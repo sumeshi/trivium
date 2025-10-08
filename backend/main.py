@@ -350,11 +350,13 @@ async def delete_project(project_id: int):
 async def get_project_logs(
     project_id: int, 
     offset: int = 0, 
-    limit: int = 100, 
-    sort_column: str = None, 
+    limit: int = 100,
+    sort_column: str = None,
     sort_direction: str = "asc",
     search: str = None,
-    flag_filter: List[str] = Query(default=None)
+    flag_filter: List[str] = Query(default=None),
+    time_start: str = None,
+    time_end: str = None
 ):
     # Load DataFrame
     df = load_dataframe(project_id)
@@ -378,6 +380,32 @@ async def get_project_logs(
                 except:
                     pass
         df = df[mask]
+    
+    # Apply time filter (before pagination)
+    if time_start or time_end:
+        # Find datetime columns
+        datetime_cols = []
+        for col in df.columns:
+            if col != '_row_index' and pd.api.types.is_datetime64_any_dtype(df[col]):
+                datetime_cols.append(col)
+        
+        if datetime_cols:
+            # Use the first datetime column for filtering
+            time_col = datetime_cols[0]
+            
+            if time_start:
+                try:
+                    start_dt = pd.to_datetime(time_start, utc=True)
+                    df = df[df[time_col] >= start_dt]
+                except:
+                    pass
+            
+            if time_end:
+                try:
+                    end_dt = pd.to_datetime(time_end, utc=True)
+                    df = df[df[time_col] < end_dt]
+                except:
+                    pass
     
     # Apply flag filter (before pagination)
     # Get flag data as DataFrame for efficient filtering
@@ -596,6 +624,188 @@ async def export_project_logs_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@app.get("/api/projects/{project_id}/timeline")
+async def get_project_timeline(
+    project_id: int,
+    search: str = None,
+    flag_filter: List[str] = Query(default=None),
+    granularity: str = "1h",  # 1sec, 1min, 1h, 1d, 1m, 1y
+    year: int = None,
+    month: int = None,
+    day: int = None,
+    hour: int = None,
+    minute: int = None
+):
+    """Get timeline data for heatmap visualization with drilldown support."""
+    # Load DataFrame
+    df = load_dataframe(project_id)
+    
+    # Get flags
+    flags_dict = await get_flags_dict(project_id)
+    
+    # Add row index
+    df['_row_index'] = df.index
+    
+    # Apply search filter
+    if search and search.strip():
+        search_lower = search.lower()
+        mask = pd.Series([False] * len(df))
+        for col in df.columns:
+            if col != '_row_index':
+                try:
+                    mask |= df[col].astype(str).str.lower().str.contains(search_lower, na=False, regex=False)
+                except:
+                    pass
+        df = df[mask]
+    
+    # Apply flag filter
+    if flag_filter and len(flag_filter) > 0:
+        flags_query = flags_table.select().where(flags_table.c.project_id == project_id)
+        flags_rows = await database.fetch_all(flags_query)
+        
+        flag_mask = pd.Series([False] * len(df), index=df.index)
+        
+        if "No Flag" in flag_filter:
+            flagged_indices = {row["row_index"] for row in flags_rows if row["flag_ok"] or row["flag_question"] or row["flag_ng"]}
+            flag_mask |= ~df['_row_index'].isin(flagged_indices)
+        
+        if "◯" in flag_filter:
+            ok_indices = {row["row_index"] for row in flags_rows if row["flag_ok"]}
+            flag_mask |= df['_row_index'].isin(ok_indices)
+        
+        if "?" in flag_filter:
+            question_indices = {row["row_index"] for row in flags_rows if row["flag_question"]}
+            flag_mask |= df['_row_index'].isin(question_indices)
+        
+        if "✗" in flag_filter:
+            ng_indices = {row["row_index"] for row in flags_rows if row["flag_ng"]}
+            flag_mask |= df['_row_index'].isin(ng_indices)
+        
+        df = df[flag_mask]
+    
+    # Find datetime columns
+    datetime_cols = []
+    for col in df.columns:
+        if col != '_row_index' and pd.api.types.is_datetime64_any_dtype(df[col]):
+            datetime_cols.append(col)
+    
+    if not datetime_cols:
+        return {"heatmap": [], "column": None, "granularity": granularity}
+    
+    # Use the first datetime column
+    time_col = datetime_cols[0]
+    
+    # Remove rows with NaT in the time column
+    df_with_time = df[df[time_col].notna()].copy()
+    
+    if len(df_with_time) == 0:
+        return {"heatmap": [], "column": time_col, "granularity": granularity}
+    
+    # Convert to datetime
+    df_with_time['datetime'] = pd.to_datetime(df_with_time[time_col])
+    
+    # Apply drilldown filters
+    if year is not None:
+        df_with_time = df_with_time[df_with_time['datetime'].dt.year == year]
+    if month is not None:
+        df_with_time = df_with_time[df_with_time['datetime'].dt.month == month]
+    if day is not None:
+        df_with_time = df_with_time[df_with_time['datetime'].dt.day == day]
+    if hour is not None:
+        df_with_time = df_with_time[df_with_time['datetime'].dt.hour == hour]
+    if minute is not None:
+        df_with_time = df_with_time[df_with_time['datetime'].dt.minute == minute]
+    
+    if len(df_with_time) == 0:
+        return {"heatmap": [], "column": time_col, "granularity": granularity}
+    
+    # Aggregate based on granularity
+    if granularity == "1sec":
+        # Group by date, hour, minute, second
+        df_with_time['timestamp'] = df_with_time['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        counts = df_with_time.groupby('timestamp').size().reset_index(name='count')
+        
+        # Convert to heatmap format
+        heatmap = [
+            {
+                "timestamp": row['timestamp'],
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    elif granularity == "1min":
+        # Group by date, hour, minute (60 minutes)
+        df_with_time['date'] = df_with_time['datetime'].dt.date
+        df_with_time['hour'] = df_with_time['datetime'].dt.hour
+        df_with_time['minute'] = df_with_time['datetime'].dt.minute
+        counts = df_with_time.groupby(['date', 'hour', 'minute']).size().reset_index(name='count')
+        
+        # Convert to heatmap format
+        heatmap = [
+            {
+                "date": str(row['date']),
+                "hour": int(row['hour']),
+                "minute": int(row['minute']),
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    elif granularity == "1h":
+        # Group by date and hour
+        df_with_time['date'] = df_with_time['datetime'].dt.date
+        df_with_time['hour'] = df_with_time['datetime'].dt.hour
+        counts = df_with_time.groupby(['date', 'hour']).size().reset_index(name='count')
+        
+        # Convert to heatmap format
+        heatmap = [
+            {
+                "date": str(row['date']),
+                "hour": int(row['hour']),
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    elif granularity == "1d":
+        # Group by date only
+        df_with_time['date'] = df_with_time['datetime'].dt.date
+        counts = df_with_time.groupby('date').size().reset_index(name='count')
+        
+        heatmap = [
+            {
+                "date": str(row['date']),
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    elif granularity == "1m":
+        # Group by year-month
+        df_with_time['year_month'] = df_with_time['datetime'].dt.strftime('%Y-%m')
+        counts = df_with_time.groupby('year_month').size().reset_index(name='count')
+        
+        heatmap = [
+            {
+                "period": row['year_month'],
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    elif granularity == "1y":
+        # Group by year
+        df_with_time['year'] = df_with_time['datetime'].dt.year
+        counts = df_with_time.groupby('year').size().reset_index(name='count')
+        
+        heatmap = [
+            {
+                "period": str(row['year']),
+                "count": int(row['count'])
+            }
+            for _, row in counts.iterrows()
+        ]
+    else:
+        return {"heatmap": [], "column": time_col, "granularity": granularity}
+    
+    return {"heatmap": heatmap, "column": time_col, "granularity": granularity}
 
 @app.put("/api/logs/{log_id}")
 async def update_log_flag(log_id: int, flag_update: FlagUpdate):

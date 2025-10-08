@@ -586,6 +586,269 @@ const LogTable = React.memo(({
   );
 });
 
+// --- HeatmapChart Component ---
+const HeatmapChart = React.memo(({ data, granularity, onDrilldown }: { 
+  data: any[]; 
+  granularity: string;
+  onDrilldown?: (value: string) => void;
+}) => {
+  if (!data || data.length === 0) return null;
+
+  // Calculate max count for color scaling
+  const maxCount = Math.max(...data.map(d => d.count));
+  
+  // Function to get color based on count
+  const getColor = (count: number) => {
+    if (count === 0) return 'rgba(81, 87, 109, 0.3)'; // Base gray
+    const intensity = Math.min(count / maxCount, 1);
+    // Use Catppuccin blue with varying opacity
+    return `rgba(140, 170, 238, ${0.2 + intensity * 0.8})`;
+  };
+
+  if (granularity === '1sec') {
+    // 60 seconds grid
+    const secondMap = new Map<number, number>();
+    data.filter(item => item.timestamp).forEach(item => {
+      const parts = item.timestamp.split(/[\s:-]/);
+      const second = parseInt(parts[5]);
+      secondMap.set(second, item.count);
+    });
+
+    const seconds = Array.from({ length: 60 }, (_, i) => i);
+
+    return (
+      <Box sx={{ display: 'flex', gap: 0.5, width: '100%' }}>
+        {seconds.map(second => {
+          const count = secondMap.get(second) || 0;
+          return (
+            <Tooltip 
+              key={second} 
+              title={`${second}s - ${count} records (click to select)`} 
+              arrow
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }
+                }
+              }}
+            >
+              <Box
+                onClick={() => onDrilldown && onDrilldown(String(second))}
+                sx={{
+                  width: '12px',
+                  height: '20px',
+                  backgroundColor: getColor(count),
+                  borderRadius: '2px',
+                  border: '1px solid rgba(81, 87, 109, 0.5)',
+                  cursor: 'pointer',
+                  flex: 1
+                }}
+              />
+            </Tooltip>
+          );
+        })}
+      </Box>
+    );
+  } else if (granularity === '1min') {
+    // 60 minutes grid
+    const minuteMap = new Map<number, number>();
+    data.forEach(item => {
+      if (item.minute !== undefined) {
+        minuteMap.set(item.minute, item.count);
+      }
+    });
+
+    const minutes = Array.from({ length: 60 }, (_, i) => i);
+
+    return (
+      <Box sx={{ display: 'flex', gap: 0.5, width: '100%' }}>
+        {minutes.map(minute => {
+          const count = minuteMap.get(minute) || 0;
+          return (
+            <Tooltip 
+              key={minute} 
+              title={`${minute}min - ${count} records (click to drilldown)`} 
+              arrow
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }
+                }
+              }}
+            >
+              <Box
+                onClick={() => onDrilldown && onDrilldown(String(minute))}
+                sx={{
+                  width: '12px',
+                  height: '20px',
+                  backgroundColor: getColor(count),
+                  borderRadius: '2px',
+                  border: '1px solid rgba(81, 87, 109, 0.5)',
+                  cursor: 'pointer',
+                  flex: 1
+                }}
+              />
+            </Tooltip>
+          );
+        })}
+      </Box>
+    );
+  } else if (granularity === '1h') {
+    // Group data by date and hour - show as grid
+    const dateMap = new Map<string, Map<number, number>>();
+    data.forEach(item => {
+      if (!item.date || item.hour === undefined) return;
+      if (!dateMap.has(item.date)) {
+        dateMap.set(item.date, new Map());
+      }
+      dateMap.get(item.date)!.set(item.hour, item.count);
+    });
+
+    const dates = Array.from(dateMap.keys()).sort();
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+
+    return (
+      <Box sx={{ width: '100%' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          {/* Hour labels */}
+          <Box sx={{ display: 'flex', gap: 0.5, pl: '60px' }}>
+            {hours.map(hour => (
+              <Box 
+                key={hour} 
+                sx={{ 
+                  flex: 1,
+                  fontSize: '8px', 
+                  textAlign: 'center',
+                  color: 'text.secondary'
+                }}
+              >
+                {hour}
+              </Box>
+            ))}
+          </Box>
+          {/* Heatmap rows */}
+          {dates.map(date => (
+            <Box key={date} sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+              <Box sx={{ width: '60px', fontSize: '8px', color: 'text.secondary' }}>
+                {date}
+              </Box>
+              {hours.map(hour => {
+                const count = dateMap.get(date)?.get(hour) || 0;
+                return (
+                  <Tooltip 
+                    key={hour} 
+                    title={`${date} ${hour}:00 - ${count} records (click to drilldown)`} 
+                    arrow
+                    componentsProps={{
+                      tooltip: {
+                        sx: {
+                          fontSize: '14px',
+                          fontWeight: 'bold'
+                        }
+                      }
+                    }}
+                  >
+                    <Box
+                      onClick={() => onDrilldown && onDrilldown(String(hour))}
+                      sx={{
+                        flex: 1,
+                        height: '20px',
+                        backgroundColor: getColor(count),
+                        borderRadius: '2px',
+                        border: '1px solid rgba(81, 87, 109, 0.5)',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </Tooltip>
+                );
+              })}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    );
+  } else if (granularity === '1d') {
+    // Simple grid for daily view
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        {data.filter(item => item.date).map(item => {
+          const day = item.date.split('-')[2];
+          return (
+            <Tooltip 
+              key={item.date} 
+              title={`${item.date} - ${item.count} records (click to drilldown)`} 
+              arrow
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }
+                }
+              }}
+            >
+              <Box
+                onClick={() => onDrilldown && onDrilldown(day)}
+                sx={{
+                  width: '40px',
+                  height: '40px',
+                  backgroundColor: getColor(item.count),
+                  borderRadius: '4px',
+                  border: '1px solid rgba(81, 87, 109, 0.5)',
+                  cursor: 'pointer'
+                }}
+              />
+            </Tooltip>
+          );
+        })}
+      </Box>
+    );
+  } else if (granularity === '1m' || granularity === '1y') {
+    // Bar-like view for months/years
+    const isDrilldownEnabled = granularity === '1y' || granularity === '1m';
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+        {data.filter(item => item.period).map(item => {
+          const value = granularity === '1y' ? item.period : item.period.split('-')[1];
+          return (
+            <Tooltip 
+              key={item.period} 
+              title={`${item.period} - ${item.count} records${isDrilldownEnabled ? ' (click to drilldown)' : ''}`} 
+              arrow
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }
+                }
+              }}
+            >
+              <Box
+                onClick={() => isDrilldownEnabled && onDrilldown && onDrilldown(value)}
+                sx={{
+                  minWidth: '80px',
+                  height: '60px',
+                  backgroundColor: getColor(item.count),
+                  borderRadius: '4px',
+                  border: '1px solid rgba(81, 87, 109, 0.5)',
+                  cursor: isDrilldownEnabled ? 'pointer' : 'default'
+                }}
+              />
+            </Tooltip>
+          );
+        })}
+      </Box>
+    );
+  }
+
+  return null;
+});
+
 // --- LogViewerPage Component --- (Refactored from AppContent)
 function LogViewerPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -606,6 +869,17 @@ function LogViewerPage() {
   const [memoDialogOpen, setMemoDialogOpen] = useState<boolean>(false);
   const [currentMemoLogId, setCurrentMemoLogId] = useState<number | null>(null);
   const [currentMemoInitial, setCurrentMemoInitial] = useState<string>('');
+  const [heatmapData, setHeatmapData] = useState<any[]>([]);
+  const [heatmapColumn, setHeatmapColumn] = useState<string | null>(null);
+  const [granularity, setGranularity] = useState<string>('1y');
+  const [drilldownPath, setDrilldownPath] = useState<string[]>([]);
+  const [timeFilterDialogOpen, setTimeFilterDialogOpen] = useState<boolean>(false);
+  const [timeFilter, setTimeFilter] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
+  const [tempTimeFilter, setTempTimeFilter] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
+  const [isAutoNavigating, setIsAutoNavigating] = useState<boolean>(true);
+  const [savedDrilldownPath, setSavedDrilldownPath] = useState<string[]>([]);
+  const [savedGranularity, setSavedGranularity] = useState<string>('1y');
+  const [pendingDrilldown, setPendingDrilldown] = useState<string | null>(null);
   const { snackbar, openSnackbar, closeSnackbar } = useSnackbar();
 
   // Fetch project name
@@ -785,6 +1059,14 @@ function LogViewerPage() {
         });
       }
       
+      // Add time filter parameters
+      if (timeFilter.start) {
+        url += `&time_start=${encodeURIComponent(timeFilter.start)}`;
+      }
+      if (timeFilter.end) {
+        url += `&time_end=${encodeURIComponent(timeFilter.end)}`;
+      }
+      
       const response = await fetch(url);
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
@@ -836,11 +1118,115 @@ function LogViewerPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, logsPerPage, columns.length, sortColumn, sortDirection, debouncedSearchKeyword, filterFlags]);
+  }, [projectId, logsPerPage, columns.length, sortColumn, sortDirection, debouncedSearchKeyword, filterFlags, timeFilter]);
+
+  const fetchTimeline = useCallback(async () => {
+    try {
+      let url = `http://localhost:8000/api/projects/${projectId}/timeline`;
+      
+      const params = new URLSearchParams();
+      params.append('granularity', granularity);
+      
+      // Add search parameter
+      if (debouncedSearchKeyword) {
+        params.append('search', debouncedSearchKeyword);
+      }
+      
+      // Add flag filter parameters (multiple)
+      if (filterFlags.length > 0) {
+        filterFlags.forEach(flag => {
+          params.append('flag_filter', flag);
+        });
+      }
+      
+      // Add drilldown filters
+      if (drilldownPath.length > 0) params.append('year', drilldownPath[0]);
+      if (drilldownPath.length > 1) params.append('month', drilldownPath[1]);
+      if (drilldownPath.length > 2) params.append('day', drilldownPath[2]);
+      if (drilldownPath.length > 3) params.append('hour', drilldownPath[3]);
+      if (drilldownPath.length > 4) params.append('minute', drilldownPath[4]);
+      
+      url += `?${params.toString()}`;
+      
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch timeline');
+      const data = await response.json();
+      
+      // Auto-drilldown if only one element (only during initial navigation)
+      if (isAutoNavigating && data.heatmap && data.heatmap.length === 1 && granularity !== '1sec') {
+        const item = data.heatmap[0];
+        let value = null;
+        
+        if (granularity === '1y' && item.period) {
+          value = item.period;
+        } else if (granularity === '1m' && item.period) {
+          value = item.period.split('-')[1];
+        } else if (granularity === '1d' && item.date) {
+          value = item.date.split('-')[2];
+        } else if (granularity === '1h' && item.hour !== undefined) {
+          // For 1h granularity, drill into the specific hour
+          value = String(item.hour);
+        } else if (granularity === '1min' && item.minute !== undefined) {
+          // For 1min granularity, drill into the specific minute
+          value = String(item.minute);
+        }
+        
+        if (value) {
+          const newPath = [...drilldownPath, value];
+          setDrilldownPath(newPath);
+          const granularityMap: Record<string, string> = {
+            '1y': '1m',
+            '1m': '1d',
+            '1d': '1h',
+            '1h': '1min',
+            '1min': '1sec'
+          };
+          const nextGranularity = granularityMap[granularity];
+          if (nextGranularity) {
+            setGranularity(nextGranularity);
+          }
+          return; // Will re-fetch with new granularity
+        }
+      }
+      
+      // Stop auto-navigation once we display data
+      setIsAutoNavigating(false);
+      
+      setHeatmapData(data.heatmap);
+      setHeatmapColumn(data.column);
+    } catch (error) {
+      console.error('Failed to load timeline:', error);
+    }
+  }, [projectId, debouncedSearchKeyword, filterFlags, granularity, drilldownPath]);
 
   useEffect(() => {
     if (projectId) fetchLogs(page);
   }, [projectId, page, fetchLogs]);
+
+  useEffect(() => {
+    if (projectId && timeFilterDialogOpen) fetchTimeline();
+  }, [projectId, fetchTimeline, timeFilterDialogOpen]);
+
+  // Handle pending drilldown
+  useEffect(() => {
+    if (pendingDrilldown) {
+      const newPath = [...drilldownPath, pendingDrilldown];
+      setDrilldownPath(newPath);
+      setIsAutoNavigating(false); // User clicked, stop auto-navigation
+      const granularityMap: Record<string, string> = {
+        '1y': '1m',
+        '1m': '1d',
+        '1d': '1h',
+        '1h': '1min',
+        '1min': '1sec'
+      };
+      const nextGranularity = granularityMap[granularity];
+      if (nextGranularity) {
+        setGranularity(nextGranularity);
+      }
+      setPendingDrilldown(null);
+    }
+  }, [pendingDrilldown, drilldownPath, granularity]);
 
   const handleFlagChange = useCallback(async (id: number, newFlag: string) => {
     let originalLogs: Log[] = [];
@@ -942,40 +1328,6 @@ function LogViewerPage() {
       </AppBar>
       <Container maxWidth={false} sx={{ mt: 4, mb: 4, px: 3 }}>
         <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Button 
-              onClick={handleFlagMenuClick} 
-              variant="outlined"
-              sx={{ minWidth: 120 }}
-            >
-              Flag Filter {filterFlags.length > 0 && `(${filterFlags.length})`}
-            </Button>
-            <Menu 
-              anchorEl={flagMenuAnchorEl} 
-              open={flagMenuOpen} 
-              onClose={handleFlagMenuClose}
-              keepMounted
-            >
-              <MenuItem onClick={() => handleFlagFilterToggle('No Flag')}>
-                <ListItemIcon><Checkbox checked={filterFlags.includes('No Flag')} size="small" /></ListItemIcon>
-                <ListItemText>No Flag</ListItemText>
-              </MenuItem>
-              {flagOptions.map(option => (
-                <MenuItem key={option} onClick={() => handleFlagFilterToggle(option)}>
-                  <ListItemIcon><Checkbox checked={filterFlags.includes(option)} size="small" /></ListItemIcon>
-                  <ListItemIcon>{flagIcons[option]}</ListItemIcon>
-                </MenuItem>
-              ))}
-            </Menu>
-            <FormControl sx={{ minWidth: 120 }}>
-              <InputLabel id="page-size-label">Per Page</InputLabel>
-              <Select labelId="page-size-label" label="Per Page" value={logsPerPage} onChange={(e) => { setLogsPerPage(Number(e.target.value)); setPage(1); }}>
-                <MenuItem value={100}>100</MenuItem>
-                <MenuItem value={500}>500</MenuItem>
-                <MenuItem value={1000}>1000</MenuItem>
-                <MenuItem value={5000}>5000</MenuItem>
-              </Select>
-            </FormControl>
-            <SearchField onSearchChange={handleSearchChange} />
             <Button id="column-visibility-button" aria-haspopup="true" onClick={handleColumnMenuClick} variant="outlined">
               Columns
             </Button>
@@ -995,6 +1347,58 @@ function LogViewerPage() {
                 />
               ))}
             </Menu>
+            <FormControl sx={{ minWidth: 120 }}>
+              <InputLabel id="page-size-label">Per Page</InputLabel>
+              <Select labelId="page-size-label" label="Per Page" value={logsPerPage} onChange={(e) => { setLogsPerPage(Number(e.target.value)); setPage(1); }}>
+                <MenuItem value={100}>100</MenuItem>
+                <MenuItem value={500}>500</MenuItem>
+                <MenuItem value={1000}>1000</MenuItem>
+                <MenuItem value={5000}>5000</MenuItem>
+              </Select>
+            </FormControl>
+            <SearchField onSearchChange={handleSearchChange} />
+            <Box sx={{ display: 'flex', gap: 2, marginLeft: 'auto' }}>
+              <Button 
+                onClick={handleFlagMenuClick} 
+                variant="outlined"
+                sx={{ minWidth: 120 }}
+              >
+                Flag Filter {filterFlags.length > 0 && `(${filterFlags.length})`}
+              </Button>
+              <Menu 
+                anchorEl={flagMenuAnchorEl} 
+                open={flagMenuOpen} 
+                onClose={handleFlagMenuClose}
+                keepMounted
+              >
+                <MenuItem onClick={() => handleFlagFilterToggle('No Flag')}>
+                  <ListItemIcon><Checkbox checked={filterFlags.includes('No Flag')} size="small" /></ListItemIcon>
+                  <ListItemText>No Flag</ListItemText>
+                </MenuItem>
+                {flagOptions.map(option => (
+                  <MenuItem key={option} onClick={() => handleFlagFilterToggle(option)}>
+                    <ListItemIcon><Checkbox checked={filterFlags.includes(option)} size="small" /></ListItemIcon>
+                    <ListItemIcon>{flagIcons[option]}</ListItemIcon>
+                  </MenuItem>
+                ))}
+              </Menu>
+              <Button 
+                variant={timeFilter.start ? "contained" : "outlined"}
+                onClick={() => {
+                  setTimeFilterDialogOpen(true);
+                  setTempTimeFilter(timeFilter);
+                  // Save current state BEFORE resetting
+                  setSavedDrilldownPath(drilldownPath);
+                  setSavedGranularity(granularity);
+                  // Reset for new session
+                  setIsAutoNavigating(true);
+                  setDrilldownPath([]);
+                  setGranularity('1y');
+                }}
+              >
+                Time Filter
+              </Button>
+            </Box>
         </Paper>
         {isLoading ? ( <CircularProgress sx={{ display: 'block', margin: '100px auto' }} /> ) : (
           <TableContainer 
@@ -1065,6 +1469,226 @@ function LogViewerPage() {
             </Button>
           </Box>
         )}
+
+        {/* Time Filter Dialog */}
+        <Dialog 
+          open={timeFilterDialogOpen} 
+          onClose={() => {
+            setTimeFilterDialogOpen(false);
+            setDrilldownPath([]);
+            setGranularity('1y');
+          }}
+          maxWidth="lg"
+          fullWidth
+        >
+          <DialogTitle>Time Filter</DialogTitle>
+          <DialogContent>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              {/* Manual Time Input */}
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                <TextField
+                  label="Start Time (required)"
+                  type="text"
+                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  value={tempTimeFilter.start || ''}
+                  onChange={(e) => setTempTimeFilter({ ...tempTimeFilter, start: e.target.value })}
+                  sx={{ flex: 1 }}
+                  size="small"
+                />
+                <TextField
+                  label="End Time (optional)"
+                  type="text"
+                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  value={tempTimeFilter.end || ''}
+                  onChange={(e) => setTempTimeFilter({ ...tempTimeFilter, end: e.target.value })}
+                  sx={{ flex: 1 }}
+                  size="small"
+                />
+              </Box>
+
+              {/* Heatmap Navigation */}
+              {heatmapData.length > 0 && heatmapColumn && (
+                <Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Box>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                        Or select from timeline ({heatmapColumn})
+                      </Typography>
+                      {/* Breadcrumb */}
+                      {drilldownPath.length > 0 && (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1 }}>
+                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                            <Button 
+                              size="small"
+                              onClick={() => {
+                                setDrilldownPath([]);
+                                setGranularity('1y');
+                                setIsAutoNavigating(true); // Reset auto-navigation
+                              }}
+                              sx={{ minWidth: 'auto', padding: '2px 8px' }}
+                            >
+                              All
+                            </Button>
+                            <Typography variant="body2" sx={{ mx: 1 }}>→</Typography>
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                            {drilldownPath.map((part, index) => {
+                              const labels = ['year', 'month', 'day', 'hour', 'minute', 'second'];
+                              const label = labels[index] || '';
+                              return (
+                                <Button 
+                                  key={index}
+                                  size="small"
+                                  onClick={() => {
+                                    const newPath = drilldownPath.slice(0, index + 1);
+                                    setDrilldownPath(newPath);
+                                    const granularities = ['1y', '1m', '1d', '1h', '1min', '1sec'];
+                                    setGranularity(granularities[newPath.length] || '1sec');
+                                    setIsAutoNavigating(false); // User clicked, stop auto-navigation
+                                  }}
+                                  sx={{ 
+                                    minWidth: 'auto', 
+                                    padding: '2px 8px',
+                                    textTransform: 'none',
+                                    fontSize: '0.75rem'
+                                  }}
+                                >
+                                  {label}
+                                </Button>
+                              );
+                            })}
+                            </Box>
+                          </Box>
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                            {(() => {
+                              const [year, month, day, hour, minute, second] = drilldownPath;
+                              let display = '';
+                              if (year) display += year;
+                              if (month) display += `-${month.padStart(2, '0')}`;
+                              if (day) display += `-${day.padStart(2, '0')}`;
+                              if (hour) display += ` ${hour.padStart(2, '0')}`;
+                              if (minute) display += `:${minute.padStart(2, '0')}`;
+                              if (second) display += `:${second.padStart(2, '0')}`;
+                              return display;
+                            })()}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                    {drilldownPath.length > 0 && (
+                      <Button 
+                        size="small" 
+                        variant="outlined"
+                        onClick={() => {
+                          const buildTimeRange = () => {
+                            if (drilldownPath.length === 0) return { start: null, end: null };
+                            let start = '';
+                            let end = '';
+                            if (drilldownPath.length >= 1) { // year
+                              start = `${drilldownPath[0]}-01-01 00:00:00`;
+                              const nextYear = parseInt(drilldownPath[0]) + 1;
+                              end = `${nextYear}-01-01 00:00:00`;
+                            }
+                            if (drilldownPath.length >= 2) { // month
+                              start = `${drilldownPath[0]}-${drilldownPath[1].padStart(2, '0')}-01 00:00:00`;
+                              let nextMonth = parseInt(drilldownPath[1]) + 1;
+                              let nextYear = parseInt(drilldownPath[0]);
+                              if (nextMonth > 12) {
+                                nextMonth = 1;
+                                nextYear += 1;
+                              }
+                              end = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01 00:00:00`;
+                            }
+                            if (drilldownPath.length >= 3) { // day
+                              start = `${drilldownPath[0]}-${drilldownPath[1].padStart(2, '0')}-${drilldownPath[2].padStart(2, '0')} 00:00:00`;
+                              const startDate = new Date(parseInt(drilldownPath[0]), parseInt(drilldownPath[1]) - 1, parseInt(drilldownPath[2]));
+                              const nextDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+                              end = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')} 00:00:00`;
+                            }
+                            if (drilldownPath.length >= 4) { // hour
+                              start = `${drilldownPath[0]}-${drilldownPath[1].padStart(2, '0')}-${drilldownPath[2].padStart(2, '0')} ${drilldownPath[3].padStart(2, '0')}:00:00`;
+                              const startDate = new Date(parseInt(drilldownPath[0]), parseInt(drilldownPath[1]) - 1, parseInt(drilldownPath[2]), parseInt(drilldownPath[3]));
+                              const nextDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+                              end = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')} ${String(nextDate.getHours()).padStart(2, '0')}:00:00`;
+                            }
+                            if (drilldownPath.length >= 5) { // minute
+                              start = `${drilldownPath[0]}-${drilldownPath[1].padStart(2, '0')}-${drilldownPath[2].padStart(2, '0')} ${drilldownPath[3].padStart(2, '0')}:${drilldownPath[4].padStart(2, '0')}:00`;
+                              const startDate = new Date(parseInt(drilldownPath[0]), parseInt(drilldownPath[1]) - 1, parseInt(drilldownPath[2]), parseInt(drilldownPath[3]), parseInt(drilldownPath[4]));
+                              const nextDate = new Date(startDate.getTime() + 60 * 1000);
+                              end = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')} ${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}:00`;
+                            }
+                            if (drilldownPath.length >= 6) { // second
+                              start = `${drilldownPath[0]}-${drilldownPath[1].padStart(2, '0')}-${drilldownPath[2].padStart(2, '0')} ${drilldownPath[3].padStart(2, '0')}:${drilldownPath[4].padStart(2, '0')}:${drilldownPath[5].padStart(2, '0')}`;
+                              const startDate = new Date(parseInt(drilldownPath[0]), parseInt(drilldownPath[1]) - 1, parseInt(drilldownPath[2]), parseInt(drilldownPath[3]), parseInt(drilldownPath[4]), parseInt(drilldownPath[5]));
+                              const nextDate = new Date(startDate.getTime() + 1000);
+                              end = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')} ${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}:${String(nextDate.getSeconds()).padStart(2, '0')}`;
+                            }
+                            return { start, end };
+                          };
+                          setTempTimeFilter(buildTimeRange());
+                        }}
+                      >
+                        Use This Range
+                      </Button>
+                    )}
+                  </Box>
+                  <Box>
+                    <HeatmapChart 
+                      data={heatmapData} 
+                      granularity={granularity} 
+                      onDrilldown={(value: string) => {
+                        // Store the latest drilldown value
+                        setPendingDrilldown(value);
+                      }}
+                    />
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            {timeFilter.start && (
+              <Button 
+                color="error"
+                onClick={() => {
+                  setTimeFilter({ start: null, end: null });
+                  setTempTimeFilter({ start: null, end: null });
+                  setTimeFilterDialogOpen(false);
+                  setDrilldownPath([]);
+                  setGranularity('1y');
+                }}
+              >
+                Clear Filter
+              </Button>
+            )}
+            <Button onClick={() => {
+              // Restore saved state first
+              setDrilldownPath(savedDrilldownPath);
+              setGranularity(savedGranularity);
+              setIsAutoNavigating(false);
+              // Then close dialog
+              setTimeFilterDialogOpen(false);
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={() => {
+                if (tempTimeFilter.start) {
+                  setTimeFilter(tempTimeFilter);
+                  setTimeFilterDialogOpen(false);
+                  setDrilldownPath([]);
+                  setGranularity('1y');
+                } else {
+                  openSnackbar('Start time is required', 'error');
+                }
+              }}
+              disabled={!tempTimeFilter.start}
+            >
+              Apply
+            </Button>
+          </DialogActions>
+        </Dialog>
+
         <Snackbar open={snackbar?.open} autoHideDuration={6000} onClose={closeSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
           <Alert onClose={closeSnackbar} severity={snackbar?.severity} sx={{ width: '100%' }}>{snackbar?.message}</Alert>
         </Snackbar>
