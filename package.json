@@ -1,0 +1,35 @@
+{
+  "name": "trivium-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "svelte-check --tsconfig ./tsconfig.json",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.4",
+    "dayjs": "^1.11.13",
+    "svelte": "^4.2.18"
+  },
+  "devDependencies": {
+    "@openai/codex": "^0.47.0",
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "@tauri-apps/cli": "^1.5.12",
+    "@types/node": "^20.14.12",
+    "@typescript-eslint/eslint-plugin": "^7.16.1",
+    "@typescript-eslint/parser": "^7.16.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "postcss-load-config": "^5.1.0",
+    "svelte-check": "^3.7.1",
+    "svelte-preprocess": "^5.1.4",
+    "tailwindcss": "^3.4.13",
+    "tslib": "^2.6.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}
