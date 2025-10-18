@@ -175,12 +175,12 @@
     }
   };
 
-  const handleRefreshRequest = async () => {
-    if (selectedProjectId) {
-      await loadProjectDetail(selectedProjectId);
-      await loadProjects();
-    }
-  };
+const handleRefreshRequest = async () => {
+  if (selectedProjectId) {
+    await loadProjectDetail(selectedProjectId);
+  }
+  await loadProjects();
+};
 
   const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
     if (!projectDetail || !selectedProjectId) return;
@@ -227,14 +227,22 @@
         >
           ☰
         </button>
-        <div>
-          <h1 class="text-base font-semibold text-white sm:text-lg">Trivium</h1>
+        <div class="flex flex-col">
+          <h1 class="text-base font-semibold text-white sm:text-lg">
+            Trivium
+            {#if projectDetail}
+              <span class="font-normal text-slate-300"> – {projectDetail.project.meta.name}</span>
+            {/if}
+          </h1>
+          {#if projectDetail?.project.meta.description}
+            <p class="text-xs text-slate-400 sm:text-sm">{projectDetail.project.meta.description}</p>
+          {/if}
         </div>
       </div>
       <button
         class="inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
         on:click={() => {
-          void loadProjects();
+          void handleRefreshRequest();
         }}
       >
         ↻ <span class="hidden sm:inline">Refresh</span>

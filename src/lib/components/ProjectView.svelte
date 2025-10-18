@@ -413,14 +413,6 @@
     }
   };
 
-  const resetFilters = () => {
-    search = '';
-    flagFilter = 'all';
-    sortKey = null;
-    sortDirection = 'asc';
-    recomputeFilteredRows(true);
-  };
-
   const toggleColumn = async (column: string) => {
     const nextHidden = new Set(hiddenColumns);
     if (nextHidden.has(column)) {
@@ -638,74 +630,60 @@
 </script>
 
 <section class="project-view">
-  <header class="toolbar">
-    <div>
-      <h2>{projectDetail.project.meta.name}</h2>
-      {#if projectDetail.project.meta.description}
-        <p class="subtitle">{projectDetail.project.meta.description}</p>
-      {/if}
-    </div>
-    <div class="toolbar-actions">
-      <button class="ghost" on:click={() => dispatch('refresh')}>Refresh</button>
-      <button class="primary" on:click={exportProject} disabled={isExporting}>
-        {isExporting ? 'Exporting…' : 'Export CSV'}
-      </button>
-    </div>
-  </header>
-
   <section class="filters">
-    <label>
-      <span>Search</span>
+    <label class="filter-flag">
+      <select bind:value={flagFilter}>
+        <option value="all">All</option>
+        {#each FLAG_OPTIONS as option}
+          <option value={option}>{option}</option>
+        {/each}
+        <option value="none">Unflagged</option>
+      </select>
+    </label>
+    <label class="filter-search">
       <input
-        placeholder="Search visible columns"
+        placeholder="Enter search text"
         bind:value={search}
         type="search"
       />
     </label>
-    <label>
-      <span>Flag</span>
-      <select bind:value={flagFilter}>
-        <option value="all">All</option>
-        <option value="none">Unflagged</option>
-        {#each FLAG_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </label>
-    <button class="ghost" on:click={resetFilters}>Reset</button>
-
-    <div class="column-picker" bind:this={columnPickerEl}>
-      <button
-        type="button"
-        class="column-trigger"
-        on:click={() => (columnsOpen = !columnsOpen)}
-        aria-expanded={columnsOpen}
-      >
-        Columns ({visibleColumns.length}/{projectDetail.columns.length})
-      </button>
-      {#if columnsOpen}
-        <div class="column-panel">
-          <ul>
-            {#each projectDetail.columns as column}
-              <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!hiddenColumns.has(column)}
-                    disabled={isUpdatingColumns}
-                    on:change={() => toggleColumn(column)}
-                  />
-                  <span>{column}</span>
-                </label>
-              </li>
-            {/each}
-          </ul>
-          <button type="button" class="close-panel" on:click={() => (columnsOpen = false)}>
-            Done
-          </button>
-        </div>
-      {/if}
+    <div class="filter-columns">
+      <div class="column-picker" bind:this={columnPickerEl}>
+        <button
+          type="button"
+          class="column-trigger"
+          on:click={() => (columnsOpen = !columnsOpen)}
+          aria-expanded={columnsOpen}
+        >
+          Columns ({visibleColumns.length}/{projectDetail.columns.length})
+        </button>
+        {#if columnsOpen}
+          <div class="column-panel">
+            <ul>
+              {#each projectDetail.columns as column}
+                <li>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenColumns.has(column)}
+                      disabled={isUpdatingColumns}
+                      on:change={() => toggleColumn(column)}
+                    />
+                    <span>{column}</span>
+                  </label>
+                </li>
+              {/each}
+            </ul>
+            <button type="button" class="close-panel" on:click={() => (columnsOpen = false)}>
+              Done
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
+    <button class="primary filter-export" on:click={exportProject} disabled={isExporting}>
+      {isExporting ? 'Exporting…' : 'Export CSV'}
+    </button>
   </section>
 
   {#if expandedCell}
