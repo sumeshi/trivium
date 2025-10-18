@@ -14,8 +14,22 @@
     summary: { flagged: number; hiddenColumns: string[] };
   }>();
 
-  const FLAG_OPTIONS = ['◯', '?', '✗'] as const;
-  type FlagSymbol = (typeof FLAG_OPTIONS)[number];
+  const FLAG_OPTIONS = [
+    { value: 'safe', label: 'Safe', hint: '✓', tone: 'safe' },
+    { value: 'suspicious', label: 'Suspicious', hint: '?', tone: 'suspicious' },
+    { value: 'critical', label: 'Critical', hint: '!', tone: 'critical' }
+  ] as const;
+  type FlagSymbol = (typeof FLAG_OPTIONS)[number]['value'];
+  type FlagFilterValue = FlagSymbol | 'all' | 'none' | 'priority';
+  const PRIORITY_FLAGS: FlagSymbol[] = ['suspicious', 'critical'];
+  const FLAG_FILTER_OPTIONS: Array<{ value: FlagFilterValue; label: string; hint?: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'safe', label: 'Safe', hint: '✓' },
+    { value: 'suspicious', label: 'Suspicious', hint: '?' },
+    { value: 'critical', label: 'Critical', hint: '!' },
+    { value: 'priority', label: 'Sus + Crit', hint: '!?' },
+    { value: 'none', label: 'Unflagged', hint: '–' }
+  ];
   const ROW_HEIGHT = 56;
   const BUFFER = 8;
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -40,7 +54,7 @@
   let columnPickerEl: HTMLDivElement | null = null;
 
   let search = '';
-  let flagFilter: FlagSymbol | 'all' | 'none' = 'all';
+  let flagFilter: FlagFilterValue = 'all';
 
   let sortKey: string | null = null;
   let sortDirection: 'asc' | 'desc' = 'asc';
@@ -65,6 +79,7 @@
 
   let bodyScrollEl: HTMLDivElement | null = null;
   let headerScrollEl: HTMLDivElement | null = null;
+  let flagPickerEl: HTMLDivElement | null = null;
   let viewportHeight = 0;
   let scrollTop = 0;
   let initialized = false;
@@ -75,6 +90,7 @@
   let baseDataWidths: number[] = [];
   let availableDataWidth = 0;
   let distributedDataWidths: number[] = [];
+  let flagMenuOpen = false;
 
   $: if (projectDetail) {
     const nextRowsRef = projectDetail.rows;
@@ -249,8 +265,20 @@
   $: stickyDataOffset = stickyMemoOffset + MEMO_COL_WIDTH;
   $: stickyVariables = `--sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
 
+  const mapStoredFlag = (flag: string | null | undefined): FlagSymbol | '' => {
+    const normalized = normalizeFlag(flag);
+    if (normalized) return normalized;
+    const trimmed = flag?.trim();
+    if (!trimmed) return '';
+    if (trimmed === '◯') return 'safe';
+    if (trimmed === '?') return 'suspicious';
+    if (trimmed === '✗') return 'critical';
+    return '';
+  };
+
   const normalizeRow = (incoming: ProjectRow): ProjectRow => ({
     ...incoming,
+    flag: mapStoredFlag(incoming.flag) || '',
     memo: incoming.memo ?? ''
   });
 
@@ -285,15 +313,30 @@
     return formatCell(value);
   };
 
+  const normalizeFlag = (flag: string | null | undefined): FlagSymbol | '' => {
+    if (!flag) return '';
+    const lower = flag.trim().toLowerCase();
+    if (lower === 'safe' || lower === 'suspicious' || lower === 'critical') {
+      return lower;
+    }
+    return '';
+  };
+
   const rowMatchesCurrentFilters = (row: ProjectRow) => {
-    const trimmedFlag = row.flag.trim();
+    const normalizedFlag = normalizeFlag(row.flag);
     if (flagFilter !== 'all') {
       if (flagFilter === 'none') {
-        if (trimmedFlag.length > 0) {
+        if (normalizedFlag.length > 0) {
           return false;
         }
-      } else if (trimmedFlag !== flagFilter) {
-        return false;
+      } else if (flagFilter === 'priority') {
+        if (!PRIORITY_FLAGS.includes(normalizedFlag as FlagSymbol)) {
+          return false;
+        }
+      } else if (flagFilter === 'safe' || flagFilter === 'suspicious' || flagFilter === 'critical') {
+        if (normalizedFlag !== flagFilter) {
+          return false;
+        }
       }
     }
     const trimmed = search.trim();
@@ -325,6 +368,24 @@
       }
     }
     return a.row_index - b.row_index;
+  };
+
+  const getFlagFilterDetails = (value: FlagSymbol | 'all' | 'none') => {
+    return (
+      FLAG_FILTER_OPTIONS.find((option) => option.value === value) ?? FLAG_FILTER_OPTIONS[0]
+    );
+  };
+
+  const toggleFlagMenu = () => {
+    flagMenuOpen = !flagMenuOpen;
+    if (flagMenuOpen) {
+      columnsOpen = false;
+    }
+  };
+
+  const selectFlagFilter = (value: FlagSymbol | 'all' | 'none') => {
+    flagFilter = value;
+    flagMenuOpen = false;
   };
 
   const updateRowState = (updated: ProjectRow) => {
@@ -375,18 +436,22 @@
     }
   };
 
-  const setFlag = async (row: ProjectRow, flag: string) => {
-    const nextFlag = row.flag === flag ? '' : flag;
+  const setFlag = async (row: ProjectRow, flag: FlagSymbol) => {
+    const currentFlag = normalizeFlag(row.flag);
+    const nextFlag = currentFlag === flag ? '' : flag;
     try {
       const updated = await backend.updateFlag({
         projectId: projectDetail.project.meta.id,
         rowIndex: row.row_index,
-        flag: nextFlag,
+        flag: nextFlag || null,
         memo: row.memo && row.memo.trim().length ? row.memo : null
       });
       updateRowState(updated);
+      const flagLabel = FLAG_OPTIONS.find((option) => option.value === flag)?.label ?? flag;
       dispatch('notify', {
-        message: nextFlag ? `Marked row ${row.row_index + 1} as ${nextFlag}` : 'Cleared flag',
+        message: nextFlag
+          ? `Marked row ${row.row_index + 1} as ${flagLabel}`
+          : 'Cleared flag',
         tone: 'success'
       });
     } catch (error) {
@@ -540,7 +605,7 @@
           lengthTracker[column] = candidateLength;
         }
       }
-      if (row.flag.trim().length > 0) {
+      if (normalizeFlag(row.flag).length > 0) {
         nextFlagged += 1;
       }
       if (rowMatchesCurrentFilters(row)) {
@@ -587,13 +652,18 @@
 
   onMount(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (columnsOpen && columnPickerEl && !columnPickerEl.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (columnsOpen && columnPickerEl && !columnPickerEl.contains(target)) {
         columnsOpen = false;
+      }
+      if (flagMenuOpen && flagPickerEl && !flagPickerEl.contains(target)) {
+        flagMenuOpen = false;
       }
     };
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         columnsOpen = false;
+        flagMenuOpen = false;
         closeCell();
       }
     };
@@ -631,15 +701,45 @@
 
 <section class="project-view">
   <section class="filters">
-    <label class="filter-flag">
-      <select bind:value={flagFilter}>
-        <option value="all">All</option>
-        {#each FLAG_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-        <option value="none">Unflagged</option>
-      </select>
-    </label>
+    <div class="filter-flag">
+      <div class="flag-picker" bind:this={flagPickerEl}>
+        <button
+          type="button"
+          class="flag-trigger"
+          class:open={flagMenuOpen}
+          on:click={toggleFlagMenu}
+          aria-haspopup="listbox"
+          aria-expanded={flagMenuOpen}
+        >
+          {#if getFlagFilterDetails(flagFilter).hint}
+            <span class="flag-hint">{getFlagFilterDetails(flagFilter).hint}</span>
+          {/if}
+          <span class="flag-label">{getFlagFilterDetails(flagFilter).label}</span>
+        </button>
+        {#if flagMenuOpen}
+          <div class="flag-menu" role="listbox">
+            {#each FLAG_FILTER_OPTIONS as option}
+              <button
+                type="button"
+                class="flag-option"
+                class:active={flagFilter === option.value}
+                on:click={() => selectFlagFilter(option.value)}
+                role="option"
+                aria-selected={flagFilter === option.value}
+              >
+                {#if option.hint}
+                  <span class="flag-hint">{option.hint}</span>
+                {/if}
+                <span>{option.label}</span>
+                {#if flagFilter === option.value}
+                  <span class="flag-dot" aria-hidden="true">●</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
     <label class="filter-search">
       <input
         placeholder="Enter search text"
@@ -652,7 +752,10 @@
         <button
           type="button"
           class="column-trigger"
-          on:click={() => (columnsOpen = !columnsOpen)}
+          on:click={() => {
+            flagMenuOpen = false;
+            columnsOpen = !columnsOpen;
+          }}
           aria-expanded={columnsOpen}
         >
           Columns ({visibleColumns.length}/{projectDetail.columns.length})
@@ -681,9 +784,11 @@
         {/if}
       </div>
     </div>
-    <button class="primary filter-export" on:click={exportProject} disabled={isExporting}>
-      {isExporting ? 'Exporting…' : 'Export CSV'}
-    </button>
+    <div class="filter-export">
+      <button class="primary" on:click={exportProject} disabled={isExporting}>
+        {isExporting ? 'Exporting…' : 'Export CSV'}
+      </button>
+    </div>
   </section>
 
   {#if expandedCell}
@@ -769,20 +874,20 @@
                 >
                   <div class="cell index sticky sticky-index">{row.row_index + 1}</div>
                   <div class="cell flag sticky sticky-flag">
-                    <div class="flag-buttons">
-                      {#each FLAG_OPTIONS as option}
-                        <button
-                          type="button"
-                          class:selected={row.flag === option}
-                          class:positive={option === '◯'}
-                          class:maybe={option === '?'}
-                          class:negative={option === '✗'}
-                          on:click={() => setFlag(row, option)}
-                        >
-                          {option}
-                        </button>
-                      {/each}
-                    </div>
+                  <div class="flag-buttons">
+                    {#each FLAG_OPTIONS as option}
+                      <button
+                        type="button"
+                        class:selected={normalizeFlag(row.flag) === option.value}
+                        class:flag-safe={option.value === 'safe'}
+                        class:flag-suspicious={option.value === 'suspicious'}
+                        class:flag-critical={option.value === 'critical'}
+                        on:click={() => setFlag(row, option.value)}
+                      >
+                        {option.hint}
+                      </button>
+                    {/each}
+                  </div>
                   </div>
                   <button
                     class="cell memo-button sticky sticky-memo"

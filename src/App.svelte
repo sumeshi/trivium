@@ -280,17 +280,9 @@ const handleRefreshRequest = async () => {
             <h2 class="text-lg font-semibold text-white">Workspace</h2>
             <p class="text-sm text-slate-400">Manage imports and projects</p>
           </div>
-          <button
-            class="rounded-md p-2 text-slate-400 transition hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-            on:click={() => (sidebarOpen = false)}
-            aria-label="Close menu"
-          >
-            ✕
-          </button>
         </div>
 
         <section class="mt-6 space-y-4">
-          <h2 class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Import CSV</h2>
           <div class="space-y-3">
             <button
               class="w-full rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
@@ -298,7 +290,7 @@ const handleRefreshRequest = async () => {
                 void pickCsv();
               }}
             >
-              Choose CSV
+              Import CSV File
             </button>
             <input
               type="file"
@@ -311,16 +303,10 @@ const handleRefreshRequest = async () => {
             <p class="truncate text-xs text-slate-300">{pendingFileName}</p>
           {/if}
           <div class="space-y-2">
-            <label
-              class="text-xs uppercase tracking-wider text-slate-400"
-              for={descriptionInputId}
-            >
-              Description
-            </label>
             <input
               type="text"
               id={descriptionInputId}
-              placeholder="Optional project description"
+              placeholder="Enter project description [Optional]"
               bind:value={pendingDescription}
               class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
             />
@@ -339,7 +325,7 @@ const handleRefreshRequest = async () => {
 
         <section class="mt-8 space-y-3">
           <div class="flex items-center justify-between">
-            <h2 class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Projects</h2>
+            <h2 class="text-md font-semibold">Projects</h2>
             <button
               class="rounded-md border border-white/10 p-2 text-xs text-slate-300 transition hover:bg-white/10 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
               on:click={() => {
@@ -371,13 +357,16 @@ const handleRefreshRequest = async () => {
                         void handleSelectProject(project.meta.id);
                       }}
                     >
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="truncate text-sm font-semibold text-slate-100">{project.meta.name}</span>
+                      <div class="flex items-center justify-end gap-3">
                         <span class="whitespace-nowrap text-xs text-slate-400">
                           {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
                         </span>
                       </div>
-                      <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                      <div class="flex items-center justify-between gap-3 mt-1">
+                        <span class="truncate text-sm font-semibold text-slate-100">{project.meta.name}</span>
+                      </div>
+                      <hr class="border-white/10 my-2">
+                      <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 mt-2">
                         <span>{project.meta.total_records} rows</span>
                         <span>{project.flagged_records} flagged</span>
                       </div>
