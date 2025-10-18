@@ -218,7 +218,7 @@
 
 <div class="min-h-screen bg-slate-950 text-slate-100">
   <header class="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-slate-950/90 backdrop-blur">
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+    <div class="flex w-full items-center justify-between gap-3 px-4 py-3 sm:px-6">
       <div class="flex items-center gap-3">
         <button
           class="inline-flex items-center justify-center rounded-md border border-white/10 p-2 text-slate-100 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
@@ -244,7 +244,7 @@
 
   {#if sidebarOpen}
     <div
-      class="fixed inset-0 z-40 flex items-stretch justify-start bg-slate-950/80 backdrop-blur-sm"
+      class="fixed inset-x-0 bottom-0 top-[64px] z-[60] flex items-stretch justify-start bg-slate-950/80 backdrop-blur-sm"
       in:fade={{ duration: 120 }}
       out:fade={{ duration: 120 }}
     >
@@ -397,7 +397,7 @@
     </div>
   {/if}
 
-  <main class="mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-12 pt-24 sm:px-6">
+  <main class="relative z-0 flex min-h-screen w-full flex-col px-4 pb-12 pt-24 sm:px-6">
     {#if !backend.isNative}
       <div class="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
         Web preview stores data in memory only. Use the Tauri desktop build to persist projects.
@@ -409,7 +409,7 @@
           Loading project…
         </div>
       {:else if projectDetail}
-        <div class="flex-1">
+        <div class="flex-1 min-h-0">
           <ProjectView
             {backend}
             {projectDetail}

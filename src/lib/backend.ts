@@ -218,11 +218,19 @@ class WebBackend implements Backend {
   async exportProject(args: ExportProjectArgs): Promise<void> {
     const project = await this.loadProject(args.projectId);
     const columns = [...project.columns];
-    const header = [...columns, 'flag', 'memo'];
+    const flagColumns = ['trivium-circle', 'trivium-question', 'trivium-cross'] as const;
+    const header = [...columns, ...flagColumns, 'trivium-memo'];
     const lines: string[][] = [header];
     for (const row of project.rows) {
       const values = columns.map((column) => stringifyCell(row.data[column]));
-      values.push(row.flag ?? '');
+      const trimmedFlag = (row.flag ?? '').trim();
+      for (const flagColumn of flagColumns) {
+        const match =
+          (flagColumn === 'trivium-circle' && trimmedFlag === '◯') ||
+          (flagColumn === 'trivium-question' && trimmedFlag === '?') ||
+          (flagColumn === 'trivium-cross' && trimmedFlag === '✗');
+        values.push(match ? '1' : '0');
+      }
       values.push(row.memo ?? '');
       lines.push(values);
     }

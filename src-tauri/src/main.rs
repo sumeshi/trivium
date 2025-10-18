@@ -458,11 +458,19 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let mut flag_series: Vec<String> = vec!["".to_string(); df.height()];
-    let mut memo_series: Vec<String> = vec!["".to_string(); df.height()];
+    let mut circle_flags: Vec<i32> = vec![0; df.height()];
+    let mut question_flags: Vec<i32> = vec![0; df.height()];
+    let mut cross_flags: Vec<i32> = vec![0; df.height()];
+    let mut memo_series: Vec<String> = vec![String::new(); df.height()];
     for (index, entry) in flags {
-        if index < flag_series.len() {
-            flag_series[index] = entry.flag;
+        if index < memo_series.len() {
+            let trimmed_flag = entry.flag.trim();
+            match trimmed_flag {
+                "◯" => circle_flags[index] = 1,
+                "?" => question_flags[index] = 1,
+                "✗" => cross_flags[index] = 1,
+                _ => {}
+            }
             memo_series[index] = entry.memo.unwrap_or_default();
         }
     }
@@ -470,9 +478,19 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     if let Ok(next) = df.drop("__rowid") {
         df = next;
     }
-    df.with_column(Series::new("flag", flag_series))
-        .map_err(|e| AppError::Message(format!("failed to append flag column: {}", e)))?;
-    df.with_column(Series::new("memo", memo_series))
+    if let Ok(next) = df.drop("flag") {
+        df = next;
+    }
+    if let Ok(next) = df.drop("memo") {
+        df = next;
+    }
+    df.with_column(Series::new("trivium-circle", circle_flags))
+        .map_err(|e| AppError::Message(format!("failed to append circle flag column: {}", e)))?;
+    df.with_column(Series::new("trivium-question", question_flags))
+        .map_err(|e| AppError::Message(format!("failed to append question flag column: {}", e)))?;
+    df.with_column(Series::new("trivium-cross", cross_flags))
+        .map_err(|e| AppError::Message(format!("failed to append cross flag column: {}", e)))?;
+    df.with_column(Series::new("trivium-memo", memo_series))
         .map_err(|e| AppError::Message(format!("failed to append memo column: {}", e)))?;
 
     let destination = PathBuf::from(payload.destination);
