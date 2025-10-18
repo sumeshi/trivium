@@ -114,6 +114,10 @@
   let memoDraft = '';
   let memoSaving = false;
   let memoError: string | null = null;
+  let releaseHeaderSyncFrame: number | null = null;
+  let releaseBodySyncFrame: number | null = null;
+  let isSyncingHeaderScroll = false;
+  let isSyncingBodyScroll = false;
 
   $: if (projectDetail) {
     const nextRowsRef = projectDetail.rows;
@@ -553,15 +557,40 @@
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
     scrollTop = target.scrollTop;
+    if (isSyncingBodyScroll) {
+      isSyncingBodyScroll = false;
+      return;
+    }
     if (headerScrollEl && headerScrollEl.scrollLeft !== target.scrollLeft) {
+      if (releaseHeaderSyncFrame !== null) {
+        cancelAnimationFrame(releaseHeaderSyncFrame);
+      }
+      isSyncingHeaderScroll = true;
       headerScrollEl.scrollLeft = target.scrollLeft;
+      releaseHeaderSyncFrame = requestAnimationFrame(() => {
+        isSyncingHeaderScroll = false;
+        releaseHeaderSyncFrame = null;
+      });
     }
   };
 
   const handleHeaderScroll = () => {
     if (!headerScrollEl || !bodyScrollEl) return;
-    if (bodyScrollEl.scrollLeft !== headerScrollEl.scrollLeft) {
-      bodyScrollEl.scrollLeft = headerScrollEl.scrollLeft;
+    if (isSyncingHeaderScroll) {
+      isSyncingHeaderScroll = false;
+      return;
+    }
+    const nextLeft = headerScrollEl.scrollLeft;
+    if (bodyScrollEl.scrollLeft !== nextLeft) {
+      if (releaseBodySyncFrame !== null) {
+        cancelAnimationFrame(releaseBodySyncFrame);
+      }
+      isSyncingBodyScroll = true;
+      bodyScrollEl.scrollLeft = nextLeft;
+      releaseBodySyncFrame = requestAnimationFrame(() => {
+        isSyncingBodyScroll = false;
+        releaseBodySyncFrame = null;
+      });
     }
   };
 
@@ -773,6 +802,14 @@
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
+    }
+    if (releaseHeaderSyncFrame !== null) {
+      cancelAnimationFrame(releaseHeaderSyncFrame);
+      releaseHeaderSyncFrame = null;
+    }
+    if (releaseBodySyncFrame !== null) {
+      cancelAnimationFrame(releaseBodySyncFrame);
+      releaseBodySyncFrame = null;
     }
   });
 
