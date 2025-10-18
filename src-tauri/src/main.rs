@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use csv::{ReaderBuilder, WriterBuilder};
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use polars::prelude::*;
@@ -53,6 +54,13 @@ struct ProjectRow {
     memo: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IocEntry {
+    flag: String,
+    tag: String,
+    query: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct LoadProjectResponse {
     project: ProjectSummary,
@@ -60,6 +68,7 @@ struct LoadProjectResponse {
     rows: Vec<ProjectRow>,
     hidden_columns: Vec<String>,
     column_max_chars: HashMap<String, usize>,
+    iocs: Vec<IocEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +222,176 @@ fn value_display_length(value: &Value) -> usize {
     }
 }
 
+fn normalize_flag_value(flag: &str) -> String {
+    let trimmed = flag.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    match trimmed.to_lowercase().as_str() {
+        "safe" => "safe".to_string(),
+        "suspicious" => "suspicious".to_string(),
+        "critical" => "critical".to_string(),
+        "◯" => "safe".to_string(),
+        "?" => "suspicious".to_string(),
+        "✗" => "critical".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn severity_rank(value: &str) -> u8 {
+    match value {
+        "critical" => 3,
+        "suspicious" => 2,
+        "safe" => 1,
+        _ => 0,
+    }
+}
+
+fn value_to_search_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(boolean) => Some(boolean.to_string()),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
+    }
+}
+
+fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
+    if query.trim().is_empty() {
+        return false;
+    }
+    let needle = query.to_lowercase();
+    row.data.values().any(|value| {
+        value_to_search_string(value)
+            .map(|text| text.to_lowercase().contains(&needle))
+            .unwrap_or(false)
+    })
+}
+
+fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
+    if entries.is_empty() {
+        return;
+    }
+    for row in rows {
+        let mut best_flag = normalize_flag_value(&row.flag);
+        let mut best_rank = severity_rank(&best_flag);
+        let mut memo = row.memo.clone().unwrap_or_default();
+        let mut memo_changed = false;
+
+        for entry in entries {
+            let query = entry.query.trim();
+            if query.is_empty() {
+                continue;
+            }
+            if !row_contains_query(row, query) {
+                continue;
+            }
+
+            let severity = normalize_flag_value(&entry.flag);
+            let severity_rank_value = severity_rank(&severity);
+            if severity_rank_value > best_rank {
+                best_rank = severity_rank_value;
+                if severity_rank_value > 0 {
+                    best_flag = severity.clone();
+                }
+            }
+
+            let tag = entry.tag.trim();
+            if !tag.is_empty() {
+                let token = format!("[{}]", tag);
+                if !memo.contains(&token) {
+                    if !memo.is_empty() && !memo.ends_with(' ') {
+                        memo.push(' ');
+                    }
+                    memo.push_str(&token);
+                    memo_changed = true;
+                }
+            }
+        }
+
+        if best_rank > 0 {
+            row.flag = best_flag.clone();
+        }
+        if memo_changed {
+            let trimmed = memo.trim().to_string();
+            row.memo = if trimmed.is_empty() { None } else { Some(trimmed) };
+        }
+    }
+}
+
+fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
+    let path = project_dir.join("iocs.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let data = fs::read(&path)
+        .with_context(|| format!("failed to read ioc file {:?}", path))?;
+    let mut entries: Vec<IocEntry> = serde_json::from_slice(&data)
+        .with_context(|| format!("failed to parse ioc file {:?}", path))?;
+    for entry in &mut entries {
+        entry.flag = normalize_flag_value(&entry.flag);
+        entry.tag = entry.tag.trim().to_string();
+        entry.query = entry.query.trim().to_string();
+    }
+    Ok(entries)
+}
+
+fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> {
+    let path = project_dir.join("iocs.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to prepare ioc dir {:?}", parent))?;
+    }
+    let data = serde_json::to_vec_pretty(entries)
+        .context("failed to serialize ioc entries")?;
+    fs::write(&path, data)
+        .with_context(|| format!("failed to write ioc file {:?}", path))
+}
+
+fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
+    let mut reader = ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(path)
+        .with_context(|| format!("failed to open IOC CSV {:?}", path))?;
+    let mut entries = Vec::new();
+    for record in reader.records() {
+        let record = record.with_context(|| "failed to read IOC CSV record")?;
+        let flag_value = record.get(0).unwrap_or("").trim().to_string();
+        let tag = record.get(1).unwrap_or("").trim().to_string();
+        let query = record.get(2).unwrap_or("").trim().to_string();
+        if query.is_empty() {
+            continue;
+        }
+        entries.push(IocEntry {
+            flag: normalize_flag_value(&flag_value),
+            tag,
+            query,
+        });
+    }
+    Ok(entries)
+}
+
+fn write_ioc_csv(entries: &[IocEntry], path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create export dir {:?}", parent))?;
+    }
+    let mut writer = WriterBuilder::new()
+        .has_headers(true)
+        .from_path(path)
+        .with_context(|| format!("failed to create IOC CSV {:?}", path))?;
+    writer
+        .write_record(["flag", "tag", "query"])
+        .context("failed to write IOC CSV header")?;
+    for entry in entries {
+        writer
+            .write_record([entry.flag.as_str(), entry.tag.as_str(), entry.query.as_str()])
+            .context("failed to write IOC CSV row")?;
+    }
+    writer.flush().context("failed to flush IOC CSV writer")
+}
+
 fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
     ParquetReader::new(File::open(path)?)
         .finish()
@@ -315,6 +494,24 @@ struct QueryRowsPayload {
     visible_columns: Option<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SaveIocsPayload {
+    project_id: Uuid,
+    entries: Vec<IocEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ImportIocsPayload {
+    project_id: Uuid,
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExportIocsPayload {
+    project_id: Uuid,
+    destination: String,
+}
+
 #[derive(Debug, Serialize)]
 struct QueryRowsResponse {
     rows: Vec<ProjectRow>,
@@ -367,6 +564,7 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
             (name.clone(), header_len)
         })
         .collect();
+    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     for row_idx in 0..df.height() {
         let mut record = HashMap::new();
         for column in &columns {
@@ -394,11 +592,15 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         });
     }
 
+    apply_iocs_to_rows(&mut rows, &iocs);
+
+    let flagged_records = rows
+        .iter()
+        .filter(|row| !row.flag.trim().is_empty())
+        .count();
+
     let summary = ProjectSummary {
-        flagged_records: flags
-            .values()
-            .filter(|entry| !entry.flag.trim().is_empty())
-            .count(),
+        flagged_records,
         meta: meta.clone(),
     };
 
@@ -408,6 +610,7 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         rows,
         hidden_columns: meta.hidden_columns.clone(),
         column_max_chars,
+        iocs,
     })
 }
 
@@ -418,32 +621,6 @@ fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
         "priority" => current_flag == "suspicious" || current_flag == "critical",
         "safe" | "suspicious" | "critical" => current_flag == filter,
         _ => true,
-    }
-}
-
-fn value_to_search_string(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(boolean) => Some(boolean.to_string()),
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
-    }
-}
-
-fn normalize_flag_value(flag: &str) -> String {
-    let trimmed = flag.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    match trimmed.to_lowercase().as_str() {
-        "safe" => "safe".to_string(),
-        "suspicious" => "suspicious".to_string(),
-        "critical" => "critical".to_string(),
-        "◯" => "safe".to_string(),
-        "?" => "suspicious".to_string(),
-        "✗" => "critical".to_string(),
-        _ => String::new(),
     }
 }
 
@@ -480,11 +657,7 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
 
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
-    let total_flagged = flags
-        .values()
-        .filter(|entry| !entry.flag.trim().is_empty())
-        .count();
-
+    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let search_value = payload
         .search
         .as_ref()
@@ -544,11 +717,65 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
             memo: flag_entry.and_then(|entry| entry.memo.clone()),
         });
     }
+    apply_iocs_to_rows(&mut rows, &iocs);
+    let auto_flagged_total = rows
+        .iter()
+        .filter(|row| !row.flag.trim().is_empty())
+        .count();
 
     Ok(QueryRowsResponse {
         rows,
-        total_flagged,
+        total_flagged: auto_flagged_total,
     })
+}
+
+#[tauri::command]
+fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(), String> {
+    let Some(meta) = state.projects.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = state.projects.project_dir(&meta.id);
+    let mut entries: Vec<IocEntry> = payload
+        .entries
+        .into_iter()
+        .map(|entry| IocEntry {
+            flag: normalize_flag_value(&entry.flag),
+            tag: entry.tag.trim().to_string(),
+            query: entry.query.trim().to_string(),
+        })
+        .filter(|entry| !entry.query.is_empty())
+        .collect();
+    entries.sort_by(|a, b| a.tag.cmp(&b.tag));
+    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<(), String> {
+    let Some(meta) = state.projects.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = state.projects.project_dir(&meta.id);
+    let source = PathBuf::from(payload.path);
+    if !source.exists() {
+        return Err(AppError::Message("Selected file does not exist.".into()).into());
+    }
+    let mut entries = read_ioc_csv(&source).map_err(AppError::from)?;
+    entries.sort_by(|a, b| a.tag.cmp(&b.tag));
+    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn export_iocs(state: State<AppState>, payload: ExportIocsPayload) -> Result<(), String> {
+    let Some(meta) = state.projects.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = state.projects.project_dir(&meta.id);
+    let entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let destination = PathBuf::from(payload.destination);
+    write_ioc_csv(&entries, &destination).map_err(AppError::from)?;
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -707,6 +934,9 @@ fn main() {
             delete_project,
             load_project,
             query_project_rows,
+            save_iocs,
+            import_iocs,
+            export_iocs,
             update_flag,
             set_hidden_columns,
             export_project

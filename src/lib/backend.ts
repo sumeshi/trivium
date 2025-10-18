@@ -4,6 +4,7 @@ import type {
   ProjectMeta,
   ProjectRow,
   ProjectSummary,
+  IocEntry,
 } from "./types";
 
 export interface CreateProjectArgs {
@@ -27,6 +28,21 @@ export interface HiddenColumnsArgs {
 export interface ExportProjectArgs {
   projectId: string;
   destination?: string;
+}
+
+export interface SaveIocsArgs {
+  projectId: string;
+  entries: IocEntry[];
+}
+
+export interface ImportIocsArgs {
+  projectId: string;
+  path: string;
+}
+
+export interface ExportIocsArgs {
+  projectId: string;
+  destination: string;
 }
 
 export type FlagFilterValue =
@@ -56,6 +72,9 @@ export interface Backend {
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string): Promise<LoadProjectResponse>;
   queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse>;
+  saveIocs(args: SaveIocsArgs): Promise<void>;
+  importIocs(args: ImportIocsArgs): Promise<void>;
+  exportIocs(args: ExportIocsArgs): Promise<void>;
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
@@ -69,6 +88,7 @@ interface WebProjectData {
   rows: ProjectRow[];
   hiddenColumns: string[];
   columnMaxChars: Record<string, number>;
+  iocEntries: IocEntry[];
 }
 
 export function createBackend(): Backend {
@@ -93,6 +113,7 @@ interface RawLoadProjectResponse {
   rows: ProjectRow[];
   hidden_columns?: string[];
   column_max_chars?: Record<string, number>;
+  iocs?: IocEntry[];
 }
 
 interface RawQueryRowsResponse {
@@ -143,6 +164,33 @@ class NativeBackend implements Backend {
       rows: response.rows.map(cloneRow),
       total_flagged: response.total_flagged,
     }));
+  }
+
+  saveIocs(args: SaveIocsArgs): Promise<void> {
+    return invoke("save_iocs", {
+      payload: {
+        project_id: args.projectId,
+        entries: args.entries.map(cloneIoc),
+      },
+    });
+  }
+
+  importIocs(args: ImportIocsArgs): Promise<void> {
+    return invoke("import_iocs", {
+      payload: {
+        project_id: args.projectId,
+        path: args.path,
+      },
+    });
+  }
+
+  exportIocs(args: ExportIocsArgs): Promise<void> {
+    return invoke("export_iocs", {
+      payload: {
+        project_id: args.projectId,
+        destination: args.destination,
+      },
+    });
   }
 
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
@@ -216,6 +264,7 @@ class WebBackend implements Backend {
       rows: parsed.rows,
       hiddenColumns: [],
       columnMaxChars: computeColumnMaxChars(parsed.columns, parsed.rows),
+      iocEntries: [],
     });
     return cloneSummary(summary);
   }
@@ -229,12 +278,22 @@ class WebBackend implements Backend {
     if (!project) {
       throw new Error("Project not found.");
     }
+    const rows = project.rows.map(cloneRow);
+    applyIocsToRowsClient(rows, project.iocEntries);
+    const columnMaxChars = computeColumnMaxChars(project.columns, rows);
+    project.columnMaxChars = columnMaxChars;
+    const summary = cloneSummary(project.summary);
+    summary.flagged_records = rows.filter(
+      (row) => normalizeFlagValue(row.flag).length > 0
+    ).length;
+    project.summary.flagged_records = summary.flagged_records;
     return {
-      project: cloneSummary(project.summary),
+      project: summary,
       columns: [...project.columns],
-      rows: project.rows.map(cloneRow),
+      rows,
       hidden_columns: [...project.hiddenColumns],
-      column_max_chars: { ...project.columnMaxChars },
+      column_max_chars: { ...columnMaxChars },
+      iocs: project.iocEntries.map(cloneIoc),
     };
   }
 
@@ -248,8 +307,8 @@ class WebBackend implements Backend {
       args.columns && args.columns.length > 0 ? args.columns : project.columns;
     const flagFilter = (args.flagFilter ?? "all").toLowerCase() as FlagFilterValue;
 
-    const matchesFlag = (flag: string) => {
-      const normalized = normalizeFlag(flag);
+    const matchesFlag = (row: ProjectRow) => {
+      const normalized = normalizeFlagValue(row.flag);
       switch (flagFilter) {
         case "all":
           return true;
@@ -266,29 +325,52 @@ class WebBackend implements Backend {
       }
     };
 
+    const allRows = project.rows.map(cloneRow);
+    applyIocsToRowsClient(allRows, project.iocEntries);
+
     const matchesSearch = (row: ProjectRow) => {
       if (!search) return true;
-      for (const column of columns) {
-        const value = stringifyCell(row.data[column]);
-        if (value.toLowerCase().includes(search)) {
-          return true;
-        }
-      }
-      return false;
+      return columns.some((column) =>
+        stringifyCell(row.data[column]).toLowerCase().includes(search)
+      );
     };
 
-    const filtered = project.rows.filter(
-      (row) => matchesFlag(row.flag) && matchesSearch(row)
+    const filtered = allRows.filter(
+      (row) => matchesFlag(row) && matchesSearch(row)
     );
 
-    const totalFlagged = project.rows.filter(
-      (row) => normalizeFlag(row.flag).length > 0
+    const totalFlagged = allRows.filter(
+      (row) => normalizeFlagValue(row.flag).length > 0
     ).length;
 
     return {
-      rows: filtered.map(cloneRow),
+      rows: filtered,
       total_flagged: totalFlagged,
     };
+  }
+
+  async saveIocs(args: SaveIocsArgs): Promise<void> {
+    const project = this.projects.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+    const normalized = args.entries
+      .map((entry) => ({
+        flag: normalizeFlagValue(entry.flag),
+        tag: entry.tag.trim(),
+        query: entry.query.trim(),
+      }))
+      .filter((entry) => entry.query.length > 0)
+      .sort((a, b) => a.tag.localeCompare(b.tag));
+    project.iocEntries = normalized;
+  }
+
+  async importIocs(_: ImportIocsArgs): Promise<void> {
+    throw new Error("IOC import via file path is not supported in web mode.");
+  }
+
+  async exportIocs(_: ExportIocsArgs): Promise<void> {
+    throw new Error("IOC export via file path is not supported in web mode.");
   }
 
   async updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
@@ -347,9 +429,10 @@ class WebBackend implements Backend {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download =
-      (project.project.meta.name?.replace(/\.[^.]+$/, "") || "trivium-export") +
-      "-web.csv";
+    const baseName = project.project.meta.name || "trivium-export.csv";
+    const stem = baseName.replace(/\.[^.]+$/, "");
+    const timestamp = formatTimestampForFilename(new Date());
+    anchor.download = `${timestamp}_trivium_${stem}.csv`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -471,22 +554,12 @@ function escapeCsvCell(value: string): string {
   return value;
 }
 
-function normalizeFlag(flag: string): string {
-  const trimmed = flag.trim().toLowerCase();
-  switch (trimmed) {
-    case "safe":
-    case "suspicious":
-    case "critical":
-      return trimmed;
-    case "◯":
-      return "safe";
-    case "?":
-      return "suspicious";
-    case "✗":
-      return "critical";
-    default:
-      return "";
-  }
+function padNumber(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function formatTimestampForFilename(date: Date): string {
+  return `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
 }
 
 function normalizeSummary(raw: RawProjectSummary): ProjectSummary {
@@ -532,6 +605,7 @@ function normalizeLoadResponse(
 ): LoadProjectResponse {
   const columnMaxChars =
     raw.column_max_chars ?? computeColumnMaxChars(raw.columns, raw.rows);
+  const iocs = Array.isArray(raw.iocs) ? raw.iocs.map(cloneIoc) : [];
   return {
     project: normalizeSummary(raw.project),
     columns: [...raw.columns],
@@ -540,6 +614,7 @@ function normalizeLoadResponse(
       ? [...raw.hidden_columns]
       : [],
     column_max_chars: columnMaxChars,
+    iocs,
   };
 }
 
@@ -563,6 +638,14 @@ function cloneRow(row: ProjectRow): ProjectRow {
   };
 }
 
+function cloneIoc(entry: IocEntry): IocEntry {
+  return {
+    flag: entry.flag,
+    tag: entry.tag,
+    query: entry.query,
+  };
+}
+
 function computeColumnMaxChars(
   columns: string[],
   rows: ProjectRow[]
@@ -582,4 +665,89 @@ function computeColumnMaxChars(
     }
   }
   return result;
+}
+
+function normalizeFlagValue(flag: string): string {
+  const trimmed = flag.trim();
+  if (!trimmed) return "";
+  switch (trimmed.toLowerCase()) {
+    case "safe":
+      return "safe";
+    case "suspicious":
+      return "suspicious";
+    case "critical":
+      return "critical";
+    case "◯":
+      return "safe";
+    case "?":
+      return "suspicious";
+    case "✗":
+      return "critical";
+    default:
+      return "";
+  }
+}
+
+function severityRank(value: string): number {
+  switch (value) {
+    case "critical":
+      return 3;
+    case "suspicious":
+      return 2;
+    case "safe":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function rowContainsQuery(row: ProjectRow, query: string): boolean {
+  const needle = query.toLowerCase();
+  return Object.values(row.data).some((value) =>
+    stringifyCell(value).toLowerCase().includes(needle)
+  );
+}
+
+function applyIocsToRowsClient(rows: ProjectRow[], entries: IocEntry[]): void {
+  if (!entries.length) {
+    return;
+  }
+  for (const row of rows) {
+    let bestFlag = normalizeFlagValue(row.flag);
+    let bestRank = severityRank(bestFlag);
+    let memo = row.memo ?? "";
+    let memoChanged = false;
+
+    for (const entry of entries) {
+      const query = entry.query.trim();
+      if (!query) continue;
+      if (!rowContainsQuery(row, query)) continue;
+
+      const severity = normalizeFlagValue(entry.flag);
+      const rank = severityRank(severity);
+      if (rank > bestRank) {
+        bestRank = rank;
+        if (rank > 0) {
+          bestFlag = severity;
+        }
+      }
+
+      const tag = entry.tag.trim();
+      if (tag) {
+        const token = `[${tag}]`;
+        if (!memo.includes(token)) {
+          memo = memo.length ? `${memo} ${token}` : token;
+          memoChanged = true;
+        }
+      }
+    }
+
+    if (bestRank > 0) {
+      row.flag = bestFlag;
+    }
+    if (memoChanged) {
+      const trimmed = memo.trim();
+      row.memo = trimmed.length ? trimmed : undefined;
+    }
+  }
 }

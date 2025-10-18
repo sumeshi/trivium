@@ -19,10 +19,17 @@ export interface ProjectRow {
   memo?: string | null;
 }
 
+export interface IocEntry {
+  flag: string;
+  tag: string;
+  query: string;
+}
+
 export interface LoadProjectResponse {
   project: ProjectSummary;
   columns: string[];
   rows: ProjectRow[];
   hidden_columns: string[];
   column_max_chars: Record<string, number>;
+  iocs: IocEntry[];
 }

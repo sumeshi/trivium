@@ -8,9 +8,11 @@
   import type { LoadProjectResponse, ProjectSummary } from './lib/types';
   import ProjectView from './lib/components/ProjectView.svelte';
 
-  const backend: Backend = createBackend();
+const backend: Backend = createBackend();
 
-  let projects: ProjectSummary[] = [];
+const projectCache = new Map<string, LoadProjectResponse>();
+
+let projects: ProjectSummary[] = [];
   let selectedProjectId: string | null = null;
   let projectDetail: LoadProjectResponse | null = null;
 
@@ -40,10 +42,10 @@
 
   let projectsLoaded = false;
 
-  const loadProjects = async (force = false) => {
-    if (projectsLoaded && !force) {
-      return;
-    }
+const loadProjects = async (force = false) => {
+  if (projectsLoaded && !force) {
+    return;
+  }
     isLoadingProjects = true;
     try {
       const result = await backend.listProjects();
@@ -64,13 +66,23 @@
     }
   };
 
-  const loadProjectDetail = async (projectId: string) => {
-    isLoadingDetail = true;
-    try {
-      const response = await backend.loadProject(projectId);
-      projectDetail = response;
+const loadProjectDetail = async (projectId: string, force = false) => {
+  if (!force) {
+    const cached = projectCache.get(projectId);
+    if (cached) {
+      projectDetail = cached;
       selectedProjectId = projectId;
       sidebarOpen = false;
+      return;
+    }
+  }
+  isLoadingDetail = true;
+  try {
+    const response = await backend.loadProject(projectId);
+    projectDetail = response;
+    selectedProjectId = projectId;
+    sidebarOpen = false;
+    projectCache.set(projectId, response);
     } catch (error) {
       console.error(error);
       showToast('Failed to load project data.', 'error');
@@ -128,7 +140,7 @@
     }
   };
 
-  const createProject = async () => {
+const createProject = async () => {
     creating = true;
     try {
       let summary: ProjectSummary;
@@ -150,8 +162,8 @@
         });
       }
       showToast(`Imported ${summary.meta.name}`);
-      await loadProjects(true);
-      await loadProjectDetail(summary.meta.id);
+    await loadProjects(true);
+    await loadProjectDetail(summary.meta.id, true);
       resetPending();
     } catch (error) {
       console.error(error);
@@ -162,19 +174,20 @@
     }
   };
 
-  const deleteProject = async (projectId: string) => {
+const deleteProject = async (projectId: string) => {
     const confirmed = window.confirm('Delete this project? The imported copy will be removed.');
     if (!confirmed) {
       return;
     }
     try {
-      await backend.deleteProject(projectId);
-      showToast('Project deleted.');
-      await loadProjects(true);
-      if (selectedProjectId === projectId) {
-        selectedProjectId = null;
-        projectDetail = null;
-      }
+    await backend.deleteProject(projectId);
+    showToast('Project deleted.');
+    projectCache.delete(projectId);
+    await loadProjects(true);
+    if (selectedProjectId === projectId) {
+      selectedProjectId = null;
+      projectDetail = null;
+    }
     } catch (error) {
       console.error(error);
       showToast('Failed to delete project.', 'error');
@@ -187,34 +200,35 @@
 
 const handleRefreshRequest = async () => {
   if (selectedProjectId) {
-    await loadProjectDetail(selectedProjectId);
+    await loadProjectDetail(selectedProjectId, true);
   }
   await loadProjects(true);
 };
 
-  const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
-    if (!projectDetail || !selectedProjectId) return;
-    projectDetail = {
-      ...projectDetail,
-      project: {
-        ...projectDetail.project,
-        flagged_records: event.detail.flagged
-      },
-      hidden_columns: event.detail.hiddenColumns
-    };
-    projects = projects.map((item) =>
-      item.meta.id === selectedProjectId
-        ? {
-            ...item,
-            flagged_records: event.detail.flagged,
-            meta: {
-              ...item.meta,
-              hidden_columns: event.detail.hiddenColumns
-            }
-          }
-        : item
-    );
+const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
+  if (!projectDetail || !selectedProjectId) return;
+  projectDetail = {
+    ...projectDetail,
+    project: {
+      ...projectDetail.project,
+      flagged_records: event.detail.flagged
+    },
+    hidden_columns: event.detail.hiddenColumns
   };
+  projects = projects.map((item) =>
+    item.meta.id === selectedProjectId
+      ? {
+          ...item,
+          flagged_records: event.detail.flagged,
+          meta: {
+            ...item.meta,
+            hidden_columns: event.detail.hiddenColumns
+          }
+        }
+      : item
+  );
+  projectCache.set(selectedProjectId, projectDetail);
+};
 
   onMount(() => {
     if (!backend.isNative) {
@@ -373,11 +387,11 @@ const handleRefreshRequest = async () => {
                         </span>
                       </div>
                       <div class="flex items-center justify-between gap-3 mt-1">
-                        <span class="truncate text-sm font-semibold text-slate-100">{truncateText(project.meta.name, 19)}</span>
+                        <span class="truncate text-sm font-semibold text-slate-100">{truncateText(project.meta.name, 16)}</span>
                       </div>
                       <hr class="border-white/10 my-2">
                       {#if project.meta.description}
-                        <p class="mt-2 text-xs text-slate-400">{truncateText(project.meta.description, 23)}</p>
+                        <p class="mt-2 text-xs text-slate-400">{truncateText(project.meta.description, 20)}</p>
                       {/if}
                       <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 mt-2">
                         <span>{project.meta.total_records} rows</span>

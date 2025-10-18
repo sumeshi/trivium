@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import { save } from '@tauri-apps/api/dialog';
+  import { open, save } from '@tauri-apps/api/dialog';
   import type { Backend } from '../backend';
-  import type { LoadProjectResponse, ProjectRow } from '../types';
+  import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
   import './project-view.css';
 
   export let projectDetail: LoadProjectResponse;
@@ -118,6 +118,11 @@
   let releaseBodySyncFrame: number | null = null;
   let isSyncingHeaderScroll = false;
   let isSyncingBodyScroll = false;
+  let iocManagerOpen = false;
+  let iocDraft: IocEntry[] = [];
+  let iocError: string | null = null;
+  let isSavingIocs = false;
+  let iocImportInput: HTMLInputElement | null = null;
 
   $: if (projectDetail) {
     const nextRowsRef = projectDetail.rows;
@@ -131,17 +136,26 @@
       currentProjectId = projectDetail.project.meta.id;
       rows = nextRowsRef.map((row) => normalizeRow(row));
       totalFlagged = projectDetail.project.flagged_records;
-      lastAppliedFilters = '';
-      lastSearchValue = null;
-      lastFlagFilter = null;
-      lastColumnsSignature = null;
+      hiddenColumns = new Set(nextHiddenColumns);
+      iocDraft = projectDetail.iocs.map((entry) => ({
+        flag: normalizeIocFlag(entry.flag),
+        tag: entry.tag,
+        query: entry.query
+      }));
+      const initialSearch = search.trim();
+      const initialFlag = flagFilter;
+      const initialColumns = projectDetail.columns.filter((column) => !hiddenColumns.has(column));
+      const initialSignature = initialColumns.join('|');
+      lastSearchValue = initialSearch;
+      lastFlagFilter = initialFlag;
+      lastColumnsSignature = initialSignature;
+      lastAppliedFilters = `${initialSearch}::${initialFlag}::${initialSignature}`;
       filterRequestId = 0;
       if (filterTimeout) {
         clearTimeout(filterTimeout);
         filterTimeout = null;
       }
       pendingFilters = null;
-      hiddenColumns = new Set(nextHiddenColumns);
       lastSummaryFlagged = -1;
       lastSummaryHiddenKey = '';
       sortKey = null;
@@ -299,10 +313,14 @@
     return String(value);
   };
 
-  const sanitizeMemoInput = (value: string): string => {
-    const withoutControl = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-    return withoutControl.replace(/<[^>]*>/g, '');
-  };
+const sanitizeMemoInput = (value: string): string => {
+  const withoutControl = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  return withoutControl.replace(/<[^>]*>/g, '');
+};
+
+const padNumber = (value: number) => value.toString().padStart(2, '0');
+const formatTimestampForFilename = (date: Date) =>
+  `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
 
   const getComparableValue = (row: CachedRow, column: string): string | number => {
     const value = row.data[column];
@@ -342,7 +360,7 @@
     return a.row_index - b.row_index;
   };
 
-  const getFlagFilterDetails = (value: FlagSymbol | 'all' | 'none') => {
+  const getFlagFilterDetails = (value: FlagFilterValue) => {
     return (
       FLAG_FILTER_OPTIONS.find((option) => option.value === value) ?? FLAG_FILTER_OPTIONS[0]
     );
@@ -355,7 +373,7 @@
     }
   };
 
-  const selectFlagFilter = (value: FlagSymbol | 'all' | 'none') => {
+  const selectFlagFilter = (value: FlagFilterValue) => {
     flagFilter = value;
     flagMenuOpen = false;
   };
@@ -447,6 +465,13 @@
     }
   };
 
+  const handleMemoBackdropKey = (event: KeyboardEvent) => {
+    if (!memoSaving && (event.key === 'Escape' || event.key === 'Enter')) {
+      event.preventDefault();
+      closeMemoEditor();
+    }
+  };
+
   const copyExpandedCell = async () => {
     if (!expandedCell) return;
     const text = expandedCell.value ?? '';
@@ -470,6 +495,274 @@
     }
   };
 
+  const normalizeIocFlag = (value: string): FlagSymbol => {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === 'critical' || lowered === 'suspicious' || lowered === 'safe') {
+      return lowered as FlagSymbol;
+    }
+    return 'safe';
+  };
+
+  const openIocManager = () => {
+    if (!projectDetail) return;
+    iocDraft = projectDetail.iocs.map((entry) => ({
+      flag: normalizeIocFlag(entry.flag),
+      tag: entry.tag,
+      query: entry.query
+    }));
+    iocError = null;
+    isSavingIocs = false;
+    iocManagerOpen = true;
+  };
+
+  const closeIocManager = () => {
+    iocManagerOpen = false;
+    iocError = null;
+    isSavingIocs = false;
+  };
+
+  const addIocEntry = () => {
+    iocDraft = [...iocDraft, { flag: 'critical', tag: '', query: '' }];
+  };
+
+  const updateIocEntry = (index: number, field: keyof IocEntry, value: string) => {
+    iocDraft = iocDraft.map((entry, current) => {
+      if (current !== index) return entry;
+      if (field === 'flag') {
+        return { ...entry, flag: normalizeIocFlag(value) };
+      }
+      return { ...entry, [field]: value };
+    });
+  };
+
+  const removeIocEntry = (index: number) => {
+    iocDraft = iocDraft.filter((_, current) => current !== index);
+  };
+
+  const handleIocFieldChange = (index: number, field: keyof IocEntry, event: Event) => {
+    const target = event.currentTarget as HTMLInputElement | HTMLSelectElement;
+    updateIocEntry(index, field, target.value);
+  };
+
+  const sanitizeIocEntries = (): IocEntry[] =>
+    iocDraft
+      .map((entry) => ({
+        flag: normalizeIocFlag(entry.flag),
+        tag: entry.tag.trim(),
+        query: entry.query.trim()
+      }))
+      .filter((entry) => entry.query.length > 0)
+      .sort((a, b) => a.tag.localeCompare(b.tag));
+
+  const saveIocEntries = async () => {
+    if (!projectDetail) return;
+    isSavingIocs = true;
+    iocError = null;
+    try {
+      const sanitized = sanitizeIocEntries();
+      await backend.saveIocs({
+        projectId: projectDetail.project.meta.id,
+        entries: sanitized
+      });
+      dispatch('notify', { message: 'IOC rules updated.', tone: 'success' });
+      closeIocManager();
+      dispatch('refresh');
+    } catch (error) {
+      console.error(error);
+      iocError =
+        error instanceof Error ? error.message : 'Failed to save IOC rules.';
+    } finally {
+      isSavingIocs = false;
+    }
+  };
+
+  const importIocEntries = async () => {
+    if (!projectDetail) return;
+    iocError = null;
+    if (backend.isNative) {
+      try {
+        const selected = await open({
+          multiple: false,
+          filters: [{ name: 'IOC CSV', extensions: ['csv'] }]
+        });
+        if (!selected) {
+          return;
+        }
+        isSavingIocs = true;
+        const path = Array.isArray(selected) ? selected[0] : selected;
+        await backend.importIocs({
+          projectId: projectDetail.project.meta.id,
+          path
+        });
+        dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
+        closeIocManager();
+        dispatch('refresh');
+      } catch (error) {
+        console.error(error);
+        iocError =
+          error instanceof Error ? error.message : 'Failed to import IOC rules.';
+      } finally {
+        isSavingIocs = false;
+      }
+    } else if (iocImportInput) {
+      iocImportInput.value = '';
+      iocImportInput.click();
+    }
+  };
+
+  const escapeCsvValue = (value: string): string =>
+    /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+
+  const buildIocCsv = (entries: IocEntry[]) => {
+    const header = 'flag,tag,query';
+    const rows = entries.map((entry) =>
+      [entry.flag, entry.tag, entry.query].map(escapeCsvValue).join(',')
+    );
+    return [header, ...rows].join('\n');
+  };
+
+  const exportIocEntries = async () => {
+    if (!projectDetail) return;
+    try {
+      if (backend.isNative) {
+        const destination = await save({
+          filters: [{ name: 'IOC CSV', extensions: ['csv'] }],
+          defaultPath: `${projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`
+        });
+        if (!destination) {
+          return;
+        }
+        await backend.exportIocs({
+          projectId: projectDetail.project.meta.id,
+          destination
+        });
+      } else {
+        const csv = buildIocCsv(sanitizeIocEntries());
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+      }
+      dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
+    } catch (error) {
+      console.error(error);
+      iocError =
+        error instanceof Error ? error.message : 'Failed to export IOC rules.';
+    }
+  };
+
+  const parseIocCsvRows = (content: string): string[][] => {
+    const rows: string[][] = [];
+    let currentRow: string[] = [];
+    let currentField = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < content.length; i += 1) {
+      const char = content[i];
+      const next = content[i + 1];
+
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          currentField += '"';
+          i += 1;
+          continue;
+        }
+        inQuotes = !inQuotes;
+        continue;
+      }
+
+      if (char === ',' && !inQuotes) {
+        currentRow.push(currentField);
+        currentField = '';
+        continue;
+      }
+
+      if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') {
+          i += 1;
+        }
+        currentRow.push(currentField);
+        if (currentRow.some((cell) => cell.trim().length > 0)) {
+          rows.push([...currentRow]);
+        }
+        currentRow = [];
+        currentField = '';
+        continue;
+      }
+
+      currentField += char;
+    }
+
+    if (currentField.length > 0 || currentRow.length > 0) {
+      currentRow.push(currentField);
+      if (currentRow.some((cell) => cell.trim().length > 0)) {
+        rows.push([...currentRow]);
+      }
+    }
+
+    return rows;
+  };
+
+  const parseIocCsvText = (content: string): IocEntry[] => {
+    const table = parseIocCsvRows(content);
+    if (!table.length) {
+      return [];
+    }
+    const [header, ...body] = table;
+    const firstCell = header[0]?.toLowerCase() ?? '';
+    const hasHeader = firstCell.includes('flag');
+    const records = hasHeader ? body : table;
+    const result: IocEntry[] = [];
+    for (const record of records) {
+      const [flagValue = '', tag = '', queryValue = ''] = record;
+      const normalizedQuery = queryValue.trim();
+      if (!normalizedQuery) continue;
+      result.push({
+        flag: normalizeIocFlag(flagValue),
+        tag: tag.trim(),
+        query: normalizedQuery
+      });
+    }
+    return result;
+  };
+
+  const handleIocFileUpload = async (event: Event) => {
+    if (!projectDetail) return;
+    const target = event.currentTarget as HTMLInputElement | null;
+    const file = target?.files?.[0];
+    if (!file) return;
+    isSavingIocs = true;
+    try {
+      const text = await file.text();
+      const imported = parseIocCsvText(text);
+      if (!imported.length) {
+        iocError = 'No IOC entries found in selected file.';
+        return;
+      }
+      await backend.saveIocs({
+        projectId: projectDetail.project.meta.id,
+        entries: imported
+      });
+      dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
+      closeIocManager();
+      dispatch('refresh');
+    } catch (error) {
+      console.error(error);
+      iocError =
+        error instanceof Error ? error.message : 'Failed to import IOC rules.';
+    } finally {
+      if (iocImportInput) {
+        iocImportInput.value = '';
+      }
+      isSavingIocs = false;
+    }
+  };
+
   const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
     const currentFlag = normalizeFlag(row.flag);
     const nextFlag = currentFlag === flag ? '' : flag;
@@ -477,7 +770,7 @@
       await backend.updateFlag({
         projectId: projectDetail.project.meta.id,
         rowIndex: row.row_index,
-        flag: nextFlag || null,
+        flag: nextFlag ?? '',
         memo: row.memo && row.memo.trim().length ? row.memo : null
       });
       await forceRefreshFilteredRows(false);
@@ -532,9 +825,13 @@
     try {
       let destination: string | undefined;
       if (backend.isNative) {
+        const baseName = projectDetail.project.meta.name || 'trivium-export.csv';
+        const stem = baseName.replace(/\.[^.]+$/, '');
+        const timestamp = formatTimestampForFilename(new Date());
+        const suggested = `${timestamp}_trivium_${stem}.csv`;
         const selected = await save({
           filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
-          defaultPath: `${projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-trivium.csv`
+          defaultPath: suggested
         });
         if (!selected) {
           return;
@@ -769,7 +1066,9 @@
       if (event.key === 'Escape') {
         columnsOpen = false;
         flagMenuOpen = false;
-        if (memoEditor) {
+        if (iocManagerOpen) {
+          closeIocManager();
+        } else if (memoEditor) {
           memoEditor = null;
           memoDraft = '';
           memoError = null;
@@ -910,6 +1209,11 @@
         {/if}
       </div>
     </div>
+    <div class="filter-ioc">
+      <button type="button" class="ghost" on:click={openIocManager}>
+        IOC Rules
+      </button>
+    </div>
     <div class="filter-export">
       <button class="primary" on:click={exportProject} disabled={isExporting}>
         {isExporting ? 'Exporting…' : 'Export CSV'}
@@ -944,12 +1248,16 @@
   {/if}
 
   {#if memoEditor}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
       class="cell-dialog-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={`Edit memo for row ${memoEditor.row.row_index + 1}`}
       on:click={handleMemoBackdropClick}
+      tabindex="-1"
+      on:keydown={handleMemoBackdropKey}
     >
       <div class="cell-dialog memo-dialog">
         <div class="cell-dialog-header">
@@ -980,6 +1288,98 @@
         </label>
         {#if memoError}
           <p class="memo-error">{memoError}</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if iocManagerOpen}
+    <div class="cell-dialog-backdrop" role="dialog" aria-modal="true" aria-label="IOC rules">
+      <div class="cell-dialog ioc-dialog">
+        <div class="cell-dialog-header">
+          <h3>IOC Rules</h3>
+          <div class="cell-dialog-actions">
+            <button type="button" class="ghost" on:click={closeIocManager} disabled={isSavingIocs}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div class="ioc-controls">
+          <button type="button" class="ghost" on:click={addIocEntry}>
+            Add rule
+          </button>
+          <div class="ioc-spacer" />
+          <button type="button" class="ghost" on:click={importIocEntries} disabled={isSavingIocs}>
+            Import…
+          </button>
+          <button type="button" class="ghost" on:click={exportIocEntries} disabled={isSavingIocs}>
+            Export…
+          </button>
+        </div>
+        <div class="ioc-table">
+          <div class="ioc-header">
+            <span>Flag</span>
+            <span>Tag</span>
+            <span>Query</span>
+            <span></span>
+          </div>
+          {#if iocDraft.length === 0}
+            <p class="ioc-empty">No IOC rules configured.</p>
+          {:else}
+            {#each iocDraft as entry, index}
+              <div class="ioc-row">
+                <select
+                  value={entry.flag}
+                  on:change={(event) => handleIocFieldChange(index, 'flag', event)}
+                  disabled={isSavingIocs}
+                >
+                  {#each FLAG_OPTIONS as option}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+                <input
+                  value={entry.tag}
+                  placeholder="Tag name"
+                  on:input={(event) => handleIocFieldChange(index, 'tag', event)}
+                  disabled={isSavingIocs}
+                />
+                <input
+                  value={entry.query}
+                  placeholder="Search string"
+                  on:input={(event) => handleIocFieldChange(index, 'query', event)}
+                  disabled={isSavingIocs}
+                />
+                <button
+                  type="button"
+                  class="ghost danger"
+                  on:click={() => removeIocEntry(index)}
+                  disabled={isSavingIocs}
+                >
+                  Remove
+                </button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+        {#if iocError}
+          <p class="memo-error">{iocError}</p>
+        {/if}
+        <div class="ioc-footer">
+          <button type="button" class="ghost" on:click={closeIocManager} disabled={isSavingIocs}>
+            Cancel
+          </button>
+          <button type="button" class="primary" on:click={saveIocEntries} disabled={isSavingIocs}>
+            {isSavingIocs ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {#if !backend.isNative}
+          <input
+            type="file"
+            accept=".csv"
+            class="hidden-input"
+            bind:this={iocImportInput}
+            on:change={handleIocFileUpload}
+          />
         {/if}
       </div>
     </div>
