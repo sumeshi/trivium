@@ -38,11 +38,17 @@
     }, 3200);
   };
 
-  const loadProjects = async () => {
+  let projectsLoaded = false;
+
+  const loadProjects = async (force = false) => {
+    if (projectsLoaded && !force) {
+      return;
+    }
     isLoadingProjects = true;
     try {
       const result = await backend.listProjects();
       projects = result;
+      projectsLoaded = true;
       if (selectedProjectId) {
         const stillExists = projects.some((item) => item.meta.id === selectedProjectId);
         if (!stillExists) {
@@ -144,7 +150,7 @@
         });
       }
       showToast(`Imported ${summary.meta.name}`);
-      await loadProjects();
+      await loadProjects(true);
       await loadProjectDetail(summary.meta.id);
       resetPending();
     } catch (error) {
@@ -164,7 +170,7 @@
     try {
       await backend.deleteProject(projectId);
       showToast('Project deleted.');
-      await loadProjects();
+      await loadProjects(true);
       if (selectedProjectId === projectId) {
         selectedProjectId = null;
         projectDetail = null;
@@ -183,7 +189,7 @@ const handleRefreshRequest = async () => {
   if (selectedProjectId) {
     await loadProjectDetail(selectedProjectId);
   }
-  await loadProjects();
+  await loadProjects(true);
 };
 
   const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
