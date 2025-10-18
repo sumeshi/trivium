@@ -447,13 +447,13 @@
         memo: row.memo && row.memo.trim().length ? row.memo : null
       });
       updateRowState(updated);
-      const flagLabel = FLAG_OPTIONS.find((option) => option.value === flag)?.label ?? flag;
-      dispatch('notify', {
-        message: nextFlag
-          ? `Marked row ${row.row_index + 1} as ${flagLabel}`
-          : 'Cleared flag',
-        tone: 'success'
-      });
+      // const flagLabel = FLAG_OPTIONS.find((option) => option.value === flag)?.label ?? flag;
+      // dispatch('notify', {
+      //   message: nextFlag
+      //     ? `Marked row ${row.row_index + 1} as ${flagLabel}`
+      //     : 'Cleared flag',
+      //   tone: 'success'
+      // });
     } catch (error) {
       console.error(error);
       dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
