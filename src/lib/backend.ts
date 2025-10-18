@@ -29,12 +29,33 @@ export interface ExportProjectArgs {
   destination?: string;
 }
 
+export type FlagFilterValue =
+  | "all"
+  | "none"
+  | "priority"
+  | "safe"
+  | "suspicious"
+  | "critical";
+
+export interface QueryProjectRowsArgs {
+  projectId: string;
+  search?: string;
+  flagFilter?: FlagFilterValue;
+  columns?: string[];
+}
+
+export interface QueryProjectRowsResponse {
+  rows: ProjectRow[];
+  total_flagged: number;
+}
+
 export interface Backend {
   readonly isNative: boolean;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string): Promise<LoadProjectResponse>;
+  queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse>;
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
@@ -74,6 +95,11 @@ interface RawLoadProjectResponse {
   column_max_chars?: Record<string, number>;
 }
 
+interface RawQueryRowsResponse {
+  rows: ProjectRow[];
+  total_flagged: number;
+}
+
 class NativeBackend implements Backend {
   readonly isNative = true;
 
@@ -103,6 +129,20 @@ class NativeBackend implements Backend {
     return invoke<RawLoadProjectResponse>("load_project", {
       request: { project_id: projectId },
     }).then(normalizeLoadResponse);
+  }
+
+  queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse> {
+    return invoke<RawQueryRowsResponse>("query_project_rows", {
+      payload: {
+        project_id: args.projectId,
+        search: args.search ?? null,
+        flag_filter: args.flagFilter ?? null,
+        visible_columns: args.columns ?? null,
+      },
+    }).then((response) => ({
+      rows: response.rows.map(cloneRow),
+      total_flagged: response.total_flagged,
+    }));
   }
 
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
@@ -195,6 +235,59 @@ class WebBackend implements Backend {
       rows: project.rows.map(cloneRow),
       hidden_columns: [...project.hiddenColumns],
       column_max_chars: { ...project.columnMaxChars },
+    };
+  }
+
+  async queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse> {
+    const project = this.projects.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+    const search = args.search?.trim().toLowerCase() ?? "";
+    const columns =
+      args.columns && args.columns.length > 0 ? args.columns : project.columns;
+    const flagFilter = (args.flagFilter ?? "all").toLowerCase() as FlagFilterValue;
+
+    const matchesFlag = (flag: string) => {
+      const normalized = normalizeFlag(flag);
+      switch (flagFilter) {
+        case "all":
+          return true;
+        case "none":
+          return normalized.length === 0;
+        case "priority":
+          return normalized === "suspicious" || normalized === "critical";
+        case "safe":
+        case "suspicious":
+        case "critical":
+          return normalized === flagFilter;
+        default:
+          return true;
+      }
+    };
+
+    const matchesSearch = (row: ProjectRow) => {
+      if (!search) return true;
+      for (const column of columns) {
+        const value = stringifyCell(row.data[column]);
+        if (value.toLowerCase().includes(search)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const filtered = project.rows.filter(
+      (row) => matchesFlag(row.flag) && matchesSearch(row)
+    );
+
+    const totalFlagged = project.rows.filter(
+      (row) => normalizeFlag(row.flag).length > 0
+    ).length;
+
+    return {
+      rows: filtered.map(cloneRow),
+      total_flagged: totalFlagged,
     };
   }
 
@@ -376,6 +469,24 @@ function escapeCsvCell(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
+}
+
+function normalizeFlag(flag: string): string {
+  const trimmed = flag.trim().toLowerCase();
+  switch (trimmed) {
+    case "safe":
+    case "suspicious":
+    case "critical":
+      return trimmed;
+    case "◯":
+      return "safe";
+    case "?":
+      return "suspicious";
+    case "✗":
+      return "critical";
+    default:
+      return "";
+  }
 }
 
 function normalizeSummary(raw: RawProjectSummary): ProjectSummary {

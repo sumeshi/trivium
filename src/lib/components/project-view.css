@@ -274,7 +274,7 @@ button.primary:disabled {
   color: rgba(230, 233, 239, 0.92);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
   transition: border 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { save } from '@tauri-apps/api/dialog';
   import type { Backend } from '../backend';
   import type { LoadProjectResponse, ProjectRow } from '../types';
@@ -47,7 +47,12 @@
   let lastProjectDetail: LoadProjectResponse | null = null;
   let lastRowsRef: ProjectRow[] | null = null;
   let lastHiddenColumnsRef: string[] | null = null;
-  let rows: ProjectRow[] = [];
+  type CachedRow = ProjectRow & {
+    memo: string;
+    displayCache: Record<string, string>;
+  };
+
+  let rows: CachedRow[] = [];
 
   let hiddenColumns = new Set<string>();
   let columnsOpen = false;
@@ -63,7 +68,8 @@
   let isUpdatingColumns = false;
 
   let visibleColumns: string[] = [];
-  let filteredRows: ProjectRow[] = [];
+  let filteredRows: CachedRow[] = [];
+  let totalFlagged = 0;
   let flaggedCount = 0;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
@@ -91,6 +97,19 @@
   let availableDataWidth = 0;
   let distributedDataWidths: number[] = [];
   let flagMenuOpen = false;
+  type ScheduledFilters = {
+    search: string;
+    flag: FlagFilterValue;
+    columns: string[];
+    resetScroll: boolean;
+  };
+  let filterTimeout: ReturnType<typeof setTimeout> | null = null;
+  let pendingFilters: ScheduledFilters | null = null;
+  let filterRequestId = 0;
+  let lastAppliedFilters = '';
+  let lastSearchValue: string | null = null;
+  let lastFlagFilter: FlagFilterValue | null = null;
+  let lastColumnsSignature: string | null = null;
 
   $: if (projectDetail) {
     const nextRowsRef = projectDetail.rows;
@@ -102,10 +121,18 @@
     if (shouldInitialize) {
       lastProjectDetail = projectDetail;
       currentProjectId = projectDetail.project.meta.id;
-      rows = new Array(nextRowsRef.length);
-      for (const row of nextRowsRef) {
-        rows[row.row_index] = normalizeRow(row);
+      rows = nextRowsRef.map((row) => normalizeRow(row));
+      totalFlagged = projectDetail.project.flagged_records;
+      lastAppliedFilters = '';
+      lastSearchValue = null;
+      lastFlagFilter = null;
+      lastColumnsSignature = null;
+      filterRequestId = 0;
+      if (filterTimeout) {
+        clearTimeout(filterTimeout);
+        filterTimeout = null;
       }
+      pendingFilters = null;
       hiddenColumns = new Set(nextHiddenColumns);
       lastSummaryFlagged = -1;
       lastSummaryHiddenKey = '';
@@ -130,12 +157,27 @@
   $: columnsKey = visibleColumns.join('|');
 
   $: if (initialized) {
-    search;
-    flagFilter;
     columnsKey;
     sortKey;
     sortDirection;
     recomputeFilteredRows(false);
+  }
+
+  $: if (initialized) {
+    const searchValue = search.trim();
+    const flagValue = flagFilter;
+    const columns = getSearchableColumns();
+    const columnsSignature = columns.join('|');
+    const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
+    const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
+    const columnsChanged =
+      lastColumnsSignature === null || columnsSignature !== lastColumnsSignature;
+    if (searchChanged || flagChanged || columnsChanged) {
+      scheduleFilterRefresh(searchValue, flagValue, columns, searchChanged);
+      lastSearchValue = searchValue;
+      lastFlagFilter = flagValue;
+      lastColumnsSignature = columnsSignature;
+    }
   }
 
   $: visibleCount =
@@ -198,6 +240,15 @@
   $: stickyDataOffset = stickyMemoOffset + MEMO_COL_WIDTH;
   $: stickyVariables = `--sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
 
+  const normalizeFlag = (flag: string | null | undefined): FlagSymbol | '' => {
+    if (!flag) return '';
+    const lower = flag.trim().toLowerCase();
+    if (lower === 'safe' || lower === 'suspicious' || lower === 'critical') {
+      return lower;
+    }
+    return '';
+  };
+
   const mapStoredFlag = (flag: string | null | undefined): FlagSymbol | '' => {
     const normalized = normalizeFlag(flag);
     if (normalized) return normalized;
@@ -209,11 +260,19 @@
     return '';
   };
 
-  const normalizeRow = (incoming: ProjectRow): ProjectRow => ({
-    ...incoming,
-    flag: mapStoredFlag(incoming.flag) || '',
-    memo: incoming.memo ?? ''
-  });
+  const normalizeRow = (incoming: ProjectRow): CachedRow => {
+    const displayCache: Record<string, string> = {};
+    for (const [column, value] of Object.entries(incoming.data)) {
+      const formatted = formatCell(value);
+      displayCache[column] = formatted;
+    }
+    return {
+      ...incoming,
+      flag: mapStoredFlag(incoming.flag) || '',
+      memo: incoming.memo ?? '',
+      displayCache
+    };
+  };
 
   const formatCell = (value: unknown): string => {
     if (value === null || value === undefined) {
@@ -229,7 +288,7 @@
     return String(value);
   };
 
-  const getComparableValue = (row: ProjectRow, column: string): string | number => {
+  const getComparableValue = (row: CachedRow, column: string): string | number => {
     const value = row.data[column];
     if (value === null || value === undefined) {
       return '';
@@ -246,43 +305,7 @@
     return formatCell(value);
   };
 
-  const normalizeFlag = (flag: string | null | undefined): FlagSymbol | '' => {
-    if (!flag) return '';
-    const lower = flag.trim().toLowerCase();
-    if (lower === 'safe' || lower === 'suspicious' || lower === 'critical') {
-      return lower;
-    }
-    return '';
-  };
-
-  const rowMatchesCurrentFilters = (row: ProjectRow) => {
-    const normalizedFlag = normalizeFlag(row.flag);
-    if (flagFilter !== 'all') {
-      if (flagFilter === 'none') {
-        if (normalizedFlag.length > 0) {
-          return false;
-        }
-      } else if (flagFilter === 'priority') {
-        if (!PRIORITY_FLAGS.includes(normalizedFlag as FlagSymbol)) {
-          return false;
-        }
-      } else if (flagFilter === 'safe' || flagFilter === 'suspicious' || flagFilter === 'critical') {
-        if (normalizedFlag !== flagFilter) {
-          return false;
-        }
-      }
-    }
-    const trimmed = search.trim();
-    if (!trimmed) {
-      return true;
-    }
-    const lower = trimmed.toLowerCase();
-    return visibleColumns.some((column) =>
-      formatCell(row.data[column]).toLowerCase().includes(lower)
-    );
-  };
-
-  const compareRows = (a: ProjectRow, b: ProjectRow): number => {
+  const compareRows = (a: CachedRow, b: CachedRow): number => {
     if (!sortKey) {
       return a.row_index - b.row_index;
     }
@@ -319,11 +342,6 @@
   const selectFlagFilter = (value: FlagSymbol | 'all' | 'none') => {
     flagFilter = value;
     flagMenuOpen = false;
-  };
-
-  const updateRowState = (updated: ProjectRow) => {
-    rows[updated.row_index] = normalizeRow(updated);
-    recomputeFilteredRows(false);
   };
 
   const toggleSort = (column: string) => {
@@ -369,17 +387,17 @@
     }
   };
 
-  const setFlag = async (row: ProjectRow, flag: FlagSymbol) => {
+  const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
     const currentFlag = normalizeFlag(row.flag);
     const nextFlag = currentFlag === flag ? '' : flag;
     try {
-      const updated = await backend.updateFlag({
+      await backend.updateFlag({
         projectId: projectDetail.project.meta.id,
         rowIndex: row.row_index,
         flag: nextFlag || null,
         memo: row.memo && row.memo.trim().length ? row.memo : null
       });
-      updateRowState(updated);
+      await forceRefreshFilteredRows(false);
       // const flagLabel = FLAG_OPTIONS.find((option) => option.value === flag)?.label ?? flag;
       // dispatch('notify', {
       //   message: nextFlag
@@ -393,17 +411,17 @@
     }
   };
 
-  const editMemo = async (row: ProjectRow) => {
+  const editMemo = async (row: CachedRow) => {
     const nextMemo = window.prompt('Edit memo', row.memo ?? '');
     if (nextMemo === null) return;
     try {
-      const updated = await backend.updateFlag({
+      await backend.updateFlag({
         projectId: projectDetail.project.meta.id,
         rowIndex: row.row_index,
         flag: row.flag,
         memo: nextMemo.trim().length ? nextMemo : null
       });
-      updateRowState(updated);
+      await forceRefreshFilteredRows(false);
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });
     } catch (error) {
       console.error(error);
@@ -504,10 +522,9 @@
   };
 
   const recomputeFilteredRows = (resetScroll: boolean) => {
-    const hasAnyRow = rows.some((row) => Boolean(row));
-    if (!hasAnyRow) {
+    if (rows.length === 0) {
       filteredRows = [];
-      flaggedCount = 0;
+      flaggedCount = totalFlagged;
       columnWidths = new Map();
       if (resetScroll && bodyScrollEl) bodyScrollEl.scrollTop = 0;
       if (resetScroll && bodyScrollEl) bodyScrollEl.scrollLeft = 0;
@@ -523,18 +540,7 @@
       : [];
     const columnMaxChars = projectDetail?.column_max_chars ?? {};
 
-    const nextFiltered: ProjectRow[] = [];
-    let nextFlagged = 0;
-
-    for (const row of rows) {
-      if (!row) continue;
-      if (normalizeFlag(row.flag).length > 0) {
-        nextFlagged += 1;
-      }
-      if (rowMatchesCurrentFilters(row)) {
-        nextFiltered.push(row);
-      }
-    }
+    const nextFiltered = [...rows];
 
     if (sortKey) {
       const direction = sortDirection === 'asc' ? 1 : -1;
@@ -544,7 +550,7 @@
     }
 
     filteredRows = nextFiltered;
-    flaggedCount = nextFlagged;
+    flaggedCount = totalFlagged;
 
     if (resetScroll) {
       scrollTop = 0;
@@ -573,6 +579,86 @@
       nextWidthMap.set(column, width);
     }
     columnWidths = nextWidthMap;
+  };
+
+  const getSearchableColumns = () =>
+    projectDetail ? projectDetail.columns.filter((column) => !hiddenColumns.has(column)) : [];
+
+  const fetchFilteredRows = async (
+    searchValue: string,
+    flagValue: FlagFilterValue,
+    columns: string[],
+    resetScroll: boolean,
+    force: boolean
+  ) => {
+    if (!projectDetail) return;
+    const signature = `${searchValue}::${flagValue}::${columns.join('|')}`;
+    if (!force && signature === lastAppliedFilters) {
+      return;
+    }
+    filterRequestId += 1;
+    const currentRequestId = filterRequestId;
+    try {
+      const response = await backend.queryProjectRows({
+        projectId: projectDetail.project.meta.id,
+        search: searchValue.length > 0 ? searchValue : undefined,
+        flagFilter: flagValue === 'all' && searchValue.length === 0 ? undefined : flagValue,
+        columns,
+      });
+      if (currentRequestId !== filterRequestId) {
+        return;
+      }
+      totalFlagged = response.total_flagged;
+      rows = response.rows.map((row) => normalizeRow(row));
+      flaggedCount = totalFlagged;
+      lastAppliedFilters = signature;
+      recomputeFilteredRows(resetScroll);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const scheduleFilterRefresh = (
+    searchValue: string,
+    flagValue: FlagFilterValue,
+    columns: string[],
+    resetScroll: boolean
+  ) => {
+    pendingFilters = {
+      search: searchValue,
+      flag: flagValue,
+      columns: [...columns],
+      resetScroll,
+    };
+    if (filterTimeout) {
+      clearTimeout(filterTimeout);
+    }
+    filterTimeout = setTimeout(() => {
+      const scheduled = pendingFilters;
+      pendingFilters = null;
+      filterTimeout = null;
+      if (!scheduled) {
+        return;
+      }
+      void fetchFilteredRows(
+        scheduled.search,
+        scheduled.flag,
+        scheduled.columns,
+        scheduled.resetScroll,
+        false
+      );
+    }, 160);
+  };
+
+  const forceRefreshFilteredRows = (resetScroll: boolean) => {
+    if (!projectDetail) return Promise.resolve();
+    if (filterTimeout) {
+      clearTimeout(filterTimeout);
+      filterTimeout = null;
+      pendingFilters = null;
+    }
+    const columns = getSearchableColumns();
+    return fetchFilteredRows(search.trim(), flagFilter, columns, resetScroll, true);
   };
 
   onMount(() => {
@@ -610,6 +696,13 @@
       }
       resizeObserver?.disconnect();
     };
+  });
+
+  onDestroy(() => {
+    if (filterTimeout) {
+      clearTimeout(filterTimeout);
+      filterTimeout = null;
+    }
   });
 
   const emitSummary = () => {
@@ -826,7 +919,7 @@
                     {/if}
                   </button>
                   {#each visibleColumns as column, columnIndex}
-                    {@const cellValue = formatCell(row.data[column])}
+                    {@const cellValue = row.displayCache[column] ?? ''}
                     <button
                       type="button"
                       class="cell"

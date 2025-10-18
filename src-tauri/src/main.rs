@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::BufWriter,
     path::{Path, PathBuf},
@@ -304,6 +304,23 @@ struct ProjectRequest {
     project_id: Uuid,
 }
 
+#[derive(Debug, Deserialize)]
+struct QueryRowsPayload {
+    project_id: Uuid,
+    #[serde(default)]
+    search: Option<String>,
+    #[serde(default)]
+    flag_filter: Option<String>,
+    #[serde(default)]
+    visible_columns: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+struct QueryRowsResponse {
+    rows: Vec<ProjectRow>,
+    total_flagged: usize,
+}
+
 #[tauri::command]
 fn delete_project(state: State<AppState>, request: ProjectRequest) -> Result<(), String> {
     let Some(meta) = state.projects.find(&request.project_id) else {
@@ -391,6 +408,146 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         rows,
         hidden_columns: meta.hidden_columns.clone(),
         column_max_chars,
+    })
+}
+
+fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
+    match filter {
+        "all" => true,
+        "none" => current_flag.is_empty(),
+        "priority" => current_flag == "suspicious" || current_flag == "critical",
+        "safe" | "suspicious" | "critical" => current_flag == filter,
+        _ => true,
+    }
+}
+
+fn value_to_search_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(boolean) => Some(boolean.to_string()),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
+    }
+}
+
+fn normalize_flag_value(flag: &str) -> String {
+    let trimmed = flag.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    match trimmed.to_lowercase().as_str() {
+        "safe" => "safe".to_string(),
+        "suspicious" => "suspicious".to_string(),
+        "critical" => "critical".to_string(),
+        "◯" => "safe".to_string(),
+        "?" => "suspicious".to_string(),
+        "✗" => "critical".to_string(),
+        _ => String::new(),
+    }
+}
+
+#[tauri::command]
+fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Result<QueryRowsResponse, String> {
+    let meta = state
+        .projects
+        .find(&payload.project_id)
+        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    let project_dir = state.projects.project_dir(&meta.id);
+    let parquet_path = project_dir.join("data.parquet");
+    if !parquet_path.exists() {
+        return Err(AppError::Message("Project data file missing.".into()).into());
+    }
+
+    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
+    let columns: Vec<String> = df
+        .get_column_names()
+        .into_iter()
+        .filter(|name| name != &"__rowid")
+        .map(|name| name.to_string())
+        .collect();
+    let search_columns: Vec<String> = if let Some(visible) = payload.visible_columns.clone() {
+        let visible_set: HashSet<String> = visible.into_iter().collect();
+        columns
+            .iter()
+            .filter(|column| visible_set.contains(*column))
+            .cloned()
+            .collect()
+    } else {
+        columns.clone()
+    };
+    let search_column_lookup: HashSet<&str> = search_columns.iter().map(|column| column.as_str()).collect();
+
+    let flags_path = project_dir.join("flags.json");
+    let flags = load_flags(&flags_path).map_err(AppError::from)?;
+    let total_flagged = flags
+        .values()
+        .filter(|entry| !entry.flag.trim().is_empty())
+        .count();
+
+    let search_value = payload
+        .search
+        .as_ref()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    let flag_filter = payload
+        .flag_filter
+        .as_ref()
+        .map(|value| value.trim().to_lowercase());
+
+    let mut rows = Vec::new();
+    for row_idx in 0..df.height() {
+        let mut record = HashMap::new();
+        let mut matches_search = search_value.is_none();
+
+        for column in &columns {
+            if let Ok(series) = df.column(column) {
+                if let Ok(value) = series.get(row_idx) {
+                    let json_value = anyvalue_to_json(&value);
+                    if let Some(search_lower) = &search_value {
+                        if !matches_search && search_column_lookup.contains(column.as_str()) {
+                            if let Some(candidate) = value_to_search_string(&json_value) {
+                                if candidate.to_lowercase().contains(search_lower) {
+                                    matches_search = true;
+                                }
+                            }
+                        }
+                    }
+                    record.insert(column.clone(), json_value);
+                }
+            }
+        }
+
+        if let Some(search_lower) = &search_value {
+            if !matches_search && !search_columns.is_empty() {
+                continue;
+            } else if search_columns.is_empty() && !matches_search && !search_lower.is_empty() {
+                continue;
+            }
+        }
+
+        let flag_entry = flags.get(&row_idx);
+        let flag_symbol = flag_entry
+            .as_ref()
+            .map(|entry| normalize_flag_value(&entry.flag))
+            .unwrap_or_default();
+        if let Some(filter) = &flag_filter {
+            if !matches_flag_filter(flag_symbol.as_str(), filter) {
+                continue;
+            }
+        }
+
+        rows.push(ProjectRow {
+            row_index: row_idx,
+            data: record,
+            flag: flag_symbol,
+            memo: flag_entry.and_then(|entry| entry.memo.clone()),
+        });
+    }
+
+    Ok(QueryRowsResponse {
+        rows,
+        total_flagged,
     })
 }
 
@@ -549,6 +706,7 @@ fn main() {
             create_project,
             delete_project,
             load_project,
+            query_project_rows,
             update_flag,
             set_hidden_columns,
             export_project
