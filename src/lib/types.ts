@@ -24,4 +24,5 @@ export interface LoadProjectResponse {
   columns: string[];
   rows: ProjectRow[];
   hidden_columns: string[];
+  column_max_chars: Record<string, number>;
 }

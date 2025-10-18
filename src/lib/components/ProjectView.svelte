@@ -33,12 +33,12 @@
   const ROW_HEIGHT = 56;
   const BUFFER = 8;
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-  const INDEX_COL_WIDTH = 72;
-  const FLAG_COL_WIDTH = 148;
-  const MEMO_COL_WIDTH = 260;
-  const MIN_DATA_WIDTH = 180;
+  const INDEX_COL_WIDTH = 80;
+  const FLAG_COL_WIDTH = 130;
+  const MEMO_COL_WIDTH = 200;
+  const MIN_DATA_WIDTH = 80;
   const WIDTH_LIMIT_CHARS = 100;
-  const CHAR_PIXEL = 7;
+  const CHAR_PIXEL = 9;
   const COLUMN_PADDING = 32;
   const MAX_DATA_WIDTH = WIDTH_LIMIT_CHARS * CHAR_PIXEL + COLUMN_PADDING;
   const STICKY_COLUMNS_WIDTH = INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH;
@@ -157,79 +157,12 @@
     return width;
   };
 
-  const expandColumnWidths = (baseWidths: number[], availableWidth: number) => {
-    if (baseWidths.length === 0) {
-      return baseWidths;
-    }
-
-    const normalized = baseWidths.map((width) => {
+  const expandColumnWidths = (baseWidths: number[], _availableWidth: number) => {
+    return baseWidths.map((width) => {
       if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
       if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-      return width;
-    });
-
-    if (availableWidth <= 0) {
-      return normalized;
-    }
-
-    const minimumTotal = normalized.reduce((sum, width) => sum + width, 0);
-    if (availableWidth <= minimumTotal) {
-      return normalized;
-    }
-
-    const slack = normalized.map((width) => Math.max(0, MAX_DATA_WIDTH - width));
-    const maximumTotal = minimumTotal + slack.reduce((sum, value) => sum + value, 0);
-    const targetTotal = Math.min(availableWidth, maximumTotal);
-    let remaining = targetTotal - minimumTotal;
-    if (remaining <= 0) {
-      return normalized;
-    }
-
-    const weights = normalized.map((width) => (width > 0 ? width : 1));
-    const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-    const adjusted = [...normalized];
-
-    for (let index = 0; index < adjusted.length && remaining > 0; index += 1) {
-      if (slack[index] <= 0) continue;
-      const share = (remaining * weights[index]) / weightTotal;
-      const applied = Math.min(slack[index], share);
-      adjusted[index] += applied;
-      remaining -= applied;
-      slack[index] -= applied;
-    }
-
-    if (remaining > 0) {
-      for (let index = adjusted.length - 1; index >= 0 && remaining > 0; index -= 1) {
-        if (slack[index] <= 0) continue;
-        const applied = Math.min(slack[index], remaining);
-        adjusted[index] += applied;
-        remaining -= applied;
-        slack[index] -= applied;
-      }
-    }
-
-    const rounded = adjusted.map((width) => {
-      if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-      if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
       return Math.round(width);
     });
-
-    const roundedTotal = rounded.reduce((sum, width) => sum + width, 0);
-    const desiredTotal = Math.round(targetTotal);
-    let difference = desiredTotal - roundedTotal;
-    let pass = 0;
-    while (difference !== 0 && pass < rounded.length * 2) {
-      const index = difference > 0 ? pass % rounded.length : rounded.length - 1 - (pass % rounded.length);
-      const step = difference > 0 ? 1 : -1;
-      const nextWidth = rounded[index] + step;
-      if (nextWidth >= MIN_DATA_WIDTH && nextWidth <= MAX_DATA_WIDTH) {
-        rounded[index] = nextWidth;
-        difference -= step;
-      }
-      pass += 1;
-    }
-
-    return rounded;
   };
 
   $: baseDataWidths = visibleColumns.map((column) => resolveColumnWidth(column));
@@ -588,23 +521,13 @@
     const visibleForWidth = projectDetail
       ? projectDetail.columns.filter((column) => !hiddenColumns.has(column))
       : [];
-    const lengthTracker: Record<string, number> = {};
-    for (const column of visibleForWidth) {
-      lengthTracker[column] = column.length;
-    }
+    const columnMaxChars = projectDetail?.column_max_chars ?? {};
 
     const nextFiltered: ProjectRow[] = [];
     let nextFlagged = 0;
 
     for (const row of rows) {
       if (!row) continue;
-      for (const column of visibleForWidth) {
-        const cellText = formatCell(row.data[column]);
-        const candidateLength = Math.min(cellText.length, WIDTH_LIMIT_CHARS);
-        if (candidateLength > (lengthTracker[column] ?? 0)) {
-          lengthTracker[column] = candidateLength;
-        }
-      }
       if (normalizeFlag(row.flag).length > 0) {
         nextFlagged += 1;
       }
@@ -642,7 +565,9 @@
 
     const nextWidthMap = new Map<string, number>();
     for (const column of visibleForWidth) {
-      const maxChars = Math.min(lengthTracker[column] ?? column.length, WIDTH_LIMIT_CHARS);
+      const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
+      const dataChars = Math.min(columnMaxChars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
+      const maxChars = Math.max(headerChars, dataChars);
       const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
       const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
       nextWidthMap.set(column, width);

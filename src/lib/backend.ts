@@ -1,10 +1,10 @@
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from "@tauri-apps/api/tauri";
 import type {
   LoadProjectResponse,
   ProjectMeta,
   ProjectRow,
-  ProjectSummary
-} from './types';
+  ProjectSummary,
+} from "./types";
 
 export interface CreateProjectArgs {
   description?: string | null;
@@ -47,12 +47,14 @@ interface WebProjectData {
   columns: string[];
   rows: ProjectRow[];
   hiddenColumns: string[];
+  columnMaxChars: Record<string, number>;
 }
 
 export function createBackend(): Backend {
   const hasNativeBridge =
-    typeof window !== 'undefined' &&
-    typeof (window as Window & { __TAURI_IPC__?: unknown }).__TAURI_IPC__ === 'function';
+    typeof window !== "undefined" &&
+    typeof (window as Window & { __TAURI_IPC__?: unknown }).__TAURI_IPC__ ===
+      "function";
 
   return hasNativeBridge ? new NativeBackend() : new WebBackend();
 }
@@ -69,68 +71,71 @@ interface RawLoadProjectResponse {
   columns: string[];
   rows: ProjectRow[];
   hidden_columns?: string[];
+  column_max_chars?: Record<string, number>;
 }
 
 class NativeBackend implements Backend {
   readonly isNative = true;
 
   listProjects(): Promise<ProjectSummary[]> {
-    return invoke<RawProjectSummary[]>('list_projects').then((items) =>
+    return invoke<RawProjectSummary[]>("list_projects").then((items) =>
       items.map(normalizeSummary)
     );
   }
 
   createProject(args: CreateProjectArgs): Promise<ProjectSummary> {
     if (!args.path) {
-      return Promise.reject(new Error('Path is required to create a project.'));
+      return Promise.reject(new Error("Path is required to create a project."));
     }
-    return invoke<RawProjectSummary>('create_project', {
+    return invoke<RawProjectSummary>("create_project", {
       payload: {
         path: args.path,
-        description: args.description ?? null
-      }
+        description: args.description ?? null,
+      },
     }).then(normalizeSummary);
   }
 
   deleteProject(projectId: string): Promise<void> {
-    return invoke('delete_project', { request: { project_id: projectId } });
+    return invoke("delete_project", { request: { project_id: projectId } });
   }
 
   loadProject(projectId: string): Promise<LoadProjectResponse> {
-    return invoke<RawLoadProjectResponse>('load_project', {
-      request: { project_id: projectId }
+    return invoke<RawLoadProjectResponse>("load_project", {
+      request: { project_id: projectId },
     }).then(normalizeLoadResponse);
   }
 
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
-    return invoke<ProjectRow>('update_flag', {
+    return invoke<ProjectRow>("update_flag", {
       payload: {
         project_id: args.projectId,
         row_index: args.rowIndex,
         flag: args.flag,
-        memo: args.memo
-      }
+        memo: args.memo,
+      },
     });
   }
 
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void> {
-    return invoke('set_hidden_columns', {
+    return invoke("set_hidden_columns", {
       payload: {
         project_id: args.projectId,
-        hidden_columns: args.hiddenColumns
-      }
+        hidden_columns: args.hiddenColumns,
+      },
     });
   }
 
   exportProject(args: ExportProjectArgs): Promise<void> {
     if (!args.destination) {
-      return Promise.reject(new Error('Destination path is required to export a project.'));
+      return Promise.reject(
+        new Error("Destination path is required to export a project.")
+      );
     }
-    return invoke('export_project', {
+    return invoke("export_project", {
       payload: {
         project_id: args.projectId,
-        destination: args.destination
-      }
+        destination: args.destination,
+      },
     });
   }
 }
@@ -148,28 +153,29 @@ class WebBackend implements Backend {
 
   async createProject(args: CreateProjectArgs): Promise<ProjectSummary> {
     if (!args.file) {
-      throw new Error('File is required to create a project in web mode.');
+      throw new Error("File is required to create a project in web mode.");
     }
     const parsed = await this.parseCsvFile(args.file);
     const id = this.randomId();
     const createdAt = new Date().toISOString();
     const meta: ProjectMeta = {
       id,
-      name: args.file.name || 'Untitled.csv',
+      name: args.file.name || "Untitled.csv",
       description: args.description ?? null,
       created_at: createdAt,
       total_records: parsed.rows.length,
-      hidden_columns: []
+      hidden_columns: [],
     };
     const summary: ProjectSummary = {
       meta,
-      flagged_records: 0
+      flagged_records: 0,
     };
     this.projects.set(id, {
       summary,
       columns: parsed.columns,
       rows: parsed.rows,
-      hiddenColumns: []
+      hiddenColumns: [],
+      columnMaxChars: computeColumnMaxChars(parsed.columns, parsed.rows),
     });
     return cloneSummary(summary);
   }
@@ -181,35 +187,38 @@ class WebBackend implements Backend {
   async loadProject(projectId: string): Promise<LoadProjectResponse> {
     const project = this.projects.get(projectId);
     if (!project) {
-      throw new Error('Project not found.');
+      throw new Error("Project not found.");
     }
     return {
       project: cloneSummary(project.summary),
       columns: [...project.columns],
       rows: project.rows.map(cloneRow),
-      hidden_columns: [...project.hiddenColumns]
+      hidden_columns: [...project.hiddenColumns],
+      column_max_chars: { ...project.columnMaxChars },
     };
   }
 
   async updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
     const project = this.projects.get(args.projectId);
     if (!project) {
-      throw new Error('Project not found.');
+      throw new Error("Project not found.");
     }
     const target = project.rows.find((row) => row.row_index === args.rowIndex);
     if (!target) {
-      throw new Error('Row not found.');
+      throw new Error("Row not found.");
     }
     target.flag = args.flag;
     target.memo = args.memo;
-    project.summary.flagged_records = project.rows.filter((row) => row.flag.trim().length > 0).length;
+    project.summary.flagged_records = project.rows.filter(
+      (row) => row.flag.trim().length > 0
+    ).length;
     return cloneRow(target);
   }
 
   async setHiddenColumns(args: HiddenColumnsArgs): Promise<void> {
     const project = this.projects.get(args.projectId);
     if (!project) {
-      throw new Error('Project not found.');
+      throw new Error("Project not found.");
     }
     project.hiddenColumns = [...args.hiddenColumns];
     project.summary.meta.hidden_columns = [...args.hiddenColumns];
@@ -218,72 +227,88 @@ class WebBackend implements Backend {
   async exportProject(args: ExportProjectArgs): Promise<void> {
     const project = await this.loadProject(args.projectId);
     const columns = [...project.columns];
-    const flagColumns = ['trivium-circle', 'trivium-question', 'trivium-cross'] as const;
-    const header = [...columns, ...flagColumns, 'trivium-memo'];
+    const flagColumns = [
+      "trivium-circle",
+      "trivium-question",
+      "trivium-cross",
+    ] as const;
+    const header = [...columns, ...flagColumns, "trivium-memo"];
     const lines: string[][] = [header];
     for (const row of project.rows) {
       const values = columns.map((column) => stringifyCell(row.data[column]));
-      const trimmedFlag = (row.flag ?? '').trim();
+      const trimmedFlag = (row.flag ?? "").trim();
       for (const flagColumn of flagColumns) {
         const match =
-          (flagColumn === 'trivium-circle' && trimmedFlag === '◯') ||
-          (flagColumn === 'trivium-question' && trimmedFlag === '?') ||
-          (flagColumn === 'trivium-cross' && trimmedFlag === '✗');
-        values.push(match ? '1' : '0');
+          (flagColumn === "trivium-circle" && trimmedFlag === "◯") ||
+          (flagColumn === "trivium-question" && trimmedFlag === "?") ||
+          (flagColumn === "trivium-cross" && trimmedFlag === "✗");
+        values.push(match ? "1" : "0");
       }
-      values.push(row.memo ?? '');
+      values.push(row.memo ?? "");
       lines.push(values);
     }
-    const csv = lines.map((line) => line.map(escapeCsvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const csv = lines
+      .map((line) => line.map(escapeCsvCell).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
+    const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download =
-      (project.project.meta.name?.replace(/\.[^.]+$/, '') || 'trivium-export') + '-web.csv';
+      (project.project.meta.name?.replace(/\.[^.]+$/, "") || "trivium-export") +
+      "-web.csv";
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   }
 
-  private async parseCsvFile(file: File): Promise<{ columns: string[]; rows: ProjectRow[] }> {
+  private async parseCsvFile(
+    file: File
+  ): Promise<{ columns: string[]; rows: ProjectRow[] }> {
     const text = await file.text();
     const table = parseCsv(text);
     if (!table.length) {
-      throw new Error('CSV file is empty.');
+      throw new Error("CSV file is empty.");
     }
     const [header, ...body] = table;
-    const columns = header.map((column, index) => column || `column_${index + 1}`);
+    const columns = header.map(
+      (column, index) => column || `column_${index + 1}`
+    );
     const rows: ProjectRow[] = body
       .filter((record) => record.some((cell) => cell.trim().length > 0))
       .map((record, rowIndex) => {
         const data: RecordData = {};
         for (let i = 0; i < columns.length; i += 1) {
-          data[columns[i]] = record[i] ?? '';
+          data[columns[i]] = record[i] ?? "";
         }
         return {
           row_index: rowIndex,
           data,
-          flag: '',
-          memo: ''
+          flag: "",
+          memo: "",
         };
       });
     return { columns, rows };
   }
 
   private randomId(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    if (
+      typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function"
+    ) {
       return crypto.randomUUID();
     }
-    return `web-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+    return `web-${Date.now().toString(16)}-${Math.random()
+      .toString(16)
+      .slice(2, 10)}`;
   }
 }
 
 function parseCsv(content: string): string[][] {
   const rows: string[][] = [];
   let currentRow: string[] = [];
-  let currentField = '';
+  let currentField = "";
   let inQuotes = false;
 
   for (let i = 0; i < content.length; i += 1) {
@@ -300,14 +325,14 @@ function parseCsv(content: string): string[][] {
       continue;
     }
 
-    if (char === ',' && !inQuotes) {
+    if (char === "," && !inQuotes) {
       currentRow.push(currentField);
-      currentField = '';
+      currentField = "";
       continue;
     }
 
-    if ((char === '\n' || char === '\r') && !inQuotes) {
-      if (char === '\r' && next === '\n') {
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") {
         i += 1;
       }
       currentRow.push(currentField);
@@ -315,7 +340,7 @@ function parseCsv(content: string): string[][] {
         rows.push([...currentRow]);
       }
       currentRow = [];
-      currentField = '';
+      currentField = "";
       continue;
     }
 
@@ -333,14 +358,14 @@ function parseCsv(content: string): string[][] {
 }
 
 function isEmptyRow(fields: string[]): boolean {
-  return fields.every((field) => field === '');
+  return fields.every((field) => field === "");
 }
 
 function stringifyCell(value: unknown): string {
   if (value === null || value === undefined) {
-    return '';
+    return "";
   }
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     return JSON.stringify(value);
   }
   return String(value);
@@ -354,20 +379,29 @@ function escapeCsvCell(value: string): string {
 }
 
 function normalizeSummary(raw: RawProjectSummary): ProjectSummary {
-  if ('meta' in raw && raw.meta) {
-    const hiddenColumns = Array.isArray(raw.meta.hidden_columns) ? raw.meta.hidden_columns : [];
+  if ("meta" in raw && raw.meta) {
+    const hiddenColumns = Array.isArray(raw.meta.hidden_columns)
+      ? raw.meta.hidden_columns
+      : [];
     return {
       flagged_records: raw.flagged_records ?? 0,
       meta: {
         ...raw.meta,
-        hidden_columns: [...hiddenColumns]
-      }
+        hidden_columns: [...hiddenColumns],
+      },
     };
   }
 
   const legacy = raw as LegacyProjectSummary;
-  const { flagged_records, hidden_columns, id, name, description, created_at, total_records } =
-    legacy;
+  const {
+    flagged_records,
+    hidden_columns,
+    id,
+    name,
+    description,
+    created_at,
+    total_records,
+  } = legacy;
   const normalizedHidden = Array.isArray(hidden_columns) ? hidden_columns : [];
   return {
     flagged_records,
@@ -377,17 +411,24 @@ function normalizeSummary(raw: RawProjectSummary): ProjectSummary {
       description: description ?? null,
       created_at,
       total_records,
-      hidden_columns: [...normalizedHidden]
-    }
+      hidden_columns: [...normalizedHidden],
+    },
   };
 }
 
-function normalizeLoadResponse(raw: RawLoadProjectResponse): LoadProjectResponse {
+function normalizeLoadResponse(
+  raw: RawLoadProjectResponse
+): LoadProjectResponse {
+  const columnMaxChars =
+    raw.column_max_chars ?? computeColumnMaxChars(raw.columns, raw.rows);
   return {
     project: normalizeSummary(raw.project),
     columns: [...raw.columns],
     rows: raw.rows.map(cloneRow),
-    hidden_columns: Array.isArray(raw.hidden_columns) ? [...raw.hidden_columns] : []
+    hidden_columns: Array.isArray(raw.hidden_columns)
+      ? [...raw.hidden_columns]
+      : [],
+    column_max_chars: columnMaxChars,
   };
 }
 
@@ -397,8 +438,8 @@ function cloneSummary(summary: ProjectSummary): ProjectSummary {
     flagged_records: normalized.flagged_records,
     meta: {
       ...normalized.meta,
-      hidden_columns: [...normalized.meta.hidden_columns]
-    }
+      hidden_columns: [...normalized.meta.hidden_columns],
+    },
   };
 }
 
@@ -407,6 +448,27 @@ function cloneRow(row: ProjectRow): ProjectRow {
     row_index: row.row_index,
     flag: row.flag,
     memo: row.memo,
-    data: { ...row.data }
+    data: { ...row.data },
   };
+}
+
+function computeColumnMaxChars(
+  columns: string[],
+  rows: ProjectRow[]
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const column of columns) {
+    result[column] = Array.from(column).length;
+  }
+  for (const row of rows) {
+    for (const column of columns) {
+      const rawValue = row.data[column];
+      const stringValue = stringifyCell(rawValue);
+      const length = Array.from(stringValue).length;
+      if (length > (result[column] ?? 0)) {
+        result[column] = length;
+      }
+    }
+  }
+  return result;
 }

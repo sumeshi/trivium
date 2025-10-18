@@ -59,6 +59,7 @@ struct LoadProjectResponse {
     columns: Vec<String>,
     rows: Vec<ProjectRow>,
     hidden_columns: Vec<String>,
+    column_max_chars: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +200,19 @@ fn anyvalue_to_json(value: &AnyValue) -> Value {
     }
 }
 
+fn value_display_length(value: &Value) -> usize {
+    match value {
+        Value::Null => 0,
+        Value::String(text) => text.chars().count(),
+        Value::Number(number) => number.to_string().chars().count(),
+        Value::Bool(true) => 4,
+        Value::Bool(false) => 5,
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value)
+            .map(|text| text.chars().count())
+            .unwrap_or(0),
+    }
+}
+
 fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
     ParquetReader::new(File::open(path)?)
         .finish()
@@ -329,16 +343,26 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
     let mut rows = Vec::with_capacity(df.height());
-    let columns_ref = df.get_column_names();
+    let mut column_max_chars: HashMap<String, usize> = columns
+        .iter()
+        .map(|name| {
+            let header_len = name.chars().count();
+            (name.clone(), header_len)
+        })
+        .collect();
     for row_idx in 0..df.height() {
         let mut record = HashMap::new();
-        for column in &columns_ref {
-            if *column == "__rowid" {
-                continue;
-            }
+        for column in &columns {
             if let Ok(series) = df.column(column) {
                 if let Ok(value) = series.get(row_idx) {
-                    record.insert(column.to_string(), anyvalue_to_json(&value));
+                    let json_value = anyvalue_to_json(&value);
+                    let display_len = value_display_length(&json_value);
+                    if let Some(max_len) = column_max_chars.get_mut(column) {
+                        if display_len > *max_len {
+                            *max_len = display_len;
+                        }
+                    }
+                    record.insert(column.clone(), json_value);
                 }
             }
         }
@@ -366,6 +390,7 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         columns,
         rows,
         hidden_columns: meta.hidden_columns.clone(),
+        column_max_chars,
     })
 }
 
