@@ -175,6 +175,10 @@
     }
   };
 
+  const truncateText = (text: string, length: number) => {
+    return text.length > length ? text.slice(0, length) + '...' + text.slice(text.length - 6) : text;
+  };
+
 const handleRefreshRequest = async () => {
   if (selectedProjectId) {
     await loadProjectDetail(selectedProjectId);
@@ -363,16 +367,16 @@ const handleRefreshRequest = async () => {
                         </span>
                       </div>
                       <div class="flex items-center justify-between gap-3 mt-1">
-                        <span class="truncate text-sm font-semibold text-slate-100">{project.meta.name}</span>
+                        <span class="truncate text-sm font-semibold text-slate-100">{truncateText(project.meta.name, 19)}</span>
                       </div>
                       <hr class="border-white/10 my-2">
+                      {#if project.meta.description}
+                        <p class="mt-2 text-xs text-slate-400">{truncateText(project.meta.description, 23)}</p>
+                      {/if}
                       <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 mt-2">
                         <span>{project.meta.total_records} rows</span>
                         <span>{project.flagged_records} flagged</span>
                       </div>
-                      {#if project.meta.description}
-                        <p class="mt-2 text-xs text-slate-400">{project.meta.description}</p>
-                      {/if}
                     </button>
                     <button
                       type="button"
