@@ -779,10 +779,48 @@ button.primary:disabled {
   gap: 16px;
 }
 
+.cell-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .cell-dialog-header h3 {
   margin: 0;
   font-size: 1rem;
   color: #e6e9ef;
+}
+
+.memo-dialog textarea {
+  width: 100%;
+  min-height: 180px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(10, 10, 20, 0.92);
+  color: rgba(230, 233, 239, 0.95);
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.memo-dialog textarea:focus-visible {
+  outline: 2px solid rgba(140, 170, 238, 0.65);
+  outline-offset: 2px;
+}
+
+.memo-editor-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: rgba(230, 233, 239, 0.75);
+}
+
+.memo-error {
+  margin: 0;
+  color: rgba(255, 139, 139, 0.9);
+  font-size: 0.85rem;
 }
 
 .cell-dialog-body {

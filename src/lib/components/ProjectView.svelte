@@ -110,6 +110,10 @@
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastColumnsSignature: string | null = null;
+  let memoEditor: { row: CachedRow } | null = null;
+  let memoDraft = '';
+  let memoSaving = false;
+  let memoError: string | null = null;
 
   $: if (projectDetail) {
     const nextRowsRef = projectDetail.rows;
@@ -140,6 +144,9 @@
       sortDirection = 'asc';
       expandedCell = null;
       recomputeFilteredRows(true);
+      memoEditor = null;
+      memoDraft = '';
+      memoError = null;
       initialized = true;
     } else if (nextHiddenColumns !== lastHiddenColumnsRef) {
       hiddenColumns = new Set(nextHiddenColumns);
@@ -269,7 +276,7 @@
     return {
       ...incoming,
       flag: mapStoredFlag(incoming.flag) || '',
-      memo: incoming.memo ?? '',
+      memo: sanitizeMemoInput(incoming.memo ?? ''),
       displayCache
     };
   };
@@ -286,6 +293,11 @@
       }
     }
     return String(value);
+  };
+
+  const sanitizeMemoInput = (value: string): string => {
+    const withoutControl = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    return withoutControl.replace(/<[^>]*>/g, '');
   };
 
   const getComparableValue = (row: CachedRow, column: string): string | number => {
@@ -367,6 +379,20 @@
     expandedCell = null;
   };
 
+  const openMemoEditor = (row: CachedRow) => {
+    memoEditor = { row };
+    memoDraft = row.memo ?? '';
+    memoError = null;
+    memoSaving = false;
+  };
+
+  const closeMemoEditor = () => {
+    memoEditor = null;
+    memoDraft = '';
+    memoError = null;
+    memoSaving = false;
+  };
+
   const handleCellKeydown = (event: KeyboardEvent, column: string, value: string) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -384,6 +410,59 @@
   const handleBackdropClick = (event: MouseEvent) => {
     if (event.target === event.currentTarget) {
       closeCell();
+    }
+  };
+
+  const saveMemo = async () => {
+    if (!memoEditor || memoSaving || !projectDetail) return;
+    const sanitized = sanitizeMemoInput(memoDraft).trim();
+    memoSaving = true;
+    memoError = null;
+    try {
+      await backend.updateFlag({
+        projectId: projectDetail.project.meta.id,
+        rowIndex: memoEditor.row.row_index,
+        flag: memoEditor.row.flag,
+        memo: sanitized.length ? sanitized : null
+      });
+      await forceRefreshFilteredRows(false);
+      dispatch('notify', { message: 'Memo updated.', tone: 'success' });
+      closeMemoEditor();
+    } catch (error) {
+      console.error(error);
+      memoError = 'Failed to update memo.';
+      dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
+    } finally {
+      memoSaving = false;
+    }
+  };
+
+  const handleMemoBackdropClick = (event: MouseEvent) => {
+    if (event.target === event.currentTarget && !memoSaving) {
+      closeMemoEditor();
+    }
+  };
+
+  const copyExpandedCell = async () => {
+    if (!expandedCell) return;
+    const text = expandedCell.value ?? '';
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      dispatch('notify', { message: 'Copied cell value.', tone: 'success' });
+    } catch (error) {
+      console.error(error);
+      dispatch('notify', { message: 'Failed to copy cell value.', tone: 'error' });
     }
   };
 
@@ -411,22 +490,8 @@
     }
   };
 
-  const editMemo = async (row: CachedRow) => {
-    const nextMemo = window.prompt('Edit memo', row.memo ?? '');
-    if (nextMemo === null) return;
-    try {
-      await backend.updateFlag({
-        projectId: projectDetail.project.meta.id,
-        rowIndex: row.row_index,
-        flag: row.flag,
-        memo: nextMemo.trim().length ? nextMemo : null
-      });
-      await forceRefreshFilteredRows(false);
-      dispatch('notify', { message: 'Memo updated.', tone: 'success' });
-    } catch (error) {
-      console.error(error);
-      dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
-    }
+  const editMemo = (row: CachedRow) => {
+    openMemoEditor(row);
   };
 
   const toggleColumn = async (column: string) => {
@@ -675,7 +740,13 @@
       if (event.key === 'Escape') {
         columnsOpen = false;
         flagMenuOpen = false;
-        closeCell();
+        if (memoEditor) {
+          memoEditor = null;
+          memoDraft = '';
+          memoError = null;
+        } else {
+          closeCell();
+        }
       }
     };
     resizeObserver = new ResizeObserver((entries) => {
@@ -825,9 +896,54 @@
       >
         <div class="cell-dialog-header">
           <h3>{expandedCell.column}</h3>
-          <button type="button" class="ghost close-dialog" on:click={closeCell}>Close</button>
+          <div class="cell-dialog-actions">
+            <button type="button" class="ghost" on:click={copyExpandedCell}>Copy</button>
+            <button type="button" class="ghost close-dialog" on:click={closeCell}>Close</button>
+          </div>
         </div>
         <pre class="cell-dialog-body">{expandedCell.value || '—'}</pre>
+      </div>
+    </div>
+  {/if}
+
+  {#if memoEditor}
+    <div
+      class="cell-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Edit memo for row ${memoEditor.row.row_index + 1}`}
+      on:click={handleMemoBackdropClick}
+    >
+      <div class="cell-dialog memo-dialog">
+        <div class="cell-dialog-header">
+          <h3>Edit memo</h3>
+          <div class="cell-dialog-actions">
+            <button type="button" class="ghost" on:click={closeMemoEditor} disabled={memoSaving}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="primary"
+              on:click={saveMemo}
+              disabled={memoSaving}
+            >
+              {memoSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+        <label class="memo-editor-label">
+          <span>Memo</span>
+          <textarea
+            bind:value={memoDraft}
+            rows="8"
+            placeholder="Add memo"
+            spellcheck="true"
+            disabled={memoSaving}
+          />
+        </label>
+        {#if memoError}
+          <p class="memo-error">{memoError}</p>
+        {/if}
       </div>
     </div>
   {/if}
