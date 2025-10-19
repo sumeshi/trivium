@@ -505,6 +505,10 @@ button.primary:disabled {
   background: rgba(17, 17, 27, 0.75);
 }
 
+.data-row.loading {
+  opacity: 0.6;
+}
+
 .data-row:nth-child(2n) {
   background: rgba(13, 13, 23, 0.35);
 }
@@ -649,6 +653,10 @@ button.primary:disabled {
 .flag-buttons button.selected {
   transform: translateY(-1px);
   box-shadow: 0 12px 24px rgba(16, 18, 32, 0.35);
+}
+
+.loading-placeholder {
+  opacity: 0.45;
 }
 
 .flag-buttons button.flag-safe.selected {

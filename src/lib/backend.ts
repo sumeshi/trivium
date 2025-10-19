@@ -7,6 +7,8 @@ import type {
   IocEntry,
 } from "./types";
 
+const PAGE_SIZE = 250;
+
 export interface CreateProjectArgs {
   description?: string | null;
   path?: string;
@@ -58,11 +60,17 @@ export interface QueryProjectRowsArgs {
   search?: string;
   flagFilter?: FlagFilterValue;
   columns?: string[];
+  offset?: number;
+  limit?: number;
+  sortKey?: string | null;
+  sortDirection?: "asc" | "desc";
 }
 
 export interface QueryProjectRowsResponse {
   rows: ProjectRow[];
   total_flagged: number;
+  total_rows: number;
+  offset: number;
 }
 
 export interface Backend {
@@ -110,15 +118,17 @@ type RawProjectSummary = ProjectSummary | LegacyProjectSummary;
 interface RawLoadProjectResponse {
   project: RawProjectSummary;
   columns: string[];
-  rows: ProjectRow[];
   hidden_columns?: string[];
   column_max_chars?: Record<string, number>;
   iocs?: IocEntry[];
+  initial_rows?: ProjectRow[];
 }
 
 interface RawQueryRowsResponse {
   rows: ProjectRow[];
   total_flagged: number;
+  total_rows: number;
+  offset: number;
 }
 
 class NativeBackend implements Backend {
@@ -159,10 +169,16 @@ class NativeBackend implements Backend {
         search: args.search ?? null,
         flag_filter: args.flagFilter ?? null,
         visible_columns: args.columns ?? null,
+        offset: args.offset ?? null,
+        limit: args.limit ?? null,
+        sort_key: args.sortKey ?? null,
+        sort_direction: args.sortDirection ?? null,
       },
     }).then((response) => ({
       rows: response.rows.map(cloneRow),
       total_flagged: response.total_flagged,
+      total_rows: response.total_rows,
+      offset: response.offset,
     }));
   }
 
@@ -287,13 +303,14 @@ class WebBackend implements Backend {
       (row) => normalizeFlagValue(row.flag).length > 0
     ).length;
     project.summary.flagged_records = summary.flagged_records;
+    const initialRows = rows.slice(0, PAGE_SIZE).map(cloneRow);
     return {
       project: summary,
       columns: [...project.columns],
-      rows,
       hidden_columns: [...project.hiddenColumns],
       column_max_chars: { ...columnMaxChars },
       iocs: project.iocEntries.map(cloneIoc),
+      initial_rows: initialRows,
     };
   }
 
@@ -339,13 +356,42 @@ class WebBackend implements Backend {
       (row) => matchesFlag(row) && matchesSearch(row)
     );
 
+    const sortKey =
+      args.sortKey && project.columns.includes(args.sortKey)
+        ? args.sortKey
+        : null;
+    if (sortKey) {
+      const collator = new Intl.Collator(undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      const direction = args.sortDirection === "desc" ? -1 : 1;
+      filtered.sort((a, b) => {
+        const left = stringifyCell(a.data[sortKey!]);
+        const right = stringifyCell(b.data[sortKey!]);
+        const result = collator.compare(left, right);
+        if (result !== 0) {
+          return direction * result;
+        }
+        return direction * (a.row_index - b.row_index);
+      });
+    } else {
+      filtered.sort((a, b) => a.row_index - b.row_index);
+    }
+
     const totalFlagged = allRows.filter(
       (row) => normalizeFlagValue(row.flag).length > 0
     ).length;
+    const totalRows = filtered.length;
+    const offset = Math.max(0, args.offset ?? 0);
+    const limit = Math.max(1, args.limit ?? 250);
+    const slice = filtered.slice(offset, offset + limit);
 
     return {
-      rows: filtered,
+      rows: slice,
       total_flagged: totalFlagged,
+      total_rows: totalRows,
+      offset,
     };
   }
 
@@ -400,8 +446,13 @@ class WebBackend implements Backend {
   }
 
   async exportProject(args: ExportProjectArgs): Promise<void> {
-    const project = await this.loadProject(args.projectId);
+    const project = this.projects.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found.");
+    }
     const columns = [...project.columns];
+    const rows = project.rows.map(cloneRow);
+    applyIocsToRowsClient(rows, project.iocEntries);
     const flagColumns = [
       "trivium-circle",
       "trivium-question",
@@ -409,7 +460,7 @@ class WebBackend implements Backend {
     ] as const;
     const header = [...columns, ...flagColumns, "trivium-memo"];
     const lines: string[][] = [header];
-    for (const row of project.rows) {
+    for (const row of rows) {
       const values = columns.map((column) => stringifyCell(row.data[column]));
       const trimmedFlag = (row.flag ?? "").trim();
       for (const flagColumn of flagColumns) {
@@ -429,7 +480,7 @@ class WebBackend implements Backend {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    const baseName = project.project.meta.name || "trivium-export.csv";
+    const baseName = project.summary.meta.name || "trivium-export.csv";
     const stem = baseName.replace(/\.[^.]+$/, "");
     const timestamp = formatTimestampForFilename(new Date());
     anchor.download = `${timestamp}_trivium_${stem}.csv`;
@@ -603,18 +654,23 @@ function normalizeSummary(raw: RawProjectSummary): ProjectSummary {
 function normalizeLoadResponse(
   raw: RawLoadProjectResponse
 ): LoadProjectResponse {
+  const fallbackRows = Array.isArray(raw.initial_rows)
+    ? raw.initial_rows
+    : [];
   const columnMaxChars =
-    raw.column_max_chars ?? computeColumnMaxChars(raw.columns, raw.rows);
+    raw.column_max_chars ?? computeColumnMaxChars(raw.columns, fallbackRows);
   const iocs = Array.isArray(raw.iocs) ? raw.iocs.map(cloneIoc) : [];
   return {
     project: normalizeSummary(raw.project),
     columns: [...raw.columns],
-    rows: raw.rows.map(cloneRow),
     hidden_columns: Array.isArray(raw.hidden_columns)
       ? [...raw.hidden_columns]
       : [],
     column_max_chars: columnMaxChars,
     iocs,
+    initial_rows: Array.isArray(raw.initial_rows)
+      ? raw.initial_rows.map(cloneRow)
+      : [],
   };
 }
 

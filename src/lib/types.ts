@@ -28,8 +28,8 @@ export interface IocEntry {
 export interface LoadProjectResponse {
   project: ProjectSummary;
   columns: string[];
-  rows: ProjectRow[];
   hidden_columns: string[];
   column_max_chars: Record<string, number>;
   iocs: IocEntry[];
+  initial_rows: ProjectRow[];
 }

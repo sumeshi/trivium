@@ -40,6 +40,10 @@ let projects: ProjectSummary[] = [];
     }, 3200);
   };
 
+  const handleNotify = (event: CustomEvent<{ message: string; tone: 'success' | 'error' }>) => {
+    showToast(event.detail.message, event.detail.tone);
+  };
+
   let projectsLoaded = false;
 
 const loadProjects = async (force = false) => {
@@ -436,7 +440,7 @@ const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns
             {projectDetail}
             on:refresh={handleRefreshRequest}
             on:summary={handleSummaryUpdate}
-            on:notify={(event) => showToast(event.detail.message, event.detail.tone)}
+            on:notify={handleNotify}
           />
         </div>
       {/if}

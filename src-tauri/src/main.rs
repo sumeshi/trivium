@@ -16,6 +16,8 @@ use tauri::{Manager, State};
 use thiserror::Error;
 use uuid::Uuid;
 
+const DEFAULT_PAGE_SIZE: usize = 250;
+
 #[derive(Debug, Error)]
 enum AppError {
     #[error("{0}")]
@@ -65,10 +67,10 @@ struct IocEntry {
 struct LoadProjectResponse {
     project: ProjectSummary,
     columns: Vec<String>,
-    rows: Vec<ProjectRow>,
     hidden_columns: Vec<String>,
     column_max_chars: HashMap<String, usize>,
     iocs: Vec<IocEntry>,
+    initial_rows: Vec<ProjectRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +257,160 @@ fn value_to_search_string(value: &Value) -> Option<String> {
         Value::Bool(boolean) => Some(boolean.to_string()),
         Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
     }
+}
+
+fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
+    match value {
+        AnyValue::Null => None,
+        AnyValue::Boolean(v) => Some(v.to_string()),
+        AnyValue::Int8(v) => Some(v.to_string()),
+        AnyValue::Int16(v) => Some(v.to_string()),
+        AnyValue::Int32(v) => Some(v.to_string()),
+        AnyValue::Int64(v) => Some(v.to_string()),
+        AnyValue::UInt8(v) => Some(v.to_string()),
+        AnyValue::UInt16(v) => Some(v.to_string()),
+        AnyValue::UInt32(v) => Some(v.to_string()),
+        AnyValue::UInt64(v) => Some(v.to_string()),
+        AnyValue::Float32(v) => Some(f64::from(*v).to_string()),
+        AnyValue::Float64(v) => Some(v.to_string()),
+        AnyValue::String(v) => Some(v.to_string()),
+        AnyValue::StringOwned(v) => Some(v.to_string()),
+        AnyValue::Datetime(_, _, _) => Some(value.to_string()),
+        AnyValue::Date(_) => Some(value.to_string()),
+        AnyValue::Time(_) => Some(value.to_string()),
+        AnyValue::List(series) => {
+            let mut parts: Vec<String> = Vec::new();
+            for inner in series.iter() {
+                if let Some(text) = anyvalue_to_search_string(&inner) {
+                    parts.push(text);
+                }
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(","))
+            }
+        }
+        other => Some(other.to_string()),
+    }
+}
+
+#[derive(Clone)]
+struct RowCandidate {
+    row_index: usize,
+    flag: String,
+    memo: Option<String>,
+    sort_value: Option<SortComparable>,
+}
+
+#[derive(Clone, Debug)]
+enum SortComparable {
+    Null,
+    Bool(bool),
+    Number(f64),
+    Text(String),
+}
+
+impl SortComparable {
+    fn from_any_value(value: &AnyValue) -> Self {
+        match value {
+            AnyValue::Null => SortComparable::Null,
+            AnyValue::Boolean(v) => SortComparable::Bool(*v),
+            AnyValue::Int8(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::Int16(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::Int32(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::Int64(v) => SortComparable::Number(*v as f64),
+            AnyValue::UInt8(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::UInt16(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::UInt32(v) => SortComparable::Number(*v as f64),
+            AnyValue::UInt64(v) => SortComparable::Number(*v as f64),
+            AnyValue::Float32(v) => SortComparable::Number(f64::from(*v)),
+            AnyValue::Float64(v) => SortComparable::Number(*v),
+            AnyValue::String(v) => SortComparable::Text(v.to_string()),
+            AnyValue::StringOwned(v) => SortComparable::Text(v.to_string()),
+            AnyValue::Datetime(_, _, _) => SortComparable::Text(value.to_string()),
+            AnyValue::Date(_) => SortComparable::Text(value.to_string()),
+            AnyValue::Time(_) => SortComparable::Text(value.to_string()),
+            AnyValue::List(series) => {
+                let joined = series
+                    .iter()
+                    .filter_map(|inner| anyvalue_to_search_string(&inner))
+                    .collect::<Vec<String>>()
+                    .join(",");
+                SortComparable::Text(joined)
+            }
+            _ => SortComparable::Text(value.to_string()),
+        }
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (SortComparable::Null, SortComparable::Null) => Ordering::Equal,
+            (SortComparable::Null, _) => Ordering::Greater,
+            (_, SortComparable::Null) => Ordering::Less,
+            (SortComparable::Bool(left), SortComparable::Bool(right)) => left.cmp(right),
+            (SortComparable::Number(left), SortComparable::Number(right)) => left
+                .partial_cmp(right)
+                .unwrap_or(Ordering::Equal),
+            (SortComparable::Text(left), SortComparable::Text(right)) => left.cmp(right),
+            (SortComparable::Bool(left), SortComparable::Number(right)) => {
+                (*left as i32 as f64).partial_cmp(right).unwrap_or(Ordering::Equal)
+            }
+            (SortComparable::Number(left), SortComparable::Bool(right)) => {
+                left.partial_cmp(&(*right as i32 as f64)).unwrap_or(Ordering::Equal)
+            }
+            (SortComparable::Bool(left), SortComparable::Text(right)) => {
+                left.to_string().cmp(right)
+            }
+            (SortComparable::Text(left), SortComparable::Bool(right)) => {
+                left.cmp(&right.to_string())
+            }
+            (SortComparable::Number(left), SortComparable::Text(right)) => {
+                left.to_string().cmp(right)
+            }
+            (SortComparable::Text(left), SortComparable::Number(right)) => {
+                left.cmp(&right.to_string())
+            }
+        }
+    }
+}
+
+fn materialize_rows(
+    df: &DataFrame,
+    columns: &[String],
+    row_indices: impl Iterator<Item = usize>,
+    flags: &HashMap<usize, FlagEntry>,
+) -> Vec<ProjectRow> {
+    let mut column_series: HashMap<&str, Series> = HashMap::with_capacity(columns.len());
+    for column in columns {
+        if let Ok(series) = df.column(column) {
+            column_series.insert(column.as_str(), series.clone());
+        }
+    }
+
+    let mut rows = Vec::new();
+    for row_idx in row_indices {
+        let mut record = HashMap::new();
+        for column in columns {
+            if let Some(series) = column_series.get(column.as_str()) {
+                if let Ok(value) = series.get(row_idx) {
+                    record.insert(column.clone(), anyvalue_to_json(&value));
+                }
+            }
+        }
+        let flag_entry = flags.get(&row_idx);
+        rows.push(ProjectRow {
+            row_index: row_idx,
+            data: record,
+            flag: flag_entry
+                .as_ref()
+                .map(|entry| normalize_flag_value(&entry.flag))
+                .unwrap_or_default(),
+            memo: flag_entry.and_then(|entry| entry.memo.clone()),
+        });
+    }
+    rows
 }
 
 fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
@@ -492,6 +648,14 @@ struct QueryRowsPayload {
     flag_filter: Option<String>,
     #[serde(default)]
     visible_columns: Option<Vec<String>>,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    sort_key: Option<String>,
+    #[serde(default)]
+    sort_direction: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -516,6 +680,8 @@ struct ExportIocsPayload {
 struct QueryRowsResponse {
     rows: Vec<ProjectRow>,
     total_flagged: usize,
+    total_rows: usize,
+    offset: usize,
 }
 
 #[tauri::command]
@@ -556,7 +722,6 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let mut rows = Vec::with_capacity(df.height());
     let mut column_max_chars: HashMap<String, usize> = columns
         .iter()
         .map(|name| {
@@ -564,40 +729,40 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
             (name.clone(), header_len)
         })
         .collect();
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    for row_idx in 0..df.height() {
-        let mut record = HashMap::new();
+
+    let sample_size = usize::min(df.height(), 1_000);
+    if sample_size > 0 {
         for column in &columns {
             if let Ok(series) = df.column(column) {
-                if let Ok(value) = series.get(row_idx) {
+                for value in series.iter().take(sample_size) {
                     let json_value = anyvalue_to_json(&value);
                     let display_len = value_display_length(&json_value);
-                    if let Some(max_len) = column_max_chars.get_mut(column) {
-                        if display_len > *max_len {
-                            *max_len = display_len;
+                    if let Some(entry) = column_max_chars.get_mut(column) {
+                        if display_len > *entry {
+                            *entry = display_len;
                         }
                     }
-                    record.insert(column.clone(), json_value);
                 }
             }
         }
-        let flag_entry = flags.get(&row_idx);
-        rows.push(ProjectRow {
-            row_index: row_idx,
-            data: record,
-            flag: flag_entry
-                .map(|entry| entry.flag.clone())
-                .unwrap_or_default(),
-            memo: flag_entry.and_then(|entry| entry.memo.clone()),
-        });
     }
 
-    apply_iocs_to_rows(&mut rows, &iocs);
-
-    let flagged_records = rows
-        .iter()
-        .filter(|row| !row.flag.trim().is_empty())
+    let flagged_records = flags
+        .values()
+        .filter(|entry| !normalize_flag_value(&entry.flag).trim().is_empty())
         .count();
+    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+
+    let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
+    let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
+    apply_iocs_to_rows(&mut initial_rows, &iocs);
+
+    println!(
+        "[debug] load_project id={} total_rows={} initial_rows={}",
+        meta.id,
+        df.height(),
+        initial_rows.len()
+    );
 
     let summary = ProjectSummary {
         flagged_records,
@@ -607,10 +772,10 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     Ok(LoadProjectResponse {
         project: summary,
         columns,
-        rows,
         hidden_columns: meta.hidden_columns.clone(),
         column_max_chars,
         iocs,
+        initial_rows,
     })
 }
 
@@ -653,8 +818,6 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     } else {
         columns.clone()
     };
-    let search_column_lookup: HashSet<&str> = search_columns.iter().map(|column| column.as_str()).collect();
-
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -668,64 +831,139 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
         .as_ref()
         .map(|value| value.trim().to_lowercase());
 
-    let mut rows = Vec::new();
+    let offset = payload.offset.unwrap_or(0);
+    let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
+    let sort_key = payload
+        .sort_key
+        .as_ref()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let sort_desc = payload
+        .sort_direction
+        .as_ref()
+        .map(|value| value.eq_ignore_ascii_case("desc"))
+        .unwrap_or(false);
+
+    let mut column_series: HashMap<&str, Series> = HashMap::with_capacity(columns.len());
+    for column in &columns {
+        if let Ok(series) = df.column(column) {
+            column_series.insert(column.as_str(), series.clone());
+        }
+    }
+
+    let mut matches: Vec<RowCandidate> = Vec::new();
+
     for row_idx in 0..df.height() {
-        let mut record = HashMap::new();
         let mut matches_search = search_value.is_none();
 
-        for column in &columns {
-            if let Ok(series) = df.column(column) {
-                if let Ok(value) = series.get(row_idx) {
-                    let json_value = anyvalue_to_json(&value);
-                    if let Some(search_lower) = &search_value {
-                        if !matches_search && search_column_lookup.contains(column.as_str()) {
-                            if let Some(candidate) = value_to_search_string(&json_value) {
+        if let Some(search_lower) = &search_value {
+            if !search_columns.is_empty() {
+                for column in &search_columns {
+                    if let Some(series) = column_series.get(column.as_str()) {
+                        if let Ok(value) = series.get(row_idx) {
+                            if let Some(candidate) = anyvalue_to_search_string(&value) {
                                 if candidate.to_lowercase().contains(search_lower) {
                                     matches_search = true;
+                                    break;
                                 }
                             }
                         }
                     }
-                    record.insert(column.clone(), json_value);
                 }
-            }
-        }
-
-        if let Some(search_lower) = &search_value {
-            if !matches_search && !search_columns.is_empty() {
-                continue;
-            } else if search_columns.is_empty() && !matches_search && !search_lower.is_empty() {
+                if !matches_search {
+                    continue;
+                }
+            } else if !matches_search {
                 continue;
             }
         }
 
         let flag_entry = flags.get(&row_idx);
-        let flag_symbol = flag_entry
+        let normalized_flag = flag_entry
             .as_ref()
             .map(|entry| normalize_flag_value(&entry.flag))
             .unwrap_or_default();
+
         if let Some(filter) = &flag_filter {
-            if !matches_flag_filter(flag_symbol.as_str(), filter) {
+            if !matches_flag_filter(normalized_flag.as_str(), filter) {
                 continue;
             }
         }
 
-        rows.push(ProjectRow {
+        let sort_value = sort_key
+            .as_ref()
+            .and_then(|key| column_series.get(key.as_str()))
+            .and_then(|series| series.get(row_idx).ok())
+            .map(|value| SortComparable::from_any_value(&value));
+
+        matches.push(RowCandidate {
             row_index: row_idx,
-            data: record,
-            flag: flag_symbol,
+            flag: normalized_flag,
             memo: flag_entry.and_then(|entry| entry.memo.clone()),
+            sort_value,
         });
     }
-    apply_iocs_to_rows(&mut rows, &iocs);
-    let auto_flagged_total = rows
+
+    if let Some(_) = sort_key {
+        matches.sort_by(|a, b| {
+            let ordering = match (&a.sort_value, &b.sort_value) {
+                (Some(left), Some(right)) => left.cmp(right),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a.row_index.cmp(&b.row_index),
+            };
+            if sort_desc {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        });
+    } else {
+        matches.sort_by(|a, b| a.row_index.cmp(&b.row_index));
+    }
+
+    let total_rows = matches.len();
+    let total_flagged_all = matches
         .iter()
-        .filter(|row| !row.flag.trim().is_empty())
+        .filter(|candidate| !candidate.flag.trim().is_empty())
         .count();
+    let start = usize::min(offset, total_rows);
+    let end = usize::min(start + limit, total_rows);
+
+    let mut rows: Vec<ProjectRow> = Vec::with_capacity(end.saturating_sub(start));
+    for candidate in matches.into_iter().skip(start).take(limit) {
+        let mut record = HashMap::new();
+        for column in &columns {
+            if let Some(series) = column_series.get(column.as_str()) {
+                if let Ok(value) = series.get(candidate.row_index) {
+                    record.insert(column.clone(), anyvalue_to_json(&value));
+                }
+            }
+        }
+        rows.push(ProjectRow {
+            row_index: candidate.row_index,
+            data: record,
+            flag: candidate.flag,
+            memo: candidate.memo,
+        });
+    }
+
+    apply_iocs_to_rows(&mut rows, &iocs);
+
+    println!(
+        "[debug] query_project_rows id={} offset={} limit={} rows={} total_rows={}",
+        meta.id,
+        start,
+        limit,
+        rows.len(),
+        total_rows
+    );
 
     Ok(QueryRowsResponse {
         rows,
-        total_flagged: auto_flagged_total,
+        total_flagged: total_flagged_all,
+        total_rows,
+        offset: start,
     })
 }
 

@@ -32,7 +32,6 @@
   ];
   const ROW_HEIGHT = 56;
   const BUFFER = 8;
-  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const INDEX_COL_WIDTH = 80;
   const FLAG_COL_WIDTH = 130;
   const MEMO_COL_WIDTH = 200;
@@ -43,16 +42,16 @@
   const MAX_DATA_WIDTH = WIDTH_LIMIT_CHARS * CHAR_PIXEL + COLUMN_PADDING;
   const STICKY_COLUMNS_WIDTH = INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH;
 
+  const PAGE_SIZE = 250;
+  const PREFETCH_PAGES = 1;
+
   let currentProjectId: string | null = null;
-  let lastProjectDetail: LoadProjectResponse | null = null;
-  let lastRowsRef: ProjectRow[] | null = null;
   let lastHiddenColumnsRef: string[] | null = null;
   type CachedRow = ProjectRow & {
     memo: string;
     displayCache: Record<string, string>;
   };
-
-  let rows: CachedRow[] = [];
+  type VirtualRow = { position: number; row: CachedRow | null };
 
   let hiddenColumns = new Set<string>();
   let columnsOpen = false;
@@ -68,12 +67,16 @@
   let isUpdatingColumns = false;
 
   let visibleColumns: string[] = [];
-  let filteredRows: CachedRow[] = [];
+  let rowsCache: Map<number, CachedRow> = new Map();
+  let pendingPages: Set<number> = new Set();
+  let loadedPages: Set<number> = new Set();
+  let totalRows = 0;
   let totalFlagged = 0;
   let flaggedCount = 0;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
 
+  let virtualRows: VirtualRow[] = [];
   let expandedCell: { column: string; value: string } | null = null;
 
   let columnWidths: Map<string, number> = new Map();
@@ -97,12 +100,23 @@
   let availableDataWidth = 0;
   let distributedDataWidths: number[] = [];
   let flagMenuOpen = false;
-  type ScheduledFilters = {
+  let visibleCount = 0;
+  let maxStart = 0;
+  let startIndex = 0;
+  let endIndex = 0;
+  let offsetY = 0;
+  let totalHeight = 0;
+  let loadedRowCount = 0;
+
+  type AppliedFilters = {
     search: string;
     flag: FlagFilterValue;
     columns: string[];
-    resetScroll: boolean;
   };
+
+  type ScheduledFilters = AppliedFilters & { resetScroll: boolean };
+
+  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [] };
   let filterTimeout: ReturnType<typeof setTimeout> | null = null;
   let pendingFilters: ScheduledFilters | null = null;
   let filterRequestId = 0;
@@ -124,55 +138,146 @@
   let isSavingIocs = false;
   let iocImportInput: HTMLInputElement | null = null;
 
-  $: if (projectDetail) {
-    const nextRowsRef = projectDetail.rows;
-    const nextHiddenColumns = projectDetail.hidden_columns ?? [];
-    const projectChanged = projectDetail.project.meta.id !== currentProjectId;
-    const rowsChanged = nextRowsRef !== lastRowsRef;
-    const shouldInitialize = !initialized || projectChanged || rowsChanged;
+  const hasRow = (row: CachedRow | null): row is CachedRow => row !== null;
 
-    if (shouldInitialize) {
-      lastProjectDetail = projectDetail;
-      currentProjectId = projectDetail.project.meta.id;
-      rows = nextRowsRef.map((row) => normalizeRow(row));
-      totalFlagged = projectDetail.project.flagged_records;
-      hiddenColumns = new Set(nextHiddenColumns);
-      iocDraft = projectDetail.iocs.map((entry) => ({
-        flag: normalizeIocFlag(entry.flag),
-        tag: entry.tag,
-        query: entry.query
-      }));
-      const initialSearch = search.trim();
-      const initialFlag = flagFilter;
-      const initialColumns = projectDetail.columns.filter((column) => !hiddenColumns.has(column));
-      const initialSignature = initialColumns.join('|');
-      lastSearchValue = initialSearch;
-      lastFlagFilter = initialFlag;
-      lastColumnsSignature = initialSignature;
-      lastAppliedFilters = `${initialSearch}::${initialFlag}::${initialSignature}`;
-      filterRequestId = 0;
-      if (filterTimeout) {
-        clearTimeout(filterTimeout);
-        filterTimeout = null;
-      }
-      pendingFilters = null;
-      lastSummaryFlagged = -1;
-      lastSummaryHiddenKey = '';
-      sortKey = null;
-      sortDirection = 'asc';
-      expandedCell = null;
-      recomputeFilteredRows(true);
-      memoEditor = null;
-      memoDraft = '';
-      memoError = null;
-      initialized = true;
-    } else if (nextHiddenColumns !== lastHiddenColumnsRef) {
-      hiddenColumns = new Set(nextHiddenColumns);
-      recomputeFilteredRows(false);
+  const areStringsEqual = (left: string[], right: string[]) => {
+    if (left.length !== right.length) {
+      return false;
     }
+    for (let i = 0; i < left.length; i += 1) {
+      if (left[i] !== right[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
 
-    lastRowsRef = nextRowsRef;
-    lastHiddenColumnsRef = nextHiddenColumns;
+  const buildFilterSignature = (filters: AppliedFilters) =>
+    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${sortKey ?? ''}::${sortDirection}`;
+
+  const resetPaginationState = () => {
+    rowsCache = new Map();
+    pendingPages = new Set();
+    loadedPages = new Set();
+    totalRows = 0;
+    totalFlagged = 0;
+    flaggedCount = 0;
+    virtualRows = [];
+  };
+
+  const initializeColumnWidths = () => {
+    if (!projectDetail) {
+      columnWidths = new Map();
+      return;
+    }
+    const next = new Map<string, number>();
+    for (const column of projectDetail.columns) {
+      const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
+      const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
+      const maxChars = Math.max(headerChars, dataChars);
+      const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
+      const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
+      next.set(column, width);
+    }
+    columnWidths = next;
+  };
+
+  const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
+    currentProjectId = detail.project.meta.id;
+    hiddenColumns = new Set(detail.hidden_columns ?? []);
+    iocDraft = detail.iocs.map((entry) => ({
+      flag: normalizeIocFlag(entry.flag),
+      tag: entry.tag,
+      query: entry.query
+    }));
+    initializeColumnWidths();
+    const currentColumns = detail.columns.filter((column) => !hiddenColumns.has(column));
+    const filters: AppliedFilters = {
+      search: search.trim(),
+      flag: flagFilter,
+      columns: currentColumns,
+    };
+    lastHiddenColumnsRef = [...(detail.hidden_columns ?? [])];
+    if (filterTimeout) {
+      clearTimeout(filterTimeout);
+      filterTimeout = null;
+    }
+    pendingFilters = null;
+    resetPaginationState();
+    activeFilters = {
+      search: filters.search,
+      flag: filters.flag,
+      columns: [...filters.columns],
+    };
+    lastAppliedFilters = buildFilterSignature(filters);
+    lastSearchValue = filters.search;
+    lastFlagFilter = filters.flag;
+    lastColumnsSignature = currentColumns.join('|');
+    filterRequestId = 0;
+    lastSummaryFlagged = -1;
+    lastSummaryHiddenKey = '';
+    sortKey = null;
+    sortDirection = 'asc';
+    expandedCell = null;
+
+    const seededRows = detail.initial_rows?.map((row) => normalizeRow(row)) ?? [];
+    console.log('[debug] applyProjectDetail', {
+      projectId: detail.project.meta.id,
+      seededRows: seededRows.length,
+      totalRecords: detail.project.meta.total_records,
+      columns: detail.columns.length,
+    });
+    const seededCache = new Map<number, CachedRow>();
+    for (const row of seededRows) {
+      seededCache.set(row.row_index, row);
+    }
+    rowsCache = seededCache;
+    if (seededRows.length > 0) {
+      updateColumnWidthsFromRows(seededRows);
+    }
+    loadedPages = seededRows.length > 0 ? new Set([0]) : new Set();
+    pendingPages = new Set();
+    totalRows = detail.project.meta.total_records ?? seededRows.length;
+    totalFlagged = detail.project.flagged_records;
+    flaggedCount = totalFlagged;
+    scrollTop = 0;
+    if (bodyScrollEl) {
+      bodyScrollEl.scrollTop = 0;
+      bodyScrollEl.scrollLeft = 0;
+    }
+    if (headerScrollEl) {
+      headerScrollEl.scrollLeft = 0;
+    }
+    initialized = true;
+    if (seededRows.length === 0) {
+      console.log('[debug] applyProjectDetail request first page');
+      void requestPage(0, true);
+    }
+  };
+
+  $: if (projectDetail) {
+    const projectChanged = projectDetail.project.meta.id !== currentProjectId;
+    const nextHiddenColumns = projectDetail.hidden_columns ?? [];
+    const hiddenChanged =
+      lastHiddenColumnsRef === null ||
+      !areStringsEqual(nextHiddenColumns, lastHiddenColumnsRef);
+    if (!initialized || projectChanged) {
+      applyProjectDetail(projectDetail, true);
+    } else if (hiddenChanged) {
+      hiddenColumns = new Set(nextHiddenColumns);
+      initializeColumnWidths();
+      const columns = getSearchableColumns();
+      const filters: AppliedFilters = {
+        search: search.trim(),
+        flag: flagFilter,
+        columns,
+      };
+      lastSearchValue = filters.search;
+      lastFlagFilter = filters.flag;
+      lastColumnsSignature = columns.join('|');
+      void applyFilters(filters, false, true);
+    }
+    lastHiddenColumnsRef = [...nextHiddenColumns];
   }
 
   $: visibleColumns = projectDetail
@@ -182,40 +287,213 @@
   $: columnsKey = visibleColumns.join('|');
 
   $: if (initialized) {
-    columnsKey;
-    sortKey;
-    sortDirection;
-    recomputeFilteredRows(false);
-  }
-
-  $: if (initialized) {
     const searchValue = search.trim();
     const flagValue = flagFilter;
     const columns = getSearchableColumns();
-    const columnsSignature = columns.join('|');
+    const signature = columns.join('|');
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
-    const columnsChanged =
-      lastColumnsSignature === null || columnsSignature !== lastColumnsSignature;
+    const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
     if (searchChanged || flagChanged || columnsChanged) {
       scheduleFilterRefresh(searchValue, flagValue, columns, searchChanged);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
-      lastColumnsSignature = columnsSignature;
+      lastColumnsSignature = signature;
     }
   }
 
   $: visibleCount =
     Math.ceil((viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: maxStart = Math.max(0, filteredRows.length - visibleCount);
+  $: maxStart = Math.max(0, totalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
     Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER)
   );
-  $: endIndex = Math.min(filteredRows.length, startIndex + visibleCount);
-  $: virtualRows = filteredRows.slice(startIndex, endIndex);
+  $: endIndex = Math.min(totalRows, startIndex + visibleCount);
+  $: ensureRangeLoaded(startIndex, endIndex);
+  $: virtualRows = buildVirtualRows(startIndex, endIndex, rowsCache);
   $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = filteredRows.length * ROW_HEIGHT;
+  $: totalHeight = totalRows * ROW_HEIGHT;
+  $: loadedRowCount = rowsCache.size;
+
+  const buildVirtualRows = (
+    start: number,
+    end: number,
+    cache: Map<number, CachedRow>
+  ): VirtualRow[] => {
+    if (end <= start) {
+      return [];
+    }
+    const result: VirtualRow[] = [];
+    for (let position = start; position < end; position += 1) {
+      const row = cache.get(position) ?? null;
+      result.push({ position, row });
+    }
+    return result;
+  };
+
+  const updateColumnWidthsFromRows = (rows: CachedRow[]) => {
+    if (!rows.length) {
+      return;
+    }
+    const next = new Map(columnWidths);
+    for (const column of visibleColumns) {
+      const current = next.get(column) ?? MIN_DATA_WIDTH;
+      let updated = current;
+      for (const row of rows) {
+        const value = row.displayCache[column] ?? '';
+        const estimated = Math.round(Math.min(value.length, WIDTH_LIMIT_CHARS) * CHAR_PIXEL + COLUMN_PADDING);
+        if (estimated > updated) {
+          updated = Math.min(estimated, MAX_DATA_WIDTH);
+        }
+      }
+      next.set(column, updated);
+    }
+    columnWidths = next;
+  };
+
+  const ensureRangeLoaded = (start: number, end: number) => {
+    if (!initialized || !projectDetail || end <= start) {
+      return;
+    }
+    const firstPage = Math.max(0, Math.floor(start / PAGE_SIZE) - PREFETCH_PAGES);
+    const lastPosition = Math.max(start, end - 1);
+    const lastPage = Math.max(firstPage, Math.floor(lastPosition / PAGE_SIZE) + PREFETCH_PAGES);
+    const maxPageIndex = Math.max(0, Math.floor(Math.max(totalRows - 1, 0) / PAGE_SIZE));
+    const clampedLastPage = Math.min(lastPage, maxPageIndex);
+    console.log('[debug] ensureRangeLoaded', {
+      start,
+      end,
+      firstPage,
+      lastPage: clampedLastPage,
+      loadedPages: Array.from(loadedPages.values()),
+      pendingPages: Array.from(pendingPages.values()),
+    });
+    for (let page = firstPage; page <= clampedLastPage; page += 1) {
+      if (!loadedPages.has(page) && !pendingPages.has(page)) {
+        void requestPage(page);
+      }
+    }
+  };
+
+  const requestPage = (pageIndex: number, force = false): Promise<void> => {
+    if (!projectDetail) return Promise.resolve();
+    const normalizedPage = Math.max(0, pageIndex);
+    if (!force && loadedPages.has(normalizedPage)) {
+      return Promise.resolve();
+    }
+    if (!force && pendingPages.has(normalizedPage)) {
+      return Promise.resolve();
+    }
+    const offset = normalizedPage * PAGE_SIZE;
+    const limit = PAGE_SIZE;
+    const requestId = filterRequestId;
+    const filters = activeFilters;
+    const nextPending = new Set(pendingPages);
+    nextPending.add(normalizedPage);
+    pendingPages = nextPending;
+
+    const payload = {
+      projectId: projectDetail.project.meta.id,
+      search: filters.search.length > 0 ? filters.search : undefined,
+      flagFilter:
+        filters.flag === 'all' && filters.search.length === 0 ? undefined : filters.flag,
+      columns:
+        filters.columns.length === projectDetail.columns.length
+          ? undefined
+          : [...filters.columns],
+      offset,
+      limit,
+      sortKey: sortKey ?? undefined,
+      sortDirection,
+    };
+
+    console.log('[debug] requestPage', {
+      page: normalizedPage,
+      offset,
+      limit,
+      filters,
+      sortKey,
+      sortDirection,
+    });
+    return backend
+      .queryProjectRows(payload)
+      .then((response) => {
+        const nextPendingPages = new Set(pendingPages);
+        nextPendingPages.delete(normalizedPage);
+        pendingPages = nextPendingPages;
+        if (requestId !== filterRequestId) {
+          return;
+        }
+        totalRows = response.total_rows;
+        totalFlagged = response.total_flagged;
+        flaggedCount = totalFlagged;
+        emitSummary();
+        const normalizedRows = response.rows.map((row) => normalizeRow(row));
+        console.log('[debug] requestPage response', {
+          page: normalizedPage,
+          received: normalizedRows.length,
+          totalRows: response.total_rows,
+          offset: response.offset,
+        });
+        updateColumnWidthsFromRows(normalizedRows);
+        const nextCache = new Map(rowsCache);
+        normalizedRows.forEach((row, index) => {
+          nextCache.set(response.offset + index, row);
+        });
+        rowsCache = nextCache;
+        const nextLoaded = new Set(loadedPages);
+        nextLoaded.add(Math.floor(response.offset / PAGE_SIZE));
+        loadedPages = nextLoaded;
+      })
+      .catch((error) => {
+        console.error(error);
+        const nextPendingPages = new Set(pendingPages);
+        nextPendingPages.delete(normalizedPage);
+        pendingPages = nextPendingPages;
+      });
+  };
+
+  const applyFilters = (
+    filters: AppliedFilters,
+    resetScroll: boolean,
+    force: boolean
+  ): Promise<void> => {
+    if (!projectDetail) {
+      return Promise.resolve();
+    }
+    const normalized: AppliedFilters = {
+      search: filters.search.trim(),
+      flag: filters.flag,
+      columns: [...filters.columns],
+    };
+    const signature = buildFilterSignature(normalized);
+    if (!force && signature === lastAppliedFilters) {
+      return Promise.resolve();
+    }
+    activeFilters = {
+      search: normalized.search,
+      flag: normalized.flag,
+      columns: [...normalized.columns],
+    };
+    lastAppliedFilters = signature;
+    filterRequestId += 1;
+    resetPaginationState();
+    if (resetScroll) {
+      scrollTop = 0;
+      if (bodyScrollEl) {
+        bodyScrollEl.scrollTop = 0;
+        bodyScrollEl.scrollLeft = 0;
+      }
+      if (headerScrollEl) {
+        headerScrollEl.scrollLeft = 0;
+      }
+    }
+    lastSummaryFlagged = -1;
+    lastSummaryHiddenKey = '';
+    const targetRow = resetScroll ? 0 : Math.max(0, Math.floor(scrollTop / ROW_HEIGHT));
+    return requestPage(Math.floor(targetRow / PAGE_SIZE), true);
+  };
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -322,44 +600,6 @@ const padNumber = (value: number) => value.toString().padStart(2, '0');
 const formatTimestampForFilename = (date: Date) =>
   `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
 
-  const getComparableValue = (row: CachedRow, column: string): string | number => {
-    const value = row.data[column];
-    if (value === null || value === undefined) {
-      return '';
-    }
-    if (typeof value === 'number') {
-      return value;
-    }
-    if (typeof value === 'boolean') {
-      return value ? 1 : 0;
-    }
-    if (typeof value === 'string') {
-      return value;
-    }
-    return formatCell(value);
-  };
-
-  const compareRows = (a: CachedRow, b: CachedRow): number => {
-    if (!sortKey) {
-      return a.row_index - b.row_index;
-    }
-    const column = sortKey;
-    const aValue = getComparableValue(a, column);
-    const bValue = getComparableValue(b, column);
-    if (typeof aValue === 'number' && typeof bValue === 'number') {
-      const diff = aValue - bValue;
-      if (diff !== 0) {
-        return diff;
-      }
-    } else {
-      const diff = collator.compare(String(aValue), String(bValue));
-      if (diff !== 0) {
-        return diff;
-      }
-    }
-    return a.row_index - b.row_index;
-  };
-
   const getFlagFilterDetails = (value: FlagFilterValue) => {
     return (
       FLAG_FILTER_OPTIONS.find((option) => option.value === value) ?? FLAG_FILTER_OPTIONS[0]
@@ -390,7 +630,12 @@ const formatTimestampForFilename = (date: Date) =>
       sortKey = column;
       sortDirection = 'asc';
     }
-    recomputeFilteredRows(false);
+    const filters: AppliedFilters = {
+      search: activeFilters.search,
+      flag: activeFilters.flag,
+      columns: [...activeFilters.columns],
+    };
+    void applyFilters(filters, false, true);
   };
 
   const openCell = (column: string, value: string) => {
@@ -799,7 +1044,17 @@ const formatTimestampForFilename = (date: Date) =>
       nextHidden.add(column);
     }
     hiddenColumns = nextHidden;
-    recomputeFilteredRows(false);
+    initializeColumnWidths();
+    const updatedColumns = getSearchableColumns();
+    const filters: AppliedFilters = {
+      search: search.trim(),
+      flag: flagFilter,
+      columns: updatedColumns,
+    };
+    lastSearchValue = filters.search;
+    lastFlagFilter = filters.flag;
+    lastColumnsSignature = updatedColumns.join('|');
+    void applyFilters(filters, false, true);
     isUpdatingColumns = true;
     try {
       await backend.setHiddenColumns({
@@ -810,7 +1065,6 @@ const formatTimestampForFilename = (date: Date) =>
         message: `${nextHidden.has(column) ? 'Hid' : 'Showing'} column ${column}`,
         tone: 'success'
       });
-      recomputeFilteredRows(false);
     } catch (error) {
       console.error(error);
       dispatch('notify', { message: 'Failed to update column visibility.', tone: 'error' });
@@ -912,102 +1166,8 @@ const formatTimestampForFilename = (date: Date) =>
     }
   };
 
-  const recomputeFilteredRows = (resetScroll: boolean) => {
-    if (rows.length === 0) {
-      filteredRows = [];
-      flaggedCount = totalFlagged;
-      columnWidths = new Map();
-      if (resetScroll && bodyScrollEl) bodyScrollEl.scrollTop = 0;
-      if (resetScroll && bodyScrollEl) bodyScrollEl.scrollLeft = 0;
-      if (resetScroll && headerScrollEl) headerScrollEl.scrollLeft = 0;
-      scrollTop = 0;
-      expandedCell = null;
-      emitSummary();
-      return;
-    }
-
-    const visibleForWidth = projectDetail
-      ? projectDetail.columns.filter((column) => !hiddenColumns.has(column))
-      : [];
-    const columnMaxChars = projectDetail?.column_max_chars ?? {};
-
-    const nextFiltered = [...rows];
-
-    if (sortKey) {
-      const direction = sortDirection === 'asc' ? 1 : -1;
-      nextFiltered.sort((a, b) => direction * compareRows(a, b));
-    } else {
-      nextFiltered.sort((a, b) => a.row_index - b.row_index);
-    }
-
-    filteredRows = nextFiltered;
-    flaggedCount = totalFlagged;
-
-    if (resetScroll) {
-      scrollTop = 0;
-      if (bodyScrollEl) {
-        bodyScrollEl.scrollTop = 0;
-        bodyScrollEl.scrollLeft = 0;
-      }
-      if (headerScrollEl) headerScrollEl.scrollLeft = 0;
-    } else if (viewportHeight > 0) {
-      const maxScroll = Math.max(0, nextFiltered.length * ROW_HEIGHT - viewportHeight);
-      if (scrollTop > maxScroll) {
-        scrollTop = maxScroll;
-        if (bodyScrollEl) bodyScrollEl.scrollTop = scrollTop;
-      }
-    }
-
-    emitSummary();
-
-    const nextWidthMap = new Map<string, number>();
-    for (const column of visibleForWidth) {
-      const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
-      const dataChars = Math.min(columnMaxChars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
-      const maxChars = Math.max(headerChars, dataChars);
-      const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
-      const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
-      nextWidthMap.set(column, width);
-    }
-    columnWidths = nextWidthMap;
-  };
-
   const getSearchableColumns = () =>
     projectDetail ? projectDetail.columns.filter((column) => !hiddenColumns.has(column)) : [];
-
-  const fetchFilteredRows = async (
-    searchValue: string,
-    flagValue: FlagFilterValue,
-    columns: string[],
-    resetScroll: boolean,
-    force: boolean
-  ) => {
-    if (!projectDetail) return;
-    const signature = `${searchValue}::${flagValue}::${columns.join('|')}`;
-    if (!force && signature === lastAppliedFilters) {
-      return;
-    }
-    filterRequestId += 1;
-    const currentRequestId = filterRequestId;
-    try {
-      const response = await backend.queryProjectRows({
-        projectId: projectDetail.project.meta.id,
-        search: searchValue.length > 0 ? searchValue : undefined,
-        flagFilter: flagValue === 'all' && searchValue.length === 0 ? undefined : flagValue,
-        columns,
-      });
-      if (currentRequestId !== filterRequestId) {
-        return;
-      }
-      totalFlagged = response.total_flagged;
-      rows = response.rows.map((row) => normalizeRow(row));
-      flaggedCount = totalFlagged;
-      lastAppliedFilters = signature;
-      recomputeFilteredRows(resetScroll);
-    } catch (error) {
-      console.error(error);
-    }
-  };
 
   const scheduleFilterRefresh = (
     searchValue: string,
@@ -1015,12 +1175,7 @@ const formatTimestampForFilename = (date: Date) =>
     columns: string[],
     resetScroll: boolean
   ) => {
-    pendingFilters = {
-      search: searchValue,
-      flag: flagValue,
-      columns: [...columns],
-      resetScroll,
-    };
+    pendingFilters = { search: searchValue, flag: flagValue, columns: [...columns], resetScroll };
     if (filterTimeout) {
       clearTimeout(filterTimeout);
     }
@@ -1031,10 +1186,12 @@ const formatTimestampForFilename = (date: Date) =>
       if (!scheduled) {
         return;
       }
-      void fetchFilteredRows(
-        scheduled.search,
-        scheduled.flag,
-        scheduled.columns,
+      void applyFilters(
+        {
+          search: scheduled.search,
+          flag: scheduled.flag,
+          columns: getSearchableColumns(),
+        },
         scheduled.resetScroll,
         false
       );
@@ -1048,8 +1205,15 @@ const formatTimestampForFilename = (date: Date) =>
       filterTimeout = null;
       pendingFilters = null;
     }
-    const columns = getSearchableColumns();
-    return fetchFilteredRows(search.trim(), flagFilter, columns, resetScroll, true);
+    return applyFilters(
+      {
+        search: search.trim(),
+        flag: flagFilter,
+        columns: getSearchableColumns(),
+      },
+      resetScroll,
+      true
+    );
   };
 
   onMount(() => {
@@ -1387,11 +1551,13 @@ const formatTimestampForFilename = (date: Date) =>
 
   <section class="table-wrapper">
     <div class="meta">
-      <span>{filteredRows.length} / {rows.length} rows</span>
+      <span>{loadedRowCount} / {totalRows} rows</span>
       <span>{flaggedCount} flagged</span>
     </div>
-    {#if filteredRows.length === 0}
-      <div class="empty-rows">No rows match your filters.</div>
+    {#if totalRows === 0}
+      <div class="empty-rows">
+        {pendingPages.size > 0 ? 'Loading rows…' : 'No rows match your filters.'}
+      </div>
     {:else}
       <div class="table-scroll">
         <div
@@ -1437,52 +1603,78 @@ const formatTimestampForFilename = (date: Date) =>
         >
           <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
             <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
-              {#each virtualRows as row (row.row_index)}
+{#each virtualRows as item (item.position)}
                 <div
                   class="data-row"
-                  class:alt-row={row.row_index % 2 === 1}
+                  class:alt-row={item.position % 2 === 1}
+                  class:loading={!item.row}
                   style={`grid-template-columns: ${gridTemplate}; ${stickyVariables}; --row-height: ${ROW_HEIGHT}px;`}
                 >
-                  <div class="cell index sticky sticky-index">{row.row_index + 1}</div>
+                  <div class="cell index sticky sticky-index">{item.position + 1}</div>
                   <div class="cell flag sticky sticky-flag">
-                  <div class="flag-buttons">
-                    {#each FLAG_OPTIONS as option}
-                      <button
-                        type="button"
-                        class:selected={normalizeFlag(row.flag) === option.value}
-                        class:flag-safe={option.value === 'safe'}
-                        class:flag-suspicious={option.value === 'suspicious'}
-                        class:flag-critical={option.value === 'critical'}
-                        on:click={() => setFlag(row, option.value)}
-                      >
-                        {option.hint}
-                      </button>
-                    {/each}
-                  </div>
+                    {#if hasRow(item.row)}
+                      <div class="flag-buttons">
+                        {#each FLAG_OPTIONS as option}
+                          <button
+                            type="button"
+                            class:selected={item.row ? normalizeFlag(item.row.flag) === option.value : false}
+                            class:flag-safe={option.value === 'safe'}
+                            class:flag-suspicious={option.value === 'suspicious'}
+                            class:flag-critical={option.value === 'critical'}
+                            on:click={() => {
+                              if (!item.row) return;
+                              setFlag(item.row, option.value);
+                            }}
+                          >
+                            {option.hint}
+                          </button>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="flag-buttons loading-placeholder">…</div>
+                    {/if}
                   </div>
                   <button
                     class="cell memo-button sticky sticky-memo"
-                    on:click={() => editMemo(row)}
-                    title={row.memo && row.memo.trim().length ? row.memo : 'Add memo'}
+                    on:click={() => item.row && editMemo(item.row)}
+                    title={
+                      item.row
+                        ? item.row.memo && item.row.memo.trim().length
+                          ? item.row.memo
+                          : 'Add memo'
+                        : 'Loading…'
+                    }
+                    disabled={!item.row}
                   >
-                    {#if row.memo && row.memo.trim().length}
-                      <span class="memo-text">{row.memo}</span>
-                    {:else}
+                    {#if item.row && item.row.memo && item.row.memo.trim().length}
+                      <span class="memo-text">{item.row.memo}</span>
+                    {:else if item.row}
                       <span class="memo-placeholder">Add memo</span>
+                    {:else}
+                      <span class="memo-placeholder">Loading…</span>
                     {/if}
                   </button>
                   {#each visibleColumns as column, columnIndex}
-                    {@const cellValue = row.displayCache[column] ?? ''}
+                    {@const cellValue = item.row ? item.row.displayCache[column] ?? '' : ''}
                     <button
                       type="button"
                       class="cell"
                       class:sticky={columnIndex === 0}
                       class:stickyData={columnIndex === 0}
-                      title={cellValue}
-                      on:click={() => openCell(column, cellValue)}
-                      on:keydown={(event) => handleCellKeydown(event, column, cellValue)}
+                      title={item.row ? cellValue : 'Loading…'}
+                      on:click={() => {
+                        if (!item.row) return;
+                        openCell(column, cellValue);
+                      }}
+                      on:keydown={(event) => {
+                        if (!item.row) return;
+                        handleCellKeydown(event, column, cellValue);
+                      }}
+                      disabled={!item.row}
                     >
-                      <span class="cell-text">{cellValue || '—'}</span>
+                      <span class="cell-text">
+                        {item.row ? (cellValue || '—') : 'Loading…'}
+                      </span>
                     </button>
                   {/each}
                 </div>
