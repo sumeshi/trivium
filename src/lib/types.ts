@@ -4,12 +4,12 @@ export interface ProjectMeta {
   description?: string | null;
   created_at: string;
   total_records: number;
+  flagged_records: number;
   hidden_columns: string[];
 }
 
 export interface ProjectSummary {
   meta: ProjectMeta;
-  flagged_records: number;
 }
 
 export interface ProjectRow {

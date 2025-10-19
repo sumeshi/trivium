@@ -39,13 +39,14 @@ struct ProjectMeta {
     description: Option<String>,
     created_at: DateTime<Utc>,
     total_records: usize,
+    #[serde(default)]
+    flagged_records: usize,
     hidden_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ProjectSummary {
     meta: ProjectMeta,
-    flagged_records: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,7 +94,7 @@ impl ProjectsStore {
             .with_context(|| format!("failed to create projects dir at {:?}", projects_dir))?;
 
         let meta_path = root_dir.join("projects.json");
-        let projects: Vec<ProjectMeta> = if meta_path.exists() {
+        let mut projects: Vec<ProjectMeta> = if meta_path.exists() {
             let data = fs::read(&meta_path)
                 .with_context(|| format!("failed to read metadata file {:?}", meta_path))?;
             serde_json::from_slice(&data)
@@ -101,6 +102,32 @@ impl ProjectsStore {
         } else {
             Vec::new()
         };
+
+        // 既存のプロジェクトデータを移行（flagged_recordsが0の場合は計算）
+        let mut needs_save = false;
+        for project in &mut projects {
+            if project.flagged_records == 0 {
+                let project_dir = root_dir.join("projects").join(project.id.to_string());
+                let flags_path = project_dir.join("flags.json");
+                if flags_path.exists() {
+                    if let Ok(flags) = load_flags(&flags_path) {
+                        project.flagged_records = flags
+                            .values()
+                            .filter(|entry| !entry.flag.trim().is_empty())
+                            .count();
+                        needs_save = true;
+                    }
+                }
+            }
+        }
+        
+        // 移行したデータを保存
+        if needs_save {
+            let data = serde_json::to_vec_pretty(&projects)
+                .with_context(|| format!("failed to serialize metadata to {:?}", meta_path))?;
+            fs::write(&meta_path, data)
+                .with_context(|| format!("failed to write metadata file {:?}", meta_path))?;
+        }
 
         Ok(Self {
             root_dir,
@@ -123,6 +150,14 @@ impl ProjectsStore {
         let mut guard = self.inner.lock();
         if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
             meta.hidden_columns = hidden_columns;
+        }
+        self.persist_locked(&guard)
+    }
+
+    fn update_flagged_records(&self, id: &Uuid, flagged_records: usize) -> Result<()> {
+        let mut guard = self.inner.lock();
+        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
+            meta.flagged_records = flagged_records;
         }
         self.persist_locked(&guard)
     }
@@ -573,16 +608,8 @@ fn list_projects(state: State<AppState>) -> Result<Vec<ProjectSummary>, String> 
     let metas = state.projects.all();
     let mut result = Vec::with_capacity(metas.len());
     for meta in metas {
-        let project_dir = state.projects.project_dir(&meta.id);
-        let flags_path = project_dir.join("flags.json");
-        let flags = load_flags(&flags_path).map_err(AppError::from)?;
-        let flagged_records = flags
-            .values()
-            .filter(|entry| !entry.flag.trim().is_empty())
-            .count();
         result.push(ProjectSummary {
             meta: meta.clone(),
-            flagged_records,
         });
     }
     result.sort_by(|a, b| b.meta.created_at.cmp(&a.meta.created_at));
@@ -623,13 +650,13 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
         description: payload.description,
         created_at: Utc::now(),
         total_records: df.height(),
+        flagged_records: 0,
         hidden_columns: Vec::new(),
     };
 
     state.projects.insert(meta.clone()).map_err(AppError::from)?;
     let summary = ProjectSummary {
         meta: meta.clone(),
-        flagged_records: 0,
     };
     Ok(summary)
 }
@@ -730,27 +757,21 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         })
         .collect();
 
-    let sample_size = usize::min(df.height(), 1_000);
-    if sample_size > 0 {
-        for column in &columns {
-            if let Ok(series) = df.column(column) {
-                for value in series.iter().take(sample_size) {
-                    let json_value = anyvalue_to_json(&value);
-                    let display_len = value_display_length(&json_value);
-                    if let Some(entry) = column_max_chars.get_mut(column) {
-                        if display_len > *entry {
-                            *entry = display_len;
-                        }
+    // 全データを対象にして最大文字列長を計算
+    for column in &columns {
+        if let Ok(series) = df.column(column) {
+            for value in series.iter() {
+                let json_value = anyvalue_to_json(&value);
+                let display_len = value_display_length(&json_value);
+                if let Some(entry) = column_max_chars.get_mut(column) {
+                    if display_len > *entry {
+                        *entry = display_len;
                     }
                 }
             }
         }
     }
 
-    let flagged_records = flags
-        .values()
-        .filter(|entry| !normalize_flag_value(&entry.flag).trim().is_empty())
-        .count();
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
 
     let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
@@ -765,7 +786,6 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     );
 
     let summary = ProjectSummary {
-        flagged_records,
         meta: meta.clone(),
     };
 
@@ -1046,6 +1066,13 @@ fn update_flag(state: State<AppState>, payload: UpdateFlagPayload) -> Result<Pro
     }
 
     save_flags(&flags_path, &flags).map_err(AppError::from)?;
+
+    // flagged_recordsを更新
+    let flagged_records = flags
+        .values()
+        .filter(|entry| !entry.flag.trim().is_empty())
+        .count();
+    state.projects.update_flagged_records(&payload.project_id, flagged_records).map_err(AppError::from)?;
 
     let parquet_path = project_dir.join("data.parquet");
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;

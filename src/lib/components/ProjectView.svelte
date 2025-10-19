@@ -1,9 +1,71 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { open, save } from '@tauri-apps/api/dialog';
-  import type { Backend } from '../backend';
+  import DataTable from './project_view/DataTable.svelte';
+  import IocManagerDialog from './project_view/IocManagerDialog.svelte';
+  import MemoEditorDialog from './project_view/MemoEditorDialog.svelte';
+  import ExpandedCellDialog from './project_view/ExpandedCellDialog.svelte';
+  import FilterControls from './project_view/FilterControls.svelte';
   import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
+  import type { Backend } from '../backend';
   import './project-view.css';
+  import {
+    projectDetail as projectDetailStore,
+    backend as backendStore,
+    visibleColumns,
+    hiddenColumns,
+    search,
+    flagFilter,
+    sortKey,
+    sortDirection,
+    isExporting,
+    isUpdatingColumns,
+    rowsCache,
+    pendingPages,
+    loadedPages,
+    totalRows,
+    totalFlagged,
+    flaggedCount,
+    expandedCell,
+    memoEditor,
+    iocManagerOpen,
+    viewportHeight,
+    scrollTop,
+    tableWidth,
+    bodyScrollEl,
+    headerScrollEl,
+    iocDraft,
+    normalizeIocFlag,
+    normalizeFlag,
+    sanitizeMemoInput,
+    mapStoredFlag,
+    normalizeRow,
+    formatCell,
+    FLAG_OPTIONS,
+    FLAG_FILTER_OPTIONS,
+    ROW_HEIGHT,
+    BUFFER,
+    INDEX_COL_WIDTH,
+    FLAG_COL_WIDTH,
+    MEMO_COL_WIDTH,
+    MIN_DATA_WIDTH,
+    WIDTH_LIMIT_CHARS,
+    CHAR_PIXEL,
+    COLUMN_PADDING,
+    MAX_DATA_WIDTH,
+    STICKY_COLUMNS_WIDTH,
+    PAGE_SIZE,
+    PREFETCH_PAGES,
+    currentProjectId,
+    lastHiddenColumnsRef
+  } from './project_view/state';
+  import type {
+    FlagSymbol,
+    FlagFilterValue,
+    CachedRow,
+    VirtualRow,
+    AppliedFilters
+  } from './project_view/state';
 
   export let projectDetail: LoadProjectResponse;
   export let backend: Backend;
@@ -14,129 +76,43 @@
     summary: { flagged: number; hiddenColumns: string[] };
   }>();
 
-  const FLAG_OPTIONS = [
-    { value: 'safe', label: 'Safe', hint: '✓', tone: 'safe' },
-    { value: 'suspicious', label: 'Suspicious', hint: '?', tone: 'suspicious' },
-    { value: 'critical', label: 'Critical', hint: '!', tone: 'critical' }
-  ] as const;
-  type FlagSymbol = (typeof FLAG_OPTIONS)[number]['value'];
-  type FlagFilterValue = FlagSymbol | 'all' | 'none' | 'priority';
-  const PRIORITY_FLAGS: FlagSymbol[] = ['suspicious', 'critical'];
-  const FLAG_FILTER_OPTIONS: Array<{ value: FlagFilterValue; label: string; hint?: string }> = [
-    { value: 'all', label: 'All' },
-    { value: 'safe', label: 'Safe', hint: '✓' },
-    { value: 'suspicious', label: 'Suspicious', hint: '?' },
-    { value: 'critical', label: 'Critical', hint: '!' },
-    { value: 'priority', label: 'Sus + Crit', hint: '!?' },
-    { value: 'none', label: 'Unflagged', hint: '–' }
-  ];
-  const ROW_HEIGHT = 56;
-  const BUFFER = 8;
-  const INDEX_COL_WIDTH = 80;
-  const FLAG_COL_WIDTH = 130;
-  const MEMO_COL_WIDTH = 200;
-  const MIN_DATA_WIDTH = 80;
-  const WIDTH_LIMIT_CHARS = 100;
-  const CHAR_PIXEL = 9;
-  const COLUMN_PADDING = 32;
-  const MAX_DATA_WIDTH = WIDTH_LIMIT_CHARS * CHAR_PIXEL + COLUMN_PADDING;
-  const STICKY_COLUMNS_WIDTH = INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH;
-
-  const PAGE_SIZE = 250;
-  const PREFETCH_PAGES = 1;
-
-  let currentProjectId: string | null = null;
-  let lastHiddenColumnsRef: string[] | null = null;
-  type CachedRow = ProjectRow & {
-    memo: string;
-    displayCache: Record<string, string>;
-  };
-  type VirtualRow = { position: number; row: CachedRow | null };
-
-  let hiddenColumns = new Set<string>();
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
 
-  let search = '';
-  let flagFilter: FlagFilterValue = 'all';
-
-  let sortKey: string | null = null;
-  let sortDirection: 'asc' | 'desc' = 'asc';
-
-  let isExporting = false;
-  let isUpdatingColumns = false;
-
-  let visibleColumns: string[] = [];
-  let rowsCache: Map<number, CachedRow> = new Map();
-  let pendingPages: Set<number> = new Set();
-  let loadedPages: Set<number> = new Set();
-  let totalRows = 0;
-  let totalFlagged = 0;
-  let flaggedCount = 0;
-  let lastSummaryFlagged = -1;
-  let lastSummaryHiddenKey = '';
-
-  let virtualRows: VirtualRow[] = [];
-  let expandedCell: { column: string; value: string } | null = null;
-
-  let columnWidths: Map<string, number> = new Map();
-  let firstDataColumn: string | null = null;
-  let stickyFlagOffset = 0;
-  let stickyMemoOffset = 0;
-  let stickyDataOffset = 0;
-  let stickyVariables = '';
-
-  let bodyScrollEl: HTMLDivElement | null = null;
-  let headerScrollEl: HTMLDivElement | null = null;
-  let flagPickerEl: HTMLDivElement | null = null;
-  let viewportHeight = 0;
-  let scrollTop = 0;
-  let initialized = false;
-  let columnsKey = '';
-  let tableWidth = 0;
-  let resizeObserver: ResizeObserver | null = null;
-  let observedScrollEl: HTMLDivElement | null = null;
-  let baseDataWidths: number[] = [];
-  let availableDataWidth = 0;
-  let distributedDataWidths: number[] = [];
   let flagMenuOpen = false;
-  let visibleCount = 0;
-  let maxStart = 0;
-  let startIndex = 0;
-  let endIndex = 0;
-  let offsetY = 0;
-  let totalHeight = 0;
-  let loadedRowCount = 0;
+  let flagPickerEl: HTMLDivElement | null = null;
 
-  type AppliedFilters = {
-    search: string;
-    flag: FlagFilterValue;
-    columns: string[];
-  };
+  let memoDraft = '';
+  let memoSaving = false;
+  let memoError: string | null = null;
 
-  type ScheduledFilters = AppliedFilters & { resetScroll: boolean };
+  let iocError: string | null = null;
+  let isSavingIocs = false;
+  let iocImportInput: HTMLInputElement | null = null;
 
-  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [] };
+  let initialized = false;
   let filterTimeout: ReturnType<typeof setTimeout> | null = null;
-  let pendingFilters: ScheduledFilters | null = null;
+  let pendingFilters: (AppliedFilters & { resetScroll: boolean }) | null = null;
   let filterRequestId = 0;
   let lastAppliedFilters = '';
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastColumnsSignature: string | null = null;
-  let memoEditor: { row: CachedRow } | null = null;
-  let memoDraft = '';
-  let memoSaving = false;
-  let memoError: string | null = null;
+  let lastSummaryFlagged = -1;
+  let lastSummaryHiddenKey = '';
+
+  let columnWidths: Map<string, number> = new Map();
+  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [] };
+  let resizeObserver: ResizeObserver | null = null;
+  let observedScrollEl: HTMLDivElement | null = null;
+
   let releaseHeaderSyncFrame: number | null = null;
   let releaseBodySyncFrame: number | null = null;
   let isSyncingHeaderScroll = false;
   let isSyncingBodyScroll = false;
-  let iocManagerOpen = false;
-  let iocDraft: IocEntry[] = [];
-  let iocError: string | null = null;
-  let isSavingIocs = false;
-  let iocImportInput: HTMLInputElement | null = null;
+
+  projectDetailStore.set(projectDetail);
+  backendStore.set(backend);
 
   const hasRow = (row: CachedRow | null): row is CachedRow => row !== null;
 
@@ -153,16 +129,15 @@
   };
 
   const buildFilterSignature = (filters: AppliedFilters) =>
-    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${sortKey ?? ''}::${sortDirection}`;
+    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}`;
 
   const resetPaginationState = () => {
-    rowsCache = new Map();
-    pendingPages = new Set();
-    loadedPages = new Set();
-    totalRows = 0;
-    totalFlagged = 0;
-    flaggedCount = 0;
-    virtualRows = [];
+    rowsCache.set(new Map());
+    pendingPages.set(new Set());
+    loadedPages.set(new Set());
+    totalRows.set(0);
+    totalFlagged.set(0);
+    flaggedCount.set(0);
   };
 
   const initializeColumnWidths = () => {
@@ -170,34 +145,43 @@
       columnWidths = new Map();
       return;
     }
+    console.log('initializeColumnWidths called, column_max_chars:', projectDetail.column_max_chars);
+    console.log('Available columns:', projectDetail.columns);
+    console.log('column_max_chars type:', typeof projectDetail.column_max_chars);
+    console.log('column_max_chars is array:', Array.isArray(projectDetail.column_max_chars));
+    console.log('column_max_chars keys:', Object.keys(projectDetail.column_max_chars));
+    console.log('column_max_chars values:', Object.values(projectDetail.column_max_chars));
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
+      // Polarsから取得した最大文字数を使用して幅を計算
       const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
       const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
       const maxChars = Math.max(headerChars, dataChars);
       const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
       const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
+      console.log(`Column ${column}: headerChars=${headerChars}, dataChars=${dataChars}, maxChars=${maxChars}, estimated=${estimated}, width=${width}`);
       next.set(column, width);
     }
     columnWidths = next;
+    console.log('Final columnWidths:', columnWidths);
   };
 
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
-    currentProjectId = detail.project.meta.id;
-    hiddenColumns = new Set(detail.hidden_columns ?? []);
-    iocDraft = detail.iocs.map((entry) => ({
+    currentProjectId.set(detail.project.meta.id);
+    hiddenColumns.set(new Set(detail.hidden_columns ?? []));
+    iocDraft.set(detail.iocs.map((entry) => ({
       flag: normalizeIocFlag(entry.flag),
       tag: entry.tag,
       query: entry.query
-    }));
+    })));
     initializeColumnWidths();
-    const currentColumns = detail.columns.filter((column) => !hiddenColumns.has(column));
+    const currentColumns = detail.columns.filter((column) => !$hiddenColumns.has(column));
     const filters: AppliedFilters = {
-      search: search.trim(),
-      flag: flagFilter,
+      search: $search.trim(),
+      flag: $flagFilter,
       columns: currentColumns,
     };
-    lastHiddenColumnsRef = [...(detail.hidden_columns ?? [])];
+    lastHiddenColumnsRef.set([...(detail.hidden_columns ?? [])]);
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
@@ -216,9 +200,9 @@
     filterRequestId = 0;
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
-    sortKey = null;
-    sortDirection = 'asc';
-    expandedCell = null;
+    sortKey.set(null);
+    sortDirection.set('asc');
+    expandedCell.set(null);
 
     const seededRows = detail.initial_rows?.map((row) => normalizeRow(row)) ?? [];
     console.log('[debug] applyProjectDetail', {
@@ -231,22 +215,22 @@
     for (const row of seededRows) {
       seededCache.set(row.row_index, row);
     }
-    rowsCache = seededCache;
+    rowsCache.set(seededCache);
     if (seededRows.length > 0) {
       updateColumnWidthsFromRows(seededRows);
     }
-    loadedPages = seededRows.length > 0 ? new Set([0]) : new Set();
-    pendingPages = new Set();
-    totalRows = detail.project.meta.total_records ?? seededRows.length;
-    totalFlagged = detail.project.flagged_records;
-    flaggedCount = totalFlagged;
-    scrollTop = 0;
-    if (bodyScrollEl) {
-      bodyScrollEl.scrollTop = 0;
-      bodyScrollEl.scrollLeft = 0;
+    loadedPages.set(seededRows.length > 0 ? new Set([0]) : new Set());
+    pendingPages.set(new Set());
+    totalRows.set(detail.project.meta.total_records ?? seededRows.length);
+    totalFlagged.set(detail.project.flagged_records);
+    flaggedCount.set($totalFlagged);
+    scrollTop.set(0);
+    if ($bodyScrollEl) {
+      $bodyScrollEl.scrollTop = 0;
+      $bodyScrollEl.scrollLeft = 0;
     }
-    if (headerScrollEl) {
-      headerScrollEl.scrollLeft = 0;
+    if ($headerScrollEl) {
+      $headerScrollEl.scrollLeft = 0;
     }
     initialized = true;
     if (seededRows.length === 0) {
@@ -256,20 +240,20 @@
   };
 
   $: if (projectDetail) {
-    const projectChanged = projectDetail.project.meta.id !== currentProjectId;
+    const projectChanged = projectDetail.project.meta.id !== $currentProjectId;
     const nextHiddenColumns = projectDetail.hidden_columns ?? [];
     const hiddenChanged =
-      lastHiddenColumnsRef === null ||
-      !areStringsEqual(nextHiddenColumns, lastHiddenColumnsRef);
+      $lastHiddenColumnsRef === null ||
+      !areStringsEqual(nextHiddenColumns, $lastHiddenColumnsRef);
     if (!initialized || projectChanged) {
       applyProjectDetail(projectDetail, true);
     } else if (hiddenChanged) {
-      hiddenColumns = new Set(nextHiddenColumns);
+      hiddenColumns.set(new Set(nextHiddenColumns));
       initializeColumnWidths();
       const columns = getSearchableColumns();
       const filters: AppliedFilters = {
-        search: search.trim(),
-        flag: flagFilter,
+        search: $search.trim(),
+        flag: $flagFilter,
         columns,
       };
       lastSearchValue = filters.search;
@@ -277,18 +261,12 @@
       lastColumnsSignature = columns.join('|');
       void applyFilters(filters, false, true);
     }
-    lastHiddenColumnsRef = [...nextHiddenColumns];
+    lastHiddenColumnsRef.set([...nextHiddenColumns]);
   }
 
-  $: visibleColumns = projectDetail
-    ? projectDetail.columns.filter((column) => !hiddenColumns.has(column))
-    : [];
-
-  $: columnsKey = visibleColumns.join('|');
-
   $: if (initialized) {
-    const searchValue = search.trim();
-    const flagValue = flagFilter;
+    const searchValue = $search.trim();
+    const flagValue = $flagFilter;
     const columns = getSearchableColumns();
     const signature = columns.join('|');
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
@@ -303,18 +281,18 @@
   }
 
   $: visibleCount =
-    Math.ceil((viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: maxStart = Math.max(0, totalRows - visibleCount);
+    Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
+  $: maxStart = Math.max(0, $totalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
-    Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER)
+    Math.max(0, Math.floor($scrollTop / ROW_HEIGHT) - BUFFER)
   );
-  $: endIndex = Math.min(totalRows, startIndex + visibleCount);
+  $: endIndex = Math.min($totalRows, startIndex + visibleCount);
   $: ensureRangeLoaded(startIndex, endIndex);
-  $: virtualRows = buildVirtualRows(startIndex, endIndex, rowsCache);
+  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache);
   $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = totalRows * ROW_HEIGHT;
-  $: loadedRowCount = rowsCache.size;
+  $: totalHeight = $totalRows * ROW_HEIGHT;
+  $: loadedRowCount = $rowsCache.size;
 
   const buildVirtualRows = (
     start: number,
@@ -337,7 +315,7 @@
       return;
     }
     const next = new Map(columnWidths);
-    for (const column of visibleColumns) {
+    for (const column of $visibleColumns) {
       const current = next.get(column) ?? MIN_DATA_WIDTH;
       let updated = current;
       for (const row of rows) {
@@ -359,18 +337,18 @@
     const firstPage = Math.max(0, Math.floor(start / PAGE_SIZE) - PREFETCH_PAGES);
     const lastPosition = Math.max(start, end - 1);
     const lastPage = Math.max(firstPage, Math.floor(lastPosition / PAGE_SIZE) + PREFETCH_PAGES);
-    const maxPageIndex = Math.max(0, Math.floor(Math.max(totalRows - 1, 0) / PAGE_SIZE));
+    const maxPageIndex = Math.max(0, Math.floor(Math.max($totalRows - 1, 0) / PAGE_SIZE));
     const clampedLastPage = Math.min(lastPage, maxPageIndex);
     console.log('[debug] ensureRangeLoaded', {
       start,
       end,
       firstPage,
       lastPage: clampedLastPage,
-      loadedPages: Array.from(loadedPages.values()),
-      pendingPages: Array.from(pendingPages.values()),
+      loadedPages: Array.from($loadedPages.values()),
+      pendingPages: Array.from($pendingPages.values()),
     });
     for (let page = firstPage; page <= clampedLastPage; page += 1) {
-      if (!loadedPages.has(page) && !pendingPages.has(page)) {
+      if (!$loadedPages.has(page) && !$pendingPages.has(page)) {
         void requestPage(page);
       }
     }
@@ -379,19 +357,19 @@
   const requestPage = (pageIndex: number, force = false): Promise<void> => {
     if (!projectDetail) return Promise.resolve();
     const normalizedPage = Math.max(0, pageIndex);
-    if (!force && loadedPages.has(normalizedPage)) {
+    if (!force && $loadedPages.has(normalizedPage)) {
       return Promise.resolve();
     }
-    if (!force && pendingPages.has(normalizedPage)) {
+    if (!force && $pendingPages.has(normalizedPage)) {
       return Promise.resolve();
     }
     const offset = normalizedPage * PAGE_SIZE;
     const limit = PAGE_SIZE;
     const requestId = filterRequestId;
     const filters = activeFilters;
-    const nextPending = new Set(pendingPages);
+    const nextPending = new Set($pendingPages);
     nextPending.add(normalizedPage);
-    pendingPages = nextPending;
+    pendingPages.set(nextPending);
 
     const payload = {
       projectId: projectDetail.project.meta.id,
@@ -404,8 +382,8 @@
           : [...filters.columns],
       offset,
       limit,
-      sortKey: sortKey ?? undefined,
-      sortDirection,
+      sortKey: $sortKey ?? undefined,
+      sortDirection: $sortDirection,
     };
 
     console.log('[debug] requestPage', {
@@ -413,21 +391,21 @@
       offset,
       limit,
       filters,
-      sortKey,
-      sortDirection,
+      sortKey: $sortKey,
+      sortDirection: $sortDirection,
     });
     return backend
       .queryProjectRows(payload)
       .then((response) => {
-        const nextPendingPages = new Set(pendingPages);
+        const nextPendingPages = new Set($pendingPages);
         nextPendingPages.delete(normalizedPage);
-        pendingPages = nextPendingPages;
+        pendingPages.set(nextPendingPages);
         if (requestId !== filterRequestId) {
           return;
         }
-        totalRows = response.total_rows;
-        totalFlagged = response.total_flagged;
-        flaggedCount = totalFlagged;
+        totalRows.set(response.total_rows);
+        totalFlagged.set(response.total_flagged);
+        flaggedCount.set($totalFlagged);
         emitSummary();
         const normalizedRows = response.rows.map((row) => normalizeRow(row));
         console.log('[debug] requestPage response', {
@@ -437,20 +415,20 @@
           offset: response.offset,
         });
         updateColumnWidthsFromRows(normalizedRows);
-        const nextCache = new Map(rowsCache);
+        const nextCache = new Map($rowsCache);
         normalizedRows.forEach((row, index) => {
           nextCache.set(response.offset + index, row);
         });
-        rowsCache = nextCache;
-        const nextLoaded = new Set(loadedPages);
+        rowsCache.set(nextCache);
+        const nextLoaded = new Set($loadedPages);
         nextLoaded.add(Math.floor(response.offset / PAGE_SIZE));
-        loadedPages = nextLoaded;
+        loadedPages.set(nextLoaded);
       })
       .catch((error) => {
         console.error(error);
-        const nextPendingPages = new Set(pendingPages);
+        const nextPendingPages = new Set($pendingPages);
         nextPendingPages.delete(normalizedPage);
-        pendingPages = nextPendingPages;
+        pendingPages.set(nextPendingPages);
       });
   };
 
@@ -480,18 +458,18 @@
     filterRequestId += 1;
     resetPaginationState();
     if (resetScroll) {
-      scrollTop = 0;
-      if (bodyScrollEl) {
-        bodyScrollEl.scrollTop = 0;
-        bodyScrollEl.scrollLeft = 0;
+      scrollTop.set(0);
+      if ($bodyScrollEl) {
+        $bodyScrollEl.scrollTop = 0;
+        $bodyScrollEl.scrollLeft = 0;
       }
-      if (headerScrollEl) {
-        headerScrollEl.scrollLeft = 0;
+      if ($headerScrollEl) {
+        $headerScrollEl.scrollLeft = 0;
       }
     }
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
-    const targetRow = resetScroll ? 0 : Math.max(0, Math.floor(scrollTop / ROW_HEIGHT));
+    const targetRow = resetScroll ? 0 : Math.max(0, Math.floor($scrollTop / ROW_HEIGHT));
     return requestPage(Math.floor(targetRow / PAGE_SIZE), true);
   };
 
@@ -510,12 +488,12 @@
     });
   };
 
-  $: baseDataWidths = visibleColumns.map((column) => resolveColumnWidth(column));
-  $: availableDataWidth = Math.max(0, tableWidth - STICKY_COLUMNS_WIDTH);
+  $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column));
+  $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
-  $: effectiveTableWidth = Math.max(totalTableWidth, tableWidth);
+  $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: gridTemplate = [
     `${INDEX_COL_WIDTH}px`,
     `${FLAG_COL_WIDTH}px`,
@@ -523,82 +501,29 @@
     ...distributedDataWidths.map((width) => `${width}px`)
   ].join(' ');
   $: if (resizeObserver) {
-    if (bodyScrollEl && bodyScrollEl !== observedScrollEl) {
+    if ($bodyScrollEl && $bodyScrollEl !== observedScrollEl) {
       if (observedScrollEl) {
         resizeObserver.unobserve(observedScrollEl);
       }
-      resizeObserver.observe(bodyScrollEl);
-      observedScrollEl = bodyScrollEl;
-      tableWidth = bodyScrollEl.clientWidth;
-    } else if (!bodyScrollEl && observedScrollEl) {
+      resizeObserver.observe($bodyScrollEl);
+      observedScrollEl = $bodyScrollEl;
+      tableWidth.set($bodyScrollEl.clientWidth);
+    } else if (!$bodyScrollEl && observedScrollEl) {
       resizeObserver.unobserve(observedScrollEl);
       observedScrollEl = null;
-      tableWidth = 0;
+      tableWidth.set(0);
     }
   }
 
-  $: firstDataColumn = visibleColumns.length > 0 ? visibleColumns[0] : null;
+  $: firstDataColumn = $visibleColumns.length > 0 ? $visibleColumns[0] : null;
   $: stickyFlagOffset = INDEX_COL_WIDTH;
   $: stickyMemoOffset = INDEX_COL_WIDTH + FLAG_COL_WIDTH;
   $: stickyDataOffset = stickyMemoOffset + MEMO_COL_WIDTH;
   $: stickyVariables = `--sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
 
-  const normalizeFlag = (flag: string | null | undefined): FlagSymbol | '' => {
-    if (!flag) return '';
-    const lower = flag.trim().toLowerCase();
-    if (lower === 'safe' || lower === 'suspicious' || lower === 'critical') {
-      return lower;
-    }
-    return '';
-  };
-
-  const mapStoredFlag = (flag: string | null | undefined): FlagSymbol | '' => {
-    const normalized = normalizeFlag(flag);
-    if (normalized) return normalized;
-    const trimmed = flag?.trim();
-    if (!trimmed) return '';
-    if (trimmed === '◯') return 'safe';
-    if (trimmed === '?') return 'suspicious';
-    if (trimmed === '✗') return 'critical';
-    return '';
-  };
-
-  const normalizeRow = (incoming: ProjectRow): CachedRow => {
-    const displayCache: Record<string, string> = {};
-    for (const [column, value] of Object.entries(incoming.data)) {
-      const formatted = formatCell(value);
-      displayCache[column] = formatted;
-    }
-    return {
-      ...incoming,
-      flag: mapStoredFlag(incoming.flag) || '',
-      memo: sanitizeMemoInput(incoming.memo ?? ''),
-      displayCache
-    };
-  };
-
-  const formatCell = (value: unknown): string => {
-    if (value === null || value === undefined) {
-      return '';
-    }
-    if (typeof value === 'object') {
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return String(value);
-      }
-    }
-    return String(value);
-  };
-
-const sanitizeMemoInput = (value: string): string => {
-  const withoutControl = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-  return withoutControl.replace(/<[^>]*>/g, '');
-};
-
-const padNumber = (value: number) => value.toString().padStart(2, '0');
-const formatTimestampForFilename = (date: Date) =>
-  `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
+  const padNumber = (value: number) => value.toString().padStart(2, '0');
+  const formatTimestampForFilename = (date: Date) =>
+    `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
 
   const getFlagFilterDetails = (value: FlagFilterValue) => {
     return (
@@ -614,21 +539,21 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const selectFlagFilter = (value: FlagFilterValue) => {
-    flagFilter = value;
+    flagFilter.set(value);
     flagMenuOpen = false;
   };
 
   const toggleSort = (column: string) => {
-    if (sortKey === column) {
-      if (sortDirection === 'asc') {
-        sortDirection = 'desc';
+    if ($sortKey === column) {
+      if ($sortDirection === 'asc') {
+        sortDirection.set('desc');
       } else {
-        sortKey = null;
-        sortDirection = 'asc';
+        sortKey.set(null);
+        sortDirection.set('asc');
       }
     } else {
-      sortKey = column;
-      sortDirection = 'asc';
+      sortKey.set(column);
+      sortDirection.set('asc');
     }
     const filters: AppliedFilters = {
       search: activeFilters.search,
@@ -639,22 +564,22 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const openCell = (column: string, value: string) => {
-    expandedCell = { column, value };
+    expandedCell.set({ column, value });
   };
 
   const closeCell = () => {
-    expandedCell = null;
+    expandedCell.set(null);
   };
 
   const openMemoEditor = (row: CachedRow) => {
-    memoEditor = { row };
+    memoEditor.set({ row });
     memoDraft = row.memo ?? '';
     memoError = null;
     memoSaving = false;
   };
 
   const closeMemoEditor = () => {
-    memoEditor = null;
+    memoEditor.set(null);
     memoDraft = '';
     memoError = null;
     memoSaving = false;
@@ -681,15 +606,15 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const saveMemo = async () => {
-    if (!memoEditor || memoSaving || !projectDetail) return;
+    if (!$memoEditor || memoSaving || !projectDetail) return;
     const sanitized = sanitizeMemoInput(memoDraft).trim();
     memoSaving = true;
     memoError = null;
     try {
       await backend.updateFlag({
         projectId: projectDetail.project.meta.id,
-        rowIndex: memoEditor.row.row_index,
-        flag: memoEditor.row.flag,
+        rowIndex: $memoEditor.row.row_index,
+        flag: $memoEditor.row.flag,
         memo: sanitized.length ? sanitized : null
       });
       await forceRefreshFilteredRows(false);
@@ -718,8 +643,8 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const copyExpandedCell = async () => {
-    if (!expandedCell) return;
-    const text = expandedCell.value ?? '';
+    if (!$expandedCell) return;
+    const text = $expandedCell.value ?? '';
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         await navigator.clipboard.writeText(text);
@@ -740,48 +665,45 @@ const formatTimestampForFilename = (date: Date) =>
     }
   };
 
-  const normalizeIocFlag = (value: string): FlagSymbol => {
-    const lowered = value.trim().toLowerCase();
-    if (lowered === 'critical' || lowered === 'suspicious' || lowered === 'safe') {
-      return lowered as FlagSymbol;
-    }
-    return 'safe';
-  };
-
   const openIocManager = () => {
-    if (!projectDetail) return;
-    iocDraft = projectDetail.iocs.map((entry) => ({
+    console.log('openIocManager called, projectDetail:', projectDetail);
+    if (!projectDetail) {
+      console.log('No projectDetail, returning early');
+      return;
+    }
+    iocDraft.set(projectDetail.iocs.map((entry) => ({
       flag: normalizeIocFlag(entry.flag),
       tag: entry.tag,
       query: entry.query
-    }));
+    })));
     iocError = null;
     isSavingIocs = false;
-    iocManagerOpen = true;
+    iocManagerOpen.set(true);
+    console.log('iocManagerOpen set to true');
   };
 
   const closeIocManager = () => {
-    iocManagerOpen = false;
+    iocManagerOpen.set(false);
     iocError = null;
     isSavingIocs = false;
   };
 
   const addIocEntry = () => {
-    iocDraft = [...iocDraft, { flag: 'critical', tag: '', query: '' }];
+    iocDraft.update(d => [...d, { flag: 'critical', tag: '', query: '' }]);
   };
 
   const updateIocEntry = (index: number, field: keyof IocEntry, value: string) => {
-    iocDraft = iocDraft.map((entry, current) => {
+    iocDraft.update(d => d.map((entry, current) => {
       if (current !== index) return entry;
       if (field === 'flag') {
         return { ...entry, flag: normalizeIocFlag(value) };
       }
       return { ...entry, [field]: value };
-    });
+    }));
   };
 
   const removeIocEntry = (index: number) => {
-    iocDraft = iocDraft.filter((_, current) => current !== index);
+    iocDraft.update(d => d.filter((_, current) => current !== index));
   };
 
   const handleIocFieldChange = (index: number, field: keyof IocEntry, event: Event) => {
@@ -790,7 +712,7 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const sanitizeIocEntries = (): IocEntry[] =>
-    iocDraft
+    $iocDraft
       .map((entry) => ({
         flag: normalizeIocFlag(entry.flag),
         tag: entry.tag.trim(),
@@ -1019,13 +941,6 @@ const formatTimestampForFilename = (date: Date) =>
         memo: row.memo && row.memo.trim().length ? row.memo : null
       });
       await forceRefreshFilteredRows(false);
-      // const flagLabel = FLAG_OPTIONS.find((option) => option.value === flag)?.label ?? flag;
-      // dispatch('notify', {
-      //   message: nextFlag
-      //     ? `Marked row ${row.row_index + 1} as ${flagLabel}`
-      //     : 'Cleared flag',
-      //   tone: 'success'
-      // });
     } catch (error) {
       console.error(error);
       dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
@@ -1037,25 +952,25 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const toggleColumn = async (column: string) => {
-    const nextHidden = new Set(hiddenColumns);
+    const nextHidden = new Set($hiddenColumns);
     if (nextHidden.has(column)) {
       nextHidden.delete(column);
     } else {
       nextHidden.add(column);
     }
-    hiddenColumns = nextHidden;
+    hiddenColumns.set(nextHidden);
     initializeColumnWidths();
     const updatedColumns = getSearchableColumns();
     const filters: AppliedFilters = {
-      search: search.trim(),
-      flag: flagFilter,
+      search: $search.trim(),
+      flag: $flagFilter,
       columns: updatedColumns,
     };
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastColumnsSignature = updatedColumns.join('|');
     void applyFilters(filters, false, true);
-    isUpdatingColumns = true;
+    isUpdatingColumns.set(true);
     try {
       await backend.setHiddenColumns({
         projectId: projectDetail.project.meta.id,
@@ -1070,12 +985,12 @@ const formatTimestampForFilename = (date: Date) =>
       dispatch('notify', { message: 'Failed to update column visibility.', tone: 'error' });
       dispatch('refresh');
     } finally {
-      isUpdatingColumns = false;
+      isUpdatingColumns.set(false);
     }
   };
 
   const exportProject = async () => {
-    isExporting = true;
+    isExporting.set(true);
     try {
       let destination: string | undefined;
       if (backend.isNative) {
@@ -1101,23 +1016,23 @@ const formatTimestampForFilename = (date: Date) =>
       console.error(error);
       dispatch('notify', { message: 'Failed to export CSV.', tone: 'error' });
     } finally {
-      isExporting = false;
+      isExporting.set(false);
     }
   };
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
-    scrollTop = target.scrollTop;
+    scrollTop.set(target.scrollTop);
     if (isSyncingBodyScroll) {
       isSyncingBodyScroll = false;
       return;
     }
-    if (headerScrollEl && headerScrollEl.scrollLeft !== target.scrollLeft) {
+    if ($headerScrollEl && $headerScrollEl.scrollLeft !== target.scrollLeft) {
       if (releaseHeaderSyncFrame !== null) {
         cancelAnimationFrame(releaseHeaderSyncFrame);
       }
       isSyncingHeaderScroll = true;
-      headerScrollEl.scrollLeft = target.scrollLeft;
+      $headerScrollEl.scrollLeft = target.scrollLeft;
       releaseHeaderSyncFrame = requestAnimationFrame(() => {
         isSyncingHeaderScroll = false;
         releaseHeaderSyncFrame = null;
@@ -1126,18 +1041,18 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const handleHeaderScroll = () => {
-    if (!headerScrollEl || !bodyScrollEl) return;
+    if (!$headerScrollEl || !$bodyScrollEl) return;
     if (isSyncingHeaderScroll) {
       isSyncingHeaderScroll = false;
       return;
     }
-    const nextLeft = headerScrollEl.scrollLeft;
-    if (bodyScrollEl.scrollLeft !== nextLeft) {
+    const nextLeft = $headerScrollEl.scrollLeft;
+    if ($bodyScrollEl.scrollLeft !== nextLeft) {
       if (releaseBodySyncFrame !== null) {
         cancelAnimationFrame(releaseBodySyncFrame);
       }
       isSyncingBodyScroll = true;
-      bodyScrollEl.scrollLeft = nextLeft;
+      $bodyScrollEl.scrollLeft = nextLeft;
       releaseBodySyncFrame = requestAnimationFrame(() => {
         isSyncingBodyScroll = false;
         releaseBodySyncFrame = null;
@@ -1146,20 +1061,20 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const forwardWheel = (event: WheelEvent) => {
-    if (!bodyScrollEl) return;
-    if (event.currentTarget === bodyScrollEl) {
+    if (!$bodyScrollEl) return;
+    if (event.currentTarget === $bodyScrollEl) {
       return;
     }
     let handled = false;
     if (event.deltaY !== 0) {
-      const previousTop = bodyScrollEl.scrollTop;
-      bodyScrollEl.scrollTop += event.deltaY;
-      handled = handled || bodyScrollEl.scrollTop !== previousTop;
+      const previousTop = $bodyScrollEl.scrollTop;
+      $bodyScrollEl.scrollTop += event.deltaY;
+      handled = handled || $bodyScrollEl.scrollTop !== previousTop;
     }
     if (event.deltaX !== 0) {
-      const previousLeft = bodyScrollEl.scrollLeft;
-      bodyScrollEl.scrollLeft += event.deltaX;
-      handled = handled || bodyScrollEl.scrollLeft !== previousLeft;
+      const previousLeft = $bodyScrollEl.scrollLeft;
+      $bodyScrollEl.scrollLeft += event.deltaX;
+      handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
     }
     if (handled) {
       event.preventDefault();
@@ -1167,7 +1082,7 @@ const formatTimestampForFilename = (date: Date) =>
   };
 
   const getSearchableColumns = () =>
-    projectDetail ? projectDetail.columns.filter((column) => !hiddenColumns.has(column)) : [];
+    projectDetail ? projectDetail.columns.filter((column) => !$hiddenColumns.has(column)) : [];
 
   const scheduleFilterRefresh = (
     searchValue: string,
@@ -1207,8 +1122,8 @@ const formatTimestampForFilename = (date: Date) =>
     }
     return applyFilters(
       {
-        search: search.trim(),
-        flag: flagFilter,
+        search: $search.trim(),
+        flag: $flagFilter,
         columns: getSearchableColumns(),
       },
       resetScroll,
@@ -1230,10 +1145,10 @@ const formatTimestampForFilename = (date: Date) =>
       if (event.key === 'Escape') {
         columnsOpen = false;
         flagMenuOpen = false;
-        if (iocManagerOpen) {
+        if ($iocManagerOpen) {
           closeIocManager();
-        } else if (memoEditor) {
-          memoEditor = null;
+        } else if ($memoEditor) {
+          memoEditor.set(null);
           memoDraft = '';
           memoError = null;
         } else {
@@ -1243,11 +1158,11 @@ const formatTimestampForFilename = (date: Date) =>
     };
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        tableWidth = entry.contentRect.width;
+        tableWidth.set(entry.contentRect.width);
       }
     });
-    if (bodyScrollEl) {
-      tableWidth = bodyScrollEl.clientWidth;
+    if ($bodyScrollEl) {
+      tableWidth.set($bodyScrollEl.clientWidth);
     }
     document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
@@ -1277,412 +1192,25 @@ const formatTimestampForFilename = (date: Date) =>
   });
 
   const emitSummary = () => {
-    const hidden = Array.from(hiddenColumns);
+    const hidden = Array.from($hiddenColumns);
     const hiddenKey = hidden.join('|');
-    if (lastSummaryFlagged === flaggedCount && lastSummaryHiddenKey === hiddenKey) {
+    if (lastSummaryFlagged === $flaggedCount && lastSummaryHiddenKey === hiddenKey) {
       return;
     }
-    lastSummaryFlagged = flaggedCount;
+    lastSummaryFlagged = $flaggedCount;
     lastSummaryHiddenKey = hiddenKey;
-    dispatch('summary', { flagged: flaggedCount, hiddenColumns: hidden });
+    dispatch('summary', { flagged: $flaggedCount, hiddenColumns: hidden });
   };
 </script>
 
 <section class="project-view">
-  <section class="filters">
-    <div class="filter-flag">
-      <div class="flag-picker" bind:this={flagPickerEl}>
-        <button
-          type="button"
-          class="flag-trigger"
-          class:open={flagMenuOpen}
-          on:click={toggleFlagMenu}
-          aria-haspopup="listbox"
-          aria-expanded={flagMenuOpen}
-        >
-          {#if getFlagFilterDetails(flagFilter).hint}
-            <span class="flag-hint">{getFlagFilterDetails(flagFilter).hint}</span>
-          {/if}
-          <span class="flag-label">{getFlagFilterDetails(flagFilter).label}</span>
-        </button>
-        {#if flagMenuOpen}
-          <div class="flag-menu" role="listbox">
-            {#each FLAG_FILTER_OPTIONS as option}
-              <button
-                type="button"
-                class="flag-option"
-                class:active={flagFilter === option.value}
-                on:click={() => selectFlagFilter(option.value)}
-                role="option"
-                aria-selected={flagFilter === option.value}
-              >
-                {#if option.hint}
-                  <span class="flag-hint">{option.hint}</span>
-                {/if}
-                <span>{option.label}</span>
-                {#if flagFilter === option.value}
-                  <span class="flag-dot" aria-hidden="true">●</span>
-                {/if}
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    </div>
-    <label class="filter-search">
-      <input
-        placeholder="Enter search text"
-        bind:value={search}
-        type="search"
-      />
-    </label>
-    <div class="filter-columns">
-      <div class="column-picker" bind:this={columnPickerEl}>
-        <button
-          type="button"
-          class="column-trigger"
-          on:click={() => {
-            flagMenuOpen = false;
-            columnsOpen = !columnsOpen;
-          }}
-          aria-expanded={columnsOpen}
-        >
-          Columns ({visibleColumns.length}/{projectDetail.columns.length})
-        </button>
-        {#if columnsOpen}
-          <div class="column-panel">
-            <ul>
-              {#each projectDetail.columns as column}
-                <li>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={!hiddenColumns.has(column)}
-                      disabled={isUpdatingColumns}
-                      on:change={() => toggleColumn(column)}
-                    />
-                    <span>{column}</span>
-                  </label>
-                </li>
-              {/each}
-            </ul>
-            <button type="button" class="close-panel" on:click={() => (columnsOpen = false)}>
-              Done
-            </button>
-          </div>
-        {/if}
-      </div>
-    </div>
-    <div class="filter-ioc">
-      <button type="button" class="ghost" on:click={openIocManager}>
-        IOC Rules
-      </button>
-    </div>
-    <div class="filter-export">
-      <button class="primary" on:click={exportProject} disabled={isExporting}>
-        {isExporting ? 'Exporting…' : 'Export CSV'}
-      </button>
-    </div>
-  </section>
+  <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} />
 
-  {#if expandedCell}
-    <div
-      class="cell-dialog-backdrop"
-      role="button"
-      tabindex="0"
-      on:click={handleBackdropClick}
-      on:keydown={handleBackdropKey}
-    >
-      <div
-        class="cell-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Cell value for ${expandedCell.column}`}
-      >
-        <div class="cell-dialog-header">
-          <h3>{expandedCell.column}</h3>
-          <div class="cell-dialog-actions">
-            <button type="button" class="ghost" on:click={copyExpandedCell}>Copy</button>
-            <button type="button" class="ghost close-dialog" on:click={closeCell}>Close</button>
-          </div>
-        </div>
-        <pre class="cell-dialog-body">{expandedCell.value || '—'}</pre>
-      </div>
-    </div>
-  {/if}
+  <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
-  {#if memoEditor}
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <div
-      class="cell-dialog-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Edit memo for row ${memoEditor.row.row_index + 1}`}
-      on:click={handleMemoBackdropClick}
-      tabindex="-1"
-      on:keydown={handleMemoBackdropKey}
-    >
-      <div class="cell-dialog memo-dialog">
-        <div class="cell-dialog-header">
-          <h3>Edit memo</h3>
-          <div class="cell-dialog-actions">
-            <button type="button" class="ghost" on:click={closeMemoEditor} disabled={memoSaving}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="primary"
-              on:click={saveMemo}
-              disabled={memoSaving}
-            >
-              {memoSaving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
-        <label class="memo-editor-label">
-          <span>Memo</span>
-          <textarea
-            bind:value={memoDraft}
-            rows="8"
-            placeholder="Add memo"
-            spellcheck="true"
-            disabled={memoSaving}
-          />
-        </label>
-        {#if memoError}
-          <p class="memo-error">{memoError}</p>
-        {/if}
-      </div>
-    </div>
-  {/if}
+  <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => forceRefreshFilteredRows(false)} />
 
-  {#if iocManagerOpen}
-    <div class="cell-dialog-backdrop" role="dialog" aria-modal="true" aria-label="IOC rules">
-      <div class="cell-dialog ioc-dialog">
-        <div class="cell-dialog-header">
-          <h3>IOC Rules</h3>
-          <div class="cell-dialog-actions">
-            <button type="button" class="ghost" on:click={closeIocManager} disabled={isSavingIocs}>
-              Close
-            </button>
-          </div>
-        </div>
-        <div class="ioc-controls">
-          <button type="button" class="ghost" on:click={addIocEntry}>
-            Add rule
-          </button>
-          <div class="ioc-spacer" />
-          <button type="button" class="ghost" on:click={importIocEntries} disabled={isSavingIocs}>
-            Import…
-          </button>
-          <button type="button" class="ghost" on:click={exportIocEntries} disabled={isSavingIocs}>
-            Export…
-          </button>
-        </div>
-        <div class="ioc-table">
-          <div class="ioc-header">
-            <span>Flag</span>
-            <span>Tag</span>
-            <span>Query</span>
-            <span></span>
-          </div>
-          {#if iocDraft.length === 0}
-            <p class="ioc-empty">No IOC rules configured.</p>
-          {:else}
-            {#each iocDraft as entry, index}
-              <div class="ioc-row">
-                <select
-                  value={entry.flag}
-                  on:change={(event) => handleIocFieldChange(index, 'flag', event)}
-                  disabled={isSavingIocs}
-                >
-                  {#each FLAG_OPTIONS as option}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-                <input
-                  value={entry.tag}
-                  placeholder="Tag name"
-                  on:input={(event) => handleIocFieldChange(index, 'tag', event)}
-                  disabled={isSavingIocs}
-                />
-                <input
-                  value={entry.query}
-                  placeholder="Search string"
-                  on:input={(event) => handleIocFieldChange(index, 'query', event)}
-                  disabled={isSavingIocs}
-                />
-                <button
-                  type="button"
-                  class="ghost danger"
-                  on:click={() => removeIocEntry(index)}
-                  disabled={isSavingIocs}
-                >
-                  Remove
-                </button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-        {#if iocError}
-          <p class="memo-error">{iocError}</p>
-        {/if}
-        <div class="ioc-footer">
-          <button type="button" class="ghost" on:click={closeIocManager} disabled={isSavingIocs}>
-            Cancel
-          </button>
-          <button type="button" class="primary" on:click={saveIocEntries} disabled={isSavingIocs}>
-            {isSavingIocs ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-        {#if !backend.isNative}
-          <input
-            type="file"
-            accept=".csv"
-            class="hidden-input"
-            bind:this={iocImportInput}
-            on:change={handleIocFileUpload}
-          />
-        {/if}
-      </div>
-    </div>
-  {/if}
+  <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')} />
 
-  <section class="table-wrapper">
-    <div class="meta">
-      <span>{loadedRowCount} / {totalRows} rows</span>
-      <span>{flaggedCount} flagged</span>
-    </div>
-    {#if totalRows === 0}
-      <div class="empty-rows">
-        {pendingPages.size > 0 ? 'Loading rows…' : 'No rows match your filters.'}
-      </div>
-    {:else}
-      <div class="table-scroll">
-        <div
-          class="table-header-scroll"
-          bind:this={headerScrollEl}
-          on:scroll={handleHeaderScroll}
-          on:wheel={forwardWheel}
-        >
-          <div
-            class="data-header"
-            style={`grid-template-columns: ${gridTemplate}; ${stickyVariables} width: ${effectiveTableWidth}px;`}
-          >
-            <div class="header-cell sticky sticky-index">#</div>
-            <div class="header-cell sticky sticky-flag">Flag</div>
-            <div class="header-cell sticky sticky-memo">Memo</div>
-            {#each visibleColumns as column, columnIndex}
-              <button
-                type="button"
-                class="header-cell"
-                class:sticky={columnIndex === 0}
-                class:stickyData={columnIndex === 0}
-                class:sorted={sortKey === column}
-                on:click={() => toggleSort(column)}
-                aria-pressed={sortKey === column}
-              >
-                <span class="header-label">{column}</span>
-                {#if sortKey === column}
-                  <span class="sort-indicator" aria-hidden="true">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </span>
-                {/if}
-              </button>
-            {/each}
-          </div>
-        </div>
-        <div
-          class="virtual-viewport"
-          bind:this={bodyScrollEl}
-          bind:clientHeight={viewportHeight}
-          on:scroll={handleScroll}
-          on:wheel={forwardWheel}
-          style={stickyVariables}
-        >
-          <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
-            <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
-{#each virtualRows as item (item.position)}
-                <div
-                  class="data-row"
-                  class:alt-row={item.position % 2 === 1}
-                  class:loading={!item.row}
-                  style={`grid-template-columns: ${gridTemplate}; ${stickyVariables}; --row-height: ${ROW_HEIGHT}px;`}
-                >
-                  <div class="cell index sticky sticky-index">{item.position + 1}</div>
-                  <div class="cell flag sticky sticky-flag">
-                    {#if hasRow(item.row)}
-                      <div class="flag-buttons">
-                        {#each FLAG_OPTIONS as option}
-                          <button
-                            type="button"
-                            class:selected={item.row ? normalizeFlag(item.row.flag) === option.value : false}
-                            class:flag-safe={option.value === 'safe'}
-                            class:flag-suspicious={option.value === 'suspicious'}
-                            class:flag-critical={option.value === 'critical'}
-                            on:click={() => {
-                              if (!item.row) return;
-                              setFlag(item.row, option.value);
-                            }}
-                          >
-                            {option.hint}
-                          </button>
-                        {/each}
-                      </div>
-                    {:else}
-                      <div class="flag-buttons loading-placeholder">…</div>
-                    {/if}
-                  </div>
-                  <button
-                    class="cell memo-button sticky sticky-memo"
-                    on:click={() => item.row && editMemo(item.row)}
-                    title={
-                      item.row
-                        ? item.row.memo && item.row.memo.trim().length
-                          ? item.row.memo
-                          : 'Add memo'
-                        : 'Loading…'
-                    }
-                    disabled={!item.row}
-                  >
-                    {#if item.row && item.row.memo && item.row.memo.trim().length}
-                      <span class="memo-text">{item.row.memo}</span>
-                    {:else if item.row}
-                      <span class="memo-placeholder">Add memo</span>
-                    {:else}
-                      <span class="memo-placeholder">Loading…</span>
-                    {/if}
-                  </button>
-                  {#each visibleColumns as column, columnIndex}
-                    {@const cellValue = item.row ? item.row.displayCache[column] ?? '' : ''}
-                    <button
-                      type="button"
-                      class="cell"
-                      class:sticky={columnIndex === 0}
-                      class:stickyData={columnIndex === 0}
-                      title={item.row ? cellValue : 'Loading…'}
-                      on:click={() => {
-                        if (!item.row) return;
-                        openCell(column, cellValue);
-                      }}
-                      on:keydown={(event) => {
-                        if (!item.row) return;
-                        handleCellKeydown(event, column, cellValue);
-                      }}
-                      disabled={!item.row}
-                    >
-                      <span class="cell-text">
-                        {item.row ? (cellValue || '—') : 'Loading…'}
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-              {/each}
-            </div>
-          </div>
-        </div>
-      </div>
-    {/if}
-  </section>
+  <DataTable {columnWidths} />
 </section>

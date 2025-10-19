@@ -160,10 +160,11 @@ button.primary:disabled {
   background: rgba(17, 17, 27, 0.8);
   color: #e6e9ef;
   font-size: 0.85rem;
-  text-align: left;
+  font-weight: 600;
+  text-align: center;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
   transition: border 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
@@ -185,8 +186,8 @@ button.primary:disabled {
   left: 0;
   z-index: 20;
   min-width: 240px;
-  padding: 14px;
-  border-radius: 14px;
+  padding: 8px;
+  border-radius: 10px;
   border: 1px solid rgba(99, 102, 241, 0.35);
   background: rgba(11, 14, 24, 0.96);
   box-shadow: 0 24px 48px rgba(8, 10, 24, 0.55);
@@ -199,39 +200,44 @@ button.primary:disabled {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   max-height: 280px;
   overflow-y: auto;
 }
 
-.column-panel label {
+.column-panel li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 6px 8px;
+  margin: 0;
+  list-style: none;
+  border-radius: 6px;
   background: rgba(30, 34, 54, 0.45);
   border: 1px solid transparent;
-  color: rgba(224, 231, 255, 0.9);
-  font-size: 0.85rem;
-  transition: border 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: border 0.15s ease, background 0.15s ease;
 }
 
-.column-panel label:hover {
+.column-panel li:hover {
   border-color: rgba(99, 102, 241, 0.45);
   background: rgba(58, 66, 110, 0.6);
 }
 
 .column-panel input[type='checkbox'] {
   appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
   border: 1px solid rgba(148, 163, 184, 0.45);
   background: rgba(17, 20, 32, 0.9);
-  display: grid;
-  place-items: center;
+  margin-right: 8px;
   transition: border 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.column-panel label {
+  color: rgba(224, 231, 255, 0.9);
+  font-size: 0.85rem;
+  cursor: pointer;
+  flex: 1;
 }
 
 .column-panel input[type='checkbox']:checked {
@@ -242,15 +248,19 @@ button.primary:disabled {
 
 .column-panel input[type='checkbox']:checked::after {
   content: '✓';
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: rgba(15, 17, 32, 0.9);
+  font-weight: bold;
+  display: block;
+  text-align: center;
+  line-height: 16px;
 }
 
 .close-panel {
-  margin-top: 14px;
+  margin-top: 8px;
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   background: rgba(140, 170, 238, 0.16);
   color: #cdd6f4;
