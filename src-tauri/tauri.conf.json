@@ -31,7 +31,13 @@
       }
     },
     "bundle": {
-      "identifier": "com.trivium.app"
+      "identifier": "com.trivium.app",
+      "windows": {
+        "webviewInstallMode": {
+          "type": "downloadBootstrapper",
+          "silent": true
+        }
+      }
     },
     "windows": [
       {
