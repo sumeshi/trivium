@@ -288,6 +288,26 @@ export const forceRefreshFilteredRows = (resetScroll: boolean) => {
 export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
   const currentFlag = normalizeFlag(row.flag);
   const nextFlag = currentFlag === flag ? "" : flag;
+
+  // 楽観的更新: 即座にUIを更新
+  const optimisticRow = {
+    ...row,
+    flag: nextFlag,
+  };
+  rowsCache.update((cache) => {
+    const newCache = new Map(cache);
+    newCache.set(row.row_index, optimisticRow);
+    return newCache;
+  });
+
+  // Update flagged count
+  const currentCache = get(rowsCache);
+  const newFlaggedCount = Array.from(currentCache.values()).filter(
+    (r) => r.flag && r.flag.trim().length > 0
+  ).length;
+  flaggedCount.set(newFlaggedCount);
+
+  // バックエンドの更新は非同期で実行（エラー時は元に戻す）
   try {
     await get(backend).updateFlag({
       projectId: get(projectDetail).project.meta.id,
@@ -295,9 +315,22 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
       flag: nextFlag ?? "",
       memo: row.memo && row.memo.trim().length ? row.memo : null,
     });
-    await forceRefreshFilteredRows(false);
   } catch (error) {
     console.error(error);
+    // エラー時は元の状態に戻す
+    rowsCache.update((cache) => {
+      const newCache = new Map(cache);
+      newCache.set(row.row_index, row);
+      return newCache;
+    });
+
+    // フラグ付きカウントも元に戻す
+    const currentCache = get(rowsCache);
+    const newFlaggedCount = Array.from(currentCache.values()).filter(
+      (r) => r.flag && r.flag.trim().length > 0
+    ).length;
+    flaggedCount.set(newFlaggedCount);
+
     // dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
   }
 };

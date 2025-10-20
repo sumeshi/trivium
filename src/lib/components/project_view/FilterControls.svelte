@@ -35,7 +35,9 @@
   };
 
   const selectFlagFilter = (value: FlagFilterValue) => {
+    console.log('Flag filter changing from', $flagFilter, 'to', value);
     flagFilter.set(value);
+    console.log('Flag filter is now', $flagFilter);
     flagMenuOpen = false;
   };
 
@@ -119,6 +121,7 @@
       placeholder="Enter search text"
       bind:value={$search}
       type="search"
+      on:input={() => console.log('Search input:', $search)}
     />
   </label>
   <div class="filter-columns">

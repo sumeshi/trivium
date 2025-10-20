@@ -257,7 +257,7 @@ import { showToast } from './lib/utils/toast';
     />
   {/if}
 
-  <main class="relative z-0 flex min-h-screen w-full flex-col px-4 pb-12 pt-24 sm:px-6">
+  <main class="relative z-0 flex w-full flex-col px-4 pt-24 pb-4 sm:px-6" style="height: 100vh; overflow: hidden;">
     {#if !backend.isNative}
       <div class="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
         Web preview stores data in memory only. Use the Tauri desktop build to persist projects.

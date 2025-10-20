@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-  import { memoEditor, backend, projectDetail, sanitizeMemoInput } from './state';
+  import { createEventDispatcher, tick } from 'svelte';
+  import { memoEditor, backend, projectDetail, sanitizeMemoInput, rowsCache, normalizeRow } from './state';
   import type { CachedRow } from './state';
 
   const dispatch = createEventDispatcher();
@@ -8,6 +8,7 @@
   let memoDraft = '';
   let memoSaving = false;
   let memoError: string | null = null;
+  let textareaEl: HTMLTextAreaElement | null = null;
 
   const closeMemoEditor = () => {
     memoEditor.set(null);
@@ -22,15 +23,23 @@
     memoSaving = true;
     memoError = null;
     try {
-      await $backend.updateFlag({
+      const updatedRow = await $backend.updateFlag({
         projectId: $projectDetail.project.meta.id,
         rowIndex: $memoEditor.row.row_index,
         flag: $memoEditor.row.flag,
         memo: sanitized.length ? sanitized : null
       });
+      
+      // Update the specific row in cache instead of triggering a full refresh
+      const normalizedRow = normalizeRow(updatedRow);
+      rowsCache.update((cache) => {
+        const newCache = new Map(cache);
+        newCache.set($memoEditor.row.row_index, normalizedRow);
+        return newCache;
+      });
+      
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });
       closeMemoEditor();
-      dispatch('refresh');
     } catch (error) {
       console.error(error);
       memoError = 'Failed to update memo.';
@@ -47,17 +56,24 @@
   };
 
   const handleMemoBackdropKey = (event: KeyboardEvent) => {
-    if (!memoSaving && (event.key === 'Escape' || event.key === 'Enter')) {
+    if (!memoSaving && event.key === 'Escape') {
       event.preventDefault();
       closeMemoEditor();
     }
   };
 
-  memoEditor.subscribe(editor => {
+  memoEditor.subscribe(async (editor) => {
     if (editor) {
       memoDraft = editor.row.memo ?? '';
       memoError = null;
       memoSaving = false;
+      await tick();
+      if (textareaEl) {
+        textareaEl.focus();
+        // Place caret at end
+        const length = textareaEl.value.length;
+        textareaEl.setSelectionRange(length, length);
+      }
     }
   });
 </script>
@@ -94,11 +110,19 @@
       <label class="memo-editor-label">
         <span>Memo</span>
         <textarea
+          bind:this={textareaEl}
           bind:value={memoDraft}
           rows="8"
           placeholder="Add memo"
           spellcheck="true"
           disabled={memoSaving}
+          on:keydown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !memoSaving) {
+              event.preventDefault();
+              event.stopPropagation();
+              saveMemo();
+            }
+          }}
         />
       </label>
       {#if memoError}

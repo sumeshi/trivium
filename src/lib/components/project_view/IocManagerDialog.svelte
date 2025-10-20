@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { open, save } from '@tauri-apps/api/dialog';
   import {
     iocManagerOpen,
@@ -58,8 +58,16 @@
     document.removeEventListener('click', handleClickOutside);
   });
 
-  const addIocEntry = () => {
+  const addIocEntry = async () => {
     iocDraft.update((d: IocEntry[]) => [...d, { flag: 'critical', tag: '', query: '' }]);
+    
+    // 新しいルールのTagフィールドにフォーカス
+    await tick();
+    const tagInputs = dialogEl?.querySelectorAll('.ioc-row input[placeholder="Tag name"]');
+    if (tagInputs && tagInputs.length > 0) {
+      const lastTagInput = tagInputs[tagInputs.length - 1] as HTMLInputElement;
+      lastTagInput.focus();
+    }
   };
 
   const updateIocEntry = (index: number, field: keyof IocEntry, value: string) => {
@@ -244,10 +252,10 @@
         {#if $iocDraft.length === 0}
           <p class="ioc-empty">No IOC rules configured.</p>
         {:else}
-          {#each $iocDraft as entry, index (entry.tag + entry.query + index)}
+          {#each $iocDraft as entry, index (index)}
             <div class="ioc-row">
               <select
-                value={entry.flag}
+                bind:value={entry.flag}
                 on:change={(event) => handleIocFieldChange(index, 'flag', event)}
                 disabled={isSavingIocs}
               >
@@ -256,13 +264,13 @@
                 {/each}
               </select>
               <input
-                value={entry.tag}
+                bind:value={entry.tag}
                 placeholder="Tag name"
                 on:input={(event) => handleIocFieldChange(index, 'tag', event)}
                 disabled={isSavingIocs}
               />
               <input
-                value={entry.query}
+                bind:value={entry.query}
                 placeholder="Search string"
                 on:input={(event) => handleIocFieldChange(index, 'query', event)}
                 disabled={isSavingIocs}

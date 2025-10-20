@@ -74,7 +74,7 @@ struct LoadProjectResponse {
     initial_rows: Vec<ProjectRow>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct FlagEntry {
     flag: String,
     memo: Option<String>,
@@ -778,6 +778,23 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
     apply_iocs_to_rows(&mut initial_rows, &iocs);
 
+    // Save IOC-applied flags to flags.json
+    let mut updated_flags = flags.clone();
+    for row in &initial_rows {
+        if !row.flag.trim().is_empty() {
+            updated_flags.insert(
+                row.row_index,
+                FlagEntry {
+                    flag: row.flag.clone(),
+                    memo: row.memo.clone(),
+                },
+            );
+        }
+    }
+    if updated_flags != flags {
+        save_flags(&flags_path, &updated_flags).map_err(AppError::from)?;
+    }
+
     println!(
         "[debug] load_project id={} total_rows={} initial_rows={}",
         meta.id,
@@ -874,8 +891,21 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     let mut matches: Vec<RowCandidate> = Vec::new();
 
     for row_idx in 0..df.height() {
-        let mut matches_search = search_value.is_none();
+        // まずフラグフィルタを適用して高コストな検索を避ける
+        let flag_entry = flags.get(&row_idx);
+        let normalized_flag = flag_entry
+            .as_ref()
+            .map(|entry| normalize_flag_value(&entry.flag))
+            .unwrap_or_default();
 
+        if let Some(filter) = &flag_filter {
+            if !matches_flag_filter(normalized_flag.as_str(), filter) {
+                continue;
+            }
+        }
+
+        // 次に検索語句フィルタ
+        let mut matches_search = search_value.is_none();
         if let Some(search_lower) = &search_value {
             if !search_columns.is_empty() {
                 for column in &search_columns {
@@ -894,18 +924,6 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
                     continue;
                 }
             } else if !matches_search {
-                continue;
-            }
-        }
-
-        let flag_entry = flags.get(&row_idx);
-        let normalized_flag = flag_entry
-            .as_ref()
-            .map(|entry| normalize_flag_value(&entry.flag))
-            .unwrap_or_default();
-
-        if let Some(filter) = &flag_filter {
-            if !matches_flag_filter(normalized_flag.as_str(), filter) {
                 continue;
             }
         }
@@ -969,6 +987,23 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     }
 
     apply_iocs_to_rows(&mut rows, &iocs);
+
+    // Save IOC-applied flags to flags.json
+    let mut updated_flags = flags.clone();
+    for row in &rows {
+        if !row.flag.trim().is_empty() {
+            updated_flags.insert(
+                row.row_index,
+                FlagEntry {
+                    flag: row.flag.clone(),
+                    memo: row.memo.clone(),
+                },
+            );
+        }
+    }
+    if updated_flags != flags {
+        save_flags(&flags_path, &updated_flags).map_err(AppError::from)?;
+    }
 
     println!(
         "[debug] query_project_rows id={} offset={} limit={} rows={} total_rows={}",

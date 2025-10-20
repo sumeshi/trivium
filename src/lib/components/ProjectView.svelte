@@ -374,8 +374,7 @@
     const payload = {
       projectId: projectDetail.project.meta.id,
       search: filters.search.length > 0 ? filters.search : undefined,
-      flagFilter:
-        filters.flag === 'all' && filters.search.length === 0 ? undefined : filters.flag,
+      flagFilter: filters.flag,
       columns:
         filters.columns.length === projectDetail.columns.length
           ? undefined
@@ -437,7 +436,9 @@
     resetScroll: boolean,
     force: boolean
   ): Promise<void> => {
+    console.log('applyFilters called with:', filters, 'projectDetail:', !!projectDetail);
     if (!projectDetail) {
+      console.log('No projectDetail, returning early');
       return Promise.resolve();
     }
     const normalized: AppliedFilters = {

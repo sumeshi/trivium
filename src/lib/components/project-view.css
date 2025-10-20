@@ -7,7 +7,7 @@
   min-height: 0;
   min-width: 0;
   position: relative;
-  padding: 0 16px 16px;
+  padding: 0;
   gap: 16px;
 }
 
@@ -15,11 +15,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  margin: 0 -16px 16px;
+  margin: 0 0 16px;
   align-items: end;
-  position: sticky;
-  top: 0;
-  z-index: 39;
   padding: 12px 16px 16px;
   background: rgba(17, 17, 27, 0.9);
   backdrop-filter: blur(6px);
@@ -409,6 +406,11 @@ button.primary:disabled {
 .table-header-scroll {
   overflow-x: auto;
   overflow-y: hidden;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  height: auto !important;
+  min-height: 50px !important;
 }
 
 .table-header-scroll::-webkit-scrollbar {
@@ -422,7 +424,7 @@ button.primary:disabled {
 }
 
 .data-header {
-  display: grid;
+  display: grid !important;
   gap: 0;
   padding: 0;
   margin-bottom: 6px;
@@ -433,6 +435,10 @@ button.primary:disabled {
   letter-spacing: 0.08em;
   color: rgba(148, 163, 184, 0.85);
   border-radius: 12px 12px 0 0;
+  visibility: visible !important;
+  opacity: 1 !important;
+  height: auto !important;
+  min-height: 50px !important;
 }
 
 .data-header > * {
@@ -545,7 +551,7 @@ button.primary:disabled {
 }
 
 .data-header .sticky {
-  z-index: 12;
+  z-index: 10;
   background: rgba(17, 17, 27, 0.98);
   box-shadow: 4px 0 12px rgba(10, 10, 19, 0.32);
 }

@@ -13,6 +13,8 @@
     viewportHeight,
     scrollTop,
     tableWidth,
+    search,
+    flagFilter,
     ROW_HEIGHT,
     INDEX_COL_WIDTH,
     FLAG_COL_WIDTH,
@@ -48,6 +50,8 @@
   let isSyncingHeaderScroll = false;
   let isSyncingBodyScroll = false;
   let scrollTimeout: number | null = null;
+  let releaseHeaderSyncFrame: number | null = null;
+  let releaseBodySyncFrame: number | null = null;
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -208,7 +212,7 @@
 
 <section class="table-wrapper">
   <div class="meta">
-    <span>{loadedRowCount} / {$totalRows} rows</span>
+    <span>{$totalRows} rows</span>
     <span>{$flaggedCount} flagged</span>
   </div>
   {#if $totalRows === 0}
@@ -266,7 +270,7 @@
                 class:loading={!item.row}
                 style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;`}
               >
-                <div class="cell index sticky sticky-index">{item.position + 1}</div>
+                <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
                 <div class="cell flag sticky sticky-flag">
                   {#if item.row}
                     <div class="flag-buttons">
