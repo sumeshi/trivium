@@ -47,11 +47,11 @@ jobs:
         shell: bash
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Rename executable to Trivium-v${{ steps.version.outputs.version }}.exe
+      - name: Rename executable
         if: matrix.platform == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $src = "src-tauri/target/release/trivium-desktop.exe"
+          $src = "src-tauri/target/release/trivium.exe"
           $dst = "src-tauri/target/release/Trivium-v${{ steps.version.outputs.version }}.exe"
           if (Test-Path $src) {
             Move-Item -Force $src $dst
