@@ -56,7 +56,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trivium-${{ matrix.platform }}
-          path: src-tauri/target/release/bundle/
+          path: |
+            src-tauri/target/release/**/*.exe
           retention-days: 30
 
   release:
