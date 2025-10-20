@@ -13,7 +13,7 @@ jobs:
           - os: windows-latest
             platform: x86_64-pc-windows-msvc
           - os: ubuntu-latest
-            platform: x86_64-unknown-linux-musl
+            platform: x86_64-unknown-linux-gnu
 
     runs-on: ${{ matrix.os }}
 
@@ -35,11 +35,16 @@ jobs:
         with:
           targets: ${{ matrix.platform }}
 
-      - name: Install musl tools (Linux only)
-        if: matrix.platform == 'x86_64-unknown-linux-musl'
+      - name: Install Linux deps for Tauri (GTK/WebKit2GTK)
+        if: matrix.platform == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
@@ -83,8 +88,8 @@ jobs:
           files: |
             artifacts/trivium-x86_64-pc-windows-msvc/**/*.exe
             artifacts/trivium-x86_64-pc-windows-msvc/**/*.msi
-            artifacts/trivium-x86_64-unknown-linux-musl/**/*.AppImage
-            artifacts/trivium-x86_64-unknown-linux-musl/**/*.deb
+            artifacts/trivium-x86_64-unknown-linux-gnu/**/*.AppImage
+            artifacts/trivium-x86_64-unknown-linux-gnu/**/*.deb
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
