@@ -59,7 +59,13 @@
   });
 
   const addIocEntry = async () => {
-    iocDraft.update((d: IocEntry[]) => [...d, { flag: 'critical', tag: '', query: '' }]);
+    const newEntry = { 
+      id: crypto.randomUUID(), 
+      flag: 'critical', 
+      tag: '', 
+      query: '' 
+    };
+    iocDraft.update((d: IocEntry[]) => [...d, newEntry]);
     
     // 新しいルールのTagフィールドにフォーカス
     await tick();
@@ -231,14 +237,23 @@
         <h3>IOC Rules</h3>
       </div>
       <div class="ioc-controls">
-        <button type="button" class="ghost" on:click={addIocEntry}>
+        <button type="button" class="ghost" on:click={(event) => {
+          event.stopPropagation();
+          addIocEntry();
+        }}>
           Add rule
         </button>
         <div class="ioc-spacer" />
-        <button type="button" class="ghost" on:click={importIocEntries} disabled={isSavingIocs}>
+        <button type="button" class="ghost" on:click={(event) => {
+          event.stopPropagation();
+          importIocEntries();
+        }} disabled={isSavingIocs}>
           Import…
         </button>
-        <button type="button" class="ghost" on:click={exportIocEntries} disabled={isSavingIocs}>
+        <button type="button" class="ghost" on:click={(event) => {
+          event.stopPropagation();
+          exportIocEntries();
+        }} disabled={isSavingIocs}>
           Export…
         </button>
       </div>
@@ -252,7 +267,7 @@
         {#if $iocDraft.length === 0}
           <p class="ioc-empty">No IOC rules configured.</p>
         {:else}
-          {#each $iocDraft as entry, index (index)}
+          {#each $iocDraft as entry, index (entry.id || `entry-${index}`)}
             <div class="ioc-row">
               <select
                 bind:value={entry.flag}
@@ -278,7 +293,10 @@
               <button
                 type="button"
                 class="ghost danger"
-                on:click={() => removeIocEntry(index)}
+                on:click={(event) => {
+                  event.stopPropagation();
+                  removeIocEntry(index);
+                }}
                 disabled={isSavingIocs}
               >
                 Delete
@@ -291,10 +309,16 @@
         <p class="memo-error">{iocError}</p>
       {/if}
       <div class="ioc-footer">
-        <button type="button" class="ghost" on:click={closeIocManager} disabled={isSavingIocs}>
+        <button type="button" class="ghost" on:click={(event) => {
+          event.stopPropagation();
+          closeIocManager();
+        }} disabled={isSavingIocs}>
           Cancel
         </button>
-        <button type="button" class="primary" on:click={saveIocEntries} disabled={isSavingIocs}>
+        <button type="button" class="primary" on:click={(event) => {
+          event.stopPropagation();
+          saveIocEntries();
+        }} disabled={isSavingIocs}>
           {isSavingIocs ? 'Saving…' : 'Save'}
         </button>
       </div>

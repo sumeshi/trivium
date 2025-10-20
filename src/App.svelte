@@ -195,6 +195,8 @@ import { showToast } from './lib/utils/toast';
 
   const handleRefreshRequest = async () => {
     if (selectedProjectId) {
+      // Clear cache to force real reload from backend
+      projectCache.delete(selectedProjectId);
       await loadProjectDetail(selectedProjectId, true);
     }
     await loadProjects(true);

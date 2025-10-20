@@ -20,6 +20,7 @@ export interface ProjectRow {
 }
 
 export interface IocEntry {
+  id?: string;
   flag: string;
   tag: string;
   query: string;

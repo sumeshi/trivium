@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows release builds
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -481,7 +482,8 @@ fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
 
             let severity = normalize_flag_value(&entry.flag);
             let severity_rank_value = severity_rank(&severity);
-            if severity_rank_value > best_rank {
+            // If user already set a flag, keep it (user wins). Only apply IOC when no user flag.
+            if best_rank == 0 && severity_rank_value > best_rank {
                 best_rank = severity_rank_value;
                 if severity_rank_value > 0 {
                     best_flag = severity.clone();
@@ -501,7 +503,8 @@ fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
             }
         }
 
-        if best_rank > 0 {
+        // Persist the resolved flag into the row only if it was empty before
+        if severity_rank(&normalize_flag_value(&row.flag)) == 0 && best_rank > 0 {
             row.flag = best_flag.clone();
         }
         if memo_changed {
@@ -629,6 +632,47 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
         .finish()
         .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
 
+    // Import flags/memo from CSV if trivium-* columns are present
+    let mut imported_flags: HashMap<usize, FlagEntry> = HashMap::new();
+    let has_safe = df.get_column_names().iter().any(|c| c == &"trivium-safe");
+    let has_suspicious = df.get_column_names().iter().any(|c| c == &"trivium-suspicious");
+    let has_critical = df.get_column_names().iter().any(|c| c == &"trivium-critical");
+    let has_memo = df.get_column_names().iter().any(|c| c == &"trivium-memo");
+    if has_safe || has_suspicious || has_critical || has_memo {
+        let safe_col = if has_safe { df.column("trivium-safe").ok() } else { None };
+        let suspicious_col = if has_suspicious { df.column("trivium-suspicious").ok() } else { None };
+        let critical_col = if has_critical { df.column("trivium-critical").ok() } else { None };
+        let memo_col = if has_memo { df.column("trivium-memo").ok() } else { None };
+
+        let height = df.height();
+        for row_idx in 0..height {
+            let mut best_flag = String::new();
+            // priority: critical > suspicious > safe
+            if let Some(series) = critical_col.as_ref() {
+                if let Ok(v) = series.get(row_idx) { if let Some(text) = anyvalue_to_search_string(&v) { if text != "0" && !text.is_empty() { best_flag = "critical".to_string(); } } }
+            }
+            if best_flag.is_empty() {
+                if let Some(series) = suspicious_col.as_ref() {
+                    if let Ok(v) = series.get(row_idx) { if let Some(text) = anyvalue_to_search_string(&v) { if text != "0" && !text.is_empty() { best_flag = "suspicious".to_string(); } } }
+                }
+            }
+            if best_flag.is_empty() {
+                if let Some(series) = safe_col.as_ref() {
+                    if let Ok(v) = series.get(row_idx) { if let Some(text) = anyvalue_to_search_string(&v) { if text != "0" && !text.is_empty() { best_flag = "safe".to_string(); } } }
+                }
+            }
+            let memo_val = if let Some(series) = memo_col.as_ref() { series.get(row_idx).ok().and_then(|v| anyvalue_to_search_string(&v)) } else { None };
+            if !best_flag.is_empty() || memo_val.as_deref().map(|m| !m.trim().is_empty()).unwrap_or(false) {
+                imported_flags.insert(row_idx, FlagEntry { flag: best_flag, memo: memo_val.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()) });
+            }
+        }
+
+        // Drop trivium-* columns before persisting parquet
+        for name in &["trivium-safe", "trivium-suspicious", "trivium-critical", "trivium-memo"] {
+            if let Ok(next) = df.drop(name) { df = next; }
+        }
+    }
+
     let project_id = Uuid::new_v4();
     let project_dir = state.projects.project_dir(&project_id);
     fs::create_dir_all(&project_dir)
@@ -637,6 +681,15 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
 
     let parquet_path = project_dir.join("data.parquet");
     write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
+
+    // Persist imported flags if any
+    if !imported_flags.is_empty() {
+        let flags_path = state.projects.project_dir(&project_id).join("flags.json");
+        save_flags(&flags_path, &imported_flags).map_err(AppError::from)?;
+        // update flagged_records
+        let flagged_records = imported_flags.values().filter(|e| !e.flag.trim().is_empty()).count();
+        state.projects.update_flagged_records(&project_id, flagged_records).map_err(AppError::from)?;
+    }
 
     let project_name = source_path
         .file_name()
@@ -778,22 +831,7 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
     apply_iocs_to_rows(&mut initial_rows, &iocs);
 
-    // Save IOC-applied flags to flags.json
-    let mut updated_flags = flags.clone();
-    for row in &initial_rows {
-        if !row.flag.trim().is_empty() {
-            updated_flags.insert(
-                row.row_index,
-                FlagEntry {
-                    flag: row.flag.clone(),
-                    memo: row.memo.clone(),
-                },
-            );
-        }
-    }
-    if updated_flags != flags {
-        save_flags(&flags_path, &updated_flags).map_err(AppError::from)?;
-    }
+    // Note: Do NOT persist IOC-applied flags here; persistence happens only via explicit updates
 
     println!(
         "[debug] load_project id={} total_rows={} initial_rows={}",
@@ -988,22 +1026,7 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
 
     apply_iocs_to_rows(&mut rows, &iocs);
 
-    // Save IOC-applied flags to flags.json
-    let mut updated_flags = flags.clone();
-    for row in &rows {
-        if !row.flag.trim().is_empty() {
-            updated_flags.insert(
-                row.row_index,
-                FlagEntry {
-                    flag: row.flag.clone(),
-                    memo: row.memo.clone(),
-                },
-            );
-        }
-    }
-    if updated_flags != flags {
-        save_flags(&flags_path, &updated_flags).map_err(AppError::from)?;
-    }
+    // Note: Do NOT persist IOC-applied flags here; persistence happens only via explicit updates
 
     println!(
         "[debug] query_project_rows id={} offset={} limit={} rows={} total_rows={}",
@@ -1167,17 +1190,17 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let mut positive_flags: Vec<i32> = vec![0; df.height()];
-    let mut maybe_flags: Vec<i32> = vec![0; df.height()];
-    let mut negative_flags: Vec<i32> = vec![0; df.height()];
+    let mut safe_flags: Vec<i32> = vec![0; df.height()];
+    let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
+    let mut critical_flags: Vec<i32> = vec![0; df.height()];
     let mut memo_series: Vec<String> = vec![String::new(); df.height()];
     for (index, entry) in flags {
         if index < memo_series.len() {
             let trimmed_flag = entry.flag.trim();
-            match trimmed_flag {
-                "◯" => positive_flags[index] = 1,
-                "?" => maybe_flags[index] = 1,
-                "✗" => negative_flags[index] = 1,
+            match normalize_flag_value(trimmed_flag).as_str() {
+                "safe" => safe_flags[index] = 1,
+                "suspicious" => suspicious_flags[index] = 1,
+                "critical" => critical_flags[index] = 1,
                 _ => {}
             }
             memo_series[index] = entry.memo.unwrap_or_default();
@@ -1193,14 +1216,16 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     if let Ok(next) = df.drop("memo") {
         df = next;
     }
-    df.with_column(Series::new("trivium-positive", positive_flags))
-        .map_err(|e| AppError::Message(format!("failed to append positive flag column: {}", e)))?;
-    df.with_column(Series::new("trivium-maybe", maybe_flags))
-        .map_err(|e| AppError::Message(format!("failed to append maybe flag column: {}", e)))?;
-    df.with_column(Series::new("trivium-negative", negative_flags))
-        .map_err(|e| AppError::Message(format!("failed to append negative flag column: {}", e)))?;
-    df.with_column(Series::new("trivium-memo", memo_series))
-        .map_err(|e| AppError::Message(format!("failed to append memo column: {}", e)))?;
+    // Prepend columns at the front in order: trivium-safe, trivium-suspicious, trivium-critical, trivium-memo
+    let mut out_cols: Vec<Series> = Vec::new();
+    out_cols.push(Series::new("trivium-safe", safe_flags));
+    out_cols.push(Series::new("trivium-suspicious", suspicious_flags));
+    out_cols.push(Series::new("trivium-critical", critical_flags));
+    out_cols.push(Series::new("trivium-memo", memo_series));
+    for name in df.get_column_names() {
+        if let Ok(series) = df.column(name) { out_cols.push(series.clone()); }
+    }
+    df = DataFrame::new(out_cols).map_err(|e| AppError::Other(e.into()))?;
 
     let destination = PathBuf::from(payload.destination);
     if let Some(parent) = destination.parent() {

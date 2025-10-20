@@ -170,6 +170,7 @@
     currentProjectId.set(detail.project.meta.id);
     hiddenColumns.set(new Set(detail.hidden_columns ?? []));
     iocDraft.set(detail.iocs.map((entry) => ({
+      id: crypto.randomUUID(),
       flag: normalizeIocFlag(entry.flag),
       tag: entry.tag,
       query: entry.query
@@ -204,24 +205,15 @@
     sortDirection.set('asc');
     expandedCell.set(null);
 
-    const seededRows = detail.initial_rows?.map((row) => normalizeRow(row)) ?? [];
+    // Don't use seededRows from initial_rows as they may be stale
+    // Always fetch fresh data from backend to ensure flags and memos are current
     console.log('[debug] applyProjectDetail', {
       projectId: detail.project.meta.id,
-      seededRows: seededRows.length,
       totalRecords: detail.project.meta.total_records,
       columns: detail.columns.length,
     });
-    const seededCache = new Map<number, CachedRow>();
-    for (const row of seededRows) {
-      seededCache.set(row.row_index, row);
-    }
-    rowsCache.set(seededCache);
-    if (seededRows.length > 0) {
-      updateColumnWidthsFromRows(seededRows);
-    }
-    loadedPages.set(seededRows.length > 0 ? new Set([0]) : new Set());
-    pendingPages.set(new Set());
-    totalRows.set(detail.project.meta.total_records ?? seededRows.length);
+    
+    totalRows.set(detail.project.meta.total_records);
     totalFlagged.set(detail.project.flagged_records);
     flaggedCount.set($totalFlagged);
     scrollTop.set(0);
@@ -233,10 +225,9 @@
       $headerScrollEl.scrollLeft = 0;
     }
     initialized = true;
-    if (seededRows.length === 0) {
-      console.log('[debug] applyProjectDetail request first page');
-      void requestPage(0, true);
-    }
+    // Always request first page to ensure flags and memos are reflected after project reload
+    console.log('[debug] applyProjectDetail request first page');
+    void requestPage(0, true);
   };
 
   $: if (projectDetail) {
@@ -544,25 +535,6 @@
     flagMenuOpen = false;
   };
 
-  const toggleSort = (column: string) => {
-    if ($sortKey === column) {
-      if ($sortDirection === 'asc') {
-        sortDirection.set('desc');
-      } else {
-        sortKey.set(null);
-        sortDirection.set('asc');
-      }
-    } else {
-      sortKey.set(column);
-      sortDirection.set('asc');
-    }
-    const filters: AppliedFilters = {
-      search: activeFilters.search,
-      flag: activeFilters.flag,
-      columns: [...activeFilters.columns],
-    };
-    void applyFilters(filters, false, true);
-  };
 
   const openCell = (column: string, value: string) => {
     expandedCell.set({ column, value });
@@ -673,6 +645,7 @@
       return;
     }
     iocDraft.set(projectDetail.iocs.map((entry) => ({
+      id: crypto.randomUUID(),
       flag: normalizeIocFlag(entry.flag),
       tag: entry.tag,
       query: entry.query
@@ -1165,11 +1138,22 @@
     if ($bodyScrollEl) {
       tableWidth.set($bodyScrollEl.clientWidth);
     }
+    const handleSortChanged = (event: CustomEvent) => {
+      const filters: AppliedFilters = {
+        search: activeFilters.search,
+        flag: activeFilters.flag,
+        columns: [...activeFilters.columns],
+      };
+      void applyFilters(filters, false, true);
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
+    document.addEventListener('sortChanged', handleSortChanged as EventListener);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('sortChanged', handleSortChanged as EventListener);
       if (resizeObserver && observedScrollEl) {
         resizeObserver.unobserve(observedScrollEl);
       }

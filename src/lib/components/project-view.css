@@ -284,7 +284,7 @@ button.primary:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   transition: border 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
@@ -307,13 +307,13 @@ button.primary:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   background: rgba(99, 102, 241, 0.15);
   color: rgba(196, 205, 255, 0.95);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.8rem;
 }
 
 .flag-menu {

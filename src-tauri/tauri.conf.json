@@ -32,6 +32,9 @@
     },
     "bundle": {
       "identifier": "com.trivium.app",
+      "icon": [
+        "icons/icon.ico"
+      ],
       "windows": {
         "webviewInstallMode": {
           "type": "downloadBootstrapper",

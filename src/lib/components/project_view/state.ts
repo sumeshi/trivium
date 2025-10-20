@@ -262,18 +262,31 @@ export const parseIocCsvText = (content: string): IocEntry[] => {
 };
 
 export const toggleSort = (column: string) => {
-  sortKey.update((current) => {
-    if (current === column) {
-      sortDirection.update((dir) => (dir === "asc" ? "desc" : "asc"));
-      if (get(sortDirection) === "asc") {
-        return null;
-      }
-      return current;
+  if (get(sortKey) === column) {
+    if (get(sortDirection) === "asc") {
+      sortDirection.set("desc");
     } else {
+      sortKey.set(null);
       sortDirection.set("asc");
-      return column;
     }
-  });
+  } else {
+    sortKey.set(column);
+    sortDirection.set("asc");
+  }
+
+  // Force refresh to apply new sort
+  const currentProjectDetail = get(projectDetail);
+  if (currentProjectDetail) {
+    // Trigger a refresh by dispatching a custom event
+    // This will be handled by ProjectView.svelte
+    const event = new CustomEvent("sortChanged", {
+      detail: {
+        sortKey: get(sortKey),
+        sortDirection: get(sortDirection),
+      },
+    });
+    document.dispatchEvent(event);
+  }
 };
 
 export const forceRefreshFilteredRows = (resetScroll: boolean) => {

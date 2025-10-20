@@ -61,6 +61,15 @@ Projects are stored in the OS-specific app data directory:
 - `trivium/projects/<uuid>/iocs.json` - IOC rules
 - `trivium/projects.json` - Project metadata
 
+## Windows Runtime Requirement (WebView2)
+
+Trivium uses Microsoft Edge WebView2 for its embedded web UI. On Windows, the WebView2 Runtime must be available on the machine.
+
+- If you use the installer (NSIS/MSI), the runtime is fetched automatically when missing.
+- If you run the standalone `Trivium.exe`, install WebView2 manually:
+  - Evergreen Bootstrapper or Standalone: https://developer.microsoft.com/en-us/microsoft-edge/webview2
+
+
 ## License
 
 MIT License - see [LICENSE](LICENSE).
