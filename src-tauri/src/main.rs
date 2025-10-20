@@ -1075,7 +1075,7 @@ fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(), Str
 }
 
 #[tauri::command]
-fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<(), String> {
+fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<Vec<IocEntry>, String> {
     let Some(meta) = state.projects.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()).into());
     };
@@ -1087,7 +1087,8 @@ fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<(),
     let mut entries = read_ioc_csv(&source).map_err(AppError::from)?;
     entries.sort_by(|a, b| a.tag.cmp(&b.tag));
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
-    Ok(())
+    let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    Ok(final_entries)
 }
 
 #[tauri::command]
@@ -1197,21 +1198,81 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     let mut df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
+    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
 
     let mut safe_flags: Vec<i32> = vec![0; df.height()];
     let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
     let mut critical_flags: Vec<i32> = vec![0; df.height()];
     let mut memo_series: Vec<String> = vec![String::new(); df.height()];
-    for (index, entry) in flags {
-        if index < memo_series.len() {
+
+    let column_names: Vec<String> = df.get_column_names().iter().map(|s| s.to_string()).collect();
+    let column_series: HashMap<&str, &Series> = df.get_columns().iter().map(|s| (s.name(), s)).collect();
+
+    for i in 0..df.height() {
+        if let Some(entry) = flags.get(&i) {
+            // User-set flag exists
             let trimmed_flag = entry.flag.trim();
             match normalize_flag_value(trimmed_flag).as_str() {
-                "safe" => safe_flags[index] = 1,
-                "suspicious" => suspicious_flags[index] = 1,
-                "critical" => critical_flags[index] = 1,
+                "safe" => safe_flags[i] = 1,
+                "suspicious" => suspicious_flags[i] = 1,
+                "critical" => critical_flags[i] = 1,
                 _ => {}
             }
-            memo_series[index] = entry.memo.unwrap_or_default();
+            memo_series[i] = entry.memo.clone().unwrap_or_default();
+        } else if !iocs.is_empty() {
+            // No user-set flag, check against IOCs
+            let mut best_flag = String::new();
+            let mut best_rank = 0;
+            let mut memo_tags = Vec::new();
+
+            for ioc_entry in &iocs {
+                let query = ioc_entry.query.trim();
+                if query.is_empty() {
+                    continue;
+                }
+                let query_lower = query.to_lowercase();
+                let mut row_matches = false;
+                for col_name in &column_names {
+                    if let Some(series) = column_series.get(col_name.as_str()) {
+                        if let Ok(value) = series.get(i) {
+                            if let Some(text) = anyvalue_to_search_string(&value) {
+                                if text.to_lowercase().contains(&query_lower) {
+                                    row_matches = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if row_matches {
+                    let severity = normalize_flag_value(&ioc_entry.flag);
+                    let severity_rank_value = severity_rank(&severity);
+                    if severity_rank_value > best_rank {
+                        best_rank = severity_rank_value;
+                        best_flag = severity.clone();
+                    }
+                    let tag = ioc_entry.tag.trim();
+                    if !tag.is_empty() {
+                        let token = format!("[{}]", tag);
+                        if !memo_tags.contains(&token) {
+                            memo_tags.push(token);
+                        }
+                    }
+                }
+            }
+
+            if best_rank > 0 {
+                match best_flag.as_str() {
+                    "safe" => safe_flags[i] = 1,
+                    "suspicious" => suspicious_flags[i] = 1,
+                    "critical" => critical_flags[i] = 1,
+                    _ => {}
+                }
+            }
+            if !memo_tags.is_empty() {
+                memo_series[i] = memo_tags.join(" ");
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { open, save } from '@tauri-apps/api/dialog';
+  import { writeFile } from '@tauri-apps/api/fs';
   import {
     iocManagerOpen,
     iocDraft,
@@ -8,6 +9,8 @@
     projectDetail,
     normalizeIocFlag,
     FLAG_OPTIONS,
+    buildIocCsv,
+    escapeCsvValue,
   } from './state';
   import type { IocEntry } from '../../types';
 
@@ -137,12 +140,17 @@
       }
       isSavingIocs = true;
       const path = Array.isArray(selected) ? selected[0] : selected;
-      await $backend.importIocs({
+      const newIocs = await $backend.importIocs({
         projectId: $projectDetail.project.meta.id,
         path
       });
+      // Directly update the stores with the new data from the backend
+      projectDetail.update(pd => ({ ...pd, iocs: newIocs }));
+      iocDraft.set(newIocs.map(entry => ({ ...entry, id: crypto.randomUUID() })));
+
       dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
       closeIocManager();
+      // Dispatch refresh to have the main view update its rows
       dispatch('refresh');
     } catch (error) {
       console.error(error);
@@ -156,6 +164,11 @@
   const exportIocEntries = async () => {
     if (!$projectDetail) return;
     try {
+      const sanitized = sanitizeIocEntries();
+      if (sanitized.length === 0) {
+        dispatch('notify', { message: 'No IOC rules to export.', tone: 'error' });
+        return;
+      }
       const destination = await save({
         filters: [{ name: 'IOC CSV', extensions: ['csv'] }],
         defaultPath: `${$projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`
@@ -163,10 +176,8 @@
       if (!destination) {
         return;
       }
-      await $backend.exportIocs({
-        projectId: $projectDetail.project.meta.id,
-        destination
-      });
+      const csv = buildIocCsv(sanitized);
+      await writeFile(destination, csv);
       dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
     } catch (error) {
       console.error(error);

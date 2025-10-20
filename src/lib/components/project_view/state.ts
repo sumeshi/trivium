@@ -175,6 +175,17 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   };
 }
 
+export const escapeCsvValue = (value: string): string =>
+  /[\",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+
+export const buildIocCsv = (entries: IocEntry[]) => {
+  const header = "flag,tag,query";
+  const rows = entries.map((entry) =>
+    [entry.flag, entry.tag, entry.query].map(escapeCsvValue).join(",")
+  );
+  return [header, ...rows].join("\n");
+};
+
 export const toggleSort = (column: string) => {
   if (get(sortKey) === column) {
     if (get(sortDirection) === "asc") {
