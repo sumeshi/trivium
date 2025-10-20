@@ -47,7 +47,7 @@ jobs:
         with:
           name: trivium-${{ matrix.platform }}
           path: |
-            src-tauri/target/release/**/*.exe
+            src-tauri/target/release/Trivium.exe
           retention-days: 30
 
   release:
@@ -74,7 +74,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           files: |
-            artifacts/**/*.exe
+            artifacts/Trivium.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
