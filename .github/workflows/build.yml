@@ -19,6 +19,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ensure Windows icon (placeholder)
+        if: matrix.platform == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/icons | Out-Null
+          choco install imagemagick -y --no-progress
+          magick -size 256x256 canvas:none src-tauri/icons/icon.ico
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
