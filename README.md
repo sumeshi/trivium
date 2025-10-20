@@ -1,75 +1,98 @@
 # Trivium
 
-A desktop application for analyzing CSV data with flagging, memo annotation, and IOC rule matching. Built with Tauri (Rust backend) and Svelte (frontend).
+A desktop application for reviewing and triaging large CSV files.
 
-![screenshot](screenshot.jpeg)
+![Trivium Screenshot](screenshot.jpeg)
 
-## Features
+## Introduction
 
-- **CSV Import**: Import CSV files and convert to Parquet for fast processing
-- **Flag System**: Mark rows as Safe (✓), Suspicious (?), or Critical (!)
-- **Memo Annotation**: Add notes to individual rows
-- **IOC Rules**: Define rules to automatically flag rows based on content matching
-- **Column Management**: Show/hide columns per project
-- **Filtering**: Filter by flag status, search text, or visible columns
-- **Export**: Export filtered data with flags and memos to CSV
+Trivium is a desktop tool designed to help you work with CSV files that are too large to handle comfortably in standard spreadsheet programs. It provides a simple, efficient interface for filtering data, flagging important rows, and adding notes.
 
-## Technology Stack
+Its core purpose is to make the process of manual data review and analysis faster and more manageable.
 
-- **Backend**: Rust with Tauri framework
-- **Data Processing**: Polars for CSV/Parquet operations
-- **Frontend**: Svelte with TypeScript
-- **UI**: Tailwind CSS
-- **Storage**: JSON files for metadata, Parquet for data
+## Download
 
-## Development
+Pre-built versions for Windows are available for download from the project's **[Releases](https://github.com/user/repo/releases)** page. *(Note: This is a placeholder link.)*
 
-### Prerequisites
+## Who is this for?
 
-- Node.js 18+
-- Rust toolchain (install via rustup)
+This tool is primarily for anyone who needs to sift through large amounts of tabular data, such as:
 
-### Setup
+- Security analysts reviewing logs or threat intelligence data.
+- Data analysts performing preliminary data cleaning and exploration.
+- Researchers categorizing and annotating datasets.
+
+## Key Features
+
+- **Efficient CSV Handling**: Imports large CSV files quickly by converting them into the efficient Parquet format.
+- **Virtualized Scrolling**: The interface remains fast and responsive, even with millions of rows.
+- **Flag Rows**: Mark any row as `Safe`, `Suspicious`, or `Critical` with a single click.
+- **Add Memos**: Annotate rows with detailed notes and observations.
+- **IOC Rules**: Define "Indicators of Compromise" (or any custom) rules to automatically flag rows and tag memos based on content, streamlining initial analysis.
+- **Filtering & Sorting**: Instantly filter the view by flag status, search for text across all columns, and sort data by any column.
+- **Column Management**: Toggle the visibility of columns to focus on the data that matters.
+- **Data Export**: Export your work—including all flags and memos—back to a CSV file for use in other tools.
+
+## Getting Started
+
+1.  **Import Data**: Launch the app and click "Import CSV" from the sidebar to create a new project.
+2.  **Review & Flag**: Use the table view to inspect your data. Use the flag buttons (`✓`, `?`, `!`) on each row to categorize them.
+3.  **Add Memos**: Click the memo icon to add detailed notes to any row.
+4.  **Use Filters**: Use the search bar and flag filter at the top to narrow down the data.
+5.  **Configure IOCs**: Open the "IOC Rules" manager to set up rules that automatically flag data for you.
+6.  **Export**: When you're done, click the "Export Project" button to save your work as a new CSV file.
+
+## Building from Source
+
+For developers who wish to build or modify the application.
+
+#### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18 or later)
+- [Rust](https://www.rust-lang.org/tools/install) toolchain
+- [Tauri CLI setup](https://tauri.app/v1/guides/getting-started/prerequisites)
+
+#### Development
+
+To run the application in development mode with hot-reloading:
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-### Build Commands
+*Note: `npm run dev` will run the Svelte frontend only, without the Rust backend.*
+
+#### Production Build
+
+To build the distributable application for your platform:
 
 ```bash
-npm run dev          # UI development only
-npm run tauri dev    # Full desktop app with hot reload
-npm run build        # Build UI bundle
-npm run tauri build  # Build distributable binary
-npm run lint         # Type checking
+npm install
+npm run tauri build
 ```
 
-## Project Structure
+## Windows System Requirement: WebView2
 
-- `src/` - Svelte frontend components
-- `src-tauri/src/` - Rust backend with Tauri commands
-- `src-tauri/Cargo.toml` - Rust dependencies including Polars
-- `package.json` - Node.js dependencies and scripts
+On Windows, Trivium uses the Microsoft Edge WebView2 runtime to display the user interface.
+If you are using the **portable executable** (`.exe`), you may need to install the WebView2 Runtime manually. You can download it from the [official Microsoft website](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+
+## Technology Stack
+
+- **Backend**: Rust with the Tauri framework
+- **Data Processing**: Polars for high-performance DataFrame operations (CSV/Parquet)
+- **Frontend**: Svelte with TypeScript
+- **UI**: Tailwind CSS
 
 ## Data Storage
 
-Projects are stored in the OS-specific app data directory:
-- `trivium/projects/<uuid>/data.parquet` - Converted CSV data
-- `trivium/projects/<uuid>/flags.json` - Row flags and memos
-- `trivium/projects/<uuid>/iocs.json` - IOC rules
-- `trivium/projects.json` - Project metadata
+Projects are stored in the standard application data directory for your operating system.
 
-## Windows Runtime Requirement (WebView2)
+- `trivium/projects/<uuid>/data.parquet` - The imported data in Parquet format.
+- `trivium/projects/<uuid>/flags.json` - Row flags and memos.
+- `trivium/projects/<uuid>/iocs.json` - IOC rules for the project.
+- `trivium/projects.json` - General metadata for all projects.
 
-Trivium uses Microsoft Edge WebView2 for its embedded web UI. On Windows, the WebView2 Runtime must be available on the machine.
+---
 
-- If you use the installer (NSIS/MSI), the runtime is fetched automatically when missing.
-- If you run the standalone `Trivium.exe`, install WebView2 manually:
-  - Evergreen Bootstrapper or Standalone: https://developer.microsoft.com/en-us/microsoft-edge/webview2
-
-
-## License
-
-MIT License - see [LICENSE](LICENSE).
+*Trivium is provided under the MIT License. See [LICENSE](LICENSE) for details.*

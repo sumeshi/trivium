@@ -1209,22 +1209,12 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
     let column_series: HashMap<&str, &Series> = df.get_columns().iter().map(|s| (s.name(), s)).collect();
 
     for i in 0..df.height() {
-        if let Some(entry) = flags.get(&i) {
-            // User-set flag exists
-            let trimmed_flag = entry.flag.trim();
-            match normalize_flag_value(trimmed_flag).as_str() {
-                "safe" => safe_flags[i] = 1,
-                "suspicious" => suspicious_flags[i] = 1,
-                "critical" => critical_flags[i] = 1,
-                _ => {}
-            }
-            memo_series[i] = entry.memo.clone().unwrap_or_default();
-        } else if !iocs.is_empty() {
-            // No user-set flag, check against IOCs
-            let mut best_flag = String::new();
-            let mut best_rank = 0;
-            let mut memo_tags = Vec::new();
+        // 1. Always check for IOC matches to get potential flag and memo tags.
+        let mut ioc_flag = String::new();
+        let mut ioc_rank = 0;
+        let mut memo_tags = Vec::new();
 
+        if !iocs.is_empty() {
             for ioc_entry in &iocs {
                 let query = ioc_entry.query.trim();
                 if query.is_empty() {
@@ -1248,9 +1238,9 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
                 if row_matches {
                     let severity = normalize_flag_value(&ioc_entry.flag);
                     let severity_rank_value = severity_rank(&severity);
-                    if severity_rank_value > best_rank {
-                        best_rank = severity_rank_value;
-                        best_flag = severity.clone();
+                    if severity_rank_value > ioc_rank {
+                        ioc_rank = severity_rank_value;
+                        ioc_flag = severity.clone();
                     }
                     let tag = ioc_entry.tag.trim();
                     if !tag.is_empty() {
@@ -1261,19 +1251,40 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
                     }
                 }
             }
+        }
 
-            if best_rank > 0 {
-                match best_flag.as_str() {
-                    "safe" => safe_flags[i] = 1,
-                    "suspicious" => suspicious_flags[i] = 1,
-                    "critical" => critical_flags[i] = 1,
-                    _ => {}
+        // 2. Check for a user-set flag and determine final flag/memo.
+        let final_flag: String;
+        let mut final_memo: String;
+
+        if let Some(user_entry) = flags.get(&i) {
+            // User flag exists. It wins for the flag value.
+            final_flag = normalize_flag_value(user_entry.flag.trim());
+            final_memo = user_entry.memo.clone().unwrap_or_default();
+        } else {
+            // No user flag. Use the IOC flag.
+            final_flag = ioc_flag;
+            final_memo = String::new();
+        }
+
+        // 3. Append IOC memo tags to the final memo, avoiding duplicates.
+        for tag in memo_tags {
+            if !final_memo.contains(&tag) {
+                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
+                    final_memo.push(' ');
                 }
-            }
-            if !memo_tags.is_empty() {
-                memo_series[i] = memo_tags.join(" ");
+                final_memo.push_str(&tag);
             }
         }
+
+        // 4. Populate the output vectors.
+        match final_flag.as_str() {
+            "safe" => safe_flags[i] = 1,
+            "suspicious" => suspicious_flags[i] = 1,
+            "critical" => critical_flags[i] = 1,
+            _ => {}
+        }
+        memo_series[i] = final_memo;
     }
 
     if let Ok(next) = df.drop("__rowid") {
