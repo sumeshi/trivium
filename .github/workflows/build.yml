@@ -42,6 +42,16 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+      - name: Rename executable to Trivium.exe
+        if: matrix.platform == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $src = "src-tauri/target/release/trivium-desktop.exe"
+          $dst = "src-tauri/target/release/Trivium.exe"
+          if (Test-Path $src) {
+            Move-Item -Force $src $dst
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -74,7 +84,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           files: |
-            artifacts/Trivium.exe
+            artifacts/**/Trivium.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
