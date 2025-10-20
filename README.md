@@ -1,79 +1,66 @@
 # Trivium
 
-A modern web application for log analysis. Import CSV files, flag important records, add memos, and filter/search through your logs efficiently.
+A desktop application for analyzing CSV data with flagging, memo annotation, and IOC rule matching. Built with Tauri (Rust backend) and Svelte (frontend).
 
-![Trivium Logo](frontend/public/logo.svg)
+![screenshot](screenshot.jpeg)
 
 ## Features
 
-![Trivium ScreenShot](screenshot.png)
+- **CSV Import**: Import CSV files and convert to Parquet for fast processing
+- **Flag System**: Mark rows as Safe (✓), Suspicious (?), or Critical (!)
+- **Memo Annotation**: Add notes to individual rows
+- **IOC Rules**: Define rules to automatically flag rows based on content matching
+- **Column Management**: Show/hide columns per project
+- **Filtering**: Filter by flag status, search text, or visible columns
+- **Export**: Export filtered data with flags and memos to CSV
 
-- **CSV Import/Export** - Load any CSV file, analyze it, and export with your flags and memos
-- **Flag System** - Mark records with ◯ (OK), ? (Question), or ✗ (NG)
-- **Memos** - Add notes to individual records
-- **Search & Filter** - Real-time search and multi-flag filtering
-- **Column Management** - Show/hide columns, settings are saved automatically
-- **Sorting** - Click any column header to sort (handles dates, numbers, text intelligently)
-- **Projects** - Manage multiple log files with descriptions
-- **Dark Theme** - Catppuccin Frappé color scheme
+## Technology Stack
 
-## Quick Start
+- **Backend**: Rust with Tauri framework
+- **Data Processing**: Polars for CSV/Parquet operations
+- **Frontend**: Svelte with TypeScript
+- **UI**: Tailwind CSS
+- **Storage**: JSON files for metadata, Parquet for data
 
-### Using Docker (Recommended)
+## Development
+
+### Prerequisites
+
+- Node.js 18+
+- Rust toolchain (install via rustup)
+
+### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/trivium.git
-cd trivium
-
-# Start with Docker Compose
-docker-compose up -d
-
-# Open http://localhost:3000 in your browser
-```
-
-### Manual Setup
-
-**Backend:**
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Frontend:**
-```bash
-cd frontend
 npm install
-npm start
+npm run tauri dev
 ```
 
-Open http://localhost:3000
+### Build Commands
 
-## Usage
+```bash
+npm run dev          # UI development only
+npm run tauri dev    # Full desktop app with hot reload
+npm run build        # Build UI bundle
+npm run tauri build  # Build distributable binary
+npm run lint         # Type checking
+```
 
-1. **Upload a CSV** - Click "Select CSV File" and upload
-2. **Flag Records** - Click ◯/?/✗ icons to mark important logs
-3. **Add Memos** - Click the comment icon to add notes
-4. **Filter** - Use "Flag Filter" to show only specific flags
-5. **Search** - Type in the search box to find logs
-6. **Export** - Click "Export" to download with all your flags and memos
+## Project Structure
 
-### Re-importing Exported Data
+- `src/` - Svelte frontend components
+- `src-tauri/src/` - Rust backend with Tauri commands
+- `src-tauri/Cargo.toml` - Rust dependencies including Polars
+- `package.json` - Node.js dependencies and scripts
 
-When you export and later re-import the CSV, all your flags and memos are automatically restored.
+## Data Storage
 
-## Tech Stack
-
-- **Backend**: FastAPI, SQLite, Pandas, Parquet
-- **Frontend**: React, TypeScript, Material-UI
+Projects are stored in the OS-specific app data directory:
+- `trivium/projects/<uuid>/data.parquet` - Converted CSV data
+- `trivium/projects/<uuid>/flags.json` - Row flags and memos
+- `trivium/projects/<uuid>/iocs.json` - IOC rules
+- `trivium/projects.json` - Project metadata
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
-
-## Acknowledgments
-
-Inspired by [Timesketch](https://timesketch.org/)
+MIT License - see [LICENSE](LICENSE).
