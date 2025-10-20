@@ -19,14 +19,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure Windows icon (placeholder)
-        if: matrix.platform == 'x86_64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path src-tauri/icons | Out-Null
-          choco install imagemagick -y --no-progress
-          magick -size 256x256 canvas:none src-tauri/icons/icon.ico
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,8 +32,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform }}
-
-      # No Linux deps needed; Windows-only matrix
 
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
@@ -84,8 +74,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
           files: |
-            artifacts/trivium-x86_64-pc-windows-msvc/**/*.exe
-            artifacts/trivium-x86_64-pc-windows-msvc/**/*.msi
+            artifacts/**/*.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
