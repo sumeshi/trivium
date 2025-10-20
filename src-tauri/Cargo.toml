@@ -10,10 +10,22 @@ parking_lot = "0.12"
 polars = { version = "0.40", features = ["lazy", "parquet", "serde", "fmt"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "1.5", features = [ "fs-remove-dir", "fs-read-file", "fs-create-dir", "shell-open", "fs-exists", "fs-write-file", "fs-remove-file", "dialog-open", "dialog-save", "path-all"] }
+tauri = { version = "1.5", default-features = false, features = [ "wry", "fs-remove-dir", "fs-read-file", "fs-create-dir", "shell-open", "fs-exists", "fs-write-file", "fs-remove-file", "dialog-open", "dialog-save", "path-all"] }
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 csv = "1"
 
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
+
+[profile.release]
+opt-level = "s"        # minimize size (use 3 for max performance)
+lto = "thin"           # link-time optimization for size/perf balance
+codegen-units = 1      # better optimization, slightly longer compile
+panic = "abort"        # smaller binary; no unwinding
+strip = true           # strip symbols in the final binary
+debug = false          # no debug info
+
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]

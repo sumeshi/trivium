@@ -188,7 +188,7 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(app: &tauri::App) -> Result<Self> {
+    fn new(app: &tauri::App<tauri::Wry>) -> Result<Self> {
         let base_dir = tauri::api::path::app_local_data_dir(&app.config())
             .context("failed to resolve app data dir")?
             .join("trivium");
@@ -1222,7 +1222,7 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
 }
 
 fn main() {
-    tauri::Builder::default()
+    tauri::Builder::new()
         .setup(|app| {
             let state = AppState::new(app)?;
             app.manage(state);
