@@ -12,6 +12,8 @@
 }
 
 .filters {
+  position: relative;
+  z-index: 15;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;

@@ -403,10 +403,18 @@ impl SortComparable {
                 left.cmp(&right.to_string())
             }
             (SortComparable::Number(left), SortComparable::Text(right)) => {
-                left.to_string().cmp(right)
+                if let Ok(right_num) = right.parse::<f64>() {
+                    left.partial_cmp(&right_num).unwrap_or(Ordering::Equal)
+                } else {
+                    Ordering::Less
+                }
             }
             (SortComparable::Text(left), SortComparable::Number(right)) => {
-                left.cmp(&right.to_string())
+                if let Ok(left_num) = left.parse::<f64>() {
+                    left_num.partial_cmp(right).unwrap_or(Ordering::Equal)
+                } else {
+                    Ordering::Greater
+                }
             }
         }
     }

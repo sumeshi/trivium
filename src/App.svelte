@@ -26,9 +26,7 @@ import { showToast } from './lib/utils/toast';
 
   let pendingDescription = '';
   let pendingFilePath: string | null = null;
-  let pendingFile: File | null = null;
   let pendingFileName = '';
-  let fileInput: HTMLInputElement | null = null;
   let canCreateProject = false;
 
   let sidebarOpen = false;
@@ -95,71 +93,40 @@ import { showToast } from './lib/utils/toast';
   };
 
   const pickCsv = async () => {
-    if (backend.isNative) {
-      try {
-        const selected = await open({
-          multiple: false,
-          filters: [{ name: 'CSV Files', extensions: ['csv'] }]
-        });
-        if (!selected || Array.isArray(selected)) {
-          return;
-        }
-        pendingFilePath = selected;
-        pendingFile = null;
-        const pathParts = selected.split(/[/\\]/);
-        pendingFileName = pathParts[pathParts.length - 1] ?? 'selected.csv';
-      } catch (error) {
-        console.error(error);
-        showToast('Failed to open file picker.', 'error');
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+      });
+      if (!selected || Array.isArray(selected)) {
+        return;
       }
-    } else if (fileInput) {
-      fileInput.value = '';
-      fileInput.click();
+      pendingFilePath = selected;
+      const pathParts = selected.split(/[/\\]/);
+      pendingFileName = pathParts[pathParts.length - 1] ?? 'selected.csv';
+    } catch (error) {
+      console.error(error);
+      showToast('Failed to open file picker.', 'error');
     }
-  };
-
-  const handleFileSelection = (event: Event) => {
-    const target = event.currentTarget as HTMLInputElement | null;
-    if (!target || !target.files || target.files.length === 0) {
-      return;
-    }
-    const file = target.files[0];
-    pendingFile = file;
-    pendingFilePath = null;
-    pendingFileName = file.name;
   };
 
   const resetPending = () => {
     pendingFilePath = null;
-    pendingFile = null;
     pendingFileName = '';
     pendingDescription = '';
-    if (fileInput) {
-      fileInput.value = '';
-    }
   };
 
   const createProject = async () => {
+    if (!pendingFilePath) {
+      showToast('Select a CSV file first.', 'error');
+      return;
+    }
     creating = true;
     try {
-      let summary: ProjectSummary;
-      if (backend.isNative) {
-        if (!pendingFilePath) {
-          throw new Error('Select a CSV file first.');
-        }
-        summary = await backend.createProject({
-          path: pendingFilePath,
-          description: pendingDescription || null
-        });
-      } else {
-        if (!pendingFile) {
-          throw new Error('Select a CSV file first.');
-        }
-        summary = await backend.createProject({
-          file: pendingFile,
-          description: pendingDescription || null
-        });
-      }
+      const summary = await backend.createProject({
+        path: pendingFilePath,
+        description: pendingDescription || null
+      });
       showToast(`Imported ${summary.meta.name}`);
       await loadProjects(true);
       await loadProjectDetail(summary.meta.id, true);
@@ -204,37 +171,34 @@ import { showToast } from './lib/utils/toast';
 
   const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
     if (!projectDetail || !selectedProjectId) return;
+
+    const newMeta = {
+      ...projectDetail.project.meta,
+      flagged_records: event.detail.flagged,
+      hidden_columns: event.detail.hiddenColumns,
+    };
+
     projectDetail = {
       ...projectDetail,
       project: {
-        ...projectDetail.project,
-        flagged_records: event.detail.flagged
+        meta: newMeta,
       },
       hidden_columns: event.detail.hiddenColumns
     };
+
     projects = projects.map((item) =>
       item.meta.id === selectedProjectId
-        ? {
-            ...item,
-            flagged_records: event.detail.flagged,
-            meta: {
-              ...item.meta,
-              hidden_columns: event.detail.hiddenColumns
-            }
-          }
+        ? { meta: newMeta }
         : item
     );
     projectCache.set(selectedProjectId, projectDetail);
   };
 
   onMount(() => {
-    if (!backend.isNative) {
-      console.info('Running without Tauri backend; using in-memory data store.');
-    }
     void loadProjects();
   });
 
-  $: canCreateProject = backend.isNative ? Boolean(pendingFilePath) : Boolean(pendingFile);
+  $: canCreateProject = Boolean(pendingFilePath);
 </script>
 
 <div class="min-h-screen bg-slate-950 text-slate-100">
@@ -253,18 +217,12 @@ import { showToast } from './lib/utils/toast';
       on:deleteProject={(e) => deleteProject(e.detail)}
       on:pickCsv={pickCsv}
       on:createProject={createProject}
-      on:fileSelection={handleFileSelection}
       on:loadProjects={() => loadProjects()}
       on:close={() => (sidebarOpen = false)}
     />
   {/if}
 
   <main class="relative z-0 flex w-full flex-col px-4 pt-24 pb-4 sm:px-6" style="height: 100vh; overflow: hidden;">
-    {#if !backend.isNative}
-      <div class="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-        Web preview stores data in memory only. Use the Tauri desktop build to persist projects.
-      </div>
-    {/if}
     {#if selectedProjectId}
       {#if isLoadingDetail}
         <div class="flex flex-1 items-center justify-center text-slate-400">

@@ -175,92 +175,6 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   };
 }
 
-export const escapeCsvValue = (value: string): string =>
-  /[\",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-
-export const buildIocCsv = (entries: IocEntry[]) => {
-  const header = "flag,tag,query";
-  const rows = entries.map((entry) =>
-    [entry.flag, entry.tag, entry.query].map(escapeCsvValue).join(",")
-  );
-  return [header, ...rows].join("\n");
-};
-
-export const parseIocCsvRows = (content: string): string[][] => {
-  const rows: string[][] = [];
-  let currentRow: string[] = [];
-  let currentField = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < content.length; i += 1) {
-    const char = content[i];
-    const next = content[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        currentField += '"';
-        i += 1;
-        continue;
-      }
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      currentRow.push(currentField);
-      currentField = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") {
-        i += 1;
-      }
-      currentRow.push(currentField);
-      if (currentRow.some((cell) => cell.trim().length > 0)) {
-        rows.push([...currentRow]);
-      }
-      currentRow = [];
-      currentField = "";
-      continue;
-    }
-
-    currentField += char;
-  }
-
-  if (currentField.length > 0 || currentRow.length > 0) {
-    currentRow.push(currentField);
-    if (currentRow.some((cell) => cell.trim().length > 0)) {
-      rows.push([...currentRow]);
-    }
-  }
-
-  return rows;
-};
-
-export const parseIocCsvText = (content: string): IocEntry[] => {
-  const table = parseIocCsvRows(content);
-  if (!table.length) {
-    return [];
-  }
-  const [header, ...body] = table;
-  const firstCell = header[0]?.toLowerCase() ?? "";
-  const hasHeader = firstCell.includes("flag");
-  const records = hasHeader ? body : table;
-  const result: IocEntry[] = [];
-  for (const record of records) {
-    const [flagValue = "", tag = "", queryValue = ""] = record;
-    const normalizedQuery = queryValue.trim();
-    if (!normalizedQuery) continue;
-    result.push({
-      flag: normalizeIocFlag(flagValue),
-      tag: tag.trim(),
-      query: normalizedQuery,
-    });
-  }
-  return result;
-};
-
 export const toggleSort = (column: string) => {
   if (get(sortKey) === column) {
     if (get(sortDirection) === "asc") {
@@ -287,15 +201,6 @@ export const toggleSort = (column: string) => {
     });
     document.dispatchEvent(event);
   }
-};
-
-export const forceRefreshFilteredRows = (resetScroll: boolean) => {
-  if (!get(projectDetail)) return Promise.resolve();
-  // This is a bit of a hack, but it's the easiest way to force a refresh
-  // without rewriting a lot of the filtering logic.
-  const currentSortKey = get(sortKey);
-  sortKey.set(currentSortKey);
-  return Promise.resolve();
 };
 
 export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
@@ -338,11 +243,11 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
     });
 
     // フラグ付きカウントも元に戻す
-    const currentCache = get(rowsCache);
-    const newFlaggedCount = Array.from(currentCache.values()).filter(
+    const revertedCache = get(rowsCache);
+    const revertedFlaggedCount = Array.from(revertedCache.values()).filter(
       (r) => r.flag && r.flag.trim().length > 0
     ).length;
-    flaggedCount.set(newFlaggedCount);
+    flaggedCount.set(revertedFlaggedCount);
 
     // dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
   }

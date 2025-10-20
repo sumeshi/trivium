@@ -615,385 +615,6 @@
     }
   };
 
-  const copyExpandedCell = async () => {
-    if (!$expandedCell) return;
-    const text = $expandedCell.value ?? '';
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
-      dispatch('notify', { message: 'Copied cell value.', tone: 'success' });
-    } catch (error) {
-      console.error(error);
-      dispatch('notify', { message: 'Failed to copy cell value.', tone: 'error' });
-    }
-  };
-
-  const openIocManager = () => {
-    console.log('openIocManager called, projectDetail:', projectDetail);
-    if (!projectDetail) {
-      console.log('No projectDetail, returning early');
-      return;
-    }
-    iocDraft.set(projectDetail.iocs.map((entry) => ({
-      id: crypto.randomUUID(),
-      flag: normalizeIocFlag(entry.flag),
-      tag: entry.tag,
-      query: entry.query
-    })));
-    iocError = null;
-    isSavingIocs = false;
-    iocManagerOpen.set(true);
-    console.log('iocManagerOpen set to true');
-  };
-
-  const closeIocManager = () => {
-    iocManagerOpen.set(false);
-    iocError = null;
-    isSavingIocs = false;
-  };
-
-  const addIocEntry = () => {
-    iocDraft.update(d => [...d, { flag: 'critical', tag: '', query: '' }]);
-  };
-
-  const updateIocEntry = (index: number, field: keyof IocEntry, value: string) => {
-    iocDraft.update(d => d.map((entry, current) => {
-      if (current !== index) return entry;
-      if (field === 'flag') {
-        return { ...entry, flag: normalizeIocFlag(value) };
-      }
-      return { ...entry, [field]: value };
-    }));
-  };
-
-  const removeIocEntry = (index: number) => {
-    iocDraft.update(d => d.filter((_, current) => current !== index));
-  };
-
-  const handleIocFieldChange = (index: number, field: keyof IocEntry, event: Event) => {
-    const target = event.currentTarget as HTMLInputElement | HTMLSelectElement;
-    updateIocEntry(index, field, target.value);
-  };
-
-  const sanitizeIocEntries = (): IocEntry[] =>
-    $iocDraft
-      .map((entry) => ({
-        flag: normalizeIocFlag(entry.flag),
-        tag: entry.tag.trim(),
-        query: entry.query.trim()
-      }))
-      .filter((entry) => entry.query.length > 0)
-      .sort((a, b) => a.tag.localeCompare(b.tag));
-
-  const saveIocEntries = async () => {
-    if (!projectDetail) return;
-    isSavingIocs = true;
-    iocError = null;
-    try {
-      const sanitized = sanitizeIocEntries();
-      await backend.saveIocs({
-        projectId: projectDetail.project.meta.id,
-        entries: sanitized
-      });
-      dispatch('notify', { message: 'IOC rules updated.', tone: 'success' });
-      closeIocManager();
-      dispatch('refresh');
-    } catch (error) {
-      console.error(error);
-      iocError =
-        error instanceof Error ? error.message : 'Failed to save IOC rules.';
-    } finally {
-      isSavingIocs = false;
-    }
-  };
-
-  const importIocEntries = async () => {
-    if (!projectDetail) return;
-    iocError = null;
-    if (backend.isNative) {
-      try {
-        const selected = await open({
-          multiple: false,
-          filters: [{ name: 'IOC CSV', extensions: ['csv'] }]
-        });
-        if (!selected) {
-          return;
-        }
-        isSavingIocs = true;
-        const path = Array.isArray(selected) ? selected[0] : selected;
-        await backend.importIocs({
-          projectId: projectDetail.project.meta.id,
-          path
-        });
-        dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
-        closeIocManager();
-        dispatch('refresh');
-      } catch (error) {
-        console.error(error);
-        iocError =
-          error instanceof Error ? error.message : 'Failed to import IOC rules.';
-      } finally {
-        isSavingIocs = false;
-      }
-    } else if (iocImportInput) {
-      iocImportInput.value = '';
-      iocImportInput.click();
-    }
-  };
-
-  const escapeCsvValue = (value: string): string =>
-    /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-
-  const buildIocCsv = (entries: IocEntry[]) => {
-    const header = 'flag,tag,query';
-    const rows = entries.map((entry) =>
-      [entry.flag, entry.tag, entry.query].map(escapeCsvValue).join(',')
-    );
-    return [header, ...rows].join('\n');
-  };
-
-  const exportIocEntries = async () => {
-    if (!projectDetail) return;
-    try {
-      if (backend.isNative) {
-        const destination = await save({
-          filters: [{ name: 'IOC CSV', extensions: ['csv'] }],
-          defaultPath: `${projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`
-        });
-        if (!destination) {
-          return;
-        }
-        await backend.exportIocs({
-          projectId: projectDetail.project.meta.id,
-          destination
-        });
-      } else {
-        const csv = buildIocCsv(sanitizeIocEntries());
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `${projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
-      }
-      dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
-    } catch (error) {
-      console.error(error);
-      iocError =
-        error instanceof Error ? error.message : 'Failed to export IOC rules.';
-    }
-  };
-
-  const parseIocCsvRows = (content: string): string[][] => {
-    const rows: string[][] = [];
-    let currentRow: string[] = [];
-    let currentField = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < content.length; i += 1) {
-      const char = content[i];
-      const next = content[i + 1];
-
-      if (char === '"') {
-        if (inQuotes && next === '"') {
-          currentField += '"';
-          i += 1;
-          continue;
-        }
-        inQuotes = !inQuotes;
-        continue;
-      }
-
-      if (char === ',' && !inQuotes) {
-        currentRow.push(currentField);
-        currentField = '';
-        continue;
-      }
-
-      if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (char === '\r' && next === '\n') {
-          i += 1;
-        }
-        currentRow.push(currentField);
-        if (currentRow.some((cell) => cell.trim().length > 0)) {
-          rows.push([...currentRow]);
-        }
-        currentRow = [];
-        currentField = '';
-        continue;
-      }
-
-      currentField += char;
-    }
-
-    if (currentField.length > 0 || currentRow.length > 0) {
-      currentRow.push(currentField);
-      if (currentRow.some((cell) => cell.trim().length > 0)) {
-        rows.push([...currentRow]);
-      }
-    }
-
-    return rows;
-  };
-
-  const parseIocCsvText = (content: string): IocEntry[] => {
-    const table = parseIocCsvRows(content);
-    if (!table.length) {
-      return [];
-    }
-    const [header, ...body] = table;
-    const firstCell = header[0]?.toLowerCase() ?? '';
-    const hasHeader = firstCell.includes('flag');
-    const records = hasHeader ? body : table;
-    const result: IocEntry[] = [];
-    for (const record of records) {
-      const [flagValue = '', tag = '', queryValue = ''] = record;
-      const normalizedQuery = queryValue.trim();
-      if (!normalizedQuery) continue;
-      result.push({
-        flag: normalizeIocFlag(flagValue),
-        tag: tag.trim(),
-        query: normalizedQuery
-      });
-    }
-    return result;
-  };
-
-  const handleIocFileUpload = async (event: Event) => {
-    if (!projectDetail) return;
-    const target = event.currentTarget as HTMLInputElement | null;
-    const file = target?.files?.[0];
-    if (!file) return;
-    isSavingIocs = true;
-    try {
-      const text = await file.text();
-      const imported = parseIocCsvText(text);
-      if (!imported.length) {
-        iocError = 'No IOC entries found in selected file.';
-        return;
-      }
-      await backend.saveIocs({
-        projectId: projectDetail.project.meta.id,
-        entries: imported
-      });
-      dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
-      closeIocManager();
-      dispatch('refresh');
-    } catch (error) {
-      console.error(error);
-      iocError =
-        error instanceof Error ? error.message : 'Failed to import IOC rules.';
-    } finally {
-      if (iocImportInput) {
-        iocImportInput.value = '';
-      }
-      isSavingIocs = false;
-    }
-  };
-
-  const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
-    const currentFlag = normalizeFlag(row.flag);
-    const nextFlag = currentFlag === flag ? '' : flag;
-    try {
-      await backend.updateFlag({
-        projectId: projectDetail.project.meta.id,
-        rowIndex: row.row_index,
-        flag: nextFlag ?? '',
-        memo: row.memo && row.memo.trim().length ? row.memo : null
-      });
-      await forceRefreshFilteredRows(false);
-    } catch (error) {
-      console.error(error);
-      dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
-    }
-  };
-
-  const editMemo = (row: CachedRow) => {
-    openMemoEditor(row);
-  };
-
-  const toggleColumn = async (column: string) => {
-    const nextHidden = new Set($hiddenColumns);
-    if (nextHidden.has(column)) {
-      nextHidden.delete(column);
-    } else {
-      nextHidden.add(column);
-    }
-    hiddenColumns.set(nextHidden);
-    initializeColumnWidths();
-    const updatedColumns = getSearchableColumns();
-    const filters: AppliedFilters = {
-      search: $search.trim(),
-      flag: $flagFilter,
-      columns: updatedColumns,
-    };
-    lastSearchValue = filters.search;
-    lastFlagFilter = filters.flag;
-    lastColumnsSignature = updatedColumns.join('|');
-    void applyFilters(filters, false, true);
-    isUpdatingColumns.set(true);
-    try {
-      await backend.setHiddenColumns({
-        projectId: projectDetail.project.meta.id,
-        hiddenColumns: Array.from(nextHidden)
-      });
-      dispatch('notify', {
-        message: `${nextHidden.has(column) ? 'Hid' : 'Showing'} column ${column}`,
-        tone: 'success'
-      });
-    } catch (error) {
-      console.error(error);
-      dispatch('notify', { message: 'Failed to update column visibility.', tone: 'error' });
-      dispatch('refresh');
-    } finally {
-      isUpdatingColumns.set(false);
-    }
-  };
-
-  const exportProject = async () => {
-    isExporting.set(true);
-    try {
-      let destination: string | undefined;
-      if (backend.isNative) {
-        const baseName = projectDetail.project.meta.name || 'trivium-export.csv';
-        const stem = baseName.replace(/\.[^.]+$/, '');
-        const timestamp = formatTimestampForFilename(new Date());
-        const suggested = `${timestamp}_trivium_${stem}.csv`;
-        const selected = await save({
-          filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
-          defaultPath: suggested
-        });
-        if (!selected) {
-          return;
-        }
-        destination = selected;
-      }
-      await backend.exportProject({
-        projectId: projectDetail.project.meta.id,
-        destination
-      });
-      dispatch('notify', { message: 'Exported CSV with flags and memos.', tone: 'success' });
-    } catch (error) {
-      console.error(error);
-      dispatch('notify', { message: 'Failed to export CSV.', tone: 'error' });
-    } finally {
-      isExporting.set(false);
-    }
-  };
-
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
     scrollTop.set(target.scrollTop);
@@ -1103,6 +724,49 @@
       resetScroll,
       true
     );
+  };
+
+  const openIocManager = () => {
+    if (!projectDetail) {
+      return;
+    }
+    iocDraft.set(projectDetail.iocs.map((entry) => ({
+      id: crypto.randomUUID(),
+      flag: normalizeIocFlag(entry.flag),
+      tag: entry.tag,
+      query: entry.query
+    })));
+    iocError = null;
+    isSavingIocs = false;
+    iocManagerOpen.set(true);
+  };
+
+  const exportProject = async () => {
+    isExporting.set(true);
+    try {
+      const baseName = projectDetail.project.meta.name || 'trivium-export.csv';
+      const stem = baseName.replace(/\.[^.]+$/, '');
+      const timestamp = formatTimestampForFilename(new Date());
+      const suggested = `${timestamp}_trivium_${stem}.csv`;
+      const selected = await save({
+        filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
+        defaultPath: suggested
+      });
+      if (!selected) {
+        isExporting.set(false);
+        return;
+      }
+      await backend.exportProject({
+        projectId: projectDetail.project.meta.id,
+        destination: selected
+      });
+      dispatch('notify', { message: 'Exported CSV with flags and memos.', tone: 'success' });
+    } catch (error) {
+      console.error(error);
+      dispatch('notify', { message: 'Failed to export CSV.', tone: 'error' });
+    } finally {
+      isExporting.set(false);
+    }
   };
 
   onMount(() => {

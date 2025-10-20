@@ -8,9 +8,6 @@
     projectDetail,
     normalizeIocFlag,
     FLAG_OPTIONS,
-    escapeCsvValue,
-    buildIocCsv,
-    parseIocCsvText
   } from './state';
   import type { IocEntry } from '../../types';
 
@@ -18,7 +15,6 @@
 
   let iocError: string | null = null;
   let isSavingIocs = false;
-  let iocImportInput: HTMLInputElement | null = null;
   let dialogEl: HTMLDivElement | null = null;
 
   const closeIocManager = () => {
@@ -28,6 +24,7 @@
   };
 
   const handleClickOutside = (event: MouseEvent) => {
+    if (isSavingIocs) return;
     const target = event.target as HTMLElement;
     
     // IOC rulesボタンがクリックされた場合は閉じない
@@ -130,88 +127,19 @@
   const importIocEntries = async () => {
     if (!$projectDetail) return;
     iocError = null;
-    if ($backend.isNative) {
-      try {
-        const selected = await open({
-          multiple: false,
-          filters: [{ name: 'IOC CSV', extensions: ['csv'] }]
-        });
-        if (!selected) {
-          return;
-        }
-        isSavingIocs = true;
-        const path = Array.isArray(selected) ? selected[0] : selected;
-        await $backend.importIocs({
-          projectId: $projectDetail.project.meta.id,
-          path
-        });
-        dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
-        closeIocManager();
-        dispatch('refresh');
-      } catch (error) {
-        console.error(error);
-        iocError =
-          error instanceof Error ? error.message : 'Failed to import IOC rules.';
-      } finally {
-        isSavingIocs = false;
-      }
-    } else if (iocImportInput) {
-      iocImportInput.value = '';
-      iocImportInput.click();
-    }
-  };
-
-  const exportIocEntries = async () => {
-    if (!$projectDetail) return;
     try {
-      if ($backend.isNative) {
-        const destination = await save({
-          filters: [{ name: 'IOC CSV', extensions: ['csv'] }],
-          defaultPath: `${$projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`
-        });
-        if (!destination) {
-          return;
-        }
-        await $backend.exportIocs({
-          projectId: $projectDetail.project.meta.id,
-          destination
-        });
-      } else {
-        const csv = buildIocCsv(sanitizeIocEntries());
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `${$projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
-      }
-      dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
-    } catch (error) {
-      console.error(error);
-      iocError =
-        error instanceof Error ? error.message : 'Failed to export IOC rules.';
-    }
-  };
-
-  const handleIocFileUpload = async (event: Event) => {
-    if (!$projectDetail) return;
-    const target = event.currentTarget as HTMLInputElement | null;
-    const file = target?.files?.[0];
-    if (!file) return;
-    isSavingIocs = true;
-    try {
-      const text = await file.text();
-      const imported = parseIocCsvText(text);
-      if (!imported.length) {
-        iocError = 'No IOC entries found in selected file.';
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'IOC CSV', extensions: ['csv'] }]
+      });
+      if (!selected) {
         return;
       }
-      await $backend.saveIocs({
+      isSavingIocs = true;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      await $backend.importIocs({
         projectId: $projectDetail.project.meta.id,
-        entries: imported
+        path
       });
       dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
       closeIocManager();
@@ -221,10 +149,29 @@
       iocError =
         error instanceof Error ? error.message : 'Failed to import IOC rules.';
     } finally {
-      if (iocImportInput) {
-        iocImportInput.value = '';
-      }
       isSavingIocs = false;
+    }
+  };
+
+  const exportIocEntries = async () => {
+    if (!$projectDetail) return;
+    try {
+      const destination = await save({
+        filters: [{ name: 'IOC CSV', extensions: ['csv'] }],
+        defaultPath: `${$projectDetail.project.meta.name.replace(/\.[^.]+$/, '')}-iocs.csv`
+      });
+      if (!destination) {
+        return;
+      }
+      await $backend.exportIocs({
+        projectId: $projectDetail.project.meta.id,
+        destination
+      });
+      dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
+    } catch (error) {
+      console.error(error);
+      iocError =
+        error instanceof Error ? error.message : 'Failed to export IOC rules.';
     }
   };
 </script>
@@ -322,15 +269,6 @@
           {isSavingIocs ? 'Saving…' : 'Save'}
         </button>
       </div>
-      {#if !$backend.isNative}
-        <input
-          type="file"
-          accept=".csv"
-          class="hidden-input"
-          bind:this={iocImportInput}
-          on:change={handleIocFileUpload}
-        />
-      {/if}
     </div>
   </div>
 {/if}
