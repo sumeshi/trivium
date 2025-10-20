@@ -44,6 +44,7 @@ jobs:
 
       - name: Get version from package.json
         id: version
+        shell: bash
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Rename executable to Trivium-v${{ steps.version.outputs.version }}.exe
@@ -54,6 +55,10 @@ jobs:
           $dst = "src-tauri/target/release/Trivium-v${{ steps.version.outputs.version }}.exe"
           if (Test-Path $src) {
             Move-Item -Force $src $dst
+            Write-Host "Renamed $src to $dst"
+          } else {
+            Write-Error "Could not find the executable at $src"
+            exit 1
           }
 
       - name: Upload artifacts
@@ -80,6 +85,7 @@ jobs:
 
       - name: Get version from package.json
         id: version
+        shell: bash
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Create Release
