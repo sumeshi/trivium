@@ -228,7 +228,7 @@
     </span>
     <span>{$flaggedCount} flagged</span>
   </div>
-  {#if $totalRows === 0}
+  {#if effectiveTotalRows === 0}
     <div class="empty-rows">
       {$pendingPages.size > 0 ? 'Loading rows…' : 'No rows match your filters.'}
     </div>
