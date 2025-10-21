@@ -89,7 +89,13 @@ import { showToast } from './lib/utils/toast';
   };
 
   const handleSelectProject = async (projectId: string) => {
-    await loadProjectDetail(projectId);
+    // Force refresh semantics on project switch
+    projectCache.delete(projectId);
+    // Immediately show loading state and unmount previous view
+    isLoadingDetail = true;
+    selectedProjectId = projectId;
+    projectDetail = null;
+    await loadProjectDetail(projectId, true);
   };
 
   const pickCsv = async () => {

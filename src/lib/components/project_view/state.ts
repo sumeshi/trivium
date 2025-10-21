@@ -43,7 +43,6 @@ export const PAGE_SIZE = 250;
 export const PREFETCH_PAGES = 1;
 
 export type CachedRow = ProjectRow & {
-  stableId: string; // Assuming 'id' in data is the stable identifier
   memo: string;
   displayCache: Record<string, string>;
 };
@@ -171,20 +170,8 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
     const formatted = formatCell(value);
     displayCache[column] = formatted;
   }
-  // Assuming 'id' is the stable identifier within incoming.data
-  const stableId = String(incoming.data.id);
-  if (!stableId) {
-    console.warn(
-      "normalizeRow: Stable ID (incoming.data.id) not found or is empty for row_index:",
-      incoming.row_index
-    );
-    // Fallback to row_index if no stable ID, but this will be problematic
-    // For now, we'll throw an error to make the problem explicit if it occurs
-    throw new Error("Stable ID not found for row.");
-  }
   return {
     ...incoming,
-    stableId,
     flag: mapStoredFlag(incoming.flag) || "",
     memo: sanitizeMemoInput(incoming.memo ?? ""),
     displayCache,

@@ -107,14 +107,29 @@
   const buildVirtualRows = (
     start: number,
     end: number,
-    cache: Map<number, CachedRow>
+    cache: Map<number, CachedRow>,
+    posMap: Map<number, number>,
+    pendingPages: Set<number>
   ): VirtualRow[] => {
     if (end <= start) {
       return [];
     }
     const result: VirtualRow[] = [];
     // Use backend-provided ordering via positionToRowIndex map
-    const posMap = $positionToRowIndex;
+    
+    // If posMap is empty and we have pending pages, return loading state rows
+    // This handles project switching where we've reset posMap but first page is still loading
+    if (posMap.size === 0 && pendingPages.size > 0) {
+      console.log('[debug] buildVirtualRows: loading state (empty posMap + pending pages)');
+      for (let position = start; position < end; position += 1) {
+        result.push({ position, row: null });
+      }
+      return result;
+    }
+    
+    if (posMap.size === 0 && cache.size > 0) {
+      console.log('[debug] buildVirtualRows: empty posMap but cache has data, might be transitioning');
+    }
     for (let position = start; position < end; position += 1) {
       const rowIndex = posMap.get(position) ?? null;
       const row = rowIndex !== null ? cache.get(rowIndex) ?? null : null;
@@ -123,7 +138,7 @@
     return result;
   };
 
-  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache);
+  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex, $pendingPages);
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
@@ -228,9 +243,9 @@
     </span>
     <span>{$flaggedCount} flagged</span>
   </div>
-  {#if effectiveTotalRows === 0}
+  {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">
-      {$pendingPages.size > 0 ? 'Loading rows…' : 'No rows match your filters.'}
+      No rows match your filters.
     </div>
   {:else}
     <div class="table-scroll">
@@ -331,7 +346,13 @@
                     class="cell"
                     class:sticky={columnIndex === 0}
                     class:stickyData={columnIndex === 0}
-                    title={item.row ? cellValue : 'Loading…'}
+                    title={
+                      !item.row
+                        ? 'Loading…'
+                        : (item.row && !(column in item.row.displayCache))
+                          ? 'Loading…'
+                          : (cellValue || '—')
+                    }
                     on:click={() => {
                       if (!item.row) return;
                       _openCell(column, cellValue);
@@ -343,7 +364,13 @@
                     disabled={!item.row}
                   >
                     <span class="cell-text">
-                      {item.row ? (cellValue || '—') : 'Loading…'}
+                      {#if !item.row}
+                        Loading…
+                      {:else if !(column in item.row.displayCache)}
+                        Loading…
+                      {:else}
+                        {cellValue || '—'}
+                      {/if}
                     </span>
                   </button>
                 {/each}

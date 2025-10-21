@@ -196,6 +196,9 @@ impl ProjectsStore {
 
 struct AppState {
     projects: ProjectsStore,
+    // lightweight caches per project to avoid recomputation
+    searchable_cache: Mutex<HashMap<Uuid, Vec<String>>>,
+    ioc_flag_cache: Mutex<HashMap<Uuid, Vec<String>>>,
 }
 
 impl AppState {
@@ -206,7 +209,11 @@ impl AppState {
         fs::create_dir_all(&base_dir)
             .with_context(|| format!("failed to create app data dir {:?}", base_dir))?;
         let projects = ProjectsStore::new(base_dir)?;
-        Ok(Self { projects })
+        Ok(Self {
+            projects,
+            searchable_cache: Mutex::new(HashMap::new()),
+            ioc_flag_cache: Mutex::new(HashMap::new()),
+        })
     }
 }
 
@@ -778,6 +785,9 @@ fn delete_project(state: State<AppState>, request: ProjectRequest) -> Result<(),
             .map_err(AppError::from)?;
     }
     state.projects.remove(&meta.id).map_err(AppError::from)?;
+    // Invalidate caches for this project
+    state.searchable_cache.lock().remove(&request.project_id);
+    state.ioc_flag_cache.lock().remove(&request.project_id);
     Ok(())
 }
 
@@ -894,6 +904,83 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     let column_names: Vec<String> = columns.clone();
     let column_series: HashMap<&str, &Series> = df.get_columns().iter().map(|s| (s.name(), s)).collect();
 
+    // Build a concatenated lowercase searchable text per row once (targets: specified columns or all)
+    let search_cols: Vec<String> = payload
+        .columns
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| column_names.clone());
+    // cache or build searchable_text per project
+    let mut searchable_text: Vec<String> = if let Some(cached) = state.searchable_cache.lock().get(&meta.id).cloned() {
+        if cached.len() == df.height() { cached } else { vec![String::new(); df.height()] }
+    } else {
+        vec![String::new(); df.height()]
+    };
+    if searchable_text.iter().all(|s| s.is_empty()) {
+        for col in &search_cols {
+            if let Some(series) = column_series.get(col.as_str()) {
+                for i in 0..df.height() {
+                    if let Ok(value) = series.get(i) {
+                        if let Some(text) = anyvalue_to_search_string(&value) {
+                            let lower = text.to_lowercase();
+                            if !lower.is_empty() {
+                                if !searchable_text[i].is_empty() { searchable_text[i].push(' '); }
+                                searchable_text[i].push_str(&lower);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        state.searchable_cache.lock().insert(meta.id, searchable_text.clone());
+    }
+
+    // Precompute search mask: substring on the per-row concatenated text
+    let mut search_mask: Option<Vec<bool>> = None;
+    if let Some(search_str_raw) = payload.search.as_ref().map(|s| s.trim().to_string()) {
+        if !search_str_raw.is_empty() {
+            let search_lower = search_str_raw.to_lowercase();
+            let mut mask = vec![false; df.height()];
+            for i in 0..df.height() {
+                if !searchable_text[i].is_empty() && searchable_text[i].contains(&search_lower) {
+                    mask[i] = true;
+                }
+            }
+            search_mask = Some(mask);
+        }
+    }
+
+    // Vectorized IOC application: build user_flag and ioc_flag arrays once
+    let mut user_flag_vec: Vec<String> = vec![String::new(); df.height()];
+    for (idx, entry) in flags.iter() {
+        if *idx < df.height() {
+            user_flag_vec[*idx] = normalize_flag_value(&entry.flag);
+        }
+    }
+
+    // Initialize ioc_flag vector
+    let mut ioc_flag_vec: Vec<String> = if let Some(cached) = state.ioc_flag_cache.lock().get(&meta.id).cloned() {
+        if cached.len() == df.height() { cached } else { vec![String::new(); df.height()] }
+    } else { vec![String::new(); df.height()] };
+    // Sort IOC entries by severity descending so higher priority flags applied first
+    let mut sorted_iocs = iocs.clone();
+    sorted_iocs.sort_by_key(|e| std::cmp::Reverse(severity_rank(&normalize_flag_value(&e.flag))));
+    let need_rebuild_ioc = ioc_flag_vec.iter().all(|s| s.is_empty());
+    if need_rebuild_ioc {
+        for ioc_entry in &sorted_iocs {
+        let query = ioc_entry.query.trim();
+        if query.is_empty() { continue; }
+        let q = query.to_lowercase();
+        for i in 0..df.height() {
+            if !ioc_flag_vec[i].is_empty() || !user_flag_vec[i].is_empty() { continue; }
+            if !searchable_text[i].is_empty() && searchable_text[i].contains(&q) {
+                ioc_flag_vec[i] = normalize_flag_value(&ioc_entry.flag);
+            }
+        }
+        }
+        state.ioc_flag_cache.lock().insert(meta.id, ioc_flag_vec.clone());
+    }
+
     // Prepare ordered row indices; if sorting requested, sort indices by the sort column
     let mut ordered_indices: Vec<usize> = (0..df.height()).collect();
     if let Some(sort_key) = &payload.sort_key {
@@ -929,123 +1016,66 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
         }
     }
 
-    // First pass: apply IOCs and filter to all rows to count filtered totals
-    let mut filtered_rows_data: Vec<(usize, String, Option<String>, Vec<String>)> = Vec::new();
-    
-    for row_idx in &ordered_indices {
-        let flag_entry = flags.get(row_idx);
-        let user_flag = flag_entry
-            .as_ref()
-            .map(|entry| normalize_flag_value(&entry.flag))
-            .unwrap_or_default();
-        let user_memo = flag_entry.and_then(|entry| entry.memo.clone());
+    // Build final_flag for all rows (user wins)
+    let mut final_flag_vec: Vec<String> = Vec::with_capacity(df.height());
+    final_flag_vec.extend((0..df.height()).map(|i| {
+        if !user_flag_vec[i].is_empty() { user_flag_vec[i].clone() } else { ioc_flag_vec[i].clone() }
+    }));
 
-        let mut ioc_flag = String::new();
-        let mut ioc_rank = 0;
-        let mut memo_tags: Vec<String> = Vec::new();
-        if !iocs.is_empty() {
-            for ioc_entry in &iocs {
-                let query = ioc_entry.query.trim();
-                if query.is_empty() { continue; }
-                let query_lower = query.to_lowercase();
-
-                let mut row_matches = false;
-                for col_name in &column_names {
-                    if let Some(series) = column_series.get(col_name.as_str()) {
-                        if let Ok(value) = series.get(*row_idx) {
-                            if let Some(text) = anyvalue_to_search_string(&value) {
-                                if text.to_lowercase().contains(&query_lower) {
-                                    row_matches = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if row_matches {
-                    let severity = normalize_flag_value(&ioc_entry.flag);
-                    let severity_rank_value = severity_rank(&severity);
-                    if severity_rank_value > ioc_rank {
-                        ioc_rank = severity_rank_value;
-                        ioc_flag = severity.clone();
-                    }
-                    let tag = ioc_entry.tag.trim();
-                    if !tag.is_empty() {
-                        let token = format!("[{}]", tag);
-                        if !memo_tags.contains(&token) {
-                            memo_tags.push(token);
-                        }
-                    }
-                }
-            }
-        }
-
-        let final_flag = if !user_flag.is_empty() { user_flag.clone() } else { ioc_flag.clone() };
-
-        // Flag filter match
-        let matches_flag = if let Some(filter) = &payload.flag_filter {
-            matches_flag_filter(&final_flag, filter)
-        } else {
-            true
-        };
-
-        // Search filter match (case-insensitive). If payload.columns specified, search only those, else search all columns.
-        let matches_search = if let Some(search_str) = payload.search.as_ref().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()) {
-            let search_cols: Vec<String> = payload.columns.as_ref().cloned().unwrap_or_else(|| column_names.clone());
-            let mut found = false;
-            for col in &search_cols {
-                if let Some(series) = column_series.get(col.as_str()) {
-                    if let Ok(value) = series.get(*row_idx) {
-                        if let Some(text) = anyvalue_to_search_string(&value) {
-                            if text.to_lowercase().contains(&search_str) {
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            found
-        } else {
-            true
-        };
-
-        let matches = matches_flag && matches_search;
-
-        if matches {
-            if !final_flag.trim().is_empty() {
-                total_flagged_after_ioc += 1;
-            }
-            filtered_rows_data.push((*row_idx, final_flag, user_memo, memo_tags));
-        }
+    // Build filtered row indices using vectorized masks
+    let mut filtered_indices: Vec<usize> = Vec::with_capacity(df.height());
+    for &idx in &ordered_indices {
+        // Flag filter
+        let ff = &final_flag_vec[idx];
+        let flag_ok = if let Some(filter) = &payload.flag_filter { matches_flag_filter(ff, filter) } else { true };
+        if !flag_ok { continue; }
+        // Search filter (precomputed mask)
+        if let Some(mask) = &search_mask { if !mask[idx] { continue; } }
+        filtered_indices.push(idx);
     }
-
-    let total_filtered_rows = filtered_rows_data.len();
+    // Compute totals on filtered set
+    for &idx in &filtered_indices { if !final_flag_vec[idx].trim().is_empty() { total_flagged_after_ioc += 1; } }
+    let total_filtered_rows = filtered_indices.len();
 
     // Second pass: materialize only the requested page
-    for (row_idx, final_flag, user_memo, memo_tags) in filtered_rows_data.iter().skip(offset).take(limit) {
+    for &row_idx in filtered_indices.iter().skip(offset).take(limit) {
         let mut record = HashMap::new();
         for column in &column_names {
             if let Some(series) = column_series.get(column.as_str()) {
-                if let Ok(value) = series.get(*row_idx) {
+                if let Ok(value) = series.get(row_idx) {
                     record.insert(column.clone(), anyvalue_to_json(&value));
                 }
             }
         }
-        let mut final_memo = user_memo.clone().unwrap_or_default();
-        for tag in memo_tags {
-            if !final_memo.contains(tag) {
-                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
-                    final_memo.push(' ');
+        // Compose memo for page rows only (avoid full-scan earlier)
+        let user_memo = flags.get(&row_idx).and_then(|e| e.memo.clone()).unwrap_or_default();
+        let mut final_memo = user_memo;
+        if !iocs.is_empty() && final_flag_vec[row_idx] == ioc_flag_vec[row_idx] {
+            // only when IOC provides the flag (no user flag), collect memo tags
+            let mut memo_tags: Vec<String> = Vec::new();
+            for ioc_entry in &iocs {
+                let query = ioc_entry.query.trim();
+                if query.is_empty() { continue; }
+                let ql = query.to_lowercase();
+                if !searchable_text[row_idx].is_empty() && searchable_text[row_idx].contains(&ql) {
+                    let tag = ioc_entry.tag.trim();
+                    if !tag.is_empty() {
+                        let token = format!("[{}]", tag);
+                        if !memo_tags.contains(&token) { memo_tags.push(token); }
+                    }
                 }
-                final_memo.push_str(tag);
+            }
+            for tag in memo_tags {
+                if !final_memo.contains(&tag) {
+                    if !final_memo.is_empty() && !final_memo.ends_with(' ') { final_memo.push(' '); }
+                    final_memo.push_str(&tag);
+                }
             }
         }
         rows.push(ProjectRow {
-            row_index: *row_idx,
+            row_index: row_idx,
             data: record,
-            flag: final_flag.clone(),
+            flag: final_flag_vec[row_idx].clone(),
             memo: if final_memo.is_empty() { None } else { Some(final_memo) },
         });
     }
@@ -1080,7 +1110,10 @@ fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(), Str
     entries.sort_by(|a, b| a.tag.cmp(&b.tag));
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
     
-        // Update ioc_applied_records
+    // Invalidate IOC caches so they are recalculated on next query
+    state.ioc_flag_cache.lock().remove(&payload.project_id);
+    
+    // Update ioc_applied_records
     let ioc_applied_records = calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
     state.projects.update_ioc_applied_records(&payload.project_id, ioc_applied_records).map_err(AppError::from)?;
     
@@ -1101,7 +1134,10 @@ fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<Vec
     entries.sort_by(|a, b| a.tag.cmp(&b.tag));
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
     
-        // Update ioc_applied_records
+    // Invalidate IOC caches so they are recalculated on next query
+    state.ioc_flag_cache.lock().remove(&payload.project_id);
+    
+    // Update ioc_applied_records
     let ioc_applied_records = calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
     state.projects.update_ioc_applied_records(&payload.project_id, ioc_applied_records).map_err(AppError::from)?;
     
@@ -1202,6 +1238,8 @@ fn set_hidden_columns(state: State<AppState>, payload: HiddenColumnsPayload) -> 
         .projects
         .update_hidden_columns(&payload.project_id, payload.hidden_columns)
         .map_err(AppError::from)?;
+    // Invalidate searchable cache because visible columns changed and search text is built from columns
+    state.searchable_cache.lock().remove(&payload.project_id);
     Ok(())
 }
 

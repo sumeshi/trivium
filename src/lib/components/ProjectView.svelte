@@ -131,6 +131,7 @@
     `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}`;
 
   const resetPaginationState = () => {
+    console.log('[debug] resetPaginationState called');
     rowsCache.set(new Map());
     pendingPages.set(new Set());
     loadedPages.set(new Set());
@@ -226,8 +227,13 @@
     }
     initialized = true;
     // Always request first page to ensure flags and memos are reflected after project reload
-      console.log('[debug] applyProjectDetail request first page');
-      void requestPage(0, true);
+    // Wait for the first page to load before marking as ready to render
+    console.log('[debug] applyProjectDetail request first page');
+    requestPage(0, true).then(() => {
+      console.log('[debug] applyProjectDetail first page loaded');
+    }).catch((error) => {
+      console.error('[debug] applyProjectDetail first page failed:', error);
+    });
   };
 
   $: if (projectDetail) {
@@ -278,114 +284,17 @@
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: maxStart = Math.max(0, $totalRows - visibleCount);
+  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0)) ? $totalFilteredRows : $totalRows;
+  $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
     Math.max(0, Math.floor($scrollTop / ROW_HEIGHT) - BUFFER)
   );
-  $: endIndex = Math.min($totalRows, startIndex + visibleCount);
+  $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
   $: ensureRangeLoaded(startIndex, endIndex);
-  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache);
   $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = $totalRows * ROW_HEIGHT;
+  $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
   $: loadedRowCount = $rowsCache.size;
-
-  const buildVirtualRows = (
-    start: number,
-    end: number,
-    cache: Map<number, CachedRow>
-  ): VirtualRow[] => {
-    if (!projectDetail) return [];
-
-    let allVisibleRows: CachedRow[] = Array.from(cache.values());
-
-    // Apply search filter
-    const currentSearch = $search.trim().toLowerCase();
-    if (currentSearch) {
-      allVisibleRows = allVisibleRows.filter(row =>
-        $visibleColumns.some(column =>
-          row.displayCache[column]?.toLowerCase().includes(currentSearch)
-        )
-      );
-    }
-
-    // Apply flag filter
-    const currentFlagFilter = $flagFilter;
-    if (currentFlagFilter !== 'all') {
-      allVisibleRows = allVisibleRows.filter(row => {
-        const normalizedFlag = normalizeFlag(row.flag);
-        if (currentFlagFilter === 'none') {
-          return normalizedFlag === '';
-        } else if (currentFlagFilter === 'priority') {
-          return PRIORITY_FLAGS.includes(normalizedFlag as FlagSymbol);
-        } else {
-          return normalizedFlag === currentFlagFilter;
-        }
-      });
-    }
-
-    // Apply sorting
-    const currentSortKey = $sortKey;
-    const currentSortDirection = $sortDirection;
-    if (currentSortKey) {
-      allVisibleRows.sort((a, b) => {
-        const aValue = a.displayCache[currentSortKey] ?? '';
-        const bValue = b.displayCache[currentSortKey] ?? '';
-
-        let comparison = 0;
-        // Attempt numerical comparison first
-        const aNum = parseFloat(aValue);
-        const bNum = parseFloat(bValue);
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-          comparison = aNum - bNum;
-        } else {
-          comparison = aValue.localeCompare(bValue);
-        }
-
-        if (currentSortDirection === 'desc') {
-          comparison *= -1;
-        }
-        return comparison;
-      });
-    }
-
-    // Update total rows and flagged count based on frontend filtering
-    // Only overwrite totalFilteredRows when there is no flag filter applied
-    if ($flagFilter === 'all') {
-      totalFilteredRows.set(allVisibleRows.length);
-    }
-    // flaggedCount should reflect the rows currently visible in the frontend view
-    flaggedCount.set(allVisibleRows.filter(r => r.flag && r.flag.trim().length > 0).length);
-
-    // Apply pagination (virtual scrolling range)
-    const paginatedRows = allVisibleRows.slice(start, end);
-
-    const result: VirtualRow[] = [];
-    for (let i = 0; i < paginatedRows.length; i += 1) {
-      result.push({ position: start + i, row: paginatedRows[i] });
-    }
-    return result;
-  };
-
-  const updateColumnWidthsFromRows = (rows: CachedRow[]) => {
-    if (!rows.length) {
-      return;
-    }
-    const next = new Map(columnWidths);
-    for (const column of $visibleColumns) {
-      const current = next.get(column) ?? MIN_DATA_WIDTH;
-      let updated = current;
-      for (const row of rows) {
-        const value = row.displayCache[column] ?? '';
-        const estimated = Math.round(Math.min(value.length, WIDTH_LIMIT_CHARS) * CHAR_PIXEL + COLUMN_PADDING);
-        if (estimated > updated) {
-          updated = Math.min(estimated, MAX_DATA_WIDTH);
-        }
-      }
-      next.set(column, updated);
-    }
-    columnWidths = next;
-  };
 
   const ensureRangeLoaded = (start: number, end: number) => {
     if (!initialized || !projectDetail || end <= start) {
@@ -394,13 +303,14 @@
     const firstPage = Math.max(0, Math.floor(start / PAGE_SIZE) - PREFETCH_PAGES);
     const lastPosition = Math.max(start, end - 1);
     const lastPage = Math.max(firstPage, Math.floor(lastPosition / PAGE_SIZE) + PREFETCH_PAGES);
-    const maxPageIndex = Math.max(0, Math.floor(Math.max($totalRows - 1, 0) / PAGE_SIZE));
+    const maxPageIndex = Math.max(0, Math.floor(Math.max(effectiveTotalRows - 1, 0) / PAGE_SIZE));
     const clampedLastPage = Math.min(lastPage, maxPageIndex);
     console.log('[debug] ensureRangeLoaded', {
       start,
       end,
       firstPage,
       lastPage: clampedLastPage,
+      effectiveTotalRows,
       loadedPages: Array.from($loadedPages.values()),
       pendingPages: Array.from($pendingPages.values()),
     });
@@ -468,7 +378,6 @@
           totalRows: response.total_rows,
           offset: response.offset,
         });
-        updateColumnWidthsFromRows(normalizedRows);
         rowsCache.update((cache) => {
           const nextCache = new Map(cache);
           normalizedRows.forEach((row) => {
@@ -482,6 +391,7 @@
           normalizedRows.forEach((row, i) => {
             next.set(response.offset + i, row.row_index);
           });
+          console.log('[debug] positionToRowIndex updated, size:', next.size);
           return next;
         });
         const nextLoaded = new Set($loadedPages);

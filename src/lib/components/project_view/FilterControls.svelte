@@ -8,6 +8,7 @@
     isExporting,
     isUpdatingColumns,
     projectDetail,
+    backend,
     FLAG_FILTER_OPTIONS
   } from './state';
   import type { FlagFilterValue } from './state';
@@ -42,7 +43,7 @@
     flagMenuOpen = false;
   };
 
-  const toggleColumn = (column: string) => {
+  const toggleColumn = async (column: string) => {
     hiddenColumns.update(hidden => {
       const nextHidden = new Set(hidden);
       if (nextHidden.has(column)) {
@@ -52,6 +53,18 @@
       }
       return nextHidden;
     });
+    
+    // Save to backend
+    if ($backend && $projectDetail) {
+      try {
+        await $backend.setHiddenColumns({
+          projectId: $projectDetail.project.meta.id,
+          hiddenColumns: Array.from($hiddenColumns)
+        });
+      } catch (error) {
+        console.error('Failed to save hidden columns:', error);
+      }
+    }
   };
 
   const handleClickOutside = (event: MouseEvent) => {
