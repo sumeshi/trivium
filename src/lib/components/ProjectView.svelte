@@ -432,6 +432,8 @@
     const payload = {
       projectId: projectDetail.project.meta.id,
       flagFilter: flagFilterValue,
+      search: filters.search && filters.search.trim() ? filters.search.trim() : undefined,
+      columns: filters.columns && filters.columns.length > 0 ? filters.columns : undefined,
       offset,
       limit,
       sortKey: $sortKey ?? null,

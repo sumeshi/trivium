@@ -92,7 +92,8 @@
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: effectiveTotalRows = $flagFilter !== 'all' ? $totalFilteredRows : $totalRows;
+  // Use totalFilteredRows when any filter is active (search or flag), otherwise use totalRows
+  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0)) ? $totalFilteredRows : $totalRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
@@ -275,7 +276,7 @@
       >
         <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
           <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
-            {#each virtualRows as item (item.row ? item.row.row_index : item.position)}
+            {#each virtualRows as item (item.position)}
               <div
                 class="data-row"
                 class:alt-row={item.position % 2 === 1}

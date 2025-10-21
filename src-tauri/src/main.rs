@@ -722,6 +722,10 @@ struct QueryRowsPayload {
     project_id: Uuid,
     #[serde(rename = "flagFilter", default)]
     flag_filter: Option<String>,
+    #[serde(rename = "search", default)]
+    search: Option<String>,
+    #[serde(default)]
+    columns: Option<Vec<String>>,
     #[serde(default)]
     offset: Option<usize>,
     #[serde(default)]
@@ -979,11 +983,35 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
 
         let final_flag = if !user_flag.is_empty() { user_flag.clone() } else { ioc_flag.clone() };
 
-        let matches = if let Some(filter) = &payload.flag_filter {
+        // Flag filter match
+        let matches_flag = if let Some(filter) = &payload.flag_filter {
             matches_flag_filter(&final_flag, filter)
         } else {
             true
         };
+
+        // Search filter match (case-insensitive). If payload.columns specified, search only those, else search all columns.
+        let matches_search = if let Some(search_str) = payload.search.as_ref().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()) {
+            let search_cols: Vec<String> = payload.columns.as_ref().cloned().unwrap_or_else(|| column_names.clone());
+            let mut found = false;
+            for col in &search_cols {
+                if let Some(series) = column_series.get(col.as_str()) {
+                    if let Ok(value) = series.get(*row_idx) {
+                        if let Some(text) = anyvalue_to_search_string(&value) {
+                            if text.to_lowercase().contains(&search_str) {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            found
+        } else {
+            true
+        };
+
+        let matches = matches_flag && matches_search;
 
         if matches {
             if !final_flag.trim().is_empty() {
