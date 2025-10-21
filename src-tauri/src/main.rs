@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows release builds
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     fs::{self, File},
     io::BufWriter,
     path::{Path, PathBuf},
@@ -42,6 +42,8 @@ struct ProjectMeta {
     total_records: usize,
     #[serde(default)]
     flagged_records: usize,
+    #[serde(default)]
+    ioc_applied_records: usize,
     hidden_columns: Vec<String>,
 }
 
@@ -104,7 +106,7 @@ impl ProjectsStore {
             Vec::new()
         };
 
-        // 既存のプロジェクトデータを移行（flagged_recordsが0の場合は計算）
+        // Migrate existing project data (calculate if flagged_records is 0)
         let mut needs_save = false;
         for project in &mut projects {
             if project.flagged_records == 0 {
@@ -122,7 +124,7 @@ impl ProjectsStore {
             }
         }
         
-        // 移行したデータを保存
+        // Save migrated data
         if needs_save {
             let data = serde_json::to_vec_pretty(&projects)
                 .with_context(|| format!("failed to serialize metadata to {:?}", meta_path))?;
@@ -159,6 +161,14 @@ impl ProjectsStore {
         let mut guard = self.inner.lock();
         if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
             meta.flagged_records = flagged_records;
+        }
+        self.persist_locked(&guard)
+    }
+
+    fn update_ioc_applied_records(&self, id: &Uuid, ioc_applied_records: usize) -> Result<()> {
+        let mut guard = self.inner.lock();
+        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
+            meta.ioc_applied_records = ioc_applied_records;
         }
         self.persist_locked(&guard)
     }
@@ -331,94 +341,6 @@ fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
     }
 }
 
-#[derive(Clone)]
-struct RowCandidate {
-    row_index: usize,
-    flag: String,
-    memo: Option<String>,
-    sort_value: Option<SortComparable>,
-}
-
-#[derive(Clone, Debug)]
-enum SortComparable {
-    Null,
-    Bool(bool),
-    Number(f64),
-    Text(String),
-}
-
-impl SortComparable {
-    fn from_any_value(value: &AnyValue) -> Self {
-        match value {
-            AnyValue::Null => SortComparable::Null,
-            AnyValue::Boolean(v) => SortComparable::Bool(*v),
-            AnyValue::Int8(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::Int16(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::Int32(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::Int64(v) => SortComparable::Number(*v as f64),
-            AnyValue::UInt8(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::UInt16(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::UInt32(v) => SortComparable::Number(*v as f64),
-            AnyValue::UInt64(v) => SortComparable::Number(*v as f64),
-            AnyValue::Float32(v) => SortComparable::Number(f64::from(*v)),
-            AnyValue::Float64(v) => SortComparable::Number(*v),
-            AnyValue::String(v) => SortComparable::Text(v.to_string()),
-            AnyValue::StringOwned(v) => SortComparable::Text(v.to_string()),
-            AnyValue::Datetime(_, _, _) => SortComparable::Text(value.to_string()),
-            AnyValue::Date(_) => SortComparable::Text(value.to_string()),
-            AnyValue::Time(_) => SortComparable::Text(value.to_string()),
-            AnyValue::List(series) => {
-                let joined = series
-                    .iter()
-                    .filter_map(|inner| anyvalue_to_search_string(&inner))
-                    .collect::<Vec<String>>()
-                    .join(",");
-                SortComparable::Text(joined)
-            }
-            _ => SortComparable::Text(value.to_string()),
-        }
-    }
-
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering;
-        match (self, other) {
-            (SortComparable::Null, SortComparable::Null) => Ordering::Equal,
-            (SortComparable::Null, _) => Ordering::Greater,
-            (_, SortComparable::Null) => Ordering::Less,
-            (SortComparable::Bool(left), SortComparable::Bool(right)) => left.cmp(right),
-            (SortComparable::Number(left), SortComparable::Number(right)) => left
-                .partial_cmp(right)
-                .unwrap_or(Ordering::Equal),
-            (SortComparable::Text(left), SortComparable::Text(right)) => left.cmp(right),
-            (SortComparable::Bool(left), SortComparable::Number(right)) => {
-                (*left as i32 as f64).partial_cmp(right).unwrap_or(Ordering::Equal)
-            }
-            (SortComparable::Number(left), SortComparable::Bool(right)) => {
-                left.partial_cmp(&(*right as i32 as f64)).unwrap_or(Ordering::Equal)
-            }
-            (SortComparable::Bool(left), SortComparable::Text(right)) => {
-                left.to_string().cmp(right)
-            }
-            (SortComparable::Text(left), SortComparable::Bool(right)) => {
-                left.cmp(&right.to_string())
-            }
-            (SortComparable::Number(left), SortComparable::Text(right)) => {
-                if let Ok(right_num) = right.parse::<f64>() {
-                    left.partial_cmp(&right_num).unwrap_or(Ordering::Equal)
-                } else {
-                    Ordering::Less
-                }
-            }
-            (SortComparable::Text(left), SortComparable::Number(right)) => {
-                if let Ok(left_num) = left.parse::<f64>() {
-                    left_num.partial_cmp(right).unwrap_or(Ordering::Equal)
-                } else {
-                    Ordering::Greater
-                }
-            }
-        }
-    }
-}
 
 fn materialize_rows(
     df: &DataFrame,
@@ -469,6 +391,72 @@ fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
     })
 }
 
+fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
+    let parquet_path = project_dir.join("data.parquet");
+    let df = read_project_dataframe(&parquet_path)?;
+    let flags_path = project_dir.join("flags.json");
+    let flags = load_flags(&flags_path)?;
+    let iocs = load_ioc_entries(project_dir)?;
+    
+    let mut ioc_applied_count = 0;
+    for row_idx in 0..df.height() {
+        let flag_entry = flags.get(&row_idx);
+        let user_flag = flag_entry
+            .as_ref()
+            .map(|entry| normalize_flag_value(&entry.flag))
+            .unwrap_or_default();
+        
+        // Count IOC applications (only when no user flag exists)
+        if severity_rank(&user_flag) == 0 && !iocs.is_empty() {
+            let mut has_ioc_match = false;
+            
+            for entry in &iocs {
+                let query = entry.query.trim();
+                if query.is_empty() {
+                    continue;
+                }
+                
+                // Check if row matches IOC query
+                for column in df.get_column_names() {
+                    if column == "__rowid" {
+                        continue;
+                    }
+                    if let Ok(series) = df.column(column) {
+                        if let Ok(value) = series.get(row_idx) {
+                            if let Some(text) = anyvalue_to_search_string(&value) {
+                                if text.to_lowercase().contains(&query.to_lowercase()) {
+                                    has_ioc_match = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if has_ioc_match {
+                    break;
+                }
+            }
+            
+            if has_ioc_match {
+                ioc_applied_count += 1;
+            }
+        }
+    }
+    
+    Ok(ioc_applied_count)
+}
+
+fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
+    match filter {
+        "all" => true,
+        "none" => current_flag.is_empty(),
+        "priority" => current_flag == "suspicious" || current_flag == "critical",
+        "safe" | "suspicious" | "critical" => current_flag == filter,
+        _ => true,
+    }
+}
+
 fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
     if entries.is_empty() {
         return;
@@ -491,11 +479,9 @@ fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
             let severity = normalize_flag_value(&entry.flag);
             let severity_rank_value = severity_rank(&severity);
             // If user already set a flag, keep it (user wins). Only apply IOC when no user flag.
-            if best_rank == 0 && severity_rank_value > best_rank {
+            if best_rank == 0 && severity_rank_value > 0 {
                 best_rank = severity_rank_value;
-                if severity_rank_value > 0 {
-                    best_flag = severity.clone();
-                }
+                best_flag = severity.clone();
             }
 
             let tag = entry.tag.trim();
@@ -616,6 +602,7 @@ struct CreateProjectPayload {
 
 #[tauri::command]
 fn list_projects(state: State<AppState>) -> Result<Vec<ProjectSummary>, String> {
+    println!("[debug] list_projects called");
     let metas = state.projects.all();
     let mut result = Vec::with_capacity(metas.len());
     for meta in metas {
@@ -712,6 +699,7 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
         created_at: Utc::now(),
         total_records: df.height(),
         flagged_records: 0,
+        ioc_applied_records: 0,
         hidden_columns: Vec::new(),
     };
 
@@ -724,42 +712,43 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
 
 #[derive(Debug, Deserialize)]
 struct ProjectRequest {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
 struct QueryRowsPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
-    #[serde(default)]
-    search: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "flagFilter", default)]
     flag_filter: Option<String>,
-    #[serde(default)]
-    visible_columns: Option<Vec<String>>,
     #[serde(default)]
     offset: Option<usize>,
     #[serde(default)]
     limit: Option<usize>,
-    #[serde(default)]
+    #[serde(rename = "sortKey", default)]
     sort_key: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "sortDirection", default)]
     sort_direction: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SaveIocsPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     entries: Vec<IocEntry>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ImportIocsPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ExportIocsPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     destination: String,
 }
@@ -769,6 +758,7 @@ struct QueryRowsResponse {
     rows: Vec<ProjectRow>,
     total_flagged: usize,
     total_rows: usize,
+    total_filtered_rows: usize,
     offset: usize,
 }
 
@@ -818,7 +808,7 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
         })
         .collect();
 
-    // 全データを対象にして最大文字列長を計算
+    // Calculate maximum string length for all data
     for column in &columns {
         if let Ok(series) = df.column(column) {
             for value in series.iter() {
@@ -862,15 +852,6 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     })
 }
 
-fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
-    match filter {
-        "all" => true,
-        "none" => current_flag.is_empty(),
-        "priority" => current_flag == "suspicious" || current_flag == "critical",
-        "safe" | "suspicious" | "critical" => current_flag == filter,
-        _ => true,
-    }
-}
 
 #[tauri::command]
 fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Result<QueryRowsResponse, String> {
@@ -891,165 +872,164 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
         .filter(|name| name != &"__rowid")
         .map(|name| name.to_string())
         .collect();
-    let search_columns: Vec<String> = if let Some(visible) = payload.visible_columns.clone() {
-        let visible_set: HashSet<String> = visible.into_iter().collect();
-        columns
-            .iter()
-            .filter(|column| visible_set.contains(*column))
-            .cloned()
-            .collect()
-    } else {
-        columns.clone()
-    };
+    
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let search_value = payload
-        .search
-        .as_ref()
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty());
-    let flag_filter = payload
-        .flag_filter
-        .as_ref()
-        .map(|value| value.trim().to_lowercase());
 
     let offset = payload.offset.unwrap_or(0);
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
-    let sort_key = payload
-        .sort_key
-        .as_ref()
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty());
-    let sort_desc = payload
-        .sort_direction
-        .as_ref()
-        .map(|value| value.eq_ignore_ascii_case("desc"))
-        .unwrap_or(false);
 
-    let mut column_series: HashMap<&str, Series> = HashMap::with_capacity(columns.len());
-    for column in &columns {
-        if let Ok(series) = df.column(column) {
-            column_series.insert(column.as_str(), series.clone());
+    let total_rows_before_flag_filter = df.height();
+
+    // Stream rows: count filtered matches and only materialize page rows (IOC applied per-row)
+    let mut rows: Vec<ProjectRow> = Vec::with_capacity(limit);
+    let mut total_flagged_after_ioc: usize = 0;
+
+    // Precompute column names and a lookup for series to speed per-row checks
+    let column_names: Vec<String> = columns.clone();
+    let column_series: HashMap<&str, &Series> = df.get_columns().iter().map(|s| (s.name(), s)).collect();
+
+    // Prepare ordered row indices; if sorting requested, sort indices by the sort column
+    let mut ordered_indices: Vec<usize> = (0..df.height()).collect();
+    if let Some(sort_key) = &payload.sort_key {
+        if let Ok(series) = df.column(sort_key) {
+            // Use custom comparison logic with numeric parsing support
+            ordered_indices.sort_by(|a, b| {
+                // Get values as strings where possible and normalize
+                let a_s = series.get(*a).ok().and_then(|v| anyvalue_to_search_string(&v)).map(|s| s.trim().replace(",", "").replace('\u{00A0}', ""));
+                let b_s = series.get(*b).ok().and_then(|v| anyvalue_to_search_string(&v)).map(|s| s.trim().replace(",", "").replace('\u{00A0}', ""));
+
+                // Try numeric comparison when either side parses
+                let a_num = a_s.as_ref().and_then(|s| s.parse::<f64>().ok());
+                let b_num = b_s.as_ref().and_then(|s| s.parse::<f64>().ok());
+
+                if a_num.is_some() || b_num.is_some() {
+                    let av = a_num.unwrap_or(f64::INFINITY);
+                    let bv = b_num.unwrap_or(f64::INFINITY);
+                    let mut ord = av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal);
+                    if payload.sort_direction.as_deref() == Some("desc") { ord = ord.reverse(); }
+                    return ord;
+                }
+
+                // Fallback: case-insensitive string compare
+                let mut ord = match (&a_s, &b_s) {
+                    (Some(a_str), Some(b_str)) => a_str.to_lowercase().cmp(&b_str.to_lowercase()),
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (None, None) => std::cmp::Ordering::Equal,
+                };
+                if payload.sort_direction.as_deref() == Some("desc") { ord = ord.reverse(); }
+                ord
+            });
         }
     }
 
-    let mut matches: Vec<RowCandidate> = Vec::new();
-
-    for row_idx in 0..df.height() {
-        // まずフラグフィルタを適用して高コストな検索を避ける
-        let flag_entry = flags.get(&row_idx);
-        let normalized_flag = flag_entry
+    // First pass: apply IOCs and filter to all rows to count filtered totals
+    let mut filtered_rows_data: Vec<(usize, String, Option<String>, Vec<String>)> = Vec::new();
+    
+    for row_idx in &ordered_indices {
+        let flag_entry = flags.get(row_idx);
+        let user_flag = flag_entry
             .as_ref()
             .map(|entry| normalize_flag_value(&entry.flag))
             .unwrap_or_default();
+        let user_memo = flag_entry.and_then(|entry| entry.memo.clone());
 
-        if let Some(filter) = &flag_filter {
-            if !matches_flag_filter(normalized_flag.as_str(), filter) {
-                continue;
-            }
-        }
+        let mut ioc_flag = String::new();
+        let mut ioc_rank = 0;
+        let mut memo_tags: Vec<String> = Vec::new();
+        if !iocs.is_empty() {
+            for ioc_entry in &iocs {
+                let query = ioc_entry.query.trim();
+                if query.is_empty() { continue; }
+                let query_lower = query.to_lowercase();
 
-        // 次に検索語句フィルタ
-        let mut matches_search = search_value.is_none();
-        if let Some(search_lower) = &search_value {
-            if !search_columns.is_empty() {
-                for column in &search_columns {
-                    if let Some(series) = column_series.get(column.as_str()) {
-                        if let Ok(value) = series.get(row_idx) {
-                            if let Some(candidate) = anyvalue_to_search_string(&value) {
-                                if candidate.to_lowercase().contains(search_lower) {
-                                    matches_search = true;
+                let mut row_matches = false;
+                for col_name in &column_names {
+                    if let Some(series) = column_series.get(col_name.as_str()) {
+                        if let Ok(value) = series.get(*row_idx) {
+                            if let Some(text) = anyvalue_to_search_string(&value) {
+                                if text.to_lowercase().contains(&query_lower) {
+                                    row_matches = true;
                                     break;
                                 }
                             }
                         }
                     }
                 }
-                if !matches_search {
-                    continue;
+
+                if row_matches {
+                    let severity = normalize_flag_value(&ioc_entry.flag);
+                    let severity_rank_value = severity_rank(&severity);
+                    if severity_rank_value > ioc_rank {
+                        ioc_rank = severity_rank_value;
+                        ioc_flag = severity.clone();
+                    }
+                    let tag = ioc_entry.tag.trim();
+                    if !tag.is_empty() {
+                        let token = format!("[{}]", tag);
+                        if !memo_tags.contains(&token) {
+                            memo_tags.push(token);
+                        }
+                    }
                 }
-            } else if !matches_search {
-                continue;
             }
         }
 
-        let sort_value = sort_key
-            .as_ref()
-            .and_then(|key| column_series.get(key.as_str()))
-            .and_then(|series| series.get(row_idx).ok())
-            .map(|value| SortComparable::from_any_value(&value));
+        let final_flag = if !user_flag.is_empty() { user_flag.clone() } else { ioc_flag.clone() };
 
-        matches.push(RowCandidate {
-            row_index: row_idx,
-            flag: normalized_flag,
-            memo: flag_entry.and_then(|entry| entry.memo.clone()),
-            sort_value,
-        });
-    }
+        let matches = if let Some(filter) = &payload.flag_filter {
+            matches_flag_filter(&final_flag, filter)
+        } else {
+            true
+        };
 
-    if let Some(_) = sort_key {
-        matches.sort_by(|a, b| {
-            let ordering = match (&a.sort_value, &b.sort_value) {
-                (Some(left), Some(right)) => left.cmp(right),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.row_index.cmp(&b.row_index),
-            };
-            if sort_desc {
-                ordering.reverse()
-            } else {
-                ordering
+        if matches {
+            if !final_flag.trim().is_empty() {
+                total_flagged_after_ioc += 1;
             }
-        });
-    } else {
-        matches.sort_by(|a, b| a.row_index.cmp(&b.row_index));
+            filtered_rows_data.push((*row_idx, final_flag, user_memo, memo_tags));
+        }
     }
 
-    let total_rows = matches.len();
-    let total_flagged_all = matches
-        .iter()
-        .filter(|candidate| !candidate.flag.trim().is_empty())
-        .count();
-    let start = usize::min(offset, total_rows);
-    let end = usize::min(start + limit, total_rows);
+    let total_filtered_rows = filtered_rows_data.len();
 
-    let mut rows: Vec<ProjectRow> = Vec::with_capacity(end.saturating_sub(start));
-    for candidate in matches.into_iter().skip(start).take(limit) {
+    // Second pass: materialize only the requested page
+    for (row_idx, final_flag, user_memo, memo_tags) in filtered_rows_data.iter().skip(offset).take(limit) {
         let mut record = HashMap::new();
-        for column in &columns {
+        for column in &column_names {
             if let Some(series) = column_series.get(column.as_str()) {
-                if let Ok(value) = series.get(candidate.row_index) {
+                if let Ok(value) = series.get(*row_idx) {
                     record.insert(column.clone(), anyvalue_to_json(&value));
                 }
             }
         }
+        let mut final_memo = user_memo.clone().unwrap_or_default();
+        for tag in memo_tags {
+            if !final_memo.contains(tag) {
+                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
+                    final_memo.push(' ');
+                }
+                final_memo.push_str(tag);
+            }
+        }
         rows.push(ProjectRow {
-            row_index: candidate.row_index,
+            row_index: *row_idx,
             data: record,
-            flag: candidate.flag,
-            memo: candidate.memo,
+            flag: final_flag.clone(),
+            memo: if final_memo.is_empty() { None } else { Some(final_memo) },
         });
     }
 
-    apply_iocs_to_rows(&mut rows, &iocs);
-
-    // Note: Do NOT persist IOC-applied flags here; persistence happens only via explicit updates
-
-    println!(
-        "[debug] query_project_rows id={} offset={} limit={} rows={} total_rows={}",
-        meta.id,
-        start,
-        limit,
-        rows.len(),
-        total_rows
-    );
+    // (debug logs removed)
 
     Ok(QueryRowsResponse {
         rows,
-        total_flagged: total_flagged_all,
-        total_rows,
-        offset: start,
+        total_flagged: total_flagged_after_ioc,
+        total_rows: total_rows_before_flag_filter,
+        total_filtered_rows,
+        offset,
     })
 }
 
@@ -1071,6 +1051,11 @@ fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(), Str
         .collect();
     entries.sort_by(|a, b| a.tag.cmp(&b.tag));
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    
+        // Update ioc_applied_records
+    let ioc_applied_records = calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
+    state.projects.update_ioc_applied_records(&payload.project_id, ioc_applied_records).map_err(AppError::from)?;
+    
     Ok(())
 }
 
@@ -1087,6 +1072,11 @@ fn import_iocs(state: State<AppState>, payload: ImportIocsPayload) -> Result<Vec
     let mut entries = read_ioc_csv(&source).map_err(AppError::from)?;
     entries.sort_by(|a, b| a.tag.cmp(&b.tag));
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    
+        // Update ioc_applied_records
+    let ioc_applied_records = calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
+    state.projects.update_ioc_applied_records(&payload.project_id, ioc_applied_records).map_err(AppError::from)?;
+    
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     Ok(final_entries)
 }
@@ -1105,6 +1095,7 @@ fn export_iocs(state: State<AppState>, payload: ExportIocsPayload) -> Result<(),
 
 #[derive(Debug, Deserialize)]
 struct UpdateFlagPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     row_index: usize,
     flag: String,
@@ -1134,12 +1125,16 @@ fn update_flag(state: State<AppState>, payload: UpdateFlagPayload) -> Result<Pro
 
     save_flags(&flags_path, &flags).map_err(AppError::from)?;
 
-    // flagged_recordsを更新
+        // Update flagged_records (user flags only)
     let flagged_records = flags
         .values()
         .filter(|entry| !entry.flag.trim().is_empty())
         .count();
     state.projects.update_flagged_records(&payload.project_id, flagged_records).map_err(AppError::from)?;
+    
+        // Update ioc_applied_records
+    let ioc_applied_records = calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
+    state.projects.update_ioc_applied_records(&payload.project_id, ioc_applied_records).map_err(AppError::from)?;
 
     let parquet_path = project_dir.join("data.parquet");
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
@@ -1165,6 +1160,7 @@ fn update_flag(state: State<AppState>, payload: UpdateFlagPayload) -> Result<Pro
 
 #[derive(Debug, Deserialize)]
 struct HiddenColumnsPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     hidden_columns: Vec<String>,
 }
@@ -1183,6 +1179,7 @@ fn set_hidden_columns(state: State<AppState>, payload: HiddenColumnsPayload) -> 
 
 #[derive(Debug, Deserialize)]
 struct ExportProjectPayload {
+    #[serde(rename = "projectId")]
     project_id: Uuid,
     destination: String,
 }

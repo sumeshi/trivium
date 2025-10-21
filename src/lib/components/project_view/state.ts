@@ -43,6 +43,7 @@ export const PAGE_SIZE = 250;
 export const PREFETCH_PAGES = 1;
 
 export type CachedRow = ProjectRow & {
+  stableId: string; // Assuming 'id' in data is the stable identifier
   memo: string;
   displayCache: Record<string, string>;
 };
@@ -74,12 +75,15 @@ export const sortDirection = writable<"asc" | "desc">("asc");
 export const isExporting = writable(false);
 export const isUpdatingColumns = writable(false);
 
-export const rowsCache = writable<Map<number, CachedRow>>(new Map());
+export const rowsCache = writable<Map<number, CachedRow>>(new Map()); // Keyed by row_index
 export const pendingPages = writable<Set<number>>(new Set());
 export const loadedPages = writable<Set<number>>(new Set());
 export const totalRows = writable(0);
+export const totalFilteredRows = writable(0);
 export const totalFlagged = writable(0);
 export const flaggedCount = writable(0);
+// Maps display position (offset + i) to backend row_index to preserve backend ordering
+export const positionToRowIndex = writable<Map<number, number>>(new Map());
 
 export const expandedCell = writable<{ column: string; value: string } | null>(
   null
@@ -167,8 +171,20 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
     const formatted = formatCell(value);
     displayCache[column] = formatted;
   }
+  // Assuming 'id' is the stable identifier within incoming.data
+  const stableId = String(incoming.data.id);
+  if (!stableId) {
+    console.warn(
+      "normalizeRow: Stable ID (incoming.data.id) not found or is empty for row_index:",
+      incoming.row_index
+    );
+    // Fallback to row_index if no stable ID, but this will be problematic
+    // For now, we'll throw an error to make the problem explicit if it occurs
+    throw new Error("Stable ID not found for row.");
+  }
   return {
     ...incoming,
+    stableId,
     flag: mapStoredFlag(incoming.flag) || "",
     memo: sanitizeMemoInput(incoming.memo ?? ""),
     displayCache,
@@ -218,7 +234,7 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
   const currentFlag = normalizeFlag(row.flag);
   const nextFlag = currentFlag === flag ? "" : flag;
 
-  // 楽観的更新: 即座にUIを更新
+  // Optimistic update: Update UI immediately
   const optimisticRow = {
     ...row,
     flag: nextFlag,
@@ -236,24 +252,29 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
   ).length;
   flaggedCount.set(newFlaggedCount);
 
-  // バックエンドの更新は非同期で実行（エラー時は元に戻す）
+  // Backend update runs asynchronously (revert on error)
   try {
-    await get(backend).updateFlag({
-      projectId: get(projectDetail).project.meta.id,
-      rowIndex: row.row_index,
+    const backendInstance = get(backend);
+    const projectDetailInstance = get(projectDetail);
+    if (!backendInstance || !projectDetailInstance) {
+      throw new Error("Backend or project detail not available");
+    }
+    await backendInstance.updateFlag({
+      projectId: projectDetailInstance.project.meta.id,
+      rowIndex: row.row_index, // Still send row_index to backend
       flag: nextFlag ?? "",
       memo: row.memo && row.memo.trim().length ? row.memo : null,
     });
   } catch (error) {
     console.error(error);
-    // エラー時は元の状態に戻す
+    // Revert to original state on error
     rowsCache.update((cache) => {
       const newCache = new Map(cache);
       newCache.set(row.row_index, row);
       return newCache;
     });
 
-    // フラグ付きカウントも元に戻す
+    // Also revert flagged count
     const revertedCache = get(rowsCache);
     const revertedFlaggedCount = Array.from(revertedCache.values()).filter(
       (r) => r.flag && r.flag.trim().length > 0

@@ -133,7 +133,7 @@
                   {/if}
                   <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 mt-2">
                     <span>{project.meta.total_records} rows</span>
-                    <span>{project.meta.flagged_records} flagged</span>
+                    <span>{project.meta.flagged_records + project.meta.ioc_applied_records} flagged</span>
                   </div>
                 </button>
                 <button

@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import type {
+  IocEntry,
   LoadProjectResponse,
   ProjectRow,
   ProjectSummary,
-  IocEntry,
 } from "./types";
 
 export interface CreateProjectArgs {
@@ -66,6 +66,7 @@ export interface QueryProjectRowsResponse {
   rows: ProjectRow[];
   total_flagged: number;
   total_rows: number;
+  total_filtered_rows: number;
   offset: number;
 }
 
@@ -75,7 +76,9 @@ export interface Backend {
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string): Promise<LoadProjectResponse>;
-  queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse>;
+  queryProjectRows(
+    args: QueryProjectRowsArgs
+  ): Promise<QueryProjectRowsResponse>;
   saveIocs(args: SaveIocsArgs): Promise<void>;
   importIocs(args: ImportIocsArgs): Promise<void>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
@@ -104,26 +107,28 @@ class NativeBackend implements Backend {
   }
 
   deleteProject(projectId: string): Promise<void> {
-    return invoke("delete_project", { request: { project_id: projectId } });
+    return invoke("delete_project", { request: { projectId: projectId } });
   }
 
   loadProject(projectId: string): Promise<LoadProjectResponse> {
     return invoke("load_project", {
-      request: { project_id: projectId },
+      request: { projectId: projectId },
     });
   }
 
-  queryProjectRows(args: QueryProjectRowsArgs): Promise<QueryProjectRowsResponse> {
+  queryProjectRows(
+    args: QueryProjectRowsArgs
+  ): Promise<QueryProjectRowsResponse> {
     return invoke("query_project_rows", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         search: args.search ?? null,
-        flag_filter: args.flagFilter ?? null,
+        flagFilter: args.flagFilter ?? null,
         visible_columns: args.columns ?? null,
         offset: args.offset ?? null,
         limit: args.limit ?? null,
-        sort_key: args.sortKey ?? null,
-        sort_direction: args.sortDirection ?? null,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
       },
     });
   }
@@ -131,7 +136,7 @@ class NativeBackend implements Backend {
   saveIocs(args: SaveIocsArgs): Promise<void> {
     return invoke("save_iocs", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         entries: args.entries,
       },
     });
@@ -140,7 +145,7 @@ class NativeBackend implements Backend {
   importIocs(args: ImportIocsArgs): Promise<void> {
     return invoke("import_iocs", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         path: args.path,
       },
     });
@@ -149,7 +154,7 @@ class NativeBackend implements Backend {
   exportIocs(args: ExportIocsArgs): Promise<void> {
     return invoke("export_iocs", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         destination: args.destination,
       },
     });
@@ -158,7 +163,7 @@ class NativeBackend implements Backend {
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
     return invoke("update_flag", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         row_index: args.rowIndex,
         flag: args.flag,
         memo: args.memo,
@@ -169,7 +174,7 @@ class NativeBackend implements Backend {
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void> {
     return invoke("set_hidden_columns", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         hidden_columns: args.hiddenColumns,
       },
     });
@@ -183,7 +188,7 @@ class NativeBackend implements Backend {
     }
     return invoke("export_project", {
       payload: {
-        project_id: args.projectId,
+        projectId: args.projectId,
         destination: args.destination,
       },
     });
@@ -191,5 +196,5 @@ class NativeBackend implements Backend {
 }
 
 export function createBackend(): Backend {
-    return new NativeBackend();
+  return new NativeBackend();
 }

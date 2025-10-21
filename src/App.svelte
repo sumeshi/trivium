@@ -169,12 +169,13 @@ import { showToast } from './lib/utils/toast';
     await loadProjects(true);
   };
 
-  const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; hiddenColumns: string[] }>) => {
+  const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
     if (!projectDetail || !selectedProjectId) return;
 
     const newMeta = {
       ...projectDetail.project.meta,
       flagged_records: event.detail.flagged,
+      ioc_applied_records: event.detail.iocApplied,
       hidden_columns: event.detail.hiddenColumns,
     };
 

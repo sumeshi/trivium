@@ -38,6 +38,7 @@
     console.log('Flag filter changing from', $flagFilter, 'to', value);
     flagFilter.set(value);
     console.log('Flag filter is now', $flagFilter);
+    console.log('Flag filter store updated, should trigger reactive update');
     flagMenuOpen = false;
   };
 
@@ -56,12 +57,12 @@
   const handleClickOutside = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
     
-    // Flag pickerの外部クリック
+    // Outside click for flag picker
     if (flagMenuOpen && flagPickerEl && !flagPickerEl.contains(target)) {
       flagMenuOpen = false;
     }
     
-    // Column pickerの外部クリック
+    // Outside click for column picker
     if (columnsOpen && columnPickerEl && !columnPickerEl.contains(target)) {
       columnsOpen = false;
     }
@@ -135,12 +136,12 @@
         }}
         aria-expanded={columnsOpen}
       >
-        Columns ({$visibleColumns.length}/{$projectDetail.columns.length})
+        Columns ({$visibleColumns.length}/{$projectDetail?.columns.length ?? 0})
       </button>
       {#if columnsOpen}
         <div class="column-panel">
           <ul>
-            {#each $projectDetail.columns as column}
+            {#each $projectDetail?.columns ?? [] as column}
               <li>
                 <input
                   type="checkbox"

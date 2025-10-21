@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, tick } from 'svelte';
   import { memoEditor, backend, projectDetail, sanitizeMemoInput, rowsCache, normalizeRow } from './state';
+  import { get } from 'svelte/store';
   import type { CachedRow } from './state';
 
   const dispatch = createEventDispatcher();
@@ -18,30 +19,41 @@
   };
 
   const saveMemo = async () => {
-    if (!$memoEditor || memoSaving || !$projectDetail) return;
+    if (!$memoEditor || memoSaving || !$projectDetail || !$backend) return;
     const sanitized = sanitizeMemoInput(memoDraft).trim();
     memoSaving = true;
     memoError = null;
+
+    const currentRowsCache = get(rowsCache);
+    const rowToUpdate = currentRowsCache.get($memoEditor.row.row_index);
+
+    if (!rowToUpdate) {
+      console.error("Row not found in cache for memo update.");
+      return;
+    }
+
+    const updatedRow: CachedRow = {
+      ...rowToUpdate,
+      memo: sanitized,
+      displayCache: { ...rowToUpdate.displayCache, memo: sanitized },
+    };
+
+    const newCache = new Map(currentRowsCache); // Create a new Map based on current cache
+    newCache.set($memoEditor.row.row_index, updatedRow); // Update the specific entry using row_index
+    rowsCache.set(newCache); // Set the entire store with the new Map
+
     try {
-      const updatedRow = await $backend.updateFlag({
+      await $backend.updateFlag({
         projectId: $projectDetail.project.meta.id,
         rowIndex: $memoEditor.row.row_index,
         flag: $memoEditor.row.flag,
         memo: sanitized.length ? sanitized : null
       });
-      
-      // Update the specific row in cache instead of triggering a full refresh
-      const normalizedRow = normalizeRow(updatedRow);
-      rowsCache.update((cache) => {
-        const newCache = new Map(cache);
-        newCache.set($memoEditor.row.row_index, normalizedRow);
-        return newCache;
-      });
-      
+
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });
       closeMemoEditor();
     } catch (error) {
-      console.error(error);
+      console.error('saveMemo: Backend updateFlag failed:', error);
       memoError = 'Failed to update memo.';
       dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
     } finally {

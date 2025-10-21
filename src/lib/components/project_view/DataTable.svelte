@@ -4,6 +4,7 @@
     rowsCache,
     pendingPages,
     totalRows,
+    totalFilteredRows,
     flaggedCount,
     visibleColumns,
     sortKey,
@@ -32,7 +33,8 @@
     setFlag,
     editMemo,
     openCell,
-    handleCellKeydown
+    handleCellKeydown,
+    positionToRowIndex
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
 
@@ -81,7 +83,7 @@
     ...distributedDataWidths.map((width) => `${width}px`)
   ].join(' ');
 
-  // CSS変数を設定してsticky列の位置を指定
+  // Set CSS variables to specify sticky column positions
   $: if (typeof document !== 'undefined') {
     document.documentElement.style.setProperty('--sticky-flag', `${INDEX_COL_WIDTH}px`);
     document.documentElement.style.setProperty('--sticky-memo', `${INDEX_COL_WIDTH + FLAG_COL_WIDTH}px`);
@@ -90,14 +92,15 @@
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: maxStart = Math.max(0, $totalRows - visibleCount);
+  $: effectiveTotalRows = $flagFilter !== 'all' ? $totalFilteredRows : $totalRows;
+  $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
     Math.max(0, Math.floor($scrollTop / ROW_HEIGHT) - BUFFER)
   );
-  $: endIndex = Math.min($totalRows, startIndex + visibleCount);
+  $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
   $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = $totalRows * ROW_HEIGHT;
+  $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
   $: loadedRowCount = $rowsCache.size;
 
   const buildVirtualRows = (
@@ -109,8 +112,11 @@
       return [];
     }
     const result: VirtualRow[] = [];
+    // Use backend-provided ordering via positionToRowIndex map
+    const posMap = $positionToRowIndex;
     for (let position = start; position < end; position += 1) {
-      const row = cache.get(position) ?? null;
+      const rowIndex = posMap.get(position) ?? null;
+      const row = rowIndex !== null ? cache.get(rowIndex) ?? null : null;
       result.push({ position, row });
     }
     return result;
@@ -122,12 +128,12 @@
     const target = event.currentTarget as HTMLDivElement;
     scrollTop.set(target.scrollTop);
     
-    // スクロールタイムアウトをクリア
+    // Clear scroll timeout
     if (scrollTimeout !== null) {
       clearTimeout(scrollTimeout);
     }
     
-    // デバウンス処理でスクロール同期を実行
+    // Execute scroll synchronization with debounce
     scrollTimeout = setTimeout(() => {
       if (isSyncingBodyScroll) {
         isSyncingBodyScroll = false;
@@ -152,7 +158,7 @@
     if ($bodyScrollEl.scrollLeft !== nextLeft) {
       isSyncingBodyScroll = true;
       $bodyScrollEl.scrollLeft = nextLeft;
-      // より確実な同期のため、フラグを即座にリセット
+      // Reset flag immediately for more reliable synchronization
       isSyncingBodyScroll = false;
     }
   };
@@ -212,7 +218,13 @@
 
 <section class="table-wrapper">
   <div class="meta">
-    <span>{$totalRows} rows</span>
+    <span>
+      {#if $flagFilter !== 'all'}
+        {$totalFilteredRows} / {$totalRows} rows
+      {:else}
+        {$totalRows} rows
+      {/if}
+    </span>
     <span>{$flaggedCount} flagged</span>
   </div>
   {#if $totalRows === 0}
@@ -263,7 +275,7 @@
       >
         <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
           <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
-            {#each virtualRows as item (item.position)}
+            {#each virtualRows as item (item.row ? item.row.row_index : item.position)}
               <div
                 class="data-row"
                 class:alt-row={item.position % 2 === 1}
@@ -281,7 +293,7 @@
                           class:flag-safe={option.value === 'safe'}
                           class:flag-suspicious={option.value === 'suspicious'}
                           class:flag-critical={option.value === 'critical'}
-                          on:click={() => _setFlag(item.row, option.value)}
+                          on:click={() => item.row && _setFlag(item.row, option.value)}
                         >
                           {option.hint}
                         </button>

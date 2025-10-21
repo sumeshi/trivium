@@ -5,6 +5,7 @@ export interface ProjectMeta {
   created_at: string;
   total_records: number;
   flagged_records: number;
+  ioc_applied_records: number;
   hidden_columns: string[];
 }
 
@@ -33,4 +34,12 @@ export interface LoadProjectResponse {
   column_max_chars: Record<string, number>;
   iocs: IocEntry[];
   initial_rows: ProjectRow[];
+}
+
+export interface QueryRowsResponse {
+  rows: ProjectRow[];
+  total_flagged: number;
+  total_rows: number;
+  total_filtered_rows: number;
+  offset: number;
 }

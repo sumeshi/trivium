@@ -24,6 +24,7 @@
     pendingPages,
     loadedPages,
     totalRows,
+    totalFilteredRows,
     totalFlagged,
     flaggedCount,
     expandedCell,
@@ -37,12 +38,12 @@
     iocDraft,
     normalizeIocFlag,
     normalizeFlag,
-    sanitizeMemoInput,
-    mapStoredFlag,
     normalizeRow,
+    mapStoredFlag,
     formatCell,
     FLAG_OPTIONS,
     FLAG_FILTER_OPTIONS,
+    PRIORITY_FLAGS,
     ROW_HEIGHT,
     BUFFER,
     INDEX_COL_WIDTH,
@@ -57,7 +58,8 @@
     PAGE_SIZE,
     PREFETCH_PAGES,
     currentProjectId,
-    lastHiddenColumnsRef
+    lastHiddenColumnsRef,
+    positionToRowIndex
   } from './project_view/state';
   import type {
     FlagSymbol,
@@ -73,7 +75,7 @@
   const dispatch = createEventDispatcher<{
     refresh: void;
     notify: { message: string; tone: 'success' | 'error' };
-    summary: { flagged: number; hiddenColumns: string[] };
+    summary: { flagged: number; iocApplied: number; hiddenColumns: string[] };
   }>();
 
   let columnsOpen = false;
@@ -82,9 +84,6 @@
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
 
-  let memoDraft = '';
-  let memoSaving = false;
-  let memoError: string | null = null;
 
   let iocError: string | null = null;
   let isSavingIocs = false;
@@ -138,6 +137,7 @@
     totalRows.set(0);
     totalFlagged.set(0);
     flaggedCount.set(0);
+    positionToRowIndex.set(new Map());
   };
 
   const initializeColumnWidths = () => {
@@ -153,7 +153,7 @@
     console.log('column_max_chars values:', Object.values(projectDetail.column_max_chars));
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
-      // Polarsから取得した最大文字数を使用して幅を計算
+      // Calculate width using maximum character count from Polars
       const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
       const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
       const maxChars = Math.max(headerChars, dataChars);
@@ -214,7 +214,7 @@
     });
     
     totalRows.set(detail.project.meta.total_records);
-    totalFlagged.set(detail.project.flagged_records);
+    totalFlagged.set(detail.project.meta.flagged_records);
     flaggedCount.set($totalFlagged);
     scrollTop.set(0);
     if ($bodyScrollEl) {
@@ -226,8 +226,8 @@
     }
     initialized = true;
     // Always request first page to ensure flags and memos are reflected after project reload
-    console.log('[debug] applyProjectDetail request first page');
-    void requestPage(0, true);
+      console.log('[debug] applyProjectDetail request first page');
+      void requestPage(0, true);
   };
 
   $: if (projectDetail) {
@@ -263,8 +263,13 @@
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
     const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
+
+    console.log('[debug] Reactive check:', { flagValue, lastFlagFilter, flagChanged, initialized });
+
     if (searchChanged || flagChanged || columnsChanged) {
-      scheduleFilterRefresh(searchValue, flagValue, columns, searchChanged);
+      console.log('[debug] Filter change detected:', { searchChanged, flagChanged, flagValue, searchValue });
+      // Flag filter changes require scroll reset
+      scheduleFilterRefresh(searchValue, flagValue, columns, flagChanged);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
       lastColumnsSignature = signature;
@@ -290,13 +295,74 @@
     end: number,
     cache: Map<number, CachedRow>
   ): VirtualRow[] => {
-    if (end <= start) {
-      return [];
+    if (!projectDetail) return [];
+
+    let allVisibleRows: CachedRow[] = Array.from(cache.values());
+
+    // Apply search filter
+    const currentSearch = $search.trim().toLowerCase();
+    if (currentSearch) {
+      allVisibleRows = allVisibleRows.filter(row =>
+        $visibleColumns.some(column =>
+          row.displayCache[column]?.toLowerCase().includes(currentSearch)
+        )
+      );
     }
+
+    // Apply flag filter
+    const currentFlagFilter = $flagFilter;
+    if (currentFlagFilter !== 'all') {
+      allVisibleRows = allVisibleRows.filter(row => {
+        const normalizedFlag = normalizeFlag(row.flag);
+        if (currentFlagFilter === 'none') {
+          return normalizedFlag === '';
+        } else if (currentFlagFilter === 'priority') {
+          return PRIORITY_FLAGS.includes(normalizedFlag as FlagSymbol);
+        } else {
+          return normalizedFlag === currentFlagFilter;
+        }
+      });
+    }
+
+    // Apply sorting
+    const currentSortKey = $sortKey;
+    const currentSortDirection = $sortDirection;
+    if (currentSortKey) {
+      allVisibleRows.sort((a, b) => {
+        const aValue = a.displayCache[currentSortKey] ?? '';
+        const bValue = b.displayCache[currentSortKey] ?? '';
+
+        let comparison = 0;
+        // Attempt numerical comparison first
+        const aNum = parseFloat(aValue);
+        const bNum = parseFloat(bValue);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          comparison = aNum - bNum;
+        } else {
+          comparison = aValue.localeCompare(bValue);
+        }
+
+        if (currentSortDirection === 'desc') {
+          comparison *= -1;
+        }
+        return comparison;
+      });
+    }
+
+    // Update total rows and flagged count based on frontend filtering
+    // Only overwrite totalFilteredRows when there is no flag filter applied
+    if ($flagFilter === 'all') {
+      totalFilteredRows.set(allVisibleRows.length);
+    }
+    // flaggedCount should reflect the rows currently visible in the frontend view
+    flaggedCount.set(allVisibleRows.filter(r => r.flag && r.flag.trim().length > 0).length);
+
+    // Apply pagination (virtual scrolling range)
+    const paginatedRows = allVisibleRows.slice(start, end);
+
     const result: VirtualRow[] = [];
-    for (let position = start; position < end; position += 1) {
-      const row = cache.get(position) ?? null;
-      result.push({ position, row });
+    for (let i = 0; i < paginatedRows.length; i += 1) {
+      result.push({ position: start + i, row: paginatedRows[i] });
     }
     return result;
   };
@@ -362,18 +428,14 @@
     nextPending.add(normalizedPage);
     pendingPages.set(nextPending);
 
+    const flagFilterValue = filters.flag !== "all" ? filters.flag : undefined;
     const payload = {
       projectId: projectDetail.project.meta.id,
-      search: filters.search.length > 0 ? filters.search : undefined,
-      flagFilter: filters.flag,
-      columns:
-        filters.columns.length === projectDetail.columns.length
-          ? undefined
-          : [...filters.columns],
+      flagFilter: flagFilterValue,
       offset,
       limit,
-      sortKey: $sortKey ?? undefined,
-      sortDirection: $sortDirection,
+      sortKey: $sortKey ?? null,
+      sortDirection: $sortDirection ?? null,
     };
 
     console.log('[debug] requestPage', {
@@ -394,8 +456,8 @@
           return;
         }
         totalRows.set(response.total_rows);
-        totalFlagged.set(response.total_flagged);
-        flaggedCount.set($totalFlagged);
+        totalFilteredRows.set(response.total_filtered_rows);
+        flaggedCount.set(response.total_flagged);
         emitSummary();
         const normalizedRows = response.rows.map((row) => normalizeRow(row));
         console.log('[debug] requestPage response', {
@@ -405,11 +467,21 @@
           offset: response.offset,
         });
         updateColumnWidthsFromRows(normalizedRows);
-        const nextCache = new Map($rowsCache);
-        normalizedRows.forEach((row, index) => {
-          nextCache.set(response.offset + index, row);
+        rowsCache.update((cache) => {
+          const nextCache = new Map(cache);
+          normalizedRows.forEach((row) => {
+            nextCache.set(row.row_index, row);
+          });
+          return nextCache;
         });
-        rowsCache.set(nextCache);
+        // Preserve backend order: map display positions to row_index
+        positionToRowIndex.update((m) => {
+          const next = new Map(m);
+          normalizedRows.forEach((row, i) => {
+            next.set(response.offset + i, row.row_index);
+          });
+          return next;
+        });
         const nextLoaded = new Set($loadedPages);
         nextLoaded.add(Math.floor(response.offset / PAGE_SIZE));
         loadedPages.set(nextLoaded);
@@ -544,19 +616,6 @@
     expandedCell.set(null);
   };
 
-  const openMemoEditor = (row: CachedRow) => {
-    memoEditor.set({ row });
-    memoDraft = row.memo ?? '';
-    memoError = null;
-    memoSaving = false;
-  };
-
-  const closeMemoEditor = () => {
-    memoEditor.set(null);
-    memoDraft = '';
-    memoError = null;
-    memoSaving = false;
-  };
 
   const handleCellKeydown = (event: KeyboardEvent, column: string, value: string) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -578,42 +637,7 @@
     }
   };
 
-  const saveMemo = async () => {
-    if (!$memoEditor || memoSaving || !projectDetail) return;
-    const sanitized = sanitizeMemoInput(memoDraft).trim();
-    memoSaving = true;
-    memoError = null;
-    try {
-      await backend.updateFlag({
-        projectId: projectDetail.project.meta.id,
-        rowIndex: $memoEditor.row.row_index,
-        flag: $memoEditor.row.flag,
-        memo: sanitized.length ? sanitized : null
-      });
-      await forceRefreshFilteredRows(false);
-      dispatch('notify', { message: 'Memo updated.', tone: 'success' });
-      closeMemoEditor();
-    } catch (error) {
-      console.error(error);
-      memoError = 'Failed to update memo.';
-      dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
-    } finally {
-      memoSaving = false;
-    }
-  };
 
-  const handleMemoBackdropClick = (event: MouseEvent) => {
-    if (event.target === event.currentTarget && !memoSaving) {
-      closeMemoEditor();
-    }
-  };
-
-  const handleMemoBackdropKey = (event: KeyboardEvent) => {
-    if (!memoSaving && (event.key === 'Escape' || event.key === 'Enter')) {
-      event.preventDefault();
-      closeMemoEditor();
-    }
-  };
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
@@ -741,6 +765,10 @@
     iocManagerOpen.set(true);
   };
 
+  const closeIocManager = () => {
+    iocManagerOpen.set(false);
+  };
+
   const exportProject = async () => {
     isExporting.set(true);
     try {
@@ -771,11 +799,11 @@
 
   onMount(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (columnsOpen && columnPickerEl && !columnPickerEl.contains(target)) {
+      const target = event.target as HTMLElement;
+      if (columnsOpen && columnPickerEl && !(columnPickerEl as HTMLElement).contains(target)) {
         columnsOpen = false;
       }
-      if (flagMenuOpen && flagPickerEl && !flagPickerEl.contains(target)) {
+      if (flagMenuOpen && flagPickerEl && !(flagPickerEl as HTMLElement).contains(target)) {
         flagMenuOpen = false;
       }
     };
@@ -787,8 +815,6 @@
           closeIocManager();
         } else if ($memoEditor) {
           memoEditor.set(null);
-          memoDraft = '';
-          memoError = null;
         } else {
           closeCell();
         }
@@ -848,7 +874,11 @@
     }
     lastSummaryFlagged = $flaggedCount;
     lastSummaryHiddenKey = hiddenKey;
-    dispatch('summary', { flagged: $flaggedCount, hiddenColumns: hidden });
+    dispatch('summary', { 
+      flagged: $flaggedCount, 
+      iocApplied: projectDetail?.project.meta.ioc_applied_records ?? 0,
+      hiddenColumns: hidden 
+    });
   };
 </script>
 
@@ -857,7 +887,7 @@
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
-  <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => forceRefreshFilteredRows(false)} />
+  <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
   <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')} />
 

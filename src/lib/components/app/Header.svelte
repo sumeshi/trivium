@@ -3,7 +3,6 @@
   import type { LoadProjectResponse } from '../../types';
 
   export let projectDetail: LoadProjectResponse | null;
-  export let onRefreshClick: () => void;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -30,10 +29,10 @@
         {/if}
       </div>
     </div>
-    <button
-      class="inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-      on:click={onRefreshClick}
-    >
+      <button
+        class="inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        on:click={(event) => { event.stopPropagation(); dispatch('refreshClick'); }}
+      >
       ↻ <span class="hidden sm:inline">Refresh</span>
     </button>
   </div>

@@ -30,12 +30,12 @@
     if (isSavingIocs) return;
     const target = event.target as HTMLElement;
     
-    // IOC rulesボタンがクリックされた場合は閉じない
+    // Don't close if IOC rules button was clicked
     if (target.textContent === 'IOC Rules') {
       return;
     }
     
-    // IOC Managerダイアログの外部クリック
+    // Outside click for IOC Manager dialog
     if ($iocManagerOpen && dialogEl && !dialogEl.contains(target)) {
       closeIocManager();
     }
@@ -44,7 +44,7 @@
   onMount(() => {
     document.addEventListener('click', handleClickOutside);
     
-    // iocManagerOpenの変更を監視
+    // Monitor iocManagerOpen changes
     const unsubscribe = iocManagerOpen.subscribe(value => {
       console.log('iocManagerOpen changed to:', value);
     });
@@ -67,7 +67,7 @@
     };
     iocDraft.update((d: IocEntry[]) => [...d, newEntry]);
     
-    // 新しいルールのTagフィールドにフォーカス
+    // Focus on Tag field of new rule
     await tick();
     const tagInputs = dialogEl?.querySelectorAll('.ioc-row input[placeholder="Tag name"]');
     if (tagInputs && tagInputs.length > 0) {
@@ -106,7 +106,7 @@
       .sort((a: IocEntry, b: IocEntry) => a.tag.localeCompare(b.tag));
 
   const saveIocEntries = async () => {
-    if (!$projectDetail) return;
+    if (!$backend || !$projectDetail) return;
     isSavingIocs = true;
     iocError = null;
     try {
@@ -138,15 +138,16 @@
       if (!selected) {
         return;
       }
+      if (!$backend || !$projectDetail) return;
       isSavingIocs = true;
       const path = Array.isArray(selected) ? selected[0] : selected;
       const newIocs = await $backend.importIocs({
         projectId: $projectDetail.project.meta.id,
         path
-      });
+      }) as unknown as IocEntry[];
       // Directly update the stores with the new data from the backend
-      projectDetail.update(pd => ({ ...pd, iocs: newIocs }));
-      iocDraft.set(newIocs.map(entry => ({ ...entry, id: crypto.randomUUID() })));
+      projectDetail.update(pd => pd ? { ...pd, iocs: newIocs } : pd);
+      iocDraft.set(newIocs.map((entry: IocEntry) => ({ ...entry, id: crypto.randomUUID() })));
 
       dispatch('notify', { message: 'Imported IOC rules.', tone: 'success' });
       closeIocManager();
