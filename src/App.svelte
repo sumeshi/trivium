@@ -29,7 +29,7 @@ import { showToast } from './lib/utils/toast';
   let pendingFileName = '';
   let canCreateProject = false;
 
-  let sidebarOpen = false;
+  let sidebarOpen = true;
 
   const handleNotify = (event: CustomEvent<{ message: string; tone: 'success' | 'error' }>) => {
     showToast(event.detail.message, event.detail.tone);
