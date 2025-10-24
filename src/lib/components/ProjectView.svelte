@@ -228,7 +228,7 @@
     initialized = true;
     // Always request first page to ensure flags and memos are reflected after project reload
     // Wait for the first page to load before marking as ready to render
-    console.log('[debug] applyProjectDetail request first page');
+      console.log('[debug] applyProjectDetail request first page');
     requestPage(0, true).then(() => {
       console.log('[debug] applyProjectDetail first page loaded');
     }).catch((error) => {

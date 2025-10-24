@@ -33,6 +33,47 @@ This tool is primarily for anyone who needs to sift through large amounts of tab
 - **Column Management**: Toggle the visibility of columns to focus on the data that matters.
 - **Data Export**: Export your work—including all flags and memos—back to a CSV file for use in other tools.
 
+## Search Syntax
+
+Trivium provides a fast, flexible text search with boolean operators and column scoping.
+
+- Basic
+  - Case-insensitive substring match
+  - Search runs across visible columns (toggling column visibility changes the search target)
+
+- Operators (no keywords; use symbols only)
+  - AND: whitespace (implicit between adjacent terms)
+  - OR: `|`
+  - NOT: leading `-` before a term (outside quotes)
+  - Precedence: `NOT` > `AND` > `OR` (no parentheses support)
+
+- Quoted phrases
+  - `"exact phrase"` matches the phrase literally
+  - Inside quotes, `|` and `-` are treated as literal characters, not operators
+
+- Column scoping
+  - `column:term` limits the term to a specific column
+  - `column:"two words"` for a quoted phrase in a specific column
+  - Column names are case-insensitive: `EventID:4624` == `eventid:4624`
+
+- Special characters
+  - To search `|`, `-`, or `-keyword` literally, wrap in quotes (e.g., `"-keyword"`)
+  - JSON-like fragments with colons should be quoted: `"hoge:fuga"` or scoped `data:"hoge:fuga"`
+
+- Examples
+  - `malware beacon` → `malware` AND `beacon`
+  - `error|warn` → `error` OR `warn`
+  - `beacon -test` → `beacon` AND NOT `test`
+  - `eventid:4624 user:administrator` → scoped to `eventid` and `user`
+  - `command:"powershell -enc"` → phrase in `command`
+
+- IOC rules
+  - IOC queries use the same syntax and semantics as the main search
+
+Notes
+- Regular expressions are not supported.
+- Searching very large datasets is cached; the first run may build masks, subsequent runs are faster.
+
 ## Getting Started
 
 1.  **Import Data**: Launch the app and click "Import CSV" from the sidebar to create a new project.

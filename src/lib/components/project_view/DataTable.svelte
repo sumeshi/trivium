@@ -235,11 +235,7 @@
 <section class="table-wrapper">
   <div class="meta">
     <span>
-      {#if $flagFilter !== 'all'}
-        {$totalFilteredRows} / {$totalRows} rows
-      {:else}
-        {$totalRows} rows
-      {/if}
+      {$totalFilteredRows} / {$totalRows} rows
     </span>
     <span>{$flaggedCount} flagged</span>
   </div>

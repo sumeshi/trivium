@@ -349,6 +349,270 @@ fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
 }
 
 
+// Boolean-search support: tokens, RPN conversion, and evaluation on prebuilt per-row searchable text
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SearchToken {
+    Term { col: Option<String>, text: String },
+    QuotedTerm { col: Option<String>, text: String },
+    And,
+    Or,
+    Not,
+}
+
+fn is_operand_token(tok: &SearchToken) -> bool {
+    matches!(tok, SearchToken::Term { .. } | SearchToken::QuotedTerm { .. })
+}
+
+fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
+    // Token rules:
+    // - Phrases in double quotes become a single Term (without quotes)
+    // - OR operator: word "OR" (upper case) or pipe character '|'
+    // - AND operator: explicit "AND" allowed, but also implicit between operands (handled later)
+    // - NOT operator: unary, written as leading '-' before a term, or explicit word "NOT"
+    // - Case-insensitive matching overall; terms are lowercased here
+    let mut raw_parts: Vec<(String, bool)> = Vec::new(); // (text, quoted)
+    let mut buf = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                if in_quotes {
+                    // end quote -> push buffer as a part
+                    if !buf.trim().is_empty() {
+                        raw_parts.push((buf.trim().to_string(), true));
+                    }
+                    buf.clear();
+                    in_quotes = false;
+                } else {
+                    // start quote -> flush current buf as part if any
+                    if !buf.trim().is_empty() {
+                        raw_parts.push((buf.trim().to_string(), false));
+                    }
+                    buf.clear();
+                    in_quotes = true;
+                }
+            }
+            '|' => {
+                if in_quotes {
+                    buf.push(ch);
+                } else {
+                    if !buf.trim().is_empty() {
+                        raw_parts.push((buf.trim().to_string(), false));
+                    }
+                    buf.clear();
+                    raw_parts.push(("|".to_string(), false));
+                    // collapse consecutive pipes
+                    while let Some('|') = chars.peek() {
+                        chars.next();
+                    }
+                }
+            }
+            c if c.is_whitespace() => {
+                if in_quotes {
+                    buf.push(c);
+                } else {
+                    if !buf.trim().is_empty() {
+                        raw_parts.push((buf.trim().to_string(), false));
+                    }
+                    buf.clear();
+                }
+            }
+            _ => buf.push(ch),
+        }
+    }
+    if !buf.trim().is_empty() {
+        raw_parts.push((buf.trim().to_string(), in_quotes));
+    }
+
+    // Merge pattern: col: "phrase with space" → single quoted term with column
+    let mut merged: Vec<(String, bool)> = Vec::new();
+    let mut i = 0usize;
+    while i < raw_parts.len() {
+        let (ref part, quoted) = raw_parts[i];
+        if !quoted && part.ends_with(':') && i + 1 < raw_parts.len() && raw_parts[i + 1].1 {
+            let col = part[..part.len() - 1].to_string();
+            let phrase = raw_parts[i + 1].0.clone();
+            merged.push((format!("{}:\"{}\"", col, phrase), true));
+            i += 2;
+            continue;
+        }
+        merged.push((part.clone(), quoted));
+        i += 1;
+    }
+
+    // Map merged parts to tokens with unary '-' handling and column prefixes
+    let mut tokens: Vec<SearchToken> = Vec::new();
+    for (part, quoted) in merged {
+        if part == "|" && !quoted {
+            tokens.push(SearchToken::Or);
+            continue;
+        }
+        // Do not treat words AND/OR/NOT as operators; users must use space, '|', or '-' only
+        // Hyphen NOT: -term or -col:term (only when not quoted)
+        if !quoted && part.starts_with('-') && part.len() > 1 {
+            tokens.push(SearchToken::Not);
+            let rest = &part[1..];
+            if let Some(pos) = (!quoted).then(|| rest.find(':')).flatten() {
+                let (c, t) = rest.split_at(pos);
+                let text = t[1..].to_lowercase();
+                let col = c.to_lowercase();
+                tokens.push(SearchToken::Term { col: Some(col), text });
+            } else {
+                tokens.push(SearchToken::Term { col: None, text: rest.to_lowercase() });
+            }
+            continue;
+        }
+        // Column prefix: col:term (unquoted) or col:"phrase" (merged, quoted=true)
+        if let Some(pos) = (!quoted).then(|| part.find(':')).flatten() {
+            let (c, t) = part.split_at(pos);
+            let text = t[1..].to_lowercase();
+            let col = c.to_lowercase();
+            tokens.push(SearchToken::Term { col: Some(col), text });
+            continue;
+        }
+        if quoted {
+            // Only treat as column-scoped when pattern is col:"phrase" (merged case)
+            if let Some(pos) = part.find(":\"") {
+                let (c, t) = part.split_at(pos);
+                let text_raw = t[1..].trim();
+                let text = text_raw.trim_matches('"').to_lowercase();
+                let col = c.to_lowercase();
+                tokens.push(SearchToken::QuotedTerm { col: Some(col), text });
+            } else {
+                tokens.push(SearchToken::QuotedTerm { col: None, text: part.to_lowercase() });
+            }
+        } else {
+            tokens.push(SearchToken::Term { col: None, text: part.to_lowercase() });
+        }
+    }
+
+    // Insert implicit ANDs between adjacent operands (or operand followed by NOT)
+    let mut with_and: Vec<SearchToken> = Vec::new();
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let cur = tokens[i].clone();
+        with_and.push(cur.clone());
+        if i + 1 < tokens.len() {
+            let a = &tokens[i];
+            let b = &tokens[i + 1];
+            let a_is_operand = is_operand_token(a);
+            let b_starts_operand = is_operand_token(b) || matches!(b, SearchToken::Not);
+            if a_is_operand && b_starts_operand {
+                with_and.push(SearchToken::And);
+            }
+        }
+        i += 1;
+    }
+    with_and
+}
+
+fn to_rpn(tokens: &[SearchToken]) -> Vec<SearchToken> {
+    // Shunting-yard without parentheses. Precedence: NOT(3, right), AND(2, left), OR(1, left)
+    fn precedence(tok: &SearchToken) -> (u8, bool) {
+        match tok {
+            SearchToken::Not => (3, true),
+            SearchToken::And => (2, false),
+            SearchToken::Or => (1, false),
+            SearchToken::Term { .. } | SearchToken::QuotedTerm { .. } => (0, false),
+        }
+    }
+
+    let mut output: Vec<SearchToken> = Vec::new();
+    let mut ops: Vec<SearchToken> = Vec::new();
+
+    for tok in tokens {
+        match tok {
+            SearchToken::Term { .. } | SearchToken::QuotedTerm { .. } => output.push(tok.clone()),
+            SearchToken::And | SearchToken::Or | SearchToken::Not => {
+                let (p_cur, right_assoc) = precedence(tok);
+                while let Some(top) = ops.last() {
+                    let (p_top, _) = precedence(top);
+                    let should_pop = if right_assoc { p_cur < p_top } else { p_cur <= p_top };
+                    if should_pop {
+                        output.push(ops.pop().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                ops.push(tok.clone());
+            }
+        }
+    }
+    while let Some(op) = ops.pop() {
+        output.push(op);
+    }
+    output
+}
+
+fn build_search_mask_boolean(
+    rpn: &[SearchToken],
+    terms: &[(Option<String>, String)],
+    searchable_text: &[String],
+    // Optional: per-column searchable texts; when None, falls back to row-wide text
+    per_column: Option<&HashMap<String, Vec<String>>>,
+) -> Vec<bool> {
+    // Precompute per-(col,term) masks
+    let mut key_masks: HashMap<(Option<String>, String), Vec<bool>> = HashMap::new();
+    for (col_opt, term) in terms {
+        let key = (col_opt.clone(), term.clone());
+        if key_masks.contains_key(&key) { continue; }
+        let mut mask = vec![false; searchable_text.len()];
+        match (col_opt.as_ref().map(|c| c.to_lowercase()), per_column) {
+            (Some(col), Some(per_col)) => {
+                if let Some(col_texts) = per_col.get(&col) {
+                    for i in 0..searchable_text.len() {
+                        if let Some(t) = col_texts.get(i) {
+                            if !t.is_empty() && t.contains(term) { mask[i] = true; }
+                        }
+                    }
+                }
+            }
+            _ => {
+                for i in 0..searchable_text.len() {
+                    if !searchable_text[i].is_empty() && searchable_text[i].contains(term) {
+                        mask[i] = true;
+                    }
+                }
+            }
+        }
+        key_masks.insert(key, mask);
+    }
+
+    // Evaluate per row
+    let mut mask_out = vec![false; searchable_text.len()];
+    for i in 0..searchable_text.len() {
+        let mut stack: Vec<bool> = Vec::new();
+        for tok in rpn {
+            match tok {
+                SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
+                    let key = (col.clone(), text.clone());
+                    let v = key_masks.get(&key).and_then(|m| m.get(i)).copied().unwrap_or(false);
+                    stack.push(v);
+                }
+                SearchToken::Not => {
+                    let a = stack.pop().unwrap_or(false);
+                    stack.push(!a);
+                }
+                SearchToken::And => {
+                    let b = stack.pop().unwrap_or(false);
+                    let a = stack.pop().unwrap_or(false);
+                    stack.push(a && b);
+                }
+                SearchToken::Or => {
+                    let b = stack.pop().unwrap_or(false);
+                    let a = stack.pop().unwrap_or(false);
+                    stack.push(a || b);
+                }
+            }
+        }
+        mask_out[i] = stack.pop().unwrap_or(false);
+    }
+    mask_out
+}
+
+
 fn materialize_rows(
     df: &DataFrame,
     columns: &[String],
@@ -390,12 +654,33 @@ fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
     if query.trim().is_empty() {
         return false;
     }
-    let needle = query.to_lowercase();
-    row.data.values().any(|value| {
-        value_to_search_string(value)
-            .map(|text| text.to_lowercase().contains(&needle))
-            .unwrap_or(false)
-    })
+    // Build concatenated lowercase text and per-column lowercase texts for the row
+    let mut row_text = String::new();
+    let mut per_col: HashMap<String, Vec<String>> = HashMap::new();
+    for (col, value) in &row.data {
+        if let Some(text) = value_to_search_string(value) {
+            let lower = text.to_lowercase();
+            if !lower.is_empty() {
+                if !row_text.is_empty() { row_text.push(' '); }
+                row_text.push_str(&lower);
+                per_col.insert(col.to_lowercase(), vec![lower]);
+            }
+        }
+    }
+    if row_text.is_empty() { return false; }
+    // Boolean evaluation using the shared tokenizer and RPN evaluator
+    let tokens = tokenize_search_query(query);
+    let mut terms: Vec<(Option<String>, String)> = Vec::new();
+    for t in &tokens {
+        if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t {
+            let key = (col.clone(), text.clone());
+            if !text.is_empty() && !terms.contains(&key) { terms.push(key); }
+        }
+    }
+    if terms.is_empty() { return false; }
+    let rpn = to_rpn(&tokens);
+    let mask = build_search_mask_boolean(&rpn, &terms, &vec![row_text], Some(&per_col));
+    mask.get(0).copied().unwrap_or(false)
 }
 
 fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
@@ -417,32 +702,40 @@ fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
         if severity_rank(&user_flag) == 0 && !iocs.is_empty() {
             let mut has_ioc_match = false;
             
-            for entry in &iocs {
-                let query = entry.query.trim();
-                if query.is_empty() {
-                    continue;
-                }
-                
-                // Check if row matches IOC query
-                for column in df.get_column_names() {
-                    if column == "__rowid" {
-                        continue;
-                    }
-                    if let Ok(series) = df.column(column) {
-                        if let Ok(value) = series.get(row_idx) {
-                            if let Some(text) = anyvalue_to_search_string(&value) {
-                                if text.to_lowercase().contains(&query.to_lowercase()) {
-                                    has_ioc_match = true;
-                                    break;
-                                }
+            // Build searchable text once for this row
+            let mut row_text = String::new();
+            for column in df.get_column_names() {
+                if column == "__rowid" { continue; }
+                if let Ok(series) = df.column(column) {
+                    if let Ok(value) = series.get(row_idx) {
+                        if let Some(text) = anyvalue_to_search_string(&value) {
+                            let lower = text.to_lowercase();
+                            if !lower.is_empty() {
+                                if !row_text.is_empty() { row_text.push(' '); }
+                                row_text.push_str(&lower);
                             }
                         }
                     }
                 }
-                
-                if has_ioc_match {
-                    break;
+            }
+            for entry in &iocs {
+                let query = entry.query.trim();
+                if query.is_empty() { continue; }
+                let tokens = tokenize_search_query(query);
+                let mut terms: Vec<(Option<String>, String)> = Vec::new();
+                for t in &tokens { if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t { let key = (col.clone(), text.clone()); if !text.is_empty() && !terms.contains(&key) { terms.push(key); } } }
+                if terms.is_empty() { continue; }
+                let rpn = to_rpn(&tokens);
+                // Build single-row per-column map
+                let mut single_per_col: HashMap<String, Vec<String>> = HashMap::new();
+                for column in df.get_column_names() {
+                    if column == "__rowid" { continue; }
+                    let mut s = String::new();
+                    if let Ok(series) = df.column(column) { if let Ok(v) = series.get(row_idx) { if let Some(t) = anyvalue_to_search_string(&v) { s = t.to_lowercase(); } } }
+                    single_per_col.insert(column.to_string().to_lowercase(), vec![s]);
                 }
+                let mask = build_search_mask_boolean(&rpn, &terms, &vec![row_text.clone()], Some(&single_per_col));
+                if mask.get(0).copied().unwrap_or(false) { has_ioc_match = true; break; }
             }
             
             if has_ioc_match {
@@ -488,7 +781,7 @@ fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
             // If user already set a flag, keep it (user wins). Only apply IOC when no user flag.
             if best_rank == 0 && severity_rank_value > 0 {
                 best_rank = severity_rank_value;
-                best_flag = severity.clone();
+                    best_flag = severity.clone();
             }
 
             let tag = entry.tag.trim();
@@ -903,6 +1196,12 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     // Precompute column names and a lookup for series to speed per-row checks
     let column_names: Vec<String> = columns.clone();
     let column_series: HashMap<&str, &Series> = df.get_columns().iter().map(|s| (s.name(), s)).collect();
+    // Case-insensitive column lookup for column-scoped queries
+    let column_series_lower: HashMap<String, &Series> = df
+        .get_columns()
+        .iter()
+        .map(|s| (s.name().to_lowercase(), s))
+        .collect();
 
     // Build a concatenated lowercase searchable text per row once (targets: specified columns or all)
     let search_cols: Vec<String> = payload
@@ -916,6 +1215,8 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     } else {
         vec![String::new(); df.height()]
     };
+    // Per-column lowercase caches for column-scoped queries (lazily built below as needed)
+    let mut per_column_text: HashMap<String, Vec<String>> = HashMap::new();
     if searchable_text.iter().all(|s| s.is_empty()) {
         for col in &search_cols {
             if let Some(series) = column_series.get(col.as_str()) {
@@ -926,27 +1227,57 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
                             if !lower.is_empty() {
                                 if !searchable_text[i].is_empty() { searchable_text[i].push(' '); }
                                 searchable_text[i].push_str(&lower);
+                                }
                             }
                         }
                     }
                 }
-            }
         }
         state.searchable_cache.lock().insert(meta.id, searchable_text.clone());
     }
 
-    // Precompute search mask: substring on the per-row concatenated text
+    // Precompute search mask: boolean query (AND/OR/NOT, quotes, implicit AND). Falls back to simple term when single token.
     let mut search_mask: Option<Vec<bool>> = None;
     if let Some(search_str_raw) = payload.search.as_ref().map(|s| s.trim().to_string()) {
         if !search_str_raw.is_empty() {
-            let search_lower = search_str_raw.to_lowercase();
-            let mut mask = vec![false; df.height()];
-            for i in 0..df.height() {
-                if !searchable_text[i].is_empty() && searchable_text[i].contains(&search_lower) {
-                    mask[i] = true;
+            let tokens = tokenize_search_query(&search_str_raw);
+            // Collect distinct (col,term) pairs
+            let mut terms: Vec<(Option<String>, String)> = Vec::new();
+            let mut needed_cols: Vec<String> = Vec::new();
+            for t in &tokens {
+                match t {
+                    SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
+                        let key = (col.clone(), text.clone());
+                        if !text.is_empty() && !terms.contains(&key) { terms.push(key); }
+                        if let Some(c) = col {
+                            if !needed_cols.contains(c) { needed_cols.push(c.clone()); }
+                        }
+                    }
+                    _ => {}
                 }
             }
-            search_mask = Some(mask);
+            // Lazily build per-column caches only for referenced columns
+            for c in needed_cols {
+                if per_column_text.contains_key(&c) { continue; }
+                if let Some(series) = column_series_lower.get(&c) {
+                    let series = *series;
+                    let mut col_vec: Vec<String> = vec![String::new(); df.height()];
+                    for i in 0..df.height() {
+                        if let Ok(value) = series.get(i) {
+                            if let Some(text) = anyvalue_to_search_string(&value) {
+                                let lower = text.to_lowercase();
+                                if !lower.is_empty() { col_vec[i] = lower; }
+                            }
+                        }
+                    }
+                    per_column_text.insert(c.clone(), col_vec);
+                }
+            }
+            if !terms.is_empty() {
+                let rpn = to_rpn(&tokens);
+                let mask = build_search_mask_boolean(&rpn, &terms, &searchable_text, Some(&per_column_text));
+                search_mask = Some(mask);
+            }
         }
     }
 
@@ -968,15 +1299,39 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     let need_rebuild_ioc = ioc_flag_vec.iter().all(|s| s.is_empty());
     if need_rebuild_ioc {
         for ioc_entry in &sorted_iocs {
-        let query = ioc_entry.query.trim();
-        if query.is_empty() { continue; }
-        let q = query.to_lowercase();
-        for i in 0..df.height() {
-            if !ioc_flag_vec[i].is_empty() || !user_flag_vec[i].is_empty() { continue; }
-            if !searchable_text[i].is_empty() && searchable_text[i].contains(&q) {
-                ioc_flag_vec[i] = normalize_flag_value(&ioc_entry.flag);
+            let query = ioc_entry.query.trim();
+            if query.is_empty() { continue; }
+            // Build boolean mask for this IOC query across all rows (column selectors supported)
+            let tokens = tokenize_search_query(query);
+            let mut terms: Vec<(Option<String>, String)> = Vec::new();
+            let mut needed_cols: Vec<String> = Vec::new();
+            for t in &tokens { if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t { let key = (col.clone(), text.clone()); if !text.is_empty() && !terms.contains(&key) { terms.push(key); } if let Some(c) = col { if !needed_cols.contains(c) { needed_cols.push(c.clone()); } } } }
+            // Ensure per-column caches for IOC-referenced columns
+            for c in needed_cols {
+                if per_column_text.contains_key(&c) { continue; }
+                if let Some(series) = column_series_lower.get(&c) {
+                    let series = *series;
+                    let mut col_vec: Vec<String> = vec![String::new(); df.height()];
+                    for i in 0..df.height() {
+                        if let Ok(value) = series.get(i) {
+                            if let Some(text) = anyvalue_to_search_string(&value) {
+                                let lower = text.to_lowercase();
+                                if !lower.is_empty() { col_vec[i] = lower; }
+                            }
+                        }
+                    }
+                    per_column_text.insert(c.clone(), col_vec);
+                }
             }
-        }
+            if terms.is_empty() { continue; }
+            let rpn = to_rpn(&tokens);
+            let mask = build_search_mask_boolean(&rpn, &terms, &searchable_text, Some(&per_column_text));
+            for i in 0..df.height() {
+                if !ioc_flag_vec[i].is_empty() || !user_flag_vec[i].is_empty() { continue; }
+                if mask.get(i).copied().unwrap_or(false) {
+                    ioc_flag_vec[i] = normalize_flag_value(&ioc_entry.flag);
+                }
+            }
         }
         state.ioc_flag_cache.lock().insert(meta.id, ioc_flag_vec.clone());
     }
@@ -1056,8 +1411,19 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
             for ioc_entry in &iocs {
                 let query = ioc_entry.query.trim();
                 if query.is_empty() { continue; }
-                let ql = query.to_lowercase();
-                if !searchable_text[row_idx].is_empty() && searchable_text[row_idx].contains(&ql) {
+                // Evaluate boolean query on this row only (column selectors supported)
+                let tokens = tokenize_search_query(query);
+                let mut terms: Vec<(Option<String>, String)> = Vec::new();
+                for t in &tokens { if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t { let key = (col.clone(), text.clone()); if !text.is_empty() && !terms.contains(&key) { terms.push(key); } } }
+                if terms.is_empty() { continue; }
+                let rpn = to_rpn(&tokens);
+                // Prepare a per-column map containing only this row for evaluation
+                let mut single_per_col: HashMap<String, Vec<String>> = HashMap::new();
+                for (col, vec_texts) in per_column_text.iter() {
+                    if let Some(v) = vec_texts.get(row_idx) { single_per_col.insert(col.to_lowercase(), vec![v.clone()]); }
+                }
+                let single_mask = build_search_mask_boolean(&rpn, &terms, &vec![searchable_text[row_idx].clone()], Some(&single_per_col));
+                if single_mask.get(0).copied().unwrap_or(false) {
                     let tag = ioc_entry.tag.trim();
                     if !tag.is_empty() {
                         let token = format!("[{}]", tag);
@@ -1278,25 +1644,38 @@ fn export_project(state: State<AppState>, payload: ExportProjectPayload) -> Resu
         let mut memo_tags = Vec::new();
 
         if !iocs.is_empty() {
-            for ioc_entry in &iocs {
-                let query = ioc_entry.query.trim();
-                if query.is_empty() {
-                    continue;
-                }
-                let query_lower = query.to_lowercase();
-                let mut row_matches = false;
-                for col_name in &column_names {
-                    if let Some(series) = column_series.get(col_name.as_str()) {
-                        if let Ok(value) = series.get(i) {
-                            if let Some(text) = anyvalue_to_search_string(&value) {
-                                if text.to_lowercase().contains(&query_lower) {
-                                    row_matches = true;
-                                    break;
-                                }
+            // Build searchable text once for this row
+            let mut row_text = String::new();
+            for col_name in &column_names {
+                if let Some(series) = column_series.get(col_name.as_str()) {
+                    if let Ok(value) = series.get(i) {
+                        if let Some(text) = anyvalue_to_search_string(&value) {
+                            let lower = text.to_lowercase();
+                            if !lower.is_empty() {
+                                if !row_text.is_empty() { row_text.push(' '); }
+                                row_text.push_str(&lower);
                             }
                         }
                     }
                 }
+            }
+            for ioc_entry in &iocs {
+                let query = ioc_entry.query.trim();
+                if query.is_empty() { continue; }
+                let tokens = tokenize_search_query(query);
+                let mut terms: Vec<(Option<String>, String)> = Vec::new();
+                for t in &tokens { if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t { let key = (col.clone(), text.clone()); if !text.is_empty() && !terms.contains(&key) { terms.push(key); } } }
+                if terms.is_empty() { continue; }
+                let rpn = to_rpn(&tokens);
+                // Build single-row per-column map
+                let mut single_per_col: HashMap<String, Vec<String>> = HashMap::new();
+                for col_name in &column_names {
+                    let mut s = String::new();
+                    if let Some(series) = column_series.get(col_name.as_str()) { if let Ok(v) = series.get(i) { if let Some(t) = anyvalue_to_search_string(&v) { s = t.to_lowercase(); } } }
+                    single_per_col.insert(col_name.to_lowercase(), vec![s]);
+                }
+                let mask = build_search_mask_boolean(&rpn, &terms, &vec![row_text.clone()], Some(&single_per_col));
+                let row_matches = mask.get(0).copied().unwrap_or(false);
 
                 if row_matches {
                     let severity = normalize_flag_value(&ioc_entry.flag);
