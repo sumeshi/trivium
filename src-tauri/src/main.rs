@@ -488,15 +488,59 @@ fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
         }
     }
 
+    // Column carry-over across OR: if an operand with a column is followed by
+    // an OR and then an operand without a column, apply the same column to the
+    // following operand. This enables queries like `com:WS01|WS02|WS03` to be
+    // interpreted as `com:WS01 OR com:WS02 OR com:WS03`.
+    let mut adjusted: Vec<SearchToken> = Vec::with_capacity(tokens.len());
+    let mut last_operand_col: Option<String> = None;
+    let mut carry_col_for_next: Option<String> = None;
+    for tok in tokens.into_iter() {
+        match tok {
+            SearchToken::Term { col, text } => {
+                let new_col = if col.is_none() {
+                    carry_col_for_next.take().or(col)
+                } else {
+                    col
+                };
+                last_operand_col = new_col.clone();
+                adjusted.push(SearchToken::Term { col: new_col, text });
+            }
+            SearchToken::QuotedTerm { col, text } => {
+                let new_col = if col.is_none() {
+                    carry_col_for_next.take().or(col)
+                } else {
+                    col
+                };
+                last_operand_col = new_col.clone();
+                adjusted.push(SearchToken::QuotedTerm { col: new_col, text });
+            }
+            SearchToken::Or => {
+                // Set carry to the last seen operand column; it will apply to the next operand
+                carry_col_for_next = last_operand_col.clone();
+                adjusted.push(SearchToken::Or);
+            }
+            SearchToken::And => {
+                // AND should not carry column context
+                carry_col_for_next = None;
+                adjusted.push(SearchToken::And);
+            }
+            SearchToken::Not => {
+                // Keep carry across NOT so patterns like `com:x|-y` become `com:x OR -com:y`
+                adjusted.push(SearchToken::Not);
+            }
+        }
+    }
+
     // Insert implicit ANDs between adjacent operands (or operand followed by NOT)
     let mut with_and: Vec<SearchToken> = Vec::new();
     let mut i = 0usize;
-    while i < tokens.len() {
-        let cur = tokens[i].clone();
+    while i < adjusted.len() {
+        let cur = adjusted[i].clone();
         with_and.push(cur.clone());
-        if i + 1 < tokens.len() {
-            let a = &tokens[i];
-            let b = &tokens[i + 1];
+        if i + 1 < adjusted.len() {
+            let a = &adjusted[i];
+            let b = &adjusted[i + 1];
             let a_is_operand = is_operand_token(a);
             let b_starts_operand = is_operand_token(b) || matches!(b, SearchToken::Not);
             if a_is_operand && b_starts_operand {
