@@ -5,13 +5,53 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* Dark theme: muted, elegant */
+    --bg: #181b24;
+    --fg: #e3e7f2;
+    --muted: #99a2bf;
+    --surface: #202534;
+    --surface-weak: #262b3c;
+    --surface-soft: color-mix(in srgb, var(--surface) 75%, transparent);
+    --surface-strong: #1b202d;
+    --overlay: rgba(19, 22, 31, 0.92);
+    --border: #3a4257;
+    --hover: color-mix(in srgb, var(--accent) 16%, transparent);
+    --heading: var(--fg);
+    --accent: #6c83ff;
+    --accent-contrast: #101321;
+    --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+    --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+    --positive: #66d19e;
+    --positive-soft: color-mix(in srgb, var(--positive) 20%, transparent);
+    --warning: #e8c27c;
+    --warning-soft: color-mix(in srgb, var(--warning) 20%, transparent);
+    --danger: #e38383;
+    --danger-soft: color-mix(in srgb, var(--danger) 20%, transparent);
+    --shadow-strong: 0 22px 48px rgba(10, 12, 18, 0.65);
+    --shadow-soft: 0 12px 24px rgba(12, 16, 24, 0.42);
   }
 
   /* Prefer Windows JP fonts; fall back to system fonts */
 
   html,
   body {
-    @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+    @apply min-h-screen antialiased;
+    background-color: var(--bg);
+    color: var(--fg);
+  }
+
+  /* Smooth theme transitions */
+  .app-shell,
+  .bg-trivium-surface,
+  .bg-overlay,
+  header,
+  .heading-text,
+  .text-muted,
+  button,
+  input,
+  textarea,
+  select {
+    transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
   }
 
   body {
@@ -24,5 +64,70 @@
 
   #app {
     @apply min-h-screen;
+  }
+
+  /* Map common Tailwind utility classes to theme vars */
+  .bg-slate-950 { background-color: var(--bg) !important; }
+  .text-slate-100 { color: var(--fg) !important; }
+  .text-slate-300 { color: color-mix(in oklab, var(--fg) 72%, var(--bg)) !important; }
+  .text-slate-400 { color: var(--muted) !important; }
+  .text-white { color: #ffffff !important; }
+  .text-black { color: #000000 !important; }
+  .text-muted { color: var(--muted) !important; }
+  .heading-text { color: var(--heading) !important; }
+  .border-white\/10 { border-color: var(--border) !important; }
+  .bg-white\/5 { background-color: var(--surface-weak) !important; }
+  .bg-white\/10 { background-color: var(--surface-soft) !important; }
+  .hover\:bg-white\/10:hover { background-color: var(--hover) !important; }
+  .hover\:text-slate-100:hover { color: var(--fg) !important; }
+  .border-indigo-400\/60 { border-color: var(--accent-border) !important; }
+  .focus\:ring-indigo-400\/40:focus { box-shadow: 0 0 0 2px var(--accent-soft); }
+  .bg-emerald-500 { background-color: var(--positive) !important; color: var(--accent-contrast) !important; }
+  .hover\:bg-emerald-400:hover { background-color: color-mix(in srgb, var(--positive) 70%, #ffffff 30%) !important; }
+  .bg-indigo-500 { background-color: var(--accent) !important; color: var(--accent-contrast) !important; }
+  .hover\:bg-indigo-400:hover { background-color: color-mix(in srgb, var(--accent) 75%, #ffffff 25%) !important; }
+  header { background-color: var(--overlay) !important; border-color: var(--border) !important; color: var(--fg); }
+  .bg-trivium-surface { background-color: var(--surface) !important; color: var(--fg); }
+  .bg-overlay { background-color: var(--overlay) !important; }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--heading);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--muted) 65%, transparent);
+  }
+
+  .placeholder\:text-slate-500::placeholder {
+    color: color-mix(in srgb, var(--muted) 65%, transparent);
+  }
+
+  /* Light theme: override variables only */
+  [data-theme='light'] { color-scheme: light; }
+  [data-theme='light'] {
+    --bg: #f7f9fb;
+    --fg: #1e2937;
+    --muted: #5b6473;
+    --surface: #ffffff;
+    --surface-weak: #eef2f6;
+    --surface-soft: color-mix(in srgb, var(--surface) 85%, var(--bg) 15%);
+    --surface-strong: #e7ebf1;
+    --overlay: rgba(255, 255, 255, 0.92);
+    --border: #d6dbe3;
+    --hover: color-mix(in srgb, var(--accent) 12%, transparent);
+    --heading: #1e2937;
+    --accent: #2563eb;
+    --accent-contrast: #ffffff;
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+    --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
+    --positive: #15803d;
+    --positive-soft: color-mix(in srgb, var(--positive) 16%, transparent);
+    --warning: #d97706;
+    --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
+    --danger: #dc2626;
+    --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+    --shadow-strong: 0 22px 48px rgba(31, 41, 55, 0.12);
+    --shadow-soft: 0 12px 24px rgba(31, 41, 55, 0.08);
   }
 }

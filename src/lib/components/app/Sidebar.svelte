@@ -3,6 +3,7 @@
   import { fade, fly } from 'svelte/transition';
   import dayjs from 'dayjs';
   import type { ProjectSummary } from '../../types';
+  import { theme, toggleTheme } from '../../theme';
 
   const dispatch = createEventDispatcher();
 
@@ -22,7 +23,7 @@
 </script>
 
 <div
-  class="fixed inset-x-0 bottom-0 top-[64px] z-[60] flex items-stretch justify-start bg-slate-950/80 backdrop-blur-sm"
+  class="fixed inset-x-0 bottom-0 top-[64px] z-[60] flex items-stretch justify-start bg-overlay backdrop-blur-sm"
   in:fade={{ duration: 120 }}
   out:fade={{ duration: 120 }}
 >
@@ -47,9 +48,29 @@
   >
     <div class="flex items-start justify-between">
       <div>
-        <h2 class="text-lg font-semibold text-white">Workspace</h2>
-        <p class="text-sm text-slate-400">Manage imports and projects</p>
+        <h2 class="text-lg font-semibold heading-text">Workspace</h2>
+        <p class="text-sm text-muted">Manage imports and projects</p>
       </div>
+      <button
+        type="button"
+        class="rounded-md border border-white/10 p-2 text-muted transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+        on:click={() => toggleTheme()}
+        aria-label="Toggle theme"
+        title="Toggle theme"
+      >
+        {#if $theme === 'dark'}
+          <!-- Sun icon for light mode target -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.364-7.364-1.414 1.414M8.05 16.95l-1.414 1.414m12.728 0-1.414-1.414M8.05 7.05 6.636 5.636"/>
+          </svg>
+        {:else}
+          <!-- Moon icon for dark mode target -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        {/if}
+      </button>
     </div>
 
     <section class="mt-6 space-y-4">
@@ -68,7 +89,7 @@
           class="hidden"
         />
         {#if pendingFileName}
-          <p class="truncate text-xs text-slate-300">{pendingFileName}</p>
+          <p class="truncate text-xs text-muted">{pendingFileName}</p>
         {/if}
         <div class="space-y-2">
           <input
@@ -76,7 +97,7 @@
             id="project-description"
             placeholder="Enter project description [Optional]"
             bind:value={pendingDescription}
-            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </div>
         <button
@@ -91,9 +112,9 @@
 
     <section class="mt-8 space-y-3">
       <div class="flex items-center justify-between">
-        <h2 class="text-md font-semibold">Projects</h2>
+        <h2 class="text-md font-semibold heading-text">Projects</h2>
         <button
-          class="rounded-md border border-white/10 p-2 text-xs text-slate-300 transition hover:bg-white/10 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+          class="rounded-md border border-white/10 p-2 text-xs text-muted transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           on:click={() => dispatch('loadProjects')}
           aria-label="Refresh projects"
         >
@@ -102,9 +123,9 @@
       </div>
 
       {#if isLoadingProjects}
-        <p class="text-xs text-slate-400">Loading projects…</p>
+        <p class="text-xs text-muted">Loading projects…</p>
       {:else if projects.length === 0}
-        <p class="text-xs text-slate-400">No projects yet. Import a CSV to get started.</p>
+        <p class="text-xs text-muted">No projects yet. Import a CSV to get started.</p>
       {:else}
         <ul class="space-y-3">
           {#each projects as project}
@@ -120,18 +141,18 @@
                   on:click={() => dispatch('selectProject', project.meta.id)}
                 >
                   <div class="flex items-center justify-end gap-3">
-                    <span class="whitespace-nowrap text-xs text-slate-400">
+                    <span class="whitespace-nowrap text-xs text-muted">
                       {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
                     </span>
                   </div>
                   <div class="flex items-center justify-between gap-3 mt-1">
-                    <span class="truncate text-sm font-semibold text-slate-100">{truncateText(project.meta.name, 16)}</span>
+                    <span class="truncate text-sm font-semibold heading-text">{truncateText(project.meta.name, 16)}</span>
                   </div>
                   <hr class="border-white/10 my-2">
                   {#if project.meta.description}
-                    <p class="mt-2 text-xs text-slate-400">{truncateText(project.meta.description, 20)}</p>
+                    <p class="mt-2 text-xs text-muted">{truncateText(project.meta.description, 20)}</p>
                   {/if}
-                  <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 mt-2">
+                  <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted mt-2">
                     <span>{project.meta.total_records} rows</span>
                     <span>{project.meta.flagged_records + project.meta.ioc_applied_records} flagged</span>
                   </div>

@@ -131,7 +131,6 @@
     `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}`;
 
   const resetPaginationState = () => {
-    console.log('[debug] resetPaginationState called');
     rowsCache.set(new Map());
     pendingPages.set(new Set());
     loadedPages.set(new Set());
@@ -146,12 +145,6 @@
       columnWidths = new Map();
       return;
     }
-    console.log('initializeColumnWidths called, column_max_chars:', projectDetail.column_max_chars);
-    console.log('Available columns:', projectDetail.columns);
-    console.log('column_max_chars type:', typeof projectDetail.column_max_chars);
-    console.log('column_max_chars is array:', Array.isArray(projectDetail.column_max_chars));
-    console.log('column_max_chars keys:', Object.keys(projectDetail.column_max_chars));
-    console.log('column_max_chars values:', Object.values(projectDetail.column_max_chars));
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
       // Calculate width using maximum character count from Polars
@@ -160,11 +153,9 @@
       const maxChars = Math.max(headerChars, dataChars);
       const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
       const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
-      console.log(`Column ${column}: headerChars=${headerChars}, dataChars=${dataChars}, maxChars=${maxChars}, estimated=${estimated}, width=${width}`);
       next.set(column, width);
     }
     columnWidths = next;
-    console.log('Final columnWidths:', columnWidths);
   };
 
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
@@ -208,12 +199,6 @@
 
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
-    console.log('[debug] applyProjectDetail', {
-      projectId: detail.project.meta.id,
-      totalRecords: detail.project.meta.total_records,
-      columns: detail.columns.length,
-    });
-    
     totalRows.set(detail.project.meta.total_records);
     totalFlagged.set(detail.project.meta.flagged_records);
     flaggedCount.set($totalFlagged);
@@ -228,10 +213,7 @@
     initialized = true;
     // Always request first page to ensure flags and memos are reflected after project reload
     // Wait for the first page to load before marking as ready to render
-      console.log('[debug] applyProjectDetail request first page');
-    requestPage(0, true).then(() => {
-      console.log('[debug] applyProjectDetail first page loaded');
-    }).catch((error) => {
+    requestPage(0, true).catch((error) => {
       console.error('[debug] applyProjectDetail first page failed:', error);
     });
   };
@@ -270,10 +252,7 @@
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
     const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
 
-    console.log('[debug] Reactive check:', { flagValue, lastFlagFilter, flagChanged, initialized });
-
     if (searchChanged || flagChanged || columnsChanged) {
-      console.log('[debug] Filter change detected:', { searchChanged, flagChanged, flagValue, searchValue });
       // Flag filter changes require scroll reset
       scheduleFilterRefresh(searchValue, flagValue, columns, flagChanged);
       lastSearchValue = searchValue;
@@ -305,15 +284,6 @@
     const lastPage = Math.max(firstPage, Math.floor(lastPosition / PAGE_SIZE) + PREFETCH_PAGES);
     const maxPageIndex = Math.max(0, Math.floor(Math.max(effectiveTotalRows - 1, 0) / PAGE_SIZE));
     const clampedLastPage = Math.min(lastPage, maxPageIndex);
-    console.log('[debug] ensureRangeLoaded', {
-      start,
-      end,
-      firstPage,
-      lastPage: clampedLastPage,
-      effectiveTotalRows,
-      loadedPages: Array.from($loadedPages.values()),
-      pendingPages: Array.from($pendingPages.values()),
-    });
     for (let page = firstPage; page <= clampedLastPage; page += 1) {
       if (!$loadedPages.has(page) && !$pendingPages.has(page)) {
         void requestPage(page);
@@ -350,14 +320,6 @@
       sortDirection: $sortDirection ?? null,
     };
 
-    console.log('[debug] requestPage', {
-      page: normalizedPage,
-      offset,
-      limit,
-      filters,
-      sortKey: $sortKey,
-      sortDirection: $sortDirection,
-    });
     return backend
       .queryProjectRows(payload)
       .then((response) => {
@@ -372,12 +334,6 @@
         flaggedCount.set(response.total_flagged);
         emitSummary();
         const normalizedRows = response.rows.map((row) => normalizeRow(row));
-        console.log('[debug] requestPage response', {
-          page: normalizedPage,
-          received: normalizedRows.length,
-          totalRows: response.total_rows,
-          offset: response.offset,
-        });
         rowsCache.update((cache) => {
           const nextCache = new Map(cache);
           normalizedRows.forEach((row) => {
@@ -391,7 +347,6 @@
           normalizedRows.forEach((row, i) => {
             next.set(response.offset + i, row.row_index);
           });
-          console.log('[debug] positionToRowIndex updated, size:', next.size);
           return next;
         });
         const nextLoaded = new Set($loadedPages);
@@ -411,9 +366,7 @@
     resetScroll: boolean,
     force: boolean
   ): Promise<void> => {
-    console.log('applyFilters called with:', filters, 'projectDetail:', !!projectDetail);
     if (!projectDetail) {
-      console.log('No projectDetail, returning early');
       return Promise.resolve();
     }
     const normalized: AppliedFilters = {

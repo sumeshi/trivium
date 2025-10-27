@@ -11,6 +11,7 @@
   import ProjectView from './lib/components/ProjectView.svelte';
   import Toast from './lib/components/app/Toast.svelte';
 import { showToast } from './lib/utils/toast';
+  import { initTheme } from './lib/theme';
 
   const backend: Backend = createBackend();
 
@@ -202,13 +203,14 @@ import { showToast } from './lib/utils/toast';
   };
 
   onMount(() => {
+    void initTheme();
     void loadProjects();
   });
 
   $: canCreateProject = Boolean(pendingFilePath);
 </script>
 
-<div class="min-h-screen bg-slate-950 text-slate-100">
+<div class="app-shell">
   <Header {projectDetail} on:menuClick={() => { sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
 
   {#if sidebarOpen}
@@ -232,7 +234,7 @@ import { showToast } from './lib/utils/toast';
   <main class="relative z-0 flex w-full flex-col px-4 pt-24 pb-4 sm:px-6" style="height: 100vh; overflow: hidden;">
     {#if selectedProjectId}
       {#if isLoadingDetail}
-        <div class="flex flex-1 items-center justify-center text-slate-400">
+        <div class="flex flex-1 items-center justify-center text-muted">
           Loading project…
         </div>
       {:else if projectDetail}
@@ -247,8 +249,8 @@ import { showToast } from './lib/utils/toast';
         </div>
       {/if}
     {:else}
-      <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-400">
-        <h2 class="text-xl font-semibold text-slate-100">Select a project</h2>
+      <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted">
+        <h2 class="text-xl font-semibold heading-text">Select a project</h2>
         <p class="max-w-sm text-sm">
           Pick a project from the menu or import a new CSV to get started.
         </p>
