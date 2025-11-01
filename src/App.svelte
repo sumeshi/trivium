@@ -1,102 +1,25 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fade, fly } from 'svelte/transition';
   import { open } from '@tauri-apps/api/dialog';
-  import dayjs from 'dayjs';
   import { createBackend } from './lib/backend';
   import type { Backend } from './lib/backend';
-  import type { LoadProjectResponse, ProjectSummary } from './lib/types';
   import Sidebar from './lib/components/app/Sidebar.svelte';
   import Header from './lib/components/app/Header.svelte';
   import ProjectView from './lib/components/ProjectView.svelte';
   import Toast from './lib/components/app/Toast.svelte';
-import { showToast } from './lib/utils/toast';
+  import { showToast } from './lib/utils/toast';
   import { initTheme } from './lib/theme';
+  import { createProjectController } from './lib/stores/projects';
 
   const backend: Backend = createBackend();
-
-  const projectCache = new Map<string, LoadProjectResponse>();
-
-  let projects: ProjectSummary[] = [];
-  let selectedProjectId: string | null = null;
-  let projectDetail: LoadProjectResponse | null = null;
-
-  let isLoadingProjects = false;
-  let isLoadingDetail = false;
-  let creating = false;
-
-  let pendingDescription = '';
-  let pendingFilePath: string | null = null;
-  let pendingFileName = '';
-  let canCreateProject = false;
+  const projectController = createProjectController(backend);
+  const projectState = projectController.state;
+  const canCreateProject = projectController.canCreateProject;
 
   let sidebarOpen = true;
 
   const handleNotify = (event: CustomEvent<{ message: string; tone: 'success' | 'error' }>) => {
     showToast(event.detail.message, event.detail.tone);
-  };
-
-  let projectsLoaded = false;
-
-  const loadProjects = async (force = false) => {
-    if (projectsLoaded && !force) {
-      return;
-    }
-    isLoadingProjects = true;
-    try {
-      const result = await backend.listProjects();
-      projects = result;
-      projectsLoaded = true;
-      if (selectedProjectId) {
-        const stillExists = projects.some((item) => item.meta.id === selectedProjectId);
-        if (!stillExists) {
-          selectedProjectId = null;
-          projectDetail = null;
-        }
-      }
-    } catch (error) {
-      console.error(error);
-      showToast('Failed to load projects.', 'error');
-    } finally {
-      isLoadingProjects = false;
-    }
-  };
-
-  const loadProjectDetail = async (projectId: string, force = false) => {
-    if (!force) {
-      const cached = projectCache.get(projectId);
-      if (cached) {
-        projectDetail = cached;
-        selectedProjectId = projectId;
-        console.log('Project selected (cached), closing sidebar');
-        sidebarOpen = false;
-        return;
-      }
-    }
-    isLoadingDetail = true;
-    try {
-      const response = await backend.loadProject(projectId);
-      projectDetail = response;
-      selectedProjectId = projectId;
-      console.log('Project selected (loaded), closing sidebar');
-      sidebarOpen = false;
-      projectCache.set(projectId, response);
-    } catch (error) {
-      console.error(error);
-      showToast('Failed to load project data.', 'error');
-    } finally {
-      isLoadingDetail = false;
-    }
-  };
-
-  const handleSelectProject = async (projectId: string) => {
-    // Force refresh semantics on project switch
-    projectCache.delete(projectId);
-    // Immediately show loading state and unmount previous view
-    isLoadingDetail = true;
-    selectedProjectId = projectId;
-    projectDetail = null;
-    await loadProjectDetail(projectId, true);
   };
 
   const pickCsv = async () => {
@@ -108,42 +31,22 @@ import { showToast } from './lib/utils/toast';
       if (!selected || Array.isArray(selected)) {
         return;
       }
-      pendingFilePath = selected;
-      const pathParts = selected.split(/[/\\]/);
-      pendingFileName = pathParts[pathParts.length - 1] ?? 'selected.csv';
+      projectController.setPendingFile(selected);
     } catch (error) {
       console.error(error);
       showToast('Failed to open file picker.', 'error');
     }
   };
 
-  const resetPending = () => {
-    pendingFilePath = null;
-    pendingFileName = '';
-    pendingDescription = '';
-  };
-
   const createProject = async () => {
-    if (!pendingFilePath) {
-      showToast('Select a CSV file first.', 'error');
-      return;
-    }
-    creating = true;
     try {
-      const summary = await backend.createProject({
-        path: pendingFilePath,
-        description: pendingDescription || null
-      });
+      const summary = await projectController.createProject();
       showToast(`Imported ${summary.meta.name}`);
-      await loadProjects(true);
-      await loadProjectDetail(summary.meta.id, true);
-      resetPending();
+      sidebarOpen = false;
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : 'Failed to import CSV.';
       showToast(message, 'error');
-    } finally {
-      creating = false;
     }
   };
 
@@ -153,14 +56,8 @@ import { showToast } from './lib/utils/toast';
       return;
     }
     try {
-      await backend.deleteProject(projectId);
+      await projectController.deleteProject(projectId);
       showToast('Project deleted.');
-      projectCache.delete(projectId);
-      await loadProjects(true);
-      if (selectedProjectId === projectId) {
-        selectedProjectId = null;
-        projectDetail = null;
-      }
     } catch (error) {
       console.error(error);
       showToast('Failed to delete project.', 'error');
@@ -168,80 +65,75 @@ import { showToast } from './lib/utils/toast';
   };
 
   const handleRefreshRequest = async () => {
-    if (selectedProjectId) {
-      // Clear cache to force real reload from backend
-      projectCache.delete(selectedProjectId);
-      await loadProjectDetail(selectedProjectId, true);
+    try {
+      await projectController.refreshSelected();
+    } catch (error) {
+      console.error(error);
+      showToast('Failed to refresh project data.', 'error');
     }
-    await loadProjects(true);
+  };
+
+  const handleSelectProject = async (projectId: string) => {
+    try {
+      await projectController.selectProject(projectId);
+      sidebarOpen = false;
+    } catch (error) {
+      console.error(error);
+      showToast('Failed to load project data.', 'error');
+    }
   };
 
   const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
-    if (!projectDetail || !selectedProjectId) return;
-
-    const newMeta = {
-      ...projectDetail.project.meta,
-      flagged_records: event.detail.flagged,
-      ioc_applied_records: event.detail.iocApplied,
-      hidden_columns: event.detail.hiddenColumns,
-    };
-
-    projectDetail = {
-      ...projectDetail,
-      project: {
-        meta: newMeta,
-      },
-      hidden_columns: event.detail.hiddenColumns
-    };
-
-    projects = projects.map((item) =>
-      item.meta.id === selectedProjectId
-        ? { meta: newMeta }
-        : item
-    );
-    projectCache.set(selectedProjectId, projectDetail);
+    projectController.updateSummary(event.detail);
   };
 
   onMount(() => {
     void initTheme();
-    void loadProjects();
+    void projectController.loadProjects().catch((error) => {
+      console.error(error);
+      showToast('Failed to load projects.', 'error');
+    });
   });
-
-  $: canCreateProject = Boolean(pendingFilePath);
 </script>
 
 <div class="app-shell">
-  <Header {projectDetail} on:menuClick={() => { sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
+  <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
 
   {#if sidebarOpen}
     <Sidebar
-      {projects}
-      {selectedProjectId}
-      {isLoadingProjects}
-      {creating}
-      bind:pendingDescription
-      {pendingFileName}
-      {canCreateProject}
+      projects={$projectState.projects}
+      selectedProjectId={$projectState.selectedProjectId}
+      isLoadingProjects={$projectState.isLoadingProjects}
+      creating={$projectState.creating}
+      pendingDescription={$projectState.pendingDescription}
+      pendingFileName={$projectState.pendingFileName}
+      canCreateProject={$canCreateProject}
+      on:descriptionChange={(e) => projectController.setPendingDescription(e.detail)}
       on:selectProject={(e) => handleSelectProject(e.detail)}
       on:deleteProject={(e) => deleteProject(e.detail)}
       on:pickCsv={pickCsv}
       on:createProject={createProject}
-      on:loadProjects={() => loadProjects()}
+      on:loadProjects={() =>
+        projectController.loadProjects(true).catch((error) => {
+          console.error(error);
+          showToast('Failed to load projects.', 'error');
+        })
+      }
       on:close={() => (sidebarOpen = false)}
     />
   {/if}
 
   <main class="relative z-0 flex w-full flex-col px-4 pt-24 pb-4 sm:px-6" style="height: 100vh; overflow: hidden;">
-    {#if selectedProjectId}
-      {#if isLoadingDetail}
+    {#if $projectState.selectedProjectId}
+      {#if $projectState.isLoadingDetail}
         <div class="flex flex-1 items-center justify-center text-muted">
           Loading project…
         </div>
-      {:else if projectDetail}
+      {:else if $projectState.projectDetail}
         <div class="flex-1 min-h-0">
           <ProjectView
             {backend}
-            {projectDetail}
+            projectDetail={$projectState.projectDetail}
             on:refresh={handleRefreshRequest}
             on:summary={handleSummaryUpdate}
             on:notify={handleNotify}

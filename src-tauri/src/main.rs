@@ -1,6 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows release builds
+
+mod error;
+mod models;
+mod state;
+mod storage;
+mod value_utils;
+
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     fs::{self, File},
     io::BufWriter,
     path::{Path, PathBuf},
@@ -8,274 +15,24 @@ use std::{
 
 use anyhow::{Context, Result};
 use csv::{ReaderBuilder, WriterBuilder};
-use chrono::{DateTime, Utc};
-use parking_lot::Mutex;
+use chrono::Utc;
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::{Manager, State};
-use thiserror::Error;
 use uuid::Uuid;
 
+use crate::{
+    error::AppError,
+    models::{FlagEntry, IocEntry, LoadProjectResponse, ProjectMeta, ProjectRow, ProjectSummary},
+    state::AppState,
+    storage::{
+        compute_column_max_chars, load_column_metrics, load_flags, save_column_metrics, save_flags,
+    },
+    value_utils::{anyvalue_to_json, anyvalue_to_search_string, value_to_search_string},
+};
+
 const DEFAULT_PAGE_SIZE: usize = 250;
-
-#[derive(Debug, Error)]
-enum AppError {
-    #[error("{0}")]
-    Message(String),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-}
-
-impl From<AppError> for String {
-    fn from(err: AppError) -> Self {
-        err.to_string()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProjectMeta {
-    id: Uuid,
-    name: String,
-    description: Option<String>,
-    created_at: DateTime<Utc>,
-    total_records: usize,
-    #[serde(default)]
-    flagged_records: usize,
-    #[serde(default)]
-    ioc_applied_records: usize,
-    hidden_columns: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProjectSummary {
-    meta: ProjectMeta,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProjectRow {
-    row_index: usize,
-    data: HashMap<String, Value>,
-    flag: String,
-    memo: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct IocEntry {
-    flag: String,
-    tag: String,
-    query: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct LoadProjectResponse {
-    project: ProjectSummary,
-    columns: Vec<String>,
-    hidden_columns: Vec<String>,
-    column_max_chars: HashMap<String, usize>,
-    iocs: Vec<IocEntry>,
-    initial_rows: Vec<ProjectRow>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct FlagEntry {
-    flag: String,
-    memo: Option<String>,
-}
-
-#[derive(Debug)]
-struct ProjectsStore {
-    root_dir: PathBuf,
-    meta_path: PathBuf,
-    inner: Mutex<Vec<ProjectMeta>>,
-}
-
-impl ProjectsStore {
-    fn new(root_dir: PathBuf) -> Result<Self> {
-        let projects_dir = root_dir.join("projects");
-        fs::create_dir_all(&projects_dir)
-            .with_context(|| format!("failed to create projects dir at {:?}", projects_dir))?;
-
-        let meta_path = root_dir.join("projects.json");
-        let mut projects: Vec<ProjectMeta> = if meta_path.exists() {
-            let data = fs::read(&meta_path)
-                .with_context(|| format!("failed to read metadata file {:?}", meta_path))?;
-            serde_json::from_slice(&data)
-                .with_context(|| format!("failed to parse metadata file {:?}", meta_path))?
-        } else {
-            Vec::new()
-        };
-
-        // Migrate existing project data (calculate if flagged_records is 0)
-        let mut needs_save = false;
-        for project in &mut projects {
-            if project.flagged_records == 0 {
-                let project_dir = root_dir.join("projects").join(project.id.to_string());
-                let flags_path = project_dir.join("flags.json");
-                if flags_path.exists() {
-                    if let Ok(flags) = load_flags(&flags_path) {
-                        project.flagged_records = flags
-                            .values()
-                            .filter(|entry| !entry.flag.trim().is_empty())
-                            .count();
-                        needs_save = true;
-                    }
-                }
-            }
-        }
-        
-        // Save migrated data
-        if needs_save {
-            let data = serde_json::to_vec_pretty(&projects)
-                .with_context(|| format!("failed to serialize metadata to {:?}", meta_path))?;
-            fs::write(&meta_path, data)
-                .with_context(|| format!("failed to write metadata file {:?}", meta_path))?;
-        }
-
-        Ok(Self {
-            root_dir,
-            meta_path,
-            inner: Mutex::new(projects),
-        })
-    }
-
-    fn all(&self) -> Vec<ProjectMeta> {
-        self.inner.lock().clone()
-    }
-
-    fn insert(&self, project: ProjectMeta) -> Result<()> {
-        let mut guard = self.inner.lock();
-        guard.push(project);
-        self.persist_locked(&guard)
-    }
-
-    fn update_hidden_columns(&self, id: &Uuid, hidden_columns: Vec<String>) -> Result<()> {
-        let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.hidden_columns = hidden_columns;
-        }
-        self.persist_locked(&guard)
-    }
-
-    fn update_flagged_records(&self, id: &Uuid, flagged_records: usize) -> Result<()> {
-        let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.flagged_records = flagged_records;
-        }
-        self.persist_locked(&guard)
-    }
-
-    fn update_ioc_applied_records(&self, id: &Uuid, ioc_applied_records: usize) -> Result<()> {
-        let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.ioc_applied_records = ioc_applied_records;
-        }
-        self.persist_locked(&guard)
-    }
-
-    fn remove(&self, id: &Uuid) -> Result<()> {
-        let mut guard = self.inner.lock();
-        guard.retain(|meta| &meta.id != id);
-        self.persist_locked(&guard)
-    }
-
-    fn find(&self, id: &Uuid) -> Option<ProjectMeta> {
-        self.inner.lock().iter().find(|meta| &meta.id == id).cloned()
-    }
-
-    fn persist_locked(&self, guard: &[ProjectMeta]) -> Result<()> {
-        let data = serde_json::to_vec_pretty(guard)?;
-        fs::write(&self.meta_path, data)
-            .with_context(|| format!("failed to write metadata file {:?}", self.meta_path))
-    }
-
-    fn project_dir(&self, id: &Uuid) -> PathBuf {
-        self.root_dir.join("projects").join(id.to_string())
-    }
-}
-
-struct AppState {
-    projects: ProjectsStore,
-    // lightweight caches per project to avoid recomputation
-    searchable_cache: Mutex<HashMap<Uuid, Vec<String>>>,
-    ioc_flag_cache: Mutex<HashMap<Uuid, Vec<String>>>,
-}
-
-impl AppState {
-    fn new(app: &tauri::App<tauri::Wry>) -> Result<Self> {
-        let base_dir = tauri::api::path::app_local_data_dir(&app.config())
-            .context("failed to resolve app data dir")?
-            .join("trivium");
-        fs::create_dir_all(&base_dir)
-            .with_context(|| format!("failed to create app data dir {:?}", base_dir))?;
-        let projects = ProjectsStore::new(base_dir)?;
-        Ok(Self {
-            projects,
-            searchable_cache: Mutex::new(HashMap::new()),
-            ioc_flag_cache: Mutex::new(HashMap::new()),
-        })
-    }
-}
-
-fn load_flags(path: &Path) -> Result<HashMap<usize, FlagEntry>> {
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    let data = fs::read(path)
-        .with_context(|| format!("failed to read flags file {:?}", path))?;
-    let map: HashMap<usize, FlagEntry> = serde_json::from_slice(&data)
-        .with_context(|| format!("failed to parse flags file {:?}", path))?;
-    Ok(map)
-}
-
-fn save_flags(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create flag dir {:?}", parent))?;
-    }
-    let data = serde_json::to_vec_pretty(flags)?;
-    fs::write(path, data)
-        .with_context(|| format!("failed to write flags file {:?}", path))
-}
-
-fn anyvalue_to_json(value: &AnyValue) -> Value {
-    match value {
-        AnyValue::Null => Value::Null,
-        AnyValue::Boolean(v) => Value::Bool(*v),
-        AnyValue::Int8(v) => Value::from(*v),
-        AnyValue::Int16(v) => Value::from(*v),
-        AnyValue::Int32(v) => Value::from(*v),
-        AnyValue::Int64(v) => Value::from(*v),
-        AnyValue::UInt8(v) => Value::from(*v),
-        AnyValue::UInt16(v) => Value::from(*v),
-        AnyValue::UInt32(v) => Value::from(*v),
-        AnyValue::UInt64(v) => Value::from(*v),
-        AnyValue::Float32(v) => Value::from(f64::from(*v)),
-        AnyValue::Float64(v) => Value::from(*v),
-        AnyValue::String(v) => Value::String(v.to_string()),
-        AnyValue::Date(v) => Value::String(v.to_string()),
-        AnyValue::Datetime(v, _, _) => Value::String(v.to_string()),
-        AnyValue::Time(v) => Value::String(v.to_string()),
-        AnyValue::List(series) => {
-            let values: Vec<Value> = series.iter().map(|v| anyvalue_to_json(&v)).collect();
-            Value::Array(values)
-        }
-        other => Value::String(other.to_string()),
-    }
-}
-
-fn value_display_length(value: &Value) -> usize {
-    match value {
-        Value::Null => 0,
-        Value::String(text) => text.chars().count(),
-        Value::Number(number) => number.to_string().chars().count(),
-        Value::Bool(true) => 4,
-        Value::Bool(false) => 5,
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(value)
-            .map(|text| text.chars().count())
-            .unwrap_or(0),
-    }
-}
+const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
 
 fn normalize_flag_value(flag: &str) -> String {
     let trimmed = flag.trim();
@@ -299,52 +56,6 @@ fn severity_rank(value: &str) -> u8 {
         "suspicious" => 2,
         "safe" => 1,
         _ => 0,
-    }
-}
-
-fn value_to_search_string(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(boolean) => Some(boolean.to_string()),
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
-    }
-}
-
-fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
-    match value {
-        AnyValue::Null => None,
-        AnyValue::Boolean(v) => Some(v.to_string()),
-        AnyValue::Int8(v) => Some(v.to_string()),
-        AnyValue::Int16(v) => Some(v.to_string()),
-        AnyValue::Int32(v) => Some(v.to_string()),
-        AnyValue::Int64(v) => Some(v.to_string()),
-        AnyValue::UInt8(v) => Some(v.to_string()),
-        AnyValue::UInt16(v) => Some(v.to_string()),
-        AnyValue::UInt32(v) => Some(v.to_string()),
-        AnyValue::UInt64(v) => Some(v.to_string()),
-        AnyValue::Float32(v) => Some(f64::from(*v).to_string()),
-        AnyValue::Float64(v) => Some(v.to_string()),
-        AnyValue::String(v) => Some(v.to_string()),
-        AnyValue::StringOwned(v) => Some(v.to_string()),
-        AnyValue::Datetime(_, _, _) => Some(value.to_string()),
-        AnyValue::Date(_) => Some(value.to_string()),
-        AnyValue::Time(_) => Some(value.to_string()),
-        AnyValue::List(series) => {
-            let mut parts: Vec<String> = Vec::new();
-            for inner in series.iter() {
-                if let Some(text) = anyvalue_to_search_string(&inner) {
-                    parts.push(text);
-                }
-            }
-            if parts.is_empty() {
-                None
-            } else {
-                Some(parts.join(","))
-            }
-        }
-        other => Some(other.to_string()),
     }
 }
 
@@ -694,6 +405,51 @@ fn materialize_rows(
     rows
 }
 
+fn build_searchable_text(
+    row_count: usize,
+    search_cols: &[String],
+    column_series: &HashMap<&str, &Series>,
+) -> Vec<String> {
+    let mut searchable_text: Vec<String> = vec![String::new(); row_count];
+    for col in search_cols {
+        if let Some(series) = column_series.get(col.as_str()) {
+            for row_idx in 0..row_count {
+                if let Ok(value) = series.get(row_idx) {
+                    if let Some(text) = anyvalue_to_search_string(&value) {
+                        let lower = text.to_lowercase();
+                        if lower.is_empty() {
+                            continue;
+                        }
+                        let entry = &mut searchable_text[row_idx];
+                        if entry.is_empty() {
+                            entry.push_str(&lower);
+                        } else {
+                            entry.push(' ');
+                            entry.push_str(&lower);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    searchable_text
+}
+
+fn ensure_searchable_text<'a>(
+    storage: &'a mut Option<Vec<String>>,
+    built_flag: &mut bool,
+    row_count: usize,
+    search_cols: &[String],
+    column_series: &HashMap<&str, &Series>,
+) -> &'a Vec<String> {
+    if storage.is_none() {
+        let built = build_searchable_text(row_count, search_cols, column_series);
+        *storage = Some(built);
+        *built_flag = true;
+    }
+    storage.as_ref().unwrap()
+}
+
 fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
     if query.trim().is_empty() {
         return false;
@@ -1018,8 +774,11 @@ fn create_project(state: State<AppState>, payload: CreateProjectPayload) -> Resu
         .with_context(|| format!("failed to create project dir {:?}", project_dir))
         .map_err(AppError::from)?;
 
+    let column_metrics = compute_column_max_chars(&df);
     let parquet_path = project_dir.join("data.parquet");
     write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
+    let metrics_path = project_dir.join(COLUMN_METRICS_FILE);
+    save_column_metrics(&metrics_path, &column_metrics).map_err(AppError::from)?;
 
     // Persist imported flags if any
     if !imported_flags.is_empty() {
@@ -1151,27 +910,18 @@ fn load_project(state: State<AppState>, request: ProjectRequest) -> Result<LoadP
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let mut column_max_chars: HashMap<String, usize> = columns
-        .iter()
-        .map(|name| {
-            let header_len = name.chars().count();
-            (name.clone(), header_len)
-        })
-        .collect();
-
-    // Calculate maximum string length for all data
-    for column in &columns {
-        if let Ok(series) = df.column(column) {
-            for value in series.iter() {
-                let json_value = anyvalue_to_json(&value);
-                let display_len = value_display_length(&json_value);
-                if let Some(entry) = column_max_chars.get_mut(column) {
-                    if display_len > *entry {
-                        *entry = display_len;
-                    }
-                }
-            }
+    let metrics_path = project_dir.join(COLUMN_METRICS_FILE);
+    let mut column_max_chars = match load_column_metrics(&metrics_path).map_err(AppError::from)? {
+        Some(map) => map,
+        None => {
+            let computed = compute_column_max_chars(&df);
+            save_column_metrics(&metrics_path, &computed).map_err(AppError::from)?;
+            computed
         }
+    };
+    if columns.iter().any(|column| !column_max_chars.contains_key(column)) {
+        column_max_chars = compute_column_max_chars(&df);
+        save_column_metrics(&metrics_path, &column_max_chars).map_err(AppError::from)?;
     }
 
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -1253,32 +1003,21 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
         .as_ref()
         .cloned()
         .unwrap_or_else(|| column_names.clone());
-    // cache or build searchable_text per project
-    let mut searchable_text: Vec<String> = if let Some(cached) = state.searchable_cache.lock().get(&meta.id).cloned() {
-        if cached.len() == df.height() { cached } else { vec![String::new(); df.height()] }
-    } else {
-        vec![String::new(); df.height()]
+    let row_count = df.height();
+    let cached_search = {
+        let guard = state.searchable_cache.lock();
+        guard.get(&meta.id).cloned()
     };
+    let mut searchable_text: Option<Vec<String>> = cached_search.and_then(|cached| {
+        if cached.len() == row_count && cached.iter().any(|s| !s.is_empty()) {
+            Some(cached)
+        } else {
+            None
+        }
+    });
+    let mut searchable_text_built = false;
     // Per-column lowercase caches for column-scoped queries (lazily built below as needed)
     let mut per_column_text: HashMap<String, Vec<String>> = HashMap::new();
-    if searchable_text.iter().all(|s| s.is_empty()) {
-        for col in &search_cols {
-            if let Some(series) = column_series.get(col.as_str()) {
-                for i in 0..df.height() {
-                    if let Ok(value) = series.get(i) {
-                        if let Some(text) = anyvalue_to_search_string(&value) {
-                            let lower = text.to_lowercase();
-                            if !lower.is_empty() {
-                                if !searchable_text[i].is_empty() { searchable_text[i].push(' '); }
-                                searchable_text[i].push_str(&lower);
-                                }
-                            }
-                        }
-                    }
-                }
-        }
-        state.searchable_cache.lock().insert(meta.id, searchable_text.clone());
-    }
 
     // Precompute search mask: boolean query (AND/OR/NOT, quotes, implicit AND). Falls back to simple term when single token.
     let mut search_mask: Option<Vec<bool>> = None;
@@ -1319,7 +1058,14 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
             }
             if !terms.is_empty() {
                 let rpn = to_rpn(&tokens);
-                let mask = build_search_mask_boolean(&rpn, &terms, &searchable_text, Some(&per_column_text));
+                let search_text = ensure_searchable_text(
+                    &mut searchable_text,
+                    &mut searchable_text_built,
+                    row_count,
+                    &search_cols,
+                    &column_series,
+                );
+                let mask = build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
                 search_mask = Some(mask);
             }
         }
@@ -1369,7 +1115,14 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
             }
             if terms.is_empty() { continue; }
             let rpn = to_rpn(&tokens);
-            let mask = build_search_mask_boolean(&rpn, &terms, &searchable_text, Some(&per_column_text));
+            let search_text = ensure_searchable_text(
+                &mut searchable_text,
+                &mut searchable_text_built,
+                row_count,
+                &search_cols,
+                &column_series,
+            );
+            let mask = build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
             for i in 0..df.height() {
                 if !ioc_flag_vec[i].is_empty() || !user_flag_vec[i].is_empty() { continue; }
                 if mask.get(i).copied().unwrap_or(false) {
@@ -1458,15 +1211,49 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
                 // Evaluate boolean query on this row only (column selectors supported)
                 let tokens = tokenize_search_query(query);
                 let mut terms: Vec<(Option<String>, String)> = Vec::new();
-                for t in &tokens { if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t { let key = (col.clone(), text.clone()); if !text.is_empty() && !terms.contains(&key) { terms.push(key); } } }
+                let mut needed_cols: Vec<String> = Vec::new();
+                for t in &tokens {
+                    if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t {
+                        let key = (col.clone(), text.clone());
+                        if !text.is_empty() && !terms.contains(&key) { terms.push(key); }
+                        if let Some(c) = col {
+                            if !needed_cols.contains(c) { needed_cols.push(c.clone()); }
+                        }
+                    }
+                }
                 if terms.is_empty() { continue; }
                 let rpn = to_rpn(&tokens);
+                // Ensure per-column caches for referenced columns (may not be built when IOC cache was reused)
+                for c in needed_cols {
+                    if per_column_text.contains_key(&c) { continue; }
+                    if let Some(series) = column_series_lower.get(&c) {
+                        let series = *series;
+                        let mut col_vec: Vec<String> = vec![String::new(); df.height()];
+                        for i in 0..df.height() {
+                            if let Ok(value) = series.get(i) {
+                                if let Some(text) = anyvalue_to_search_string(&value) {
+                                    let lower = text.to_lowercase();
+                                    if !lower.is_empty() { col_vec[i] = lower; }
+                                }
+                            }
+                        }
+                        per_column_text.insert(c.clone(), col_vec);
+                    }
+                }
                 // Prepare a per-column map containing only this row for evaluation
                 let mut single_per_col: HashMap<String, Vec<String>> = HashMap::new();
                 for (col, vec_texts) in per_column_text.iter() {
                     if let Some(v) = vec_texts.get(row_idx) { single_per_col.insert(col.to_lowercase(), vec![v.clone()]); }
                 }
-                let single_mask = build_search_mask_boolean(&rpn, &terms, &vec![searchable_text[row_idx].clone()], Some(&single_per_col));
+                let search_text = ensure_searchable_text(
+                    &mut searchable_text,
+                    &mut searchable_text_built,
+                    row_count,
+                    &search_cols,
+                    &column_series,
+                );
+                let row_search_text = search_text[row_idx].clone();
+                let single_mask = build_search_mask_boolean(&rpn, &terms, &vec![row_search_text], Some(&single_per_col));
                 if single_mask.get(0).copied().unwrap_or(false) {
                     let tag = ioc_entry.tag.trim();
                     if !tag.is_empty() {
@@ -1491,6 +1278,12 @@ fn query_project_rows(state: State<AppState>, payload: QueryRowsPayload) -> Resu
     }
 
     // (debug logs removed)
+
+    if searchable_text_built {
+        if let Some(ref built) = searchable_text {
+            state.searchable_cache.lock().insert(meta.id, built.clone());
+        }
+    }
 
     Ok(QueryRowsResponse {
         rows,
