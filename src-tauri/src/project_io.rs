@@ -11,8 +11,8 @@ pub fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
 }
 
 pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {
-    let file = File::create(path)
-        .with_context(|| format!("failed to create parquet file {:?}", path))?;
+    let file =
+        File::create(path).with_context(|| format!("failed to create parquet file {:?}", path))?;
     let writer = ParquetWriter::new(file);
     writer.finish(df).context("failed to write parquet file")?;
     Ok(())

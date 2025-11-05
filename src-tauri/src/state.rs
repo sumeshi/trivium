@@ -1,17 +1,10 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::{
-    models::ProjectMeta,
-    storage::load_flags,
-};
+use crate::{models::ProjectMeta, storage::load_flags};
 
 pub struct ProjectsStore {
     root_dir: PathBuf,
@@ -109,7 +102,11 @@ impl ProjectsStore {
     }
 
     pub fn find(&self, id: &Uuid) -> Option<ProjectMeta> {
-        self.inner.lock().iter().find(|meta| &meta.id == id).cloned()
+        self.inner
+            .lock()
+            .iter()
+            .find(|meta| &meta.id == id)
+            .cloned()
     }
 
     pub fn project_dir(&self, id: &Uuid) -> PathBuf {

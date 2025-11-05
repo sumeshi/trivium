@@ -15,7 +15,10 @@ pub enum SearchToken {
 }
 
 fn is_operand_token(tok: &SearchToken) -> bool {
-    matches!(tok, SearchToken::Term { .. } | SearchToken::QuotedTerm { .. })
+    matches!(
+        tok,
+        SearchToken::Term { .. } | SearchToken::QuotedTerm { .. }
+    )
 }
 
 pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
@@ -113,9 +116,15 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
                 let (c, t) = rest.split_at(pos);
                 let text = t[1..].to_lowercase();
                 let col = c.to_lowercase();
-                tokens.push(SearchToken::Term { col: Some(col), text });
+                tokens.push(SearchToken::Term {
+                    col: Some(col),
+                    text,
+                });
             } else {
-                tokens.push(SearchToken::Term { col: None, text: rest.to_lowercase() });
+                tokens.push(SearchToken::Term {
+                    col: None,
+                    text: rest.to_lowercase(),
+                });
             }
             continue;
         }
@@ -124,7 +133,10 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
             let (c, t) = part.split_at(pos);
             let text = t[1..].to_lowercase();
             let col = c.to_lowercase();
-            tokens.push(SearchToken::Term { col: Some(col), text });
+            tokens.push(SearchToken::Term {
+                col: Some(col),
+                text,
+            });
             continue;
         }
         if quoted {
@@ -134,12 +146,21 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
                 let text_raw = t[1..].trim();
                 let text = text_raw.trim_matches('"').to_lowercase();
                 let col = c.to_lowercase();
-                tokens.push(SearchToken::QuotedTerm { col: Some(col), text });
+                tokens.push(SearchToken::QuotedTerm {
+                    col: Some(col),
+                    text,
+                });
             } else {
-                tokens.push(SearchToken::QuotedTerm { col: None, text: part.to_lowercase() });
+                tokens.push(SearchToken::QuotedTerm {
+                    col: None,
+                    text: part.to_lowercase(),
+                });
             }
         } else {
-            tokens.push(SearchToken::Term { col: None, text: part.to_lowercase() });
+            tokens.push(SearchToken::Term {
+                col: None,
+                text: part.to_lowercase(),
+            });
         }
     }
 
@@ -228,7 +249,11 @@ pub fn to_rpn(tokens: &[SearchToken]) -> Vec<SearchToken> {
                 let (p_cur, right_assoc) = precedence(tok);
                 while let Some(top) = ops.last() {
                     let (p_top, _) = precedence(top);
-                    let should_pop = if right_assoc { p_cur < p_top } else { p_cur <= p_top };
+                    let should_pop = if right_assoc {
+                        p_cur < p_top
+                    } else {
+                        p_cur <= p_top
+                    };
                     if should_pop {
                         output.push(ops.pop().unwrap());
                     } else {
@@ -292,7 +317,11 @@ pub fn build_search_mask_boolean(
             match tok {
                 SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
                     let key = (col.clone(), text.clone());
-                    let v = key_masks.get(&key).and_then(|m| m.get(i)).copied().unwrap_or(false);
+                    let v = key_masks
+                        .get(&key)
+                        .and_then(|m| m.get(i))
+                        .copied()
+                        .unwrap_or(false);
                     stack.push(v);
                 }
                 SearchToken::Not => {

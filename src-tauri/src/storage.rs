@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-};
+use std::{collections::HashMap, fs, path::Path};
 
 use anyhow::{Context, Result};
 use polars::prelude::DataFrame;
@@ -16,8 +12,7 @@ pub fn load_flags(path: &Path) -> Result<HashMap<usize, FlagEntry>> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let data = fs::read(path)
-        .with_context(|| format!("failed to read flags file {:?}", path))?;
+    let data = fs::read(path).with_context(|| format!("failed to read flags file {:?}", path))?;
     let map: HashMap<usize, FlagEntry> = serde_json::from_slice(&data)
         .with_context(|| format!("failed to parse flags file {:?}", path))?;
     Ok(map)
@@ -29,16 +24,15 @@ pub fn save_flags(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<()> 
             .with_context(|| format!("failed to create flag dir {:?}", parent))?;
     }
     let data = serde_json::to_vec_pretty(flags)?;
-    fs::write(path, data)
-        .with_context(|| format!("failed to write flags file {:?}", path))
+    fs::write(path, data).with_context(|| format!("failed to write flags file {:?}", path))
 }
 
 pub fn load_column_metrics(path: &Path) -> Result<Option<HashMap<String, usize>>> {
     if !path.exists() {
         return Ok(None);
     }
-    let data = fs::read(path)
-        .with_context(|| format!("failed to read column metrics file {:?}", path))?;
+    let data =
+        fs::read(path).with_context(|| format!("failed to read column metrics file {:?}", path))?;
     let map: HashMap<String, usize> = serde_json::from_slice(&data)
         .with_context(|| format!("failed to parse column metrics file {:?}", path))?;
     Ok(Some(map))
@@ -51,8 +45,7 @@ pub fn save_column_metrics(path: &Path, metrics: &HashMap<String, usize>) -> Res
     }
     let data = serde_json::to_vec_pretty(metrics)
         .with_context(|| format!("failed to serialize column metrics for {:?}", path))?;
-    fs::write(path, data)
-        .with_context(|| format!("failed to write column metrics file {:?}", path))
+    fs::write(path, data).with_context(|| format!("failed to write column metrics file {:?}", path))
 }
 
 pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {

@@ -6,9 +6,9 @@ mod flags;
 mod ioc;
 mod models;
 mod project_io;
+mod search;
 mod state;
 mod storage;
-mod search;
 mod value_utils;
 
 use tauri::Manager;

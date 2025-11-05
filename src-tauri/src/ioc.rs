@@ -8,7 +8,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 use crate::flags::{normalize_flag_value, severity_rank};
 use crate::models::{IocEntry, ProjectRow};
 use crate::project_io::read_project_dataframe;
-use crate::search::{build_search_mask_boolean, tokenize_search_query, to_rpn, SearchToken};
+use crate::search::{build_search_mask_boolean, to_rpn, tokenize_search_query, SearchToken};
 use crate::storage::load_flags;
 use crate::value_utils::{anyvalue_to_search_string, value_to_search_string};
 
@@ -99,7 +99,11 @@ pub fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
         }
         if memo_changed {
             let trimmed = memo.trim().to_string();
-            row.memo = if trimmed.is_empty() { None } else { Some(trimmed) };
+            row.memo = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
         }
     }
 }
@@ -109,8 +113,7 @@ pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data = fs::read(&path)
-        .with_context(|| format!("failed to read ioc file {:?}", path))?;
+    let data = fs::read(&path).with_context(|| format!("failed to read ioc file {:?}", path))?;
     let mut entries: Vec<IocEntry> = serde_json::from_slice(&data)
         .with_context(|| format!("failed to parse ioc file {:?}", path))?;
     for entry in &mut entries {
@@ -168,7 +171,11 @@ pub fn write_ioc_csv(entries: &[IocEntry], path: &Path) -> Result<()> {
         .context("failed to write IOC CSV header")?;
     for entry in entries {
         writer
-            .write_record([entry.flag.as_str(), entry.tag.as_str(), entry.query.as_str()])
+            .write_record([
+                entry.flag.as_str(),
+                entry.tag.as_str(),
+                entry.query.as_str(),
+            ])
             .context("failed to write IOC CSV row")?;
     }
     writer.flush().context("failed to flush IOC CSV writer")
@@ -225,7 +232,8 @@ pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
                 let tokens = tokenize_search_query(query);
                 let mut terms: Vec<(Option<String>, String)> = Vec::new();
                 for t in &tokens {
-                    if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t
+                    if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } =
+                        t
                     {
                         let key = (col.clone(), text.clone());
                         if !text.is_empty() && !terms.contains(&key) {
@@ -250,8 +258,12 @@ pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
                     }
                     single_per_col.insert(column.to_lowercase(), vec![s]);
                 }
-                let mask =
-                    build_search_mask_boolean(&rpn, &terms, &vec![row_text.clone()], Some(&single_per_col));
+                let mask = build_search_mask_boolean(
+                    &rpn,
+                    &terms,
+                    &vec![row_text.clone()],
+                    Some(&single_per_col),
+                );
                 if mask.get(0).copied().unwrap_or(false) {
                     has_ioc_match = true;
                     break;

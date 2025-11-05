@@ -12,7 +12,7 @@ Its core purpose is to make the process of manual data review and analysis faste
 
 ## Download
 
-Pre-built versions for Windows are available for download from the project's **[Releases](https://github.com/user/repo/releases)** page. *(Note: This is a placeholder link.)*
+Pre-built versions for Windows are available for download from the project's **[Releases](https://github.com/sumeshi/Trivium/releases)** page. *(Note: This is a placeholder link.)*
 
 ## Who is this for?
 
