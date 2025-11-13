@@ -19,7 +19,10 @@
     return text.length > length ? text.slice(0, length) + '...' + text.slice(text.length - 6) : text;
   };
 
-  let fileInput: HTMLInputElement | null;
+  const handleDescriptionInput = (event: Event) => {
+    const nextValue = (event.target as HTMLInputElement | null)?.value ?? '';
+    dispatch('descriptionChange', nextValue);
+  };
 </script>
 
 <div
@@ -81,13 +84,6 @@
         >
           Import CSV File
         </button>
-        <input
-          type="file"
-          accept=".csv"
-          bind:this={fileInput}
-          on:change={(event) => dispatch('fileSelection', event)}
-          class="hidden"
-        />
         {#if pendingFileName}
           <p class="truncate text-xs text-muted">{pendingFileName}</p>
         {/if}
@@ -96,8 +92,9 @@
             type="text"
             id="project-description"
             placeholder="Enter project description [Optional]"
-            bind:value={pendingDescription}
-          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+            value={pendingDescription}
+            on:input={handleDescriptionInput}
+            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </div>
         <button

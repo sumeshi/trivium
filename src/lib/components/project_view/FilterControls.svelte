@@ -36,10 +36,7 @@
   };
 
   const selectFlagFilter = (value: FlagFilterValue) => {
-    console.log('Flag filter changing from', $flagFilter, 'to', value);
     flagFilter.set(value);
-    console.log('Flag filter is now', $flagFilter);
-    console.log('Flag filter store updated, should trigger reactive update');
     flagMenuOpen = false;
   };
 
@@ -135,7 +132,6 @@
       placeholder="Enter search text"
       bind:value={$search}
       type="search"
-      on:input={() => console.log('Search input:', $search)}
     />
   </label>
   <div class="filter-columns">
@@ -176,7 +172,6 @@
   </div>
   <div class="filter-ioc">
     <button type="button" class="ghost" on:click={() => {
-      console.log('IOC Rules button clicked');
       dispatch('iocManagerOpen');
     }}>
       IOC Rules

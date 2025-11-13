@@ -120,15 +120,10 @@
     // If posMap is empty and we have pending pages, return loading state rows
     // This handles project switching where we've reset posMap but first page is still loading
     if (posMap.size === 0 && pendingPages.size > 0) {
-      console.log('[debug] buildVirtualRows: loading state (empty posMap + pending pages)');
       for (let position = start; position < end; position += 1) {
         result.push({ position, row: null });
       }
       return result;
-    }
-    
-    if (posMap.size === 0 && cache.size > 0) {
-      console.log('[debug] buildVirtualRows: empty posMap but cache has data, might be transitioning');
     }
     for (let position = start; position < end; position += 1) {
       const rowIndex = posMap.get(position) ?? null;

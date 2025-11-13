@@ -13,6 +13,7 @@
     escapeCsvValue,
   } from './state';
   import type { IocEntry } from '../../types';
+import FlagSelect from './FlagSelect.svelte';
 
   const dispatch = createEventDispatcher();
 
@@ -59,11 +60,11 @@
   });
 
   const addIocEntry = async () => {
-    const newEntry = { 
-      id: crypto.randomUUID(), 
-      flag: 'critical', 
-      tag: '', 
-      query: '' 
+    const newEntry: IocEntry = {
+      id: crypto.randomUUID(),
+      flag: 'critical',
+      tag: '',
+      query: '',
     };
     iocDraft.update((d: IocEntry[]) => [...d, newEntry]);
     
@@ -228,15 +229,11 @@
         {:else}
           {#each $iocDraft as entry, index (entry.id || `entry-${index}`)}
             <div class="ioc-row">
-              <select
-                bind:value={entry.flag}
-                on:change={(event) => handleIocFieldChange(index, 'flag', event)}
+              <FlagSelect
+                value={entry.flag}
                 disabled={isSavingIocs}
-              >
-                {#each FLAG_OPTIONS as option}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
+                on:change={(event) => updateIocEntry(index, 'flag', event.detail)}
+              />
               <input
                 bind:value={entry.tag}
                 placeholder="Tag name"

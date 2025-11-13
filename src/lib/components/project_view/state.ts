@@ -1,6 +1,11 @@
 import { derived, get, writable } from "svelte/store";
 import type { Backend } from "../../backend";
-import type { IocEntry, LoadProjectResponse, ProjectRow } from "../../types";
+import type {
+  FlagSymbol,
+  IocEntry,
+  LoadProjectResponse,
+  ProjectRow,
+} from "../../types";
 
 export const FLAG_OPTIONS = [
   { value: "safe", label: "Safe", hint: "✓", tone: "safe" },
@@ -8,7 +13,6 @@ export const FLAG_OPTIONS = [
   { value: "critical", label: "Critical", hint: "!", tone: "critical" },
 ] as const;
 
-export type FlagSymbol = (typeof FLAG_OPTIONS)[number]["value"];
 export type FlagFilterValue = FlagSymbol | "all" | "none" | "priority";
 
 export const PRIORITY_FLAGS: FlagSymbol[] = ["suspicious", "critical"];
@@ -220,6 +224,9 @@ export const toggleSort = (column: string) => {
 export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
   const currentFlag = normalizeFlag(row.flag);
   const nextFlag = currentFlag === flag ? "" : flag;
+  const previousHadFlag = Boolean(currentFlag);
+  const nextHasFlag = Boolean(nextFlag);
+  const flaggedDelta = (nextHasFlag ? 1 : 0) - (previousHadFlag ? 1 : 0);
 
   // Optimistic update: Update UI immediately
   const optimisticRow = {
@@ -232,12 +239,9 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
     return newCache;
   });
 
-  // Update flagged count
-  const currentCache = get(rowsCache);
-  const newFlaggedCount = Array.from(currentCache.values()).filter(
-    (r) => r.flag && r.flag.trim().length > 0
-  ).length;
-  flaggedCount.set(newFlaggedCount);
+  if (flaggedDelta !== 0) {
+    flaggedCount.update((value) => Math.max(0, value + flaggedDelta));
+  }
 
   // Backend update runs asynchronously (revert on error)
   try {
@@ -261,12 +265,9 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
       return newCache;
     });
 
-    // Also revert flagged count
-    const revertedCache = get(rowsCache);
-    const revertedFlaggedCount = Array.from(revertedCache.values()).filter(
-      (r) => r.flag && r.flag.trim().length > 0
-    ).length;
-    flaggedCount.set(revertedFlaggedCount);
+    if (flaggedDelta !== 0) {
+      flaggedCount.update((value) => Math.max(0, value - flaggedDelta));
+    }
 
     // dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
   }
