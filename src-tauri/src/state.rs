@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
@@ -122,9 +122,6 @@ impl ProjectsStore {
 
 pub struct AppState {
     pub projects: ProjectsStore,
-    // lightweight caches per project to avoid recomputation
-    pub searchable_cache: Mutex<HashMap<Uuid, Vec<String>>>,
-    pub ioc_flag_cache: Mutex<HashMap<Uuid, Vec<String>>>,
 }
 
 impl AppState {
@@ -135,10 +132,6 @@ impl AppState {
         fs::create_dir_all(&base_dir)
             .with_context(|| format!("failed to create app data dir {:?}", base_dir))?;
         let projects = ProjectsStore::new(base_dir)?;
-        Ok(Self {
-            projects,
-            searchable_cache: Mutex::new(HashMap::new()),
-            ioc_flag_cache: Mutex::new(HashMap::new()),
-        })
+        Ok(Self { projects })
     }
 }

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use anyhow::Error as AnyhowError;
+
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -9,19 +11,24 @@ use crate::{
     error::AppError,
     flags::{normalize_flag_value, severity_rank},
     ioc::load_ioc_entries,
-    models::ProjectRow,
+    models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
     search::{
         build_search_mask_boolean, ensure_searchable_text, to_rpn, tokenize_search_query,
         SearchToken,
     },
     state::AppState,
-    storage::load_flags,
+    storage::{
+        load_flags, load_ioc_flag_cache, load_searchable_cache, save_ioc_flag_cache,
+        save_searchable_cache,
+    },
     value_utils::anyvalue_to_search_string,
 };
 
 use super::{
-    utils::{build_row_search_text, collect_row_record, ensure_column_text_cache},
+    utils::{
+        build_row_search_text, collect_row_record_from_series, ensure_column_text_cache,
+    },
     DEFAULT_PAGE_SIZE,
 };
 
@@ -115,9 +122,15 @@ pub fn query_project_rows(
         .cloned()
         .unwrap_or_else(|| column_names.clone());
     let row_count = df.height();
-    let cached_search = {
-        let guard = state.searchable_cache.lock();
-        guard.get(&meta.id).cloned()
+    let cached_search = match load_searchable_cache(&project_dir) {
+        Ok(cache) => cache,
+        Err(err) => {
+            eprintln!(
+                "[cache] failed to load searchable cache for {:?}: {:?}",
+                project_dir, err
+            );
+            None
+        }
     };
     let mut searchable_text: Option<Vec<String>> = cached_search.and_then(|cached| {
         if cached.len() == row_count && cached.iter().any(|s| !s.is_empty()) {
@@ -130,48 +143,48 @@ pub fn query_project_rows(
     let mut per_column_text: HashMap<String, Vec<String>> = HashMap::new();
 
     let mut search_mask: Option<Vec<bool>> = None;
-    if let Some(search_str_raw) = payload.search.as_ref().map(|s| s.trim().to_string()) {
-        if !search_str_raw.is_empty() {
-            let tokens = tokenize_search_query(&search_str_raw);
-            let mut terms: Vec<(Option<String>, String)> = Vec::new();
-            let mut needed_cols: Vec<String> = Vec::new();
-            for t in &tokens {
-                match t {
-                    SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
-                        let key = (col.clone(), text.clone());
-                        if !text.is_empty() && !terms.contains(&key) {
-                            terms.push(key);
-                        }
-                        if let Some(c) = col {
-                            if !needed_cols.contains(c) {
-                                needed_cols.push(c.clone());
-                            }
-                        }
+    if let Some(search_str_raw) = payload
+        .search
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        let tokens = tokenize_search_query(&search_str_raw);
+        let mut terms: Vec<(Option<String>, String)> = Vec::new();
+        let mut needed_cols: Vec<String> = Vec::new();
+        for token in &tokens {
+            if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = token {
+                let key = (col.clone(), text.clone());
+                if !text.is_empty() && !terms.contains(&key) {
+                    terms.push(key);
+                }
+                if let Some(column_name) = col {
+                    if !needed_cols.contains(column_name) {
+                        needed_cols.push(column_name.clone());
                     }
-                    _ => {}
                 }
             }
-            for c in needed_cols {
-                ensure_column_text_cache(
-                    &c,
-                    &column_series_lower,
-                    &mut per_column_text,
-                    df.height(),
-                );
-            }
-            if !terms.is_empty() {
-                let rpn = to_rpn(&tokens);
-                let search_text = ensure_searchable_text(
-                    &mut searchable_text,
-                    &mut searchable_text_built,
-                    row_count,
-                    &search_cols,
-                    &column_series,
-                );
-                let mask =
-                    build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
-                search_mask = Some(mask);
-            }
+        }
+        for column in needed_cols {
+            ensure_column_text_cache(
+                &column,
+                &column_series_lower,
+                &mut per_column_text,
+                df.height(),
+            );
+        }
+        if !terms.is_empty() {
+            let rpn = to_rpn(&tokens);
+            let search_text = ensure_searchable_text(
+                &mut searchable_text,
+                &mut searchable_text_built,
+                row_count,
+                &search_cols,
+                &column_series,
+            );
+            let mask =
+                build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
+            search_mask = Some(mask);
         }
     }
 
@@ -182,16 +195,19 @@ pub fn query_project_rows(
         }
     }
 
-    let mut ioc_flag_vec: Vec<String> =
-        if let Some(cached) = state.ioc_flag_cache.lock().get(&meta.id).cloned() {
-            if cached.len() == df.height() {
-                cached
-            } else {
-                vec![String::new(); df.height()]
-            }
-        } else {
-            vec![String::new(); df.height()]
-        };
+    let cached_ioc_flags = match load_ioc_flag_cache(&project_dir) {
+        Ok(cache) => cache,
+        Err(err) => {
+            eprintln!(
+                "[cache] failed to load IOC cache for {:?}: {:?}",
+                project_dir, err
+            );
+            None
+        }
+    };
+    let mut ioc_flag_vec: Vec<String> = cached_ioc_flags
+        .filter(|cached| cached.len() == row_count)
+        .unwrap_or_else(|| vec![String::new(); row_count]);
     let mut sorted_iocs = iocs.clone();
     sorted_iocs.sort_by_key(|e| std::cmp::Reverse(severity_rank(&normalize_flag_value(&e.flag))));
     let need_rebuild_ioc = ioc_flag_vec.iter().all(|s| s.is_empty());
@@ -246,10 +262,12 @@ pub fn query_project_rows(
                 }
             }
         }
-        state
-            .ioc_flag_cache
-            .lock()
-            .insert(meta.id, ioc_flag_vec.clone());
+        if let Err(err) = save_ioc_flag_cache(&project_dir, &ioc_flag_vec) {
+            eprintln!(
+                "[cache] failed to persist IOC cache for {:?}: {:?}",
+                project_dir, err
+            );
+        }
     }
 
     let mut ordered_indices: Vec<usize> = (0..df.height()).collect();
@@ -328,9 +346,30 @@ pub fn query_project_rows(
     }
     let total_filtered_rows = filtered_indices.len();
 
-    for &row_idx in filtered_indices.iter().skip(offset).take(limit) {
-        let record = collect_row_record(&df, &column_names, row_idx);
-        let user_memo = flags
+    let selected_indices: Vec<usize> = filtered_indices
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .copied()
+        .collect();
+    let take_idx =
+        UInt32Chunked::from_iter_values("take_idx", selected_indices.iter().map(|&idx| idx as u32));
+    let taken_df = df
+        .take(&take_idx)
+        .map_err(|err| AppError::from(AnyhowError::from(err)))?;
+    let taken_series_map: HashMap<&str, &Series> = taken_df
+        .get_columns()
+        .iter()
+        .map(|series| (series.name(), series))
+        .collect();
+    let page_flags: HashMap<usize, FlagEntry> = selected_indices
+        .iter()
+        .filter_map(|idx| flags.get(idx).cloned().map(|entry| (*idx, entry)))
+        .collect();
+
+    for (position, &row_idx) in selected_indices.iter().enumerate() {
+        let record = collect_row_record_from_series(&taken_series_map, &column_names, position);
+        let user_memo = page_flags
             .get(&row_idx)
             .and_then(|e| e.memo.clone())
             .unwrap_or_default();
@@ -410,7 +449,12 @@ pub fn query_project_rows(
 
     if searchable_text_built {
         if let Some(ref built) = searchable_text {
-            state.searchable_cache.lock().insert(meta.id, built.clone());
+            if let Err(err) = save_searchable_cache(&project_dir, built) {
+                eprintln!(
+                    "[cache] failed to persist searchable cache for {:?}: {:?}",
+                    project_dir, err
+                );
+            }
         }
     }
 

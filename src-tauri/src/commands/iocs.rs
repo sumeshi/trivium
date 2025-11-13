@@ -12,6 +12,7 @@ use crate::{
     },
     models::IocEntry,
     state::AppState,
+    storage::clear_ioc_flag_cache,
 };
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +46,12 @@ pub fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(),
     let entries = prepare_ioc_entries(payload.entries);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
-    state.ioc_flag_cache.lock().remove(&payload.project_id);
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
 
     let ioc_applied_records =
         calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
@@ -74,7 +80,12 @@ pub fn import_iocs(
     let entries = prepare_ioc_entries(read_ioc_csv(&source).map_err(AppError::from)?);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
-    state.ioc_flag_cache.lock().remove(&payload.project_id);
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
 
     let ioc_applied_records =
         calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;

@@ -1,6 +1,11 @@
 import { derived, get, writable } from "svelte/store";
 import type { Backend } from "../../backend";
-import type { IocEntry, LoadProjectResponse, ProjectRow } from "../../types";
+import type {
+  FlagSymbol,
+  IocEntry,
+  LoadProjectResponse,
+  ProjectRow,
+} from "../../types";
 
 export const FLAG_OPTIONS = [
   { value: "safe", label: "Safe", hint: "✓", tone: "safe" },
@@ -8,7 +13,6 @@ export const FLAG_OPTIONS = [
   { value: "critical", label: "Critical", hint: "!", tone: "critical" },
 ] as const;
 
-export type FlagSymbol = (typeof FLAG_OPTIONS)[number]["value"];
 export type FlagFilterValue = FlagSymbol | "all" | "none" | "priority";
 
 export const PRIORITY_FLAGS: FlagSymbol[] = ["suspicious", "critical"];

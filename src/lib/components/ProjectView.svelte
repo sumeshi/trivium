@@ -61,8 +61,7 @@
     lastHiddenColumnsRef,
     positionToRowIndex
   } from './project_view/state';
-  import type {
-    FlagSymbol,
+import type {
     FlagFilterValue,
     CachedRow,
     VirtualRow,

@@ -270,6 +270,7 @@ pub fn to_rpn(tokens: &[SearchToken]) -> Vec<SearchToken> {
     output
 }
 
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_search_mask_boolean(
     rpn: &[SearchToken],

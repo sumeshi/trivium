@@ -8,7 +8,9 @@ use crate::{
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
     state::AppState,
-    storage::{load_flags, save_flags},
+    storage::{
+        clear_ioc_flag_cache, clear_searchable_cache, count_flagged, remove_flag, upsert_flag,
+    },
 };
 
 use super::utils::collect_row_record;
@@ -40,32 +42,31 @@ pub fn update_flag(
     };
     let project_dir = state.projects.project_dir(&payload.project_id);
     let flags_path = project_dir.join("flags.json");
-    let mut flags = load_flags(&flags_path).map_err(AppError::from)?;
-
-    if payload.flag.trim().is_empty()
+    let should_clear = payload.flag.trim().is_empty()
         && payload
             .memo
             .as_ref()
             .map(|m| m.trim().is_empty())
-            .unwrap_or(true)
-    {
-        flags.remove(&payload.row_index);
+            .unwrap_or(true);
+
+    if should_clear {
+        remove_flag(&flags_path, payload.row_index).map_err(AppError::from)?;
     } else {
-        flags.insert(
-            payload.row_index,
-            FlagEntry {
-                flag: payload.flag.clone(),
-                memo: payload.memo.clone(),
-            },
+        let entry = FlagEntry {
+            flag: payload.flag.clone(),
+            memo: payload.memo.clone(),
+        };
+        upsert_flag(&flags_path, payload.row_index, &entry).map_err(AppError::from)?;
+    }
+
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
         );
     }
 
-    save_flags(&flags_path, &flags).map_err(AppError::from)?;
-
-    let flagged_records = flags
-        .values()
-        .filter(|entry| !entry.flag.trim().is_empty())
-        .count();
+    let flagged_records = count_flagged(&flags_path).map_err(AppError::from)?;
     state
         .projects
         .update_flagged_records(&payload.project_id, flagged_records)
@@ -105,10 +106,16 @@ pub fn set_hidden_columns(
     let Some(_) = state.projects.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()).into());
     };
+    let project_dir = state.projects.project_dir(&payload.project_id);
     state
         .projects
         .update_hidden_columns(&payload.project_id, payload.hidden_columns)
         .map_err(AppError::from)?;
-    state.searchable_cache.lock().remove(&payload.project_id);
+    if let Err(err) = clear_searchable_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear searchable cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
     Ok(())
 }

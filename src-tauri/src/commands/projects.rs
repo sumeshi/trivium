@@ -17,7 +17,8 @@ use crate::{
     project_io::{read_project_dataframe, write_project_dataframe},
     state::AppState,
     storage::{
-        compute_column_max_chars, load_column_metrics, load_flags, save_column_metrics, save_flags,
+        clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
+        load_column_metrics, load_flags, save_column_metrics, save_flags,
     },
     value_utils::anyvalue_to_search_string,
 };
@@ -244,14 +245,24 @@ pub fn delete_project(state: State<AppState>, request: ProjectRequest) -> Result
         return Ok(());
     };
     let project_dir = state.projects.project_dir(&meta.id);
+    if let Err(err) = clear_searchable_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear searchable cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
     if project_dir.exists() {
         fs::remove_dir_all(&project_dir)
             .with_context(|| format!("failed to remove project dir {:?}", project_dir))
             .map_err(AppError::from)?;
     }
     state.projects.remove(&meta.id).map_err(AppError::from)?;
-    state.searchable_cache.lock().remove(&request.project_id);
-    state.ioc_flag_cache.lock().remove(&request.project_id);
     Ok(())
 }
 

@@ -11,9 +11,23 @@ pub(crate) fn collect_row_record(
     column_names: &[String],
     row_idx: usize,
 ) -> HashMap<String, Value> {
+    let series_map: HashMap<&str, &Series> = df
+        .get_columns()
+        .iter()
+        .map(|series| (series.name(), series))
+        .collect();
+    collect_row_record_from_series(&series_map, column_names, row_idx)
+}
+
+/// Collects a row's data using a precomputed series map to avoid repeated lookups.
+pub(crate) fn collect_row_record_from_series(
+    series_map: &HashMap<&str, &Series>,
+    column_names: &[String],
+    row_idx: usize,
+) -> HashMap<String, Value> {
     let mut record = HashMap::new();
     for column in column_names {
-        if let Ok(series) = df.column(column) {
+        if let Some(series) = series_map.get(column.as_str()) {
             if let Ok(value) = series.get(row_idx) {
                 record.insert(column.clone(), anyvalue_to_json(&value));
             }

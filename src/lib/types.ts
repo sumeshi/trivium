@@ -13,6 +13,8 @@ export interface ProjectSummary {
   meta: ProjectMeta;
 }
 
+export type FlagSymbol = 'safe' | 'suspicious' | 'critical';
+
 export interface ProjectRow {
   row_index: number;
   data: Record<string, unknown>;
@@ -22,7 +24,7 @@ export interface ProjectRow {
 
 export interface IocEntry {
   id?: string;
-  flag: string;
+  flag: FlagSymbol;
   tag: string;
   query: string;
 }

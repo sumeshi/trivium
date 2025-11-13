@@ -27,6 +27,10 @@
     --warning-soft: color-mix(in srgb, var(--warning) 20%, transparent);
     --danger: #e38383;
     --danger-soft: color-mix(in srgb, var(--danger) 20%, transparent);
+    --flag-selected-text: #ffffff;
+    --flag-safe-text: var(--fg);
+    --flag-suspicious-text: var(--fg);
+    --flag-critical-text: #ffffff;
     --shadow-strong: 0 22px 48px rgba(10, 12, 18, 0.65);
     --shadow-soft: 0 12px 24px rgba(12, 16, 24, 0.42);
   }
@@ -127,7 +131,11 @@
     --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
     --danger: #dc2626;
     --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+    --flag-selected-text: #ffffff;
     --shadow-strong: 0 22px 48px rgba(31, 41, 55, 0.12);
     --shadow-soft: 0 12px 24px rgba(31, 41, 55, 0.08);
+    --flag-safe-text: #092712;
+    --flag-suspicious-text: #3d2203;
+    --flag-critical-text: #3f0505;
   }
 }

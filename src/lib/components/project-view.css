@@ -885,7 +885,6 @@ button.primary:disabled {
   color: var(--muted);
 }
 
-.ioc-row select,
 .ioc-row input {
   width: 100%;
   padding: 8px 10px;
@@ -895,13 +894,143 @@ button.primary:disabled {
   color: var(--fg);
 }
 
-.ioc-row select:focus-visible,
+.flag-select {
+  position: relative;
+  width: 100%;
+}
+
+.flag-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border 0.15s ease, background 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.flag-select-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.flag-select-trigger.flag-safe {
+  border-color: color-mix(in srgb, var(--positive) 30%, transparent);
+  background: var(--positive-soft);
+  color: var(--flag-safe-text);
+}
+
+.flag-select-trigger.flag-suspicious {
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  background: var(--warning-soft);
+  color: var(--flag-suspicious-text);
+}
+
+.flag-select-trigger.flag-critical {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--flag-critical-text);
+}
+
+.flag-select-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flag-select .flag-icon {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.flag-select .flag-label {
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flag-caret {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.flag-select-menu {
+  position: fixed;
+  z-index: 200;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.flag-option {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.flag-option.flag-safe {
+  color: var(--flag-safe-text);
+}
+
+.flag-option.flag-suspicious {
+  color: var(--flag-suspicious-text);
+}
+
+.flag-option.flag-critical {
+  color: var(--flag-critical-text);
+}
+
+.flag-option.selected.flag-safe {
+  background: var(--positive);
+  color: var(--flag-selected-text);
+}
+
+.flag-option.selected.flag-suspicious {
+  background: var(--warning);
+  color: var(--flag-selected-text);
+}
+
+.flag-option.selected.flag-critical {
+  background: var(--danger);
+  color: var(--flag-selected-text);
+}
+
+.flag-select-trigger:focus-visible,
+.flag-option:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .ioc-row input:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
 
-.ioc-row button {
+.ioc-row > button {
   white-space: nowrap;
   justify-self: end;
 }
