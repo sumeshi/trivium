@@ -34,7 +34,10 @@ fn main() {
             commands::group_tree,
             commands::time_analysis,
             commands::surrounding_rows,
-            commands::build_report
+            commands::build_report,
+            commands::bulk_preview,
+            commands::bulk_update,
+            commands::bulk_undo
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

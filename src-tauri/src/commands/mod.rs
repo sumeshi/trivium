@@ -1,3 +1,4 @@
+mod bulk;
 mod cross;
 mod diff;
 mod dupes;
@@ -13,6 +14,10 @@ mod stats;
 mod surround;
 mod time;
 
+pub use bulk::{
+    __cmd__bulk_preview, __cmd__bulk_undo, __cmd__bulk_update, bulk_preview, bulk_undo,
+    bulk_update,
+};
 pub use cross::{__cmd__search_projects, search_projects};
 pub use diff::{__cmd__diff_projects, diff_projects};
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};

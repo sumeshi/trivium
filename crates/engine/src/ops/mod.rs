@@ -1,3 +1,4 @@
+pub mod bulk;
 pub mod cross;
 pub mod diff;
 pub mod dupes;
