@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import type {
+  ColorRule,
   ConditionNode,
   IocEntry,
   BulkApplied,
@@ -51,6 +52,19 @@ export interface ImportIocsArgs {
 export interface ExportIocsArgs {
   projectId: string;
   destination: string;
+}
+
+export interface ColorRuleArgs {
+  projectId: string;
+}
+
+export interface SaveColorRulesArgs {
+  projectId: string;
+  rules: ColorRule[];
+}
+
+export interface ColorRulesResponse {
+  rules: ColorRule[];
 }
 
 export type FlagFilterValue =
@@ -164,6 +178,8 @@ export interface Backend {
   saveIocs(args: SaveIocsArgs): Promise<void>;
   importIocs(args: ImportIocsArgs): Promise<void>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
+  colorRules(args: ColorRuleArgs): Promise<ColorRulesResponse>;
+  saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse>;
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
@@ -346,6 +362,23 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+      },
+    });
+  }
+
+  colorRules(args: ColorRuleArgs): Promise<ColorRulesResponse> {
+    return invoke("color_rules", {
+      request: {
+        projectId: args.projectId,
+      },
+    });
+  }
+
+  saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse> {
+    return invoke("save_color_rules", {
+      payload: {
+        projectId: args.projectId,
+        rules: args.rules,
       },
     });
   }

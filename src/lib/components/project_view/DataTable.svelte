@@ -288,7 +288,9 @@
                 class="data-row"
                 class:alt-row={item.position % 2 === 1}
                 class:loading={!item.row}
-                style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;`}
+                style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
+                  item.row?.color ? ` background-color: ${item.row.color};` : ''
+                }`}
               >
                 <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
                 <div class="cell flag sticky sticky-flag">

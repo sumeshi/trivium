@@ -22,6 +22,7 @@ export interface ProjectRow {
   memo?: string | null;
   tags: string[];
   bookmarked: boolean;
+  color?: string | null;
 }
 
 export interface IocEntry {
@@ -33,6 +34,12 @@ export interface IocEntry {
 
 export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
 
+export interface ColorRule {
+  name: string;
+  condition: ConditionNode;
+  color: string;
+}
+
 export interface LoadProjectResponse {
   project: ProjectSummary;
   columns: string[];
@@ -40,6 +47,7 @@ export interface LoadProjectResponse {
   column_max_chars: Record<string, number>;
   column_kinds: Record<string, ColumnKind>;
   iocs: IocEntry[];
+  color_rules: ColorRule[];
   initial_rows: ProjectRow[];
 }
 

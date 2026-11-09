@@ -17,6 +17,7 @@
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
   import GroupingPanel from './GroupingPanel.svelte';
+  import ColorRulesPanel from './ColorRulesPanel.svelte';
   import BulkControls from './BulkControls.svelte';
 
 
@@ -199,6 +200,7 @@
   <StatsPanel />
   <TimePanel />
   <GroupingPanel />
+  <ColorRulesPanel />
   <BulkControls on:refresh />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
