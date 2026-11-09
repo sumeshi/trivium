@@ -29,6 +29,7 @@
     hiddenColumns,
     search,
     flagFilter,
+    bookmarkedOnly,
     sortKey,
     sortDirection,
     isExporting,
@@ -108,6 +109,7 @@ import type {
   let lastAppliedFilters = '';
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
+  let lastBookmarkedOnly: boolean | null = null;
   let lastColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
   let applyingHistory = false;
@@ -118,7 +120,7 @@ import type {
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
-  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [], condition: null };
+  let activeFilters: AppliedFilters = { search: '', flag: 'all', bookmarkedOnly: false, columns: [], condition: null };
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
 
@@ -145,7 +147,7 @@ import type {
   };
 
   const buildFilterSignature = (filters: AppliedFilters) =>
-    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}::${JSON.stringify(filters.condition)}`;
+    `${filters.search}::${filters.flag}::${filters.bookmarkedOnly}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}::${JSON.stringify(filters.condition)}`;
 
   const resetPaginationState = () => {
     rowsCache.set(new Map());
@@ -236,6 +238,7 @@ import type {
     const filters: AppliedFilters = {
       search: $search.trim(),
       flag: $flagFilter,
+      bookmarkedOnly: $bookmarkedOnly,
       columns: currentColumns,
       condition: get(conditionPayload),
     };
@@ -249,12 +252,14 @@ import type {
     activeFilters = {
       search: filters.search,
       flag: filters.flag,
+      bookmarkedOnly: filters.bookmarkedOnly,
       columns: [...filters.columns],
       condition: filters.condition,
     };
     lastAppliedFilters = buildFilterSignature(filters);
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
+    lastBookmarkedOnly = filters.bookmarkedOnly;
     lastColumnsSignature = currentColumns.join('|');
     filterRequestId = 0;
     lastSummaryFlagged = -1;
@@ -297,11 +302,13 @@ import type {
       const filters: AppliedFilters = {
         search: $search.trim(),
         flag: $flagFilter,
+        bookmarkedOnly: $bookmarkedOnly,
         columns,
         condition: get(conditionPayload),
       };
       lastSearchValue = filters.search;
       lastFlagFilter = filters.flag;
+      lastBookmarkedOnly = filters.bookmarkedOnly;
       lastColumnsSignature = columns.join('|');
       void applyFilters(filters, false, true);
     }
@@ -318,14 +325,17 @@ import type {
   $: if (initialized) {
     const searchValue = $search.trim();
     const flagValue = $flagFilter;
+    const bookmarkedValue = $bookmarkedOnly;
     const columns = getSearchableColumns();
     const signature = columns.join('|');
     const conditionJson = JSON.stringify($conditionPayload);
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
+    const bookmarkedChanged =
+      lastBookmarkedOnly === null || bookmarkedValue !== lastBookmarkedOnly;
     const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
     const conditionChanged = conditionJson !== lastConditionJson;
-    let resetScroll = flagChanged || conditionChanged;
+    let resetScroll = flagChanged || bookmarkedChanged || conditionChanged;
     if (conditionChanged && applyingHistory) {
       resetScroll = false;
       applyingHistory = false;
@@ -333,10 +343,11 @@ import type {
       recordAppliedCondition(rowOffset(), get(conditionTree), 0);
     }
 
-    if (searchChanged || flagChanged || columnsChanged || conditionChanged) {
+    if (searchChanged || flagChanged || bookmarkedChanged || columnsChanged || conditionChanged) {
       scheduleFilterRefresh(searchValue, flagValue, columns, resetScroll);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
+      lastBookmarkedOnly = bookmarkedValue;
       lastColumnsSignature = signature;
       lastConditionJson = conditionJson;
     }
@@ -357,7 +368,7 @@ import type {
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0) || $conditionPayload != null) ? $totalFilteredRows : $totalRows;
+  $: effectiveTotalRows = ($flagFilter !== 'all' || $bookmarkedOnly || ($search && $search.trim().length > 0) || $conditionPayload != null) ? $totalFilteredRows : $totalRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
@@ -411,6 +422,7 @@ import type {
     const payload = {
       projectId: projectDetail.project.meta.id,
       flagFilter: flagFilterValue,
+      bookmarkedOnly: filters.bookmarkedOnly ? true : undefined,
       search: filters.search && filters.search.trim() ? filters.search.trim() : undefined,
       columns: filters.columns && filters.columns.length > 0 ? filters.columns : undefined,
       offset,
@@ -472,6 +484,7 @@ import type {
     const normalized: AppliedFilters = {
       search: filters.search.trim(),
       flag: filters.flag,
+      bookmarkedOnly: filters.bookmarkedOnly,
       columns: [...filters.columns],
       condition: filters.condition,
     };
@@ -482,6 +495,7 @@ import type {
     activeFilters = {
       search: normalized.search,
       flag: normalized.flag,
+      bookmarkedOnly: normalized.bookmarkedOnly,
       columns: [...normalized.columns],
       condition: normalized.condition,
     };
@@ -658,6 +672,7 @@ import type {
     pendingFilters = {
       search: searchValue,
       flag: flagValue,
+      bookmarkedOnly: $bookmarkedOnly,
       columns: [...columns],
       condition: get(conditionPayload),
       resetScroll,
@@ -676,6 +691,7 @@ import type {
         {
           search: scheduled.search,
           flag: scheduled.flag,
+          bookmarkedOnly: scheduled.bookmarkedOnly,
           columns: getSearchableColumns(),
           condition: scheduled.condition,
         },
@@ -696,6 +712,7 @@ import type {
       {
         search: $search.trim(),
         flag: $flagFilter,
+        bookmarkedOnly: $bookmarkedOnly,
         columns: getSearchableColumns(),
         condition: get(conditionPayload),
       },
@@ -803,6 +820,7 @@ import type {
       const filters: AppliedFilters = {
         search: activeFilters.search,
         flag: activeFilters.flag,
+        bookmarkedOnly: activeFilters.bookmarkedOnly,
         columns: [...activeFilters.columns],
         condition: activeFilters.condition,
       };

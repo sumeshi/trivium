@@ -893,6 +893,71 @@ button.primary:disabled {
   color: var(--muted);
 }
 
+.memo-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.memo-editor-caption {
+  font-size: 0.85rem;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-weak);
+  color: var(--fg);
+  font-size: 0.8rem;
+}
+
+.tag-chip-remove {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.tag-chip-remove:hover {
+  color: var(--danger);
+}
+
+.tag-input {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.9rem;
+}
+
+.bookmark-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
+.filter-bookmark .bookmark-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .memo-error {
   margin: 0;
   color: var(--danger);

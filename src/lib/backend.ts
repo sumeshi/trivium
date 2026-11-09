@@ -24,6 +24,8 @@ export interface UpdateFlagArgs {
   rowIndex: number;
   flag: string;
   memo: string | null;
+  tags?: string[] | null;
+  bookmarked?: boolean | null;
 }
 
 export interface HiddenColumnsArgs {
@@ -100,6 +102,7 @@ export interface QueryProjectRowsArgs {
   projectId: string;
   search?: string;
   flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
   columns?: string[];
   offset?: number;
   limit?: number;
@@ -256,6 +259,7 @@ class NativeBackend implements Backend {
         projectId: args.projectId,
         search: args.search ?? null,
         flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
         columns: args.columns ?? null,
         offset: args.offset ?? null,
         limit: args.limit ?? null,
@@ -353,6 +357,8 @@ class NativeBackend implements Backend {
         row_index: args.rowIndex,
         flag: args.flag,
         memo: args.memo,
+        tags: args.tags ?? null,
+        bookmarked: args.bookmarked ?? null,
       },
     });
   }

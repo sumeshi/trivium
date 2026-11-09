@@ -5,6 +5,7 @@
     hiddenColumns,
     search,
     flagFilter,
+    bookmarkedOnly,
     isExporting,
     isUpdatingColumns,
     projectDetail,
@@ -131,6 +132,18 @@
         </div>
       {/if}
     </div>
+  </div>
+  <div class="filter-bookmark">
+    <button
+      type="button"
+      class="ghost bookmark-toggle"
+      class:active={$bookmarkedOnly}
+      aria-pressed={$bookmarkedOnly}
+      title="Show bookmarked rows only"
+      on:click={() => bookmarkedOnly.update((value) => !value)}
+    >
+      ★ Bookmark only
+    </button>
   </div>
   <label class="filter-search">
     <input

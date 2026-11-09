@@ -20,6 +20,8 @@ export interface ProjectRow {
   data: Record<string, unknown>;
   flag: string;
   memo?: string | null;
+  tags: string[];
+  bookmarked: boolean;
 }
 
 export interface IocEntry {

@@ -10,17 +10,49 @@
   let memoSaving = false;
   let memoError: string | null = null;
   let textareaEl: HTMLTextAreaElement | null = null;
+  let tagDraft = '';
+  let tagList: string[] = [];
+  let bookmarkDraft = false;
 
   const closeMemoEditor = () => {
     memoEditor.set(null);
     memoDraft = '';
     memoError = null;
     memoSaving = false;
+    tagDraft = '';
+    tagList = [];
+    bookmarkDraft = false;
+  };
+
+  const addTags = () => {
+    const parts = tagDraft
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+    if (parts.length === 0) {
+      tagDraft = '';
+      return;
+    }
+    const merged = [...tagList];
+    for (const tag of parts) {
+      if (!merged.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+        merged.push(tag);
+      }
+    }
+    tagList = merged;
+    tagDraft = '';
+  };
+
+  const removeTag = (tag: string) => {
+    tagList = tagList.filter((existing) => existing !== tag);
   };
 
   const saveMemo = async () => {
     if (!$memoEditor || memoSaving || !$projectDetail || !$backend) return;
+    addTags();
     const sanitized = sanitizeMemoInput(memoDraft).trim();
+    const tags = [...tagList];
+    const bookmarked = bookmarkDraft;
     memoSaving = true;
     memoError = null;
 
@@ -35,6 +67,8 @@
     const updatedRow: CachedRow = {
       ...rowToUpdate,
       memo: sanitized,
+      tags,
+      bookmarked,
       displayCache: { ...rowToUpdate.displayCache, memo: sanitized },
     };
 
@@ -47,7 +81,9 @@
         projectId: $projectDetail.project.meta.id,
         rowIndex: $memoEditor.row.row_index,
         flag: $memoEditor.row.flag,
-        memo: sanitized.length ? sanitized : null
+        memo: sanitized.length ? sanitized : null,
+        tags,
+        bookmarked
       });
 
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });
@@ -77,6 +113,9 @@
   memoEditor.subscribe(async (editor) => {
     if (editor) {
       memoDraft = editor.row.memo ?? '';
+      tagList = [...(editor.row.tags ?? [])];
+      tagDraft = '';
+      bookmarkDraft = editor.row.bookmarked ?? false;
       memoError = null;
       memoSaving = false;
       await tick();
@@ -136,6 +175,46 @@
             }
           }}
         />
+      </label>
+      <div class="memo-tags">
+        <span class="memo-editor-caption">Tags</span>
+        <div class="tag-chips">
+          {#each tagList as tag}
+            <span class="tag-chip">
+              {tag}
+              <button
+                type="button"
+                class="tag-chip-remove"
+                aria-label={`Remove tag ${tag}`}
+                on:click={() => removeTag(tag)}
+                disabled={memoSaving}
+              >
+                ×
+              </button>
+            </span>
+          {/each}
+        </div>
+        <input
+          class="tag-input"
+          bind:value={tagDraft}
+          placeholder="Add tags (comma separated)"
+          disabled={memoSaving}
+          on:blur={addTags}
+          on:keydown={(event) => {
+            if (event.key === 'Enter' || event.key === ',') {
+              event.preventDefault();
+              addTags();
+            }
+          }}
+        />
+      </div>
+      <label class="bookmark-toggle">
+        <input
+          type="checkbox"
+          bind:checked={bookmarkDraft}
+          disabled={memoSaving}
+        />
+        <span>★ Bookmark</span>
       </label>
       {#if memoError}
         <p class="memo-error">{memoError}</p>

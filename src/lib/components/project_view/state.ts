@@ -57,6 +57,7 @@ export type VirtualRow = { position: number; row: CachedRow | null };
 export type AppliedFilters = {
   search: string;
   flag: FlagFilterValue;
+  bookmarkedOnly: boolean;
   columns: string[];
   condition: ConditionNode | null;
 };
@@ -73,6 +74,7 @@ export const columnsOpen = writable(false);
 
 export const search = writable("");
 export const flagFilter = writable<FlagFilterValue>("all");
+export const bookmarkedOnly = writable(false);
 
 export const sortKey = writable<string | null>(null);
 export const sortDirection = writable<"asc" | "desc">("asc");
