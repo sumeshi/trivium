@@ -16,11 +16,11 @@ use crate::{
     ioc::{cached_ioc_outcomes, load_ioc_entries},
     models::ProjectRow,
     project_io::read_project_dataframe,
-    storage::load_flags,
+    storage::{load_color_rules, load_flags},
     store::ProjectsStore,
 };
 
-use super::util::DEFAULT_PAGE_SIZE;
+use super::util::{matched_rule_color, DEFAULT_PAGE_SIZE};
 
 #[derive(Debug, Deserialize)]
 pub struct QueryRowsPayload {
@@ -118,7 +118,7 @@ pub fn query_project_rows(
         .take(limit)
         .copied()
         .collect();
-    let rows = page::materialize_page(
+    let mut rows = page::materialize_page(
         &df,
         &selected_indices,
         &columns,
@@ -127,6 +127,22 @@ pub fn query_project_rows(
         &ioc_outcomes,
         !iocs.is_empty(),
     )?;
+
+    // Colors are decorative: a missing or malformed colors.json must never
+    // fail a query, so fall back to "no rules" instead of propagating.
+    let color_rules = match load_color_rules(&project_dir) {
+        Ok(rules) => rules.unwrap_or_default(),
+        Err(err) => {
+            eprintln!(
+                "[colors] failed to load color rules for {:?}: {:?}",
+                project_dir, err
+            );
+            Vec::new()
+        }
+    };
+    for row in &mut rows {
+        row.color = matched_rule_color(&row.data, &color_rules);
+    }
 
     search::persist_search_cache(&project_dir, &search_state);
 

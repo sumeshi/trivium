@@ -109,6 +109,7 @@ pub fn materialize_page(
             },
             tags,
             bookmarked,
+            color: None,
         });
     }
     Ok(rows)

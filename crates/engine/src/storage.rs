@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sled::Db;
 
 use crate::{
-    models::FlagEntry,
+    models::{ColorRule, FlagEntry},
     value_utils::{anyvalue_to_json, value_display_length},
 };
 
@@ -143,6 +143,31 @@ pub fn save_flags(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<()> 
     write_flags_to_db(&db_path, flags)?;
     remove_legacy_flags_file(path);
     Ok(())
+}
+
+/// Loads per-project color rules. `None` means the project has never saved
+/// rules; an empty file/array is a deliberate "no rules" state.
+pub fn load_color_rules(project_dir: &Path) -> Result<Option<Vec<ColorRule>>> {
+    let path = project_dir.join("colors.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read(&path).with_context(|| format!("failed to read color rules {:?}", path))?;
+    let rules: Vec<ColorRule> = serde_json::from_slice(&data)
+        .with_context(|| format!("failed to parse color rules {:?}", path))?;
+    Ok(Some(rules))
+}
+
+/// Persists color rules as pretty JSON. Normalization belongs to the ops layer;
+/// this function is plain IO.
+pub fn save_color_rules(project_dir: &Path, rules: &[ColorRule]) -> Result<()> {
+    let path = project_dir.join("colors.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to prepare color rules dir {:?}", parent))?;
+    }
+    let data = serde_json::to_vec_pretty(rules).context("failed to serialize color rules")?;
+    fs::write(&path, data).with_context(|| format!("failed to write color rules {:?}", path))
 }
 
 pub fn load_column_metrics(path: &Path) -> Result<Option<HashMap<String, usize>>> {

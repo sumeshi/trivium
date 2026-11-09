@@ -37,7 +37,9 @@ fn main() {
             commands::build_report,
             commands::bulk_preview,
             commands::bulk_update,
-            commands::bulk_undo
+            commands::bulk_undo,
+            commands::save_color_rules,
+            commands::color_rules
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,11 +5,14 @@ use crate::{
     error::AppError,
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
-    storage::{clear_searchable_cache, count_flagged, load_flags, remove_flag, upsert_flag},
+    storage::{
+        clear_searchable_cache, count_flagged, load_color_rules, load_flags, remove_flag,
+        upsert_flag,
+    },
     store::ProjectsStore,
 };
 
-use super::util::collect_row_record;
+use super::util::{collect_row_record, matched_rule_color};
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateFlagPayload {
@@ -94,6 +97,19 @@ pub fn update_flag(
         .collect();
     let record = collect_row_record(&df, &column_names, payload.row_index);
 
+    // Same failure-tolerant behavior as the query path: a broken color file
+    // must not prevent a flag update from being saved.
+    let color = match load_color_rules(&project_dir) {
+        Ok(rules) => matched_rule_color(&record, &rules.unwrap_or_default()),
+        Err(err) => {
+            eprintln!(
+                "[colors] failed to load color rules for {:?}: {:?}",
+                project_dir, err
+            );
+            None
+        }
+    };
+
     Ok(ProjectRow {
         row_index: payload.row_index,
         data: record,
@@ -101,6 +117,7 @@ pub fn update_flag(
         memo: payload.memo,
         tags: if should_clear { Vec::new() } else { new_tags },
         bookmarked: if should_clear { false } else { new_bookmarked },
+        color,
     })
 }
 

@@ -32,6 +32,19 @@ pub struct ProjectRow {
     pub memo: Option<String>,
     pub tags: Vec<String>,
     pub bookmarked: bool,
+    /// `None` when no color rule matches. Query and flag updates evaluate this
+    /// in the engine so the frontend never carries a second predicate.
+    pub color: Option<String>,
+}
+
+/// A condition-to-color rule. `condition` is the shared F1 node, so row
+/// coloring uses the same predicate as search and structured filters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ColorRule {
+    pub name: String,
+    pub condition: crate::condition::Node,
+    /// Normalized "#rrggbb" or "#rgb".
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +62,7 @@ pub struct LoadProjectResponse {
     pub column_max_chars: HashMap<String, usize>,
     pub column_kinds: HashMap<String, String>,
     pub iocs: Vec<IocEntry>,
+    pub color_rules: Vec<ColorRule>,
     pub initial_rows: Vec<ProjectRow>,
 }
 

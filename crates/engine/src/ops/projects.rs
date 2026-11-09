@@ -15,7 +15,7 @@ use crate::{
     project_io::{read_project_dataframe, write_project_dataframe},
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
-        load_column_metrics, load_flags, save_column_metrics, save_flags,
+        load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
     },
     store::ProjectsStore,
 };
@@ -172,6 +172,18 @@ pub fn load_project(
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
 
+    // Like query coloring, a broken colors.json must not block project loading.
+    let color_rules = match load_color_rules(&project_dir) {
+        Ok(rules) => rules.unwrap_or_default(),
+        Err(err) => {
+            eprintln!(
+                "[colors] failed to load color rules for {:?}: {:?}",
+                project_dir, err
+            );
+            Vec::new()
+        }
+    };
+
     let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
     let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
     apply_ioc_outcomes_to_rows(&mut initial_rows, &ioc_outcomes);
@@ -194,6 +206,7 @@ pub fn load_project(
             .map(|(name, kind)| (name, kind.as_str().to_string()))
             .collect(),
         iocs,
+        color_rules,
         initial_rows,
     })
 }

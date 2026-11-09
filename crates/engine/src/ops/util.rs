@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use serde_json::Value;
 
+use crate::condition::eval;
 use crate::error::AppError;
 use crate::flags::normalize_flag_value;
-use crate::models::{FlagEntry, ProjectRow};
+use crate::models::{ColorRule, FlagEntry, ProjectRow};
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
@@ -118,6 +119,19 @@ pub fn build_row_search_text(
     (row_text, per_column)
 }
 
+/// Returns the color of the first matching rule, or `None` when nothing matches.
+/// Row data is passed directly to the shared condition evaluator, so color
+/// matching uses exactly the same predicate as search and filters.
+pub fn matched_rule_color(
+    row: &HashMap<String, Value>,
+    rules: &[ColorRule],
+) -> Option<String> {
+    rules
+        .iter()
+        .find(|rule| eval(&rule.condition, row))
+        .map(|rule| rule.color.clone())
+}
+
 pub fn materialize_rows(
     df: &DataFrame,
     columns: &[String],
@@ -138,6 +152,7 @@ pub fn materialize_rows(
             memo: flag_entry.and_then(|entry| entry.memo.clone()),
             tags: flag_entry.map(|entry| entry.tags.clone()).unwrap_or_default(),
             bookmarked: flag_entry.is_some_and(|entry| entry.bookmarked),
+            color: None,
         });
     }
     rows

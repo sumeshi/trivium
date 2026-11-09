@@ -11,6 +11,7 @@ pub mod projects;
 mod query;
 pub mod report;
 pub mod rows;
+pub mod rules;
 pub mod stats;
 pub mod surround;
 pub mod time;

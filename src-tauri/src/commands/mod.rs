@@ -10,6 +10,7 @@ mod iocs;
 mod projects;
 mod report;
 mod rows;
+mod rules;
 mod stats;
 mod surround;
 mod time;
@@ -34,6 +35,9 @@ pub use projects::{
 };
 pub use report::{__cmd__build_report, build_report};
 pub use rows::{__cmd__query_project_rows, query_project_rows};
+pub use rules::{
+    __cmd__color_rules, __cmd__save_color_rules, color_rules, save_color_rules,
+};
 pub use stats::{__cmd__column_stats, column_stats};
 pub use surround::{__cmd__surrounding_rows, surrounding_rows};
 pub use time::{__cmd__time_analysis, time_analysis};
