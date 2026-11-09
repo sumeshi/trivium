@@ -461,12 +461,15 @@ src-tauri/src/
 - 既知の限界: エクスポートでは user tags を `[tag]` として memo に含めるが、
   再取込は memo 全体をそのままメモにするためタグには戻らない（`crates/engine/tests/tags_test.rs` で pin）。
 
-#### F20: 条件付き色
+#### F20: 条件付き色 → 完了（`5a67716`）
 
 - 前提: F3
-- 手順: 条件(F1 の Node) → 色のルール一覧を案件に保存。DataTable のセル描画時に評価。
-  評価はフロントで行う（件数はページ単位のため）が、条件モデルは F1 を JSON で共用。
-- 完了条件: ルール適用前後でソート・絞り込み結果が不変（I5 + 手動確認 1 回）。
+- 手順: 条件(F1 の Node) → 色のルール一覧を案件の `colors.json` に保存。
+  評価はフロントではなく engine 側で行い、F2 の `condition::eval` をそのまま使う
+  （フロントに第二の述語を作らない）。query と `update_flag` の `ProjectRow.color` に反映する。
+  色の読込失敗は query を落とさず「ルール無し」に落とす。
+- 完了条件: ルール適用前後でソート・絞り込み結果が不変（`colors_test.rs` で固定）。
+  `cargo test -p trivium-engine` と `npm run lint` が通る。
 
 #### F21: プリセット / 保存ビュー
 
