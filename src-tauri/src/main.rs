@@ -29,6 +29,7 @@ fn main() {
             commands::column_stats,
             commands::duplicate_rows,
             commands::search_projects,
+            commands::diff_projects,
             commands::histogram,
             commands::time_analysis,
             commands::surrounding_rows
