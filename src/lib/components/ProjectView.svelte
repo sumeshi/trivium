@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/api/dialog';
   import DataTable from './project_view/DataTable.svelte';
   import IocManagerDialog from './project_view/IocManagerDialog.svelte';
@@ -9,6 +10,7 @@
   import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
   import type { Backend } from '../backend';
   import './project-view.css';
+  import { conditionPayload, resetConditions } from '../stores/condition';
   import {
     projectDetail as projectDetailStore,
     backend as backendStore,
@@ -96,11 +98,12 @@ import type {
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastColumnsSignature: string | null = null;
+  let lastConditionJson = 'null';
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
-  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [] };
+  let activeFilters: AppliedFilters = { search: '', flag: 'all', columns: [], condition: null };
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
 
@@ -127,7 +130,7 @@ import type {
   };
 
   const buildFilterSignature = (filters: AppliedFilters) =>
-    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}`;
+    `${filters.search}::${filters.flag}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}::${JSON.stringify(filters.condition)}`;
 
   const resetPaginationState = () => {
     rowsCache.set(new Map());
@@ -158,6 +161,8 @@ import type {
   };
 
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
+    resetConditions();
+    lastConditionJson = 'null';
     currentProjectId.set(detail.project.meta.id);
     hiddenColumns.set(new Set(detail.hidden_columns ?? []));
     iocDraft.set(detail.iocs.map((entry) => ({
@@ -172,6 +177,7 @@ import type {
       search: $search.trim(),
       flag: $flagFilter,
       columns: currentColumns,
+      condition: null,
     };
     lastHiddenColumnsRef.set([...(detail.hidden_columns ?? [])]);
     if (filterTimeout) {
@@ -184,6 +190,7 @@ import type {
       search: filters.search,
       flag: filters.flag,
       columns: [...filters.columns],
+      condition: filters.condition,
     };
     lastAppliedFilters = buildFilterSignature(filters);
     lastSearchValue = filters.search;
@@ -233,6 +240,7 @@ import type {
         search: $search.trim(),
         flag: $flagFilter,
         columns,
+        condition: get(conditionPayload),
       };
       lastSearchValue = filters.search;
       lastFlagFilter = filters.flag;
@@ -247,22 +255,24 @@ import type {
     const flagValue = $flagFilter;
     const columns = getSearchableColumns();
     const signature = columns.join('|');
+    const conditionJson = JSON.stringify($conditionPayload);
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
     const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
+    const conditionChanged = conditionJson !== lastConditionJson;
 
-    if (searchChanged || flagChanged || columnsChanged) {
-      // Flag filter changes require scroll reset
-      scheduleFilterRefresh(searchValue, flagValue, columns, flagChanged);
+    if (searchChanged || flagChanged || columnsChanged || conditionChanged) {
+      scheduleFilterRefresh(searchValue, flagValue, columns, flagChanged || conditionChanged);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
       lastColumnsSignature = signature;
+      lastConditionJson = conditionJson;
     }
   }
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0)) ? $totalFilteredRows : $totalRows;
+  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0) || $conditionPayload != null) ? $totalFilteredRows : $totalRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
@@ -317,6 +327,7 @@ import type {
       limit,
       sortKey: $sortKey ?? null,
       sortDirection: $sortDirection ?? null,
+      condition: filters.condition,
     };
 
     return backend
@@ -372,6 +383,7 @@ import type {
       search: filters.search.trim(),
       flag: filters.flag,
       columns: [...filters.columns],
+      condition: filters.condition,
     };
     const signature = buildFilterSignature(normalized);
     if (!force && signature === lastAppliedFilters) {
@@ -381,6 +393,7 @@ import type {
       search: normalized.search,
       flag: normalized.flag,
       columns: [...normalized.columns],
+      condition: normalized.condition,
     };
     lastAppliedFilters = signature;
     filterRequestId += 1;
@@ -573,7 +586,13 @@ import type {
     columns: string[],
     resetScroll: boolean
   ) => {
-    pendingFilters = { search: searchValue, flag: flagValue, columns: [...columns], resetScroll };
+    pendingFilters = {
+      search: searchValue,
+      flag: flagValue,
+      columns: [...columns],
+      condition: get(conditionPayload),
+      resetScroll,
+    };
     if (filterTimeout) {
       clearTimeout(filterTimeout);
     }
@@ -589,6 +608,7 @@ import type {
           search: scheduled.search,
           flag: scheduled.flag,
           columns: getSearchableColumns(),
+          condition: scheduled.condition,
         },
         scheduled.resetScroll,
         false
@@ -608,6 +628,7 @@ import type {
         search: $search.trim(),
         flag: $flagFilter,
         columns: getSearchableColumns(),
+        condition: get(conditionPayload),
       },
       resetScroll,
       true
@@ -697,6 +718,7 @@ import type {
         search: activeFilters.search,
         flag: activeFilters.flag,
         columns: [...activeFilters.columns],
+        condition: activeFilters.condition,
       };
       void applyFilters(filters, false, true);
     };

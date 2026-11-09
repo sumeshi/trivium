@@ -51,6 +51,38 @@
   gap: 8px;
 }
 
+.condition-editor {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.condition-toolbar,
+.condition-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.condition-row select,
+.condition-row input[type='text'] {
+  min-width: 8rem;
+}
+
+.filters .condition-not {
+  flex-direction: row;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.condition-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .filter-label,
 .columns-label,
 .export-label {
@@ -88,6 +120,7 @@
 }
 
 .filters input[type='search'],
+.filters input[type='text'],
 .filters select {
   padding: 10px;
   border-radius: 8px;
@@ -98,6 +131,7 @@
 }
 
 .filters input[type='search']:focus,
+.filters input[type='text']:focus,
 .filters select:focus {
   outline: none;
   border-color: var(--accent-border);

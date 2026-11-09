@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import type {
+  ConditionNode,
   IocEntry,
   LoadProjectResponse,
   ProjectRow,
@@ -60,6 +61,7 @@ export interface QueryProjectRowsArgs {
   limit?: number;
   sortKey?: string | null;
   sortDirection?: "asc" | "desc";
+  condition?: ConditionNode | null;
 }
 
 export interface QueryProjectRowsResponse {
@@ -129,6 +131,7 @@ class NativeBackend implements Backend {
         limit: args.limit ?? null,
         sortKey: args.sortKey ?? null,
         sortDirection: args.sortDirection ?? null,
+        condition: args.condition ?? null,
       },
     });
   }

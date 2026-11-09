@@ -1,6 +1,7 @@
 import { derived, get, writable } from "svelte/store";
 import type { Backend } from "../../backend";
 import type {
+  ConditionNode,
   FlagSymbol,
   IocEntry,
   LoadProjectResponse,
@@ -57,6 +58,7 @@ export type AppliedFilters = {
   search: string;
   flag: FlagFilterValue;
   columns: string[];
+  condition: ConditionNode | null;
 };
 
 export type ScheduledFilters = AppliedFilters & { resetScroll: boolean };

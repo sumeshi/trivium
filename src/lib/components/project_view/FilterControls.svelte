@@ -12,6 +12,7 @@
     FLAG_FILTER_OPTIONS
   } from './state';
   import type { FlagFilterValue } from './state';
+  import ConditionEditor from './ConditionEditor.svelte';
 
 
   let columnsOpen = false;
@@ -177,6 +178,7 @@
       IOC Rules
     </button>
   </div>
+  <ConditionEditor />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
       {$isExporting ? 'Exporting…' : 'Export CSV'}

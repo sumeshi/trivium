@@ -38,6 +38,33 @@ export interface LoadProjectResponse {
   initial_rows: ProjectRow[];
 }
 
+export type CompareOp =
+  | "eq"
+  | "ne"
+  | "gt"
+  | "lt"
+  | "ge"
+  | "le"
+  | "contains"
+  | "startsWith"
+  | "endsWith"
+  | "regex"
+  | "in";
+
+export interface ConditionLeaf {
+  column: string;
+  op: CompareOp;
+  values: string[];
+  negated: boolean;
+}
+
+export interface ConditionGroup {
+  kind: "and" | "or";
+  children: ConditionNode[];
+}
+
+export type ConditionNode = ConditionLeaf | ConditionGroup;
+
 export interface QueryRowsResponse {
   rows: ProjectRow[];
   total_flagged: number;

@@ -37,6 +37,7 @@
     positionToRowIndex
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
+  import { conditionPayload } from '../../stores/condition';
 
   const _toggleSort = toggleSort;
   const _setFlag = setFlag;
@@ -92,8 +93,8 @@
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  // Use totalFilteredRows when any filter is active (search or flag), otherwise use totalRows
-  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0)) ? $totalFilteredRows : $totalRows;
+  $: conditionFiltering = $conditionPayload != null;
+  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0) || conditionFiltering) ? $totalFilteredRows : $totalRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
