@@ -360,10 +360,10 @@ src-tauri/src/
 
 ### 分析
 
-#### F7: 列統計エンジン + コマンド
+#### F7: 列統計エンジン + コマンド → 完了（`49b748c`）
 
 - 前提: R0, I1
-- 対象: 新規 `src-tauri/src/analysis/stats.rs`、`engine/commands` 経由で `column_stats` コマンド追加
+- 対象: `crates/engine/src/analysis/stats.rs`（カード記載の `src-tauri/src/analysis/stats.rs` は R0 後の配置）。コマンドは `src-tauri/src/commands/stats.rs` の `column_stats`
 - 手順: 列ごとに「型推論(null/int/float/datetime/string)、欠損数、ユニーク数、上位 20 値、
   希少値(頻度 1〜N) 件数と値」を 1 走査で計算。DataFrame 全件舐めでよい（100GB 非目標）。
 - 完了条件: fixtures で欠損数・ユニーク数が `python3 -c` で別計算した値と一致（I5 に組み込み）。
