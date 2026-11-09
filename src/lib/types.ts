@@ -41,6 +41,20 @@ export interface LoadProjectResponse {
   initial_rows: ProjectRow[];
 }
 
+export interface ValueCount {
+  value: string;
+  count: number;
+}
+
+export interface ColumnStats {
+  column: string;
+  kind: ColumnKind;
+  missing: number;
+  unique: number;
+  top: ValueCount[];
+  rare: ValueCount[];
+}
+
 export type CompareOp =
   | "eq"
   | "ne"

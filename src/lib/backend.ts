@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type {
   ConditionNode,
   IocEntry,
+  ColumnStats,
   LoadProjectResponse,
   ProjectRow,
   ProjectSummary,
@@ -52,6 +53,12 @@ export type FlagFilterValue =
   | "suspicious"
   | "critical";
 
+export interface ColumnStatsArgs {
+  projectId: string;
+  column: string;
+  rareMax?: number;
+}
+
 export interface QueryProjectRowsArgs {
   projectId: string;
   search?: string;
@@ -78,6 +85,7 @@ export interface Backend {
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string): Promise<LoadProjectResponse>;
+  columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
@@ -115,6 +123,16 @@ class NativeBackend implements Backend {
   loadProject(projectId: string): Promise<LoadProjectResponse> {
     return invoke("load_project", {
       request: { projectId: projectId },
+    });
+  }
+
+  columnStats(args: ColumnStatsArgs): Promise<ColumnStats> {
+    return invoke("column_stats", {
+      payload: {
+        projectId: args.projectId,
+        column: args.column,
+        rareMax: args.rareMax ?? 1,
+      },
     });
   }
 

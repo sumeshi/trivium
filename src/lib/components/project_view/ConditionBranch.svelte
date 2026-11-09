@@ -113,12 +113,12 @@
         {/each}
       </select>
       <input
-        type={valueInput(node.column).type}
-        inputmode={valueInput(node.column).inputmode}
-        step={valueInput(node.column).step}
+        type={node.exact ? "text" : valueInput(node.column).type}
+        inputmode={node.exact ? undefined : valueInput(node.column).inputmode}
+        step={node.exact ? undefined : valueInput(node.column).step}
         value={node.value}
         placeholder={node.op === "in" ? "a, b, c" : "Value"}
-        on:input={(event) => patchCondition(node.id, { value: event.currentTarget.value })}
+        on:input={(event) => patchCondition(node.id, { value: event.currentTarget.value, exact: false })}
         aria-label="Value"
       />
       <label class="condition-not">

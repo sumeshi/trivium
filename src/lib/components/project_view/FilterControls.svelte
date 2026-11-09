@@ -13,6 +13,7 @@
   } from './state';
   import type { FlagFilterValue } from './state';
   import ConditionEditor from './ConditionEditor.svelte';
+  import StatsPanel from './StatsPanel.svelte';
 
 
   let columnsOpen = false;
@@ -179,6 +180,7 @@
     </button>
   </div>
   <ConditionEditor />
+  <StatsPanel />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
       {$isExporting ? 'Exporting…' : 'Export CSV'}

@@ -52,6 +52,7 @@
 }
 
 .condition-editor,
+.stats-panel,
 .condition-group,
 .condition-branch {
   display: flex;
@@ -59,7 +60,8 @@
   gap: 8px;
 }
 
-.condition-editor {
+.condition-editor,
+.stats-panel {
   grid-column: 1 / -1;
 }
 

@@ -21,6 +21,8 @@ export interface EditorCondition {
   column: string;
   op: CompareOp;
   value: string;
+  /** One `in` value, kept whole when it contains a comma. Cleared once the field is edited. */
+  exact?: boolean;
   negated: boolean;
 }
 
@@ -80,6 +82,26 @@ function edit(update: (root: EditorGroup) => EditorGroup): void {
 
 export function resetConditions(): void {
   conditionTree.set(rootGroup());
+}
+
+/** Replaces the editor with one `in` condition so a stats value filters the table. */
+export function filterByValue(column: string, value: string): void {
+  const row: EditorCondition = {
+    type: "condition",
+    id: crypto.randomUUID(),
+    column,
+    op: "in",
+    value,
+    exact: true,
+    negated: false,
+  };
+  conditionTree.set({
+    type: "group",
+    id: ROOT_ID,
+    kind: "and",
+    collapsed: false,
+    children: [row],
+  });
 }
 
 export function addCondition(groupId: string, column: string): void {
@@ -162,6 +184,9 @@ export function patchCondition(id: string, patch: Partial<EditorCondition>): voi
 }
 
 function conditionValues(row: EditorCondition): string[] {
+  if (row.op === "in" && row.exact === true) {
+    return [row.value];
+  }
   if (row.op === "in") {
     return row.value
       .split(",")
