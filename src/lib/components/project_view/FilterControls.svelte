@@ -15,6 +15,7 @@
   import ConditionEditor from './ConditionEditor.svelte';
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
+  import GroupingPanel from './GroupingPanel.svelte';
 
 
   let columnsOpen = false;
@@ -183,6 +184,7 @@
   <ConditionEditor />
   <StatsPanel />
   <TimePanel />
+  <GroupingPanel />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
       {$isExporting ? 'Exporting…' : 'Export CSV'}

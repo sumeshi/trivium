@@ -104,6 +104,26 @@ export function filterByValue(column: string, value: string): void {
   });
 }
 
+/** Replaces the editor with an AND of `in` conditions, one per grouping level. */
+export function filterByValues(filters: Array<{ column: string; value: string }>): void {
+  const children: EditorCondition[] = filters.map(({ column, value }) => ({
+    type: "condition",
+    id: crypto.randomUUID(),
+    column,
+    op: "in",
+    value,
+    exact: true,
+    negated: false,
+  }));
+  conditionTree.set({
+    type: "group",
+    id: ROOT_ID,
+    kind: "and",
+    collapsed: false,
+    children,
+  });
+}
+
 /** Replaces the editor with `column >= start AND column <= end`. */
 export function filterByRange(column: string, start: string, end: string): void {
   const bound = (op: "ge" | "le", value: string): EditorCondition => ({

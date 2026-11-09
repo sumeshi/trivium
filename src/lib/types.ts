@@ -119,3 +119,16 @@ export interface QueryRowsResponse {
   total_filtered_rows: number;
   offset: number;
 }
+
+export interface GroupTreeNode {
+  value: unknown;
+  label: string;
+  count: number;
+  children: GroupTreeNode[];
+}
+
+export interface GroupTreeResponse {
+  columns: string[];
+  nodes: GroupTreeNode[];
+  total: number;
+}

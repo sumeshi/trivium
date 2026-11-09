@@ -3,6 +3,7 @@ import type {
   ConditionNode,
   IocEntry,
   ColumnStats,
+  GroupTreeResponse,
   Histogram,
   LoadProjectResponse,
   TimeAnalysis,
@@ -113,6 +114,15 @@ export interface QueryProjectRowsResponse {
   offset: number;
 }
 
+export interface GroupTreeArgs {
+  projectId: string;
+  groupColumns: string[];
+  search?: string;
+  flagFilter?: FlagFilterValue;
+  columns?: string[];
+  condition?: ConditionNode | null;
+}
+
 export interface Backend {
   readonly isNative: boolean;
   listProjects(): Promise<ProjectSummary[]>;
@@ -126,6 +136,7 @@ export interface Backend {
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
+  groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse>;
   saveIocs(args: SaveIocsArgs): Promise<void>;
   importIocs(args: ImportIocsArgs): Promise<void>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
@@ -230,6 +241,19 @@ class NativeBackend implements Backend {
         sortKey: args.sortKey ?? null,
         sortDirection: args.sortDirection ?? null,
         condition: args.condition ?? null,
+      },
+    });
+  }
+
+  groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse> {
+    return invoke("group_tree", {
+      payload: {
+        projectId: args.projectId,
+        search: args.search ?? null,
+        flagFilter: args.flagFilter ?? null,
+        columns: args.columns ?? null,
+        condition: args.condition ?? null,
+        groupColumns: args.groupColumns,
       },
     });
   }
