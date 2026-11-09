@@ -5,9 +5,7 @@ use crate::{
     error::AppError,
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
-    storage::{
-        clear_ioc_flag_cache, clear_searchable_cache, count_flagged, remove_flag, upsert_flag,
-    },
+    storage::{clear_searchable_cache, count_flagged, remove_flag, upsert_flag},
     store::ProjectsStore,
 };
 
@@ -56,12 +54,8 @@ pub fn update_flag(
         upsert_flag(&flags_path, payload.row_index, &entry).map_err(AppError::from)?;
     }
 
-    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear IOC cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
+    // The IOC outcome cache is independent of user flags, so a flag update
+    // never invalidates it.
 
     let flagged_records = count_flagged(&flags_path).map_err(AppError::from)?;
     store

@@ -26,6 +26,16 @@ pub struct SearchableCacheEntry {
     pub text: Vec<String>,
 }
 
+/// Cached IOC evaluation: the signature of the IOC set the rows were computed
+/// from, plus the raw per-row outcomes. User flags are deliberately not part
+/// of the cache, so flag updates never invalidate it. A cache written by an
+/// older version fails to deserialize and forces a rebuild.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IocCacheEntry {
+    pub signature: String,
+    pub rows: Vec<crate::ioc::IocRowOutcome>,
+}
+
 fn encode_row_key(row_index: usize) -> [u8; 8] {
     (row_index as u64).to_be_bytes()
 }
@@ -262,11 +272,11 @@ pub fn clear_searchable_cache(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<Vec<String>>> {
+pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<IocCacheEntry>> {
     let db = open_cache_db(&cache_db_path(project_dir))?;
     match db.get(IOC_FLAG_CACHE_KEY) {
         Ok(Some(value)) => {
-            let cache: Vec<String> =
+            let cache: IocCacheEntry =
                 serde_json::from_slice(&value).context("failed to deserialize IOC flag cache")?;
             Ok(Some(cache))
         }
@@ -275,9 +285,17 @@ pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<Vec<String>>> {
     }
 }
 
-pub fn save_ioc_flag_cache(project_dir: &Path, cache: &[String]) -> Result<()> {
+pub fn save_ioc_flag_cache(
+    project_dir: &Path,
+    signature: &str,
+    rows: &[crate::ioc::IocRowOutcome],
+) -> Result<()> {
     let db = open_cache_db(&cache_db_path(project_dir))?;
-    let data = serde_json::to_vec(cache).context("failed to serialize IOC flag cache")?;
+    let entry = IocCacheEntry {
+        signature: signature.to_string(),
+        rows: rows.to_vec(),
+    };
+    let data = serde_json::to_vec(&entry).context("failed to serialize IOC flag cache")?;
     db.insert(IOC_FLAG_CACHE_KEY, data)
         .with_context(|| "failed to persist IOC flag cache")?;
     db.flush()

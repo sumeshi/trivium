@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -8,103 +7,38 @@ use csv::{ReaderBuilder, WriterBuilder};
 use crate::flags::{normalize_flag_value, severity_rank};
 use crate::models::{IocEntry, ProjectRow};
 use crate::project_io::read_project_dataframe;
-use crate::search::{build_search_mask_boolean, to_rpn, tokenize_search_query, SearchToken};
 use crate::storage::load_flags;
-use crate::value_utils::{anyvalue_to_search_string, value_to_search_string};
 
-pub fn row_contains_query(row: &ProjectRow, query: &str) -> bool {
-    if query.trim().is_empty() {
-        return false;
-    }
-    // Build concatenated lowercase text and per-column lowercase texts for the row
-    let mut row_text = String::new();
-    let mut per_col: HashMap<String, Vec<String>> = HashMap::new();
-    for (col, value) in &row.data {
-        if let Some(text) = value_to_search_string(value) {
-            let lower = text.to_lowercase();
-            if !lower.is_empty() {
-                if !row_text.is_empty() {
-                    row_text.push(' ');
-                }
-                row_text.push_str(&lower);
-                per_col.insert(col.to_lowercase(), vec![lower]);
-            }
-        }
-    }
-    if row_text.is_empty() {
-        return false;
-    }
-    // Boolean evaluation using the shared tokenizer and RPN evaluator
-    let tokens = tokenize_search_query(query);
-    let mut terms: Vec<(Option<String>, String)> = Vec::new();
-    for t in &tokens {
-        if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t {
-            let key = (col.clone(), text.clone());
-            if !text.is_empty() && !terms.contains(&key) {
-                terms.push(key);
-            }
-        }
-    }
-    if terms.is_empty() {
-        return false;
-    }
-    let rpn = to_rpn(&tokens);
-    let mask = build_search_mask_boolean(&rpn, &terms, &vec![row_text], Some(&per_col));
-    mask.get(0).copied().unwrap_or(false)
-}
+pub mod evaluate;
+pub use evaluate::{cached_ioc_outcomes, evaluate_iocs, IocRowOutcome};
 
-pub fn apply_iocs_to_rows(rows: &mut [ProjectRow], entries: &[IocEntry]) {
-    if entries.is_empty() {
-        return;
-    }
-    for row in rows {
-        let mut best_flag = normalize_flag_value(&row.flag);
-        let mut best_rank = severity_rank(&best_flag);
+/// Applies frame-level IOC outcomes to materialized page rows.
+///
+/// Precedence: a non-empty user flag wins over the IOC flag; matched tags are
+/// appended to the memo for every matching row.
+pub fn apply_ioc_outcomes_to_rows(rows: &mut [ProjectRow], outcomes: &[IocRowOutcome]) {
+    for row in rows.iter_mut() {
+        let Some(outcome) = outcomes.get(row.row_index) else {
+            continue;
+        };
+        if severity_rank(&normalize_flag_value(&row.flag)) == 0 && !outcome.flag.is_empty() {
+            row.flag = outcome.flag.clone();
+        }
         let mut memo = row.memo.clone().unwrap_or_default();
-        let mut memo_changed = false;
-
-        for entry in entries {
-            let query = entry.query.trim();
-            if query.is_empty() {
-                continue;
-            }
-            if !row_contains_query(row, query) {
-                continue;
-            }
-
-            let severity = normalize_flag_value(&entry.flag);
-            let severity_rank_value = severity_rank(&severity);
-            // If user already set a flag, keep it (user wins). Only apply IOC when no user flag.
-            if best_rank == 0 && severity_rank_value > 0 {
-                best_rank = severity_rank_value;
-                best_flag = severity.clone();
-            }
-
-            let tag = entry.tag.trim();
-            if !tag.is_empty() {
-                let token = format!("[{}]", tag);
-                if !memo.contains(&token) {
-                    if !memo.is_empty() && !memo.ends_with(' ') {
-                        memo.push(' ');
-                    }
-                    memo.push_str(&token);
-                    memo_changed = true;
+        for tag in &outcome.tags {
+            if !memo.contains(tag) {
+                if !memo.is_empty() && !memo.ends_with(' ') {
+                    memo.push(' ');
                 }
+                memo.push_str(tag);
             }
         }
-
-        // Persist the resolved flag into the row only if it was empty before
-        if severity_rank(&normalize_flag_value(&row.flag)) == 0 && best_rank > 0 {
-            row.flag = best_flag.clone();
-        }
-        if memo_changed {
-            let trimmed = memo.trim().to_string();
-            row.memo = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            };
-        }
+        let trimmed = memo.trim().to_string();
+        row.memo = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
     }
 }
 
@@ -187,96 +121,23 @@ pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path)?;
     let iocs = load_ioc_entries(project_dir)?;
-
-    let mut ioc_applied_count = 0;
-    let column_names: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|column| *column != "__rowid")
-        .map(|column| column.to_string())
-        .collect();
-
-    for row_idx in 0..df.height() {
-        let flag_entry = flags.get(&row_idx);
-        let user_flag = flag_entry
-            .as_ref()
-            .map(|entry| normalize_flag_value(&entry.flag))
-            .unwrap_or_default();
-
-        // Count IOC applications (only when no user flag exists)
-        if severity_rank(&user_flag) == 0 && !iocs.is_empty() {
-            let mut has_ioc_match = false;
-
-            // Build searchable text once for this row
-            let mut row_text = String::new();
-            for column in &column_names {
-                if let Ok(series) = df.column(column) {
-                    if let Ok(value) = series.get(row_idx) {
-                        if let Some(text) = anyvalue_to_search_string(&value) {
-                            let lower = text.to_lowercase();
-                            if !lower.is_empty() {
-                                if !row_text.is_empty() {
-                                    row_text.push(' ');
-                                }
-                                row_text.push_str(&lower);
-                            }
-                        }
-                    }
-                }
-            }
-            for entry in &iocs {
-                let query = entry.query.trim();
-                if query.is_empty() {
-                    continue;
-                }
-                let tokens = tokenize_search_query(query);
-                let mut terms: Vec<(Option<String>, String)> = Vec::new();
-                for t in &tokens {
-                    if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } =
-                        t
-                    {
-                        let key = (col.clone(), text.clone());
-                        if !text.is_empty() && !terms.contains(&key) {
-                            terms.push(key);
-                        }
-                    }
-                }
-                if terms.is_empty() {
-                    continue;
-                }
-                let rpn = to_rpn(&tokens);
-                // Build single-row per-column map
-                let mut single_per_col: HashMap<String, Vec<String>> = HashMap::new();
-                for column in &column_names {
-                    let mut s = String::new();
-                    if let Ok(series) = df.column(column) {
-                        if let Ok(v) = series.get(row_idx) {
-                            if let Some(t) = anyvalue_to_search_string(&v) {
-                                s = t.to_lowercase();
-                            }
-                        }
-                    }
-                    single_per_col.insert(column.to_lowercase(), vec![s]);
-                }
-                let mask = build_search_mask_boolean(
-                    &rpn,
-                    &terms,
-                    &vec![row_text.clone()],
-                    Some(&single_per_col),
-                );
-                if mask.get(0).copied().unwrap_or(false) {
-                    has_ioc_match = true;
-                    break;
-                }
-            }
-
-            if has_ioc_match {
-                ioc_applied_count += 1;
-            }
-        }
+    if iocs.is_empty() {
+        return Ok(0);
     }
 
-    Ok(ioc_applied_count)
+    // An IOC flag applies only where the user has not set one.
+    let outcomes = evaluate_iocs(&df, &iocs);
+    let mut count = 0;
+    for (row_idx, outcome) in outcomes.iter().enumerate() {
+        let user_flag = flags
+            .get(&row_idx)
+            .map(|entry| normalize_flag_value(&entry.flag))
+            .unwrap_or_default();
+        if severity_rank(&user_flag) == 0 && !outcome.flag.is_empty() {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 pub fn prepare_ioc_entries(entries: Vec<IocEntry>) -> Vec<IocEntry> {

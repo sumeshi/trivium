@@ -8,26 +8,20 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    flags::{normalize_flag_value, severity_rank},
-    ioc::load_ioc_entries,
+    flags::normalize_flag_value,
+    ioc::{cached_ioc_outcomes, load_ioc_entries},
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
     search::{
         build_search_mask_boolean, ensure_searchable_text, to_rpn, tokenize_search_query,
         SearchToken,
     },
-    storage::{
-        load_flags, load_ioc_flag_cache, load_searchable_cache, save_ioc_flag_cache,
-        save_searchable_cache,
-    },
+    storage::{load_flags, load_searchable_cache, save_searchable_cache},
     store::ProjectsStore,
     value_utils::anyvalue_to_search_string,
 };
 
-use super::util::{
-    build_row_search_text, collect_row_record_from_series, ensure_column_text_cache,
-    DEFAULT_PAGE_SIZE,
-};
+use super::util::{collect_row_record_from_series, ensure_column_text_cache, DEFAULT_PAGE_SIZE};
 
 fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
     match filter {
@@ -190,80 +184,7 @@ pub fn query_project_rows(
         }
     }
 
-    let cached_ioc_flags = match load_ioc_flag_cache(&project_dir) {
-        Ok(cache) => cache,
-        Err(err) => {
-            eprintln!(
-                "[cache] failed to load IOC cache for {:?}: {:?}",
-                project_dir, err
-            );
-            None
-        }
-    };
-    let mut ioc_flag_vec: Vec<String> = cached_ioc_flags
-        .filter(|cached| cached.len() == row_count)
-        .unwrap_or_else(|| vec![String::new(); row_count]);
-    let mut sorted_iocs = iocs.clone();
-    sorted_iocs.sort_by_key(|e| std::cmp::Reverse(severity_rank(&normalize_flag_value(&e.flag))));
-    let need_rebuild_ioc = ioc_flag_vec.iter().all(|s| s.is_empty());
-    if need_rebuild_ioc {
-        for ioc_entry in &sorted_iocs {
-            let query = ioc_entry.query.trim();
-            if query.is_empty() {
-                continue;
-            }
-            let tokens = tokenize_search_query(query);
-            let mut terms: Vec<(Option<String>, String)> = Vec::new();
-            let mut needed_cols: Vec<String> = Vec::new();
-            for t in &tokens {
-                if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = t {
-                    let key = (col.clone(), text.clone());
-                    if !text.is_empty() && !terms.contains(&key) {
-                        terms.push(key);
-                    }
-                    if let Some(c) = col {
-                        if !needed_cols.contains(c) {
-                            needed_cols.push(c.clone());
-                        }
-                    }
-                }
-            }
-            for c in needed_cols {
-                ensure_column_text_cache(
-                    &c,
-                    &column_series_lower,
-                    &mut per_column_text,
-                    df.height(),
-                );
-            }
-            if terms.is_empty() {
-                continue;
-            }
-            let rpn = to_rpn(&tokens);
-            let search_text = ensure_searchable_text(
-                &mut searchable_text,
-                &mut searchable_text_built,
-                row_count,
-                &search_cols,
-                &column_series,
-            );
-            let mask = build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
-            for i in 0..df.height() {
-                if !ioc_flag_vec[i].is_empty() || !user_flag_vec[i].is_empty() {
-                    continue;
-                }
-                if mask.get(i).copied().unwrap_or(false) {
-                    ioc_flag_vec[i] = normalize_flag_value(&ioc_entry.flag);
-                }
-            }
-        }
-        if let Err(err) = save_ioc_flag_cache(&project_dir, &ioc_flag_vec) {
-            eprintln!(
-                "[cache] failed to persist IOC cache for {:?}: {:?}",
-                project_dir, err
-            );
-        }
-    }
+    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
 
     let mut ordered_indices: Vec<usize> = (0..df.height()).collect();
     if let Some(sort_key) = &payload.sort_key {
@@ -312,7 +233,7 @@ pub fn query_project_rows(
         if !user_flag_vec[i].is_empty() {
             user_flag_vec[i].clone()
         } else {
-            ioc_flag_vec[i].clone()
+            ioc_outcomes[i].flag.clone()
         }
     }));
 
@@ -369,59 +290,11 @@ pub fn query_project_rows(
             .and_then(|e| e.memo.clone())
             .unwrap_or_default();
         let mut final_memo = user_memo;
-        if !iocs.is_empty() && final_flag_vec[row_idx] == ioc_flag_vec[row_idx] {
-            let mut memo_tags: Vec<String> = Vec::new();
-            for ioc_entry in &iocs {
-                let query = ioc_entry.query.trim();
-                if query.is_empty() {
-                    continue;
-                }
-                let tokens = tokenize_search_query(query);
-                let mut terms: Vec<(Option<String>, String)> = Vec::new();
-                let mut needed_cols: Vec<String> = Vec::new();
-                for t in &tokens {
-                    if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } =
-                        t
-                    {
-                        let key = (col.clone(), text.clone());
-                        if !text.is_empty() && !terms.contains(&key) {
-                            terms.push(key);
-                        }
-                        if let Some(c) = col {
-                            if !needed_cols.contains(c) {
-                                needed_cols.push(c.clone());
-                            }
-                        }
-                    }
-                }
-                if terms.is_empty() {
-                    continue;
-                }
-                let rpn = to_rpn(&tokens);
-                for c in needed_cols {
-                    ensure_column_text_cache(
-                        &c,
-                        &column_series_lower,
-                        &mut per_column_text,
-                        df.height(),
-                    );
-                }
-                let (row_search_text, single_per_col) =
-                    build_row_search_text(&column_names, &column_series, row_idx);
-                let single_row = vec![row_search_text];
-                let single_mask =
-                    build_search_mask_boolean(&rpn, &terms, &single_row, Some(&single_per_col));
-                if single_mask.get(0).copied().unwrap_or(false) {
-                    let tag = ioc_entry.tag.trim();
-                    if !tag.is_empty() {
-                        let token = format!("[{}]", tag);
-                        if !memo_tags.contains(&token) {
-                            memo_tags.push(token);
-                        }
-                    }
-                }
-            }
-            for tag in memo_tags {
+        // Pre-B2 behaviour preserved: tags surface only when the IOC flag is
+        // the active one for this row (no user flag). The tags themselves come
+        // from the cached evaluation instead of a per-row re-evaluation.
+        if !iocs.is_empty() && final_flag_vec[row_idx] == ioc_outcomes[row_idx].flag {
+            for tag in ioc_outcomes[row_idx].tags.clone() {
                 if !final_memo.contains(&tag) {
                     if !final_memo.is_empty() && !final_memo.ends_with(' ') {
                         final_memo.push(' ');

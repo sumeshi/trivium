@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     error::AppError,
     flags::normalize_flag_value,
-    ioc::{apply_iocs_to_rows, load_ioc_entries},
+    ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     models::{FlagEntry, LoadProjectResponse, ProjectMeta, ProjectRow, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe},
     storage::{
@@ -304,10 +304,11 @@ pub fn load_project(
     }
 
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
 
     let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
     let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
-    apply_iocs_to_rows(&mut initial_rows, &iocs);
+    apply_ioc_outcomes_to_rows(&mut initial_rows, &ioc_outcomes);
 
     println!(
         "[debug] load_project id={} total_rows={} initial_rows={}",
