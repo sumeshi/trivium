@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
+use trivium_engine::condition::{Condition, Group, GroupKind, Node, Op};
 use trivium_engine::models::IocEntry;
 use trivium_engine::ops;
 use trivium_engine::ops::export::ExportProjectPayload;
@@ -188,6 +189,61 @@ fn search_scoping_and_operators() {
     let r = base(Some("user:alice|bob".to_string()), None);
     assert_eq!(r.total_filtered_rows, 20);
 
+    let _ = fs::remove_dir_all(root);
+}
+
+fn eq_condition(column: &str, value: &str) -> Node {
+    Node::Condition(Condition {
+        column: column.to_string(),
+        op: Op::Eq,
+        values: vec![value.to_string()],
+        negated: false,
+    })
+}
+
+fn and_group(children: Vec<Node>) -> Node {
+    Node::Group(Group {
+        kind: GroupKind::And,
+        children,
+    })
+}
+
+#[test]
+fn nested_condition_matches_either_group() {
+    let (root, store, id) = setup_project();
+    // (user = alice AND EventID = 4624) OR (user = bob AND EventID = 4688)
+    // Fixture: 6 alice/4624 rows and 5 bob/4688 rows.
+    let condition = Node::Group(Group {
+        kind: GroupKind::Or,
+        children: vec![
+            and_group(vec![eq_condition("user", "alice"), eq_condition("EventID", "4624")]),
+            and_group(vec![eq_condition("user", "bob"), eq_condition("EventID", "4688")]),
+        ],
+    });
+    let response = ops::rows::query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: Some(condition),
+        },
+    )
+    .expect("query failed");
+    assert_eq!(response.total_filtered_rows, 11);
+    assert!(response.rows.iter().all(|row| {
+        let user = row.data.get("user").and_then(|value| value.as_str());
+        let event = row.data.get("EventID").map(|value| value.to_string());
+        matches!(
+            (user, event.as_deref()),
+            (Some("alice"), Some("4624")) | (Some("bob"), Some("4688"))
+        )
+    }));
     let _ = fs::remove_dir_all(root);
 }
 

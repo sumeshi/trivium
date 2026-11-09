@@ -51,11 +51,21 @@
   gap: 8px;
 }
 
-.condition-editor {
-  grid-column: 1 / -1;
+.condition-editor,
+.condition-group,
+.condition-branch {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.condition-editor {
+  grid-column: 1 / -1;
+}
+
+.condition-group {
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
 }
 
 .condition-toolbar,
