@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use serde_json::Value;
 
-use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
+use trivium_engine::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
 /// Collects a row's data into a JSON map using the provided column ordering.
 pub(crate) fn collect_row_record(

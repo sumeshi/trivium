@@ -4,14 +4,14 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{
+use crate::state::AppState;
+use trivium_engine::{
     error::AppError,
     ioc::{
         calculate_ioc_applied_records, load_ioc_entries, prepare_ioc_entries, read_ioc_csv,
         save_ioc_entries, write_ioc_csv,
     },
     models::IocEntry,
-    state::AppState,
     storage::clear_ioc_flag_cache,
 };
 

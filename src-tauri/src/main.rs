@@ -1,15 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows release builds
 
 mod commands;
-mod error;
-mod flags;
-mod ioc;
-mod models;
-mod project_io;
-mod search;
 mod state;
-mod storage;
-mod value_utils;
 
 use tauri::Manager;
 

@@ -2,12 +2,12 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{
+use crate::state::AppState;
+use trivium_engine::{
     error::AppError,
     ioc::calculate_ioc_applied_records,
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
-    state::AppState,
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, count_flagged, remove_flag, upsert_flag,
     },

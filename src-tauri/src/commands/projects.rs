@@ -9,13 +9,13 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{
+use crate::state::AppState;
+use trivium_engine::{
     error::AppError,
     flags::normalize_flag_value,
     ioc::{apply_iocs_to_rows, load_ioc_entries},
     models::{FlagEntry, LoadProjectResponse, ProjectMeta, ProjectRow, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe},
-    state::AppState,
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
         load_column_metrics, load_flags, save_column_metrics, save_flags,

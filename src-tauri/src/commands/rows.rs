@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{
+use crate::state::AppState;
+use trivium_engine::{
     error::AppError,
     flags::{normalize_flag_value, severity_rank},
     ioc::load_ioc_entries,
@@ -17,7 +18,6 @@ use crate::{
         build_search_mask_boolean, ensure_searchable_text, to_rpn, tokenize_search_query,
         SearchToken,
     },
-    state::AppState,
     storage::{
         load_flags, load_ioc_flag_cache, load_searchable_cache, save_ioc_flag_cache,
         save_searchable_cache,
