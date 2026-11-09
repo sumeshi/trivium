@@ -2,6 +2,7 @@ pub mod cross;
 pub mod diff;
 pub mod dupes;
 pub mod export;
+pub mod group;
 pub mod histogram;
 pub mod flags;
 pub mod iocs;

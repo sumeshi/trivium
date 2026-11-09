@@ -2,6 +2,7 @@ mod cross;
 mod diff;
 mod dupes;
 mod export;
+mod group;
 mod histogram;
 mod flags;
 mod iocs;
@@ -16,6 +17,7 @@ pub use cross::{__cmd__search_projects, search_projects};
 pub use diff::{__cmd__diff_projects, diff_projects};
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};
 pub use export::{__cmd__export_project, export_project};
+pub use group::{__cmd__group_tree, group_tree};
 pub use histogram::{__cmd__histogram, histogram};
 pub use flags::{__cmd__set_hidden_columns, __cmd__update_flag, set_hidden_columns, update_flag};
 pub use iocs::{

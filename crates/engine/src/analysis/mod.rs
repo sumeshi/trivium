@@ -1,4 +1,5 @@
 pub mod dupes;
+pub mod group;
 pub mod histogram;
 pub mod infer;
 pub mod stats;

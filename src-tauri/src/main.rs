@@ -31,6 +31,7 @@ fn main() {
             commands::search_projects,
             commands::diff_projects,
             commands::histogram,
+            commands::group_tree,
             commands::time_analysis,
             commands::surrounding_rows,
             commands::build_report

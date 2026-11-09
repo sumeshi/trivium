@@ -20,6 +20,7 @@ use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
 use trivium_engine::ops::cross::CrossSearchPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
+use trivium_engine::ops::group::GroupTreePayload;
 use trivium_engine::ops::histogram::HistogramPayload;
 use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::ops::time::TimeAnalysisPayload;
@@ -1379,5 +1380,31 @@ ts,EventID,host,user,proc,path,msg
     }
     assert_eq!(hits[0].total_filtered_rows, 10);
     assert_eq!(hits[1].total_filtered_rows, 2);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn grouping_counts_match_the_query_path() {
+    let (root, store, id) = setup_project();
+    let grouped = ops::group::group_tree(
+        &store,
+        GroupTreePayload {
+            project_id: id,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+            group_columns: vec!["EventID".to_string()],
+        },
+    )
+    .expect("grouping failed");
+    let queried = query(&store, id);
+
+    assert_eq!(grouped.total, queried.total_filtered_rows);
+    assert_eq!(
+        grouped.nodes.iter().map(|node| node.count).sum::<usize>(),
+        grouped.total
+    );
+    assert_eq!(grouped.nodes.len(), 3);
     let _ = fs::remove_dir_all(root);
 }
