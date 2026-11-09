@@ -290,10 +290,9 @@ pub fn query_project_rows(
             .and_then(|e| e.memo.clone())
             .unwrap_or_default();
         let mut final_memo = user_memo;
-        // Pre-B2 behaviour preserved: tags surface only when the IOC flag is
-        // the active one for this row (no user flag). The tags themselves come
-        // from the cached evaluation instead of a per-row re-evaluation.
-        if !iocs.is_empty() && final_flag_vec[row_idx] == ioc_outcomes[row_idx].flag {
+        // B2 unified rule: matched tags surface on every matching row,
+        // regardless of user flags. A user flag only wins the flag column.
+        if !iocs.is_empty() {
             for tag in ioc_outcomes[row_idx].tags.clone() {
                 if !final_memo.contains(&tag) {
                     if !final_memo.is_empty() && !final_memo.ends_with(' ') {

@@ -54,16 +54,22 @@ pub fn export_project(
         let ioc_flag = outcome.flag;
         let memo_tags = outcome.tags;
 
-        let final_flag: String;
-        let mut final_memo: String;
-
-        if let Some(user_entry) = flags.get(&i) {
-            final_flag = normalize_flag_value(user_entry.flag.trim());
-            final_memo = user_entry.memo.clone().unwrap_or_default();
+        // B2 unified rule: a non-empty user flag wins the flag column; a user
+        // entry with an empty flag (memo-only) does not block the IOC flag.
+        // The user memo always survives, and matched tags are appended.
+        let user_flag = flags
+            .get(&i)
+            .map(|entry| normalize_flag_value(entry.flag.trim()))
+            .unwrap_or_default();
+        let final_flag = if user_flag.is_empty() {
+            ioc_flag
         } else {
-            final_flag = ioc_flag;
-            final_memo = String::new();
-        }
+            user_flag
+        };
+        let mut final_memo = flags
+            .get(&i)
+            .and_then(|entry| entry.memo.clone())
+            .unwrap_or_default();
 
         for tag in memo_tags {
             if !final_memo.contains(&tag) {

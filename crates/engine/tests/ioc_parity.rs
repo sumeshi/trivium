@@ -1,12 +1,15 @@
-//! Parity test for the unified IOC evaluation (R5).
+//! Parity test for the unified IOC evaluation (R5 + B2).
 //!
 //! The query path (`ops::rows`), the export path (`ops::export`), and the
 //! applied-record count (`ioc::calculate_ioc_applied_records`) must produce
-//! the same flags for the same data, IOC set, and user flags.
+//! the same flags and the same memo tags for the same data, IOC set, and
+//! user flags.
 //!
-//! Note: this file pins the pre-B2 state for tags (query hides tags on
-//! user-flagged rows, export shows them). The B2 change extends this test to
-//! full tag parity.
+//! Unified rules (B2):
+//! - a non-empty user flag wins the flag column; a memo-only entry (empty
+//!   flag) does not block the IOC flag
+//! - matched IOC tags are appended to the memo on every matching row,
+//!   whether or not the user set a flag
 
 use std::fs;
 use std::path::PathBuf;
@@ -60,15 +63,20 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
     )
     .expect("failed to create project");
 
-    // User flags: row 0 (no IOC match) and row 5 (IOC match; user wins).
-    for (row_index, flag) in [(0usize, "suspicious"), (5usize, "safe")] {
+    // User flags: row 0 (no IOC match), row 5 "safe" (IOC match; user wins),
+    // and row 6 memo-only (empty flag; must NOT block the IOC flag).
+    for (row_index, flag, memo) in [
+        (0usize, "suspicious", None),
+        (5usize, "safe", None),
+        (6usize, "", Some("memo only")),
+    ] {
         ops::flags::update_flag(
             &store,
             UpdateFlagPayload {
                 project_id: summary.meta.id,
                 row_index,
                 flag: flag.to_string(),
-                memo: None,
+                memo: memo.map(|m| m.to_string()),
             },
         )
         .expect("failed to set user flag");
@@ -150,10 +158,11 @@ fn export_flags(destination: &std::path::Path) -> Vec<(String, String)> {
 }
 
 #[test]
-fn query_export_and_count_agree_on_flags() {
+fn query_export_and_count_agree_on_flags_and_tags() {
     let (root, store, id) = setup();
 
-    // Count path: IOC applies only where no user flag exists (rows 6..9).
+    // Count path: IOC applies only where no user flag exists. Row 6 has a
+    // memo-only entry (empty flag), so it still counts. -> rows 6..9.
     let meta = store.find(&id).expect("meta missing");
     assert_eq!(meta.ioc_applied_records, 4);
 
@@ -178,8 +187,9 @@ fn query_export_and_count_agree_on_flags() {
     let expected = [
         "suspicious", // row 0: user flag, no IOC match
         "", "", "", "", // rows 1..4: nothing
-        "safe", // row 5: user flag wins over IOC
-        "critical", "critical", "critical", "critical", // rows 6..9: IOC
+        "safe",     // row 5: user flag wins over IOC
+        "critical", // row 6: memo-only entry does not block the IOC flag
+        "critical", "critical", "critical", // rows 7..9: IOC
     ];
     for i in 0..10 {
         assert_eq!(query[i].0, expected[i], "query flag for row {i}");
@@ -187,16 +197,25 @@ fn query_export_and_count_agree_on_flags() {
     }
 
     // Count path agrees with the flag sources: exactly the four IOC rows.
-    let ioc_rows = (0..10)
-        .filter(|&i| query[i].0 == "critical")
-        .count();
+    let ioc_rows = (0..10).filter(|&i| query[i].0 == "critical").count();
     assert_eq!(ioc_rows, meta.ioc_applied_records as usize);
 
-    // Pre-B2 tag behaviour: both paths show [logon-fail] on rows without a
-    // user flag. (Row 5 differs until B2 lands.)
-    for i in [6usize, 7, 8, 9] {
-        assert!(query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"));
-        assert!(exported[i].1.contains("[logon-fail]"));
+    // B2 tag parity: every matching row (5..9) shows [logon-fail] in both
+    // paths, including the user-flagged row 5 and the memo-only row 6.
+    for i in [5usize, 6, 7, 8, 9] {
+        assert!(
+            query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"),
+            "query memo for row {i}"
+        );
+        assert!(exported[i].1.contains("[logon-fail]"), "export memo for row {i}");
+    }
+    // The memo-only note survives in both paths alongside the tag.
+    assert!(query[6].1.as_deref().unwrap_or("").contains("memo only"));
+    assert!(exported[6].1.contains("memo only"));
+    // Non-matching rows carry no tag.
+    for i in [0usize, 1, 2, 3, 4] {
+        assert!(!query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"));
+        assert!(!exported[i].1.contains("[logon-fail]"));
     }
 
     let _ = fs::remove_dir_all(root);

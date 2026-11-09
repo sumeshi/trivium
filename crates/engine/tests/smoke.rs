@@ -279,12 +279,24 @@ fn flag_update_and_flag_filter() {
 fn ioc_apply_and_query() {
     let (root, store, id) = setup_project();
 
-    // User flag on an alice/4624 row so IOC must not override it.
+    // User flag on an alice/4624 row (no IOC match)...
     ops::flags::update_flag(
         &store,
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
+            flag: "safe".to_string(),
+            memo: None,
+        },
+    )
+    .expect("update failed");
+    // ...and on an alice/4625 row (IOC match): the user flag wins the flag
+    // column, but the matched tag must still surface (B2).
+    ops::flags::update_flag(
+        &store,
+        UpdateFlagPayload {
+            project_id: id,
+            row_index: 7,
             flag: "safe".to_string(),
             memo: None,
         },
@@ -305,27 +317,36 @@ fn ioc_apply_and_query() {
     .expect("save iocs failed");
 
     // ioc_applied_records counts rows where the IOC flag actually applies
-    // (no user flag): the four 4625 rows.
+    // (no user flag): the three remaining 4625 rows (6, 8, 9).
     let meta = store.find(&id).expect("meta missing");
-    assert_eq!(meta.ioc_applied_records, 4);
+    assert_eq!(meta.ioc_applied_records, 3);
 
     let r = query(&store, id);
-    assert_eq!(r.total_flagged, 5); // 1 user safe + 4 IOC critical
+    assert_eq!(r.total_flagged, 5); // 2 user safe + 3 IOC critical
 
     let flagged: Vec<&trivium_engine::models::ProjectRow> = r
         .rows
         .iter()
         .filter(|row| row.flag == "critical")
         .collect();
-    assert_eq!(flagged.len(), 4);
+    assert_eq!(flagged.len(), 3);
     for row in &flagged {
         let memo = row.memo.as_deref().unwrap_or_default();
         assert!(memo.contains("[logon-fail]"), "memo was: {memo:?}");
     }
 
-    // User flag wins over IOC on row 0.
+    // User flag wins over IOC on row 0 (no match, no tag)...
     let row0 = r.rows.iter().find(|row| row.row_index == 0).unwrap();
     assert_eq!(row0.flag, "safe");
+    assert!(row0.memo.is_none());
+    // ...and on row 7 (match: user flag, but the tag is appended).
+    let row7 = r.rows.iter().find(|row| row.row_index == 7).unwrap();
+    assert_eq!(row7.flag, "safe");
+    assert!(row7
+        .memo
+        .as_deref()
+        .unwrap_or_default()
+        .contains("[logon-fail]"));
 
     let _ = fs::remove_dir_all(root);
 }
