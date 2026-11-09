@@ -452,12 +452,14 @@ src-tauri/src/
 - 完了条件: 「条件一致全件」に一括フラグ → 再読込後も件数・内容が一致（I5）。
 - 禁止: フロント側で 1000 行リストを受け取って 1 行ずつ `update_flag` を回す方式。
 
-#### F19: タグ・ブックマーク
+#### F19: タグ・ブックマーク → 完了（`6a6aaf9`）
 
 - 前提: F18
 - 手順: `FlagEntry` に `tags: Vec<String>` と `bookmarked: bool` を追加（serde default で後方互換）。
   `[tag]` のメモ追記方式は維持（互換）。UI はタグ入力 + ブックマークトグル。
 - 完了条件: 旧 `flags.json`（tag 無し）の読み込みが壊れない（I5 に旧形式ケース）。
+- 既知の限界: エクスポートでは user tags を `[tag]` として memo に含めるが、
+  再取込は memo 全体をそのままメモにするためタグには戻らない（`crates/engine/tests/tags_test.rs` で pin）。
 
 #### F20: 条件付き色
 
