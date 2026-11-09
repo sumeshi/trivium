@@ -124,7 +124,7 @@ class NativeBackend implements Backend {
         projectId: args.projectId,
         search: args.search ?? null,
         flagFilter: args.flagFilter ?? null,
-        visible_columns: args.columns ?? null,
+        columns: args.columns ?? null,
         offset: args.offset ?? null,
         limit: args.limit ?? null,
         sortKey: args.sortKey ?? null,
