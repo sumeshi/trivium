@@ -375,10 +375,10 @@ src-tauri/src/
 - 手順: 列選択 → 統計表示 → 値クリックでその値に絞り込み（`condition` に In 条件を発行）。
 - 完了条件: F4 と同じ。希少値から絞り込みまでの操作が成立。
 
-#### F9: 重複 / 単独値抽出
+#### F9: 重複 / 単独値抽出 → 完了（`f31e9be`）
 
 - 前提: F7（推論を共用）
-- 対象: `analysis/dupes.rs`
+- 対象: `crates/engine/src/analysis/dupes.rs`。コマンドは `src-tauri/src/commands/dupes.rs` の `duplicate_rows`
 - 手順: 指定列（複数可）をキーに重複行のみ / 単独値のみの行集合を返すコマンド。
   重複件数を保持（3 回出現は 3 行として返す）。
 - 完了条件: fixtures の意図的重複（1%）が検出され件数一致（I5 に組み込み）。
