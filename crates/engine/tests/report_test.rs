@@ -60,6 +60,8 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
                 row_index,
                 flag: flag.to_string(),
                 memo: memo.map(|m| m.to_string()),
+                tags: None,
+                bookmarked: None,
             },
         )
         .expect("failed to set user flag");
@@ -112,6 +114,7 @@ fn report_hit_rows_match_query() {
             sort_key: Some("EventID".to_string()),
             sort_direction: Some("desc".to_string()),
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed");

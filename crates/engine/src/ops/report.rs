@@ -86,6 +86,9 @@ pub fn build_report(
     );
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+    let bookmarked: Vec<bool> = (0..df.height())
+        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
+        .collect();
     let ordered = ordered_row_indices(
         &df,
         payload.sort_key.as_deref(),
@@ -94,6 +97,8 @@ pub fn build_report(
     let (filtered, flagged_in_matches) = filtered_indices(
         &ordered,
         &final_flag_vec,
+        &bookmarked,
+        None,
         payload.flag_filter.as_deref(),
         search_state.mask.as_deref(),
     );

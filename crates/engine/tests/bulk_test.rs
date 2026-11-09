@@ -114,6 +114,7 @@ fn query(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> QueryRowsResp
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed")

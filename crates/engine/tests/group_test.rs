@@ -99,6 +99,7 @@ fn query_total(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> usize {
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed")

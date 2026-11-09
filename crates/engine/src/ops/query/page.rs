@@ -23,6 +23,8 @@ pub fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
 pub fn filtered_indices(
     ordered_indices: &[usize],
     final_flag_vec: &[String],
+    bookmarked: &[bool],
+    bookmarked_only: Option<bool>,
     flag_filter: Option<&str>,
     search_mask: Option<&[bool]>,
 ) -> (Vec<usize>, usize) {
@@ -35,6 +37,9 @@ pub fn filtered_indices(
             true
         };
         if !flag_ok {
+            continue;
+        }
+        if bookmarked_only == Some(true) && !bookmarked.get(idx).copied().unwrap_or(false) {
             continue;
         }
         if let Some(mask) = search_mask {
@@ -86,6 +91,13 @@ pub fn materialize_page(
         if apply_ioc_tags {
             append_ioc_tags(&mut final_memo, &ioc_outcomes[row_idx].tags);
         }
+        let tags = page_flags
+            .get(&row_idx)
+            .map(|e| e.tags.clone())
+            .unwrap_or_default();
+        let bookmarked = page_flags
+            .get(&row_idx)
+            .is_some_and(|e| e.bookmarked);
         rows.push(ProjectRow {
             row_index: row_idx,
             data: record,
@@ -95,6 +107,8 @@ pub fn materialize_page(
             } else {
                 Some(final_memo)
             },
+            tags,
+            bookmarked,
         });
     }
     Ok(rows)

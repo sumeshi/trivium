@@ -5,7 +5,7 @@ use crate::{
     error::AppError,
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
-    storage::{clear_searchable_cache, count_flagged, remove_flag, upsert_flag},
+    storage::{clear_searchable_cache, count_flagged, load_flags, remove_flag, upsert_flag},
     store::ProjectsStore,
 };
 
@@ -17,7 +17,14 @@ pub struct UpdateFlagPayload {
     pub project_id: Uuid,
     pub row_index: usize,
     pub flag: String,
+    #[serde(default)]
     pub memo: Option<String>,
+    /// `None` keeps the stored tags; `Some` replaces them.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// `None` keeps the stored bookmark state.
+    #[serde(default)]
+    pub bookmarked: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,12 +44,25 @@ pub fn update_flag(
     };
     let project_dir = store.project_dir(&payload.project_id);
     let flags_path = project_dir.join("flags.json");
+    let existing = load_flags(&flags_path)
+        .map_err(AppError::from)?
+        .get(&payload.row_index)
+        .cloned();
+    let new_tags = payload
+        .tags
+        .clone()
+        .unwrap_or_else(|| existing.as_ref().map(|entry| entry.tags.clone()).unwrap_or_default());
+    let new_bookmarked = payload
+        .bookmarked
+        .unwrap_or_else(|| existing.as_ref().is_some_and(|entry| entry.bookmarked));
     let should_clear = payload.flag.trim().is_empty()
         && payload
             .memo
             .as_ref()
             .map(|m| m.trim().is_empty())
-            .unwrap_or(true);
+            .unwrap_or(true)
+        && new_tags.is_empty()
+        && !new_bookmarked;
 
     if should_clear {
         remove_flag(&flags_path, payload.row_index).map_err(AppError::from)?;
@@ -50,6 +70,8 @@ pub fn update_flag(
         let entry = FlagEntry {
             flag: payload.flag.clone(),
             memo: payload.memo.clone(),
+            tags: new_tags.clone(),
+            bookmarked: new_bookmarked,
         };
         upsert_flag(&flags_path, payload.row_index, &entry).map_err(AppError::from)?;
     }
@@ -77,6 +99,8 @@ pub fn update_flag(
         data: record,
         flag: payload.flag,
         memo: payload.memo,
+        tags: if should_clear { Vec::new() } else { new_tags },
+        bookmarked: if should_clear { false } else { new_bookmarked },
     })
 }
 

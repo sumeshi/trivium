@@ -136,6 +136,8 @@ pub fn materialize_rows(
                 .map(|entry| normalize_flag_value(&entry.flag))
                 .unwrap_or_default(),
             memo: flag_entry.and_then(|entry| entry.memo.clone()),
+            tags: flag_entry.map(|entry| entry.tags.clone()).unwrap_or_default(),
+            bookmarked: flag_entry.is_some_and(|entry| entry.bookmarked),
         });
     }
     rows

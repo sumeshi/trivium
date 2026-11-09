@@ -30,6 +30,8 @@ pub struct ProjectRow {
     pub data: HashMap<String, Value>,
     pub flag: String,
     pub memo: Option<String>,
+    pub tags: Vec<String>,
+    pub bookmarked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,4 +56,10 @@ pub struct LoadProjectResponse {
 pub struct FlagEntry {
     pub flag: String,
     pub memo: Option<String>,
+    /// User-defined tags. serde's default keeps entries written before F19 readable.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Independent bookmark flag. Old entries deserialize as `false`.
+    #[serde(default)]
+    pub bookmarked: bool,
 }

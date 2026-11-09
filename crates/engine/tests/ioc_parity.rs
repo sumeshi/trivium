@@ -77,6 +77,8 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
                 row_index,
                 flag: flag.to_string(),
                 memo: memo.map(|m| m.to_string()),
+                tags: None,
+                bookmarked: None,
             },
         )
         .expect("failed to set user flag");
@@ -111,6 +113,7 @@ fn query_flags(store: &ProjectsStore, id: uuid::Uuid) -> Vec<(String, Option<Str
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed");

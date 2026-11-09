@@ -50,6 +50,7 @@ pub fn search_projects(
                 search: payload.search.clone(),
                 columns: payload.columns.clone(),
                 flag_filter: payload.flag_filter.clone(),
+                bookmarked_only: None,
                 offset: payload.offset,
                 limit: payload.limit,
                 sort_key: payload.sort_key.clone(),

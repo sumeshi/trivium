@@ -32,6 +32,8 @@ pub struct QueryRowsPayload {
     pub columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
+    #[serde(default, rename = "bookmarkedOnly")]
+    pub bookmarked_only: Option<bool>,
     #[serde(default)]
     pub offset: Option<usize>,
     #[serde(default)]
@@ -94,6 +96,9 @@ pub fn query_project_rows(
     );
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = ioc::final_flags(df.height(), &flags, &ioc_outcomes);
+    let bookmarked: Vec<bool> = (0..df.height())
+        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
+        .collect();
     let ordered = sort::ordered_row_indices(
         &df,
         payload.sort_key.as_deref(),
@@ -102,6 +107,8 @@ pub fn query_project_rows(
     let (filtered_indices, total_flagged) = page::filtered_indices(
         &ordered,
         &final_flag_vec,
+        &bookmarked,
+        payload.bookmarked_only,
         payload.flag_filter.as_deref(),
         search_state.mask.as_deref(),
     );

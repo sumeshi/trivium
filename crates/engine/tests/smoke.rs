@@ -106,6 +106,7 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed")
@@ -165,6 +166,7 @@ fn search_scoping_and_operators() {
                 sort_key: None,
                 sort_direction: None,
             condition: None,
+                bookmarked_only: None,
             },
         )
         .expect("query failed")
@@ -242,6 +244,7 @@ fn nested_condition_matches_either_group() {
             sort_key: None,
             sort_direction: None,
             condition: Some(condition),
+            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -298,6 +301,7 @@ fn nanosecond_integer_is_not_rounded() {
             sort_key: None,
             sort_direction: None,
             condition: Some(eq_condition("n", exact)),
+            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -629,6 +633,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             sort_key: None,
             sort_direction: None,
             condition: condition.clone(),
+            bookmarked_only: None,
         },
     )
     .expect("query");
@@ -661,6 +666,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("search query");
@@ -930,6 +936,7 @@ fn time_analysis_gap_range_matches_bounds() {
             sort_key: None,
             sort_direction: None,
             condition: Some(condition),
+            bookmarked_only: None,
         },
     )
     .expect("query");
@@ -953,6 +960,7 @@ fn sort_and_pagination() {
             sort_key: Some("EventID".to_string()),
             sort_direction: Some("desc".to_string()),
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -976,6 +984,7 @@ fn sort_and_pagination() {
             sort_key: Some("EventID".to_string()),
             sort_direction: Some("desc".to_string()),
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -995,6 +1004,8 @@ fn flag_update_and_flag_filter() {
             row_index: 0,
             flag: "suspicious".to_string(),
             memo: Some("manual note".to_string()),
+            tags: None,
+            bookmarked: None,
         },
     )
     .expect("update failed");
@@ -1016,6 +1027,7 @@ fn flag_update_and_flag_filter() {
             sort_key: None,
             sort_direction: None,
             condition: None,
+            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -1039,6 +1051,8 @@ fn ioc_apply_and_query() {
             row_index: 0,
             flag: "safe".to_string(),
             memo: None,
+            tags: None,
+            bookmarked: None,
         },
     )
     .expect("update failed");
@@ -1051,6 +1065,8 @@ fn ioc_apply_and_query() {
             row_index: 7,
             flag: "safe".to_string(),
             memo: None,
+            tags: None,
+            bookmarked: None,
         },
     )
     .expect("update failed");
@@ -1114,6 +1130,8 @@ fn export_and_reimport_roundtrip() {
             row_index: 0,
             flag: "suspicious".to_string(),
             memo: Some("manual note".to_string()),
+            tags: None,
+            bookmarked: None,
         },
     )
     .expect("update failed");
@@ -1371,6 +1389,7 @@ ts,EventID,host,user,proc,path,msg
                 sort_key: None,
                 sort_direction: None,
                 condition: Some(condition.clone()),
+                bookmarked_only: None,
             },
         )
         .expect("query failed");
@@ -1380,6 +1399,25 @@ ts,EventID,host,user,proc,path,msg
     }
     assert_eq!(hits[0].total_filtered_rows, 10);
     assert_eq!(hits[1].total_filtered_rows, 2);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_flags_json_defaults_tags_and_bookmark() {
+    let root = temp_root();
+    let project_dir = root.join("legacy");
+    fs::create_dir_all(&project_dir).expect("failed to create legacy dir");
+    let flags_path = project_dir.join("flags.json");
+    fs::write(&flags_path, r#"{"0":{"flag":"safe","memo":"hello"}}"#)
+        .expect("failed to write legacy flags");
+
+    let flags = trivium_engine::storage::load_flags(&flags_path).expect("legacy load failed");
+    let entry = flags.get(&0).expect("legacy entry missing");
+    assert_eq!(entry.flag, "safe");
+    assert_eq!(entry.memo.as_deref(), Some("hello"));
+    assert!(entry.tags.is_empty());
+    assert!(!entry.bookmarked);
+
     let _ = fs::remove_dir_all(root);
 }
 

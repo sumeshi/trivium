@@ -67,10 +67,15 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+    let bookmarked: Vec<bool> = (0..df.height())
+        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
+        .collect();
     let ordered: Vec<usize> = (0..df.height()).collect();
     let (filtered, _) = filtered_indices(
         &ordered,
         &final_flag_vec,
+        &bookmarked,
+        None,
         payload.flag_filter.as_deref(),
         search_state.mask.as_deref(),
     );

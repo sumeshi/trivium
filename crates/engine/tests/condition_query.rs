@@ -20,6 +20,7 @@ fn payload(id: Uuid, search: Option<String>, condition: Option<Node>) -> QueryRo
         sort_key: None,
         sort_direction: None,
         condition,
+        bookmarked_only: None,
     }
 }
 

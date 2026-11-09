@@ -115,10 +115,15 @@ fn resolve_target_like(
             let iocs = load_ioc_entries(project_dir).map_err(AppError::from)?;
             let ioc_outcomes = cached_ioc_outcomes(project_dir, df, &iocs);
             let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+            let bookmarked: Vec<bool> = (0..df.height())
+                .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
+                .collect();
             let ordered: Vec<usize> = (0..df.height()).collect();
             let (filtered, _) = filtered_indices(
                 &ordered,
                 &final_flag_vec,
+                &bookmarked,
+                None,
                 payload.flag_filter.as_deref(),
                 search_state.mask.as_deref(),
             );
@@ -178,14 +183,19 @@ pub fn bulk_update(
             .as_ref()
             .map(|memo| memo.trim().is_empty())
             .unwrap_or(true);
-    let entry = FlagEntry {
-        flag: payload.flag.clone(),
-        memo: payload.memo.clone(),
-    };
     for &row_index in &target {
         if should_clear {
             remove_flag(&flags_path, row_index).map_err(AppError::from)?;
         } else {
+            // The bulk payload only carries flag/memo; tags and bookmarks are
+            // per-row user data and must survive the overwrite.
+            let existing = flags.get(&row_index);
+            let entry = FlagEntry {
+                flag: payload.flag.clone(),
+                memo: payload.memo.clone(),
+                tags: existing.map(|entry| entry.tags.clone()).unwrap_or_default(),
+                bookmarked: existing.is_some_and(|entry| entry.bookmarked),
+            };
             upsert_flag(&flags_path, row_index, &entry).map_err(AppError::from)?;
         }
     }

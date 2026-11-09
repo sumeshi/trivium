@@ -80,6 +80,25 @@ pub fn export_project(
             }
         }
 
+        // F19 user tags are exported as `[tag]` tokens after the IOC tags, so
+        // they survive the CSV round trip as memo text. Re-import keeps the
+        // whole memo verbatim (create_project does not parse tags back out),
+        // so the tag becomes part of the memo on import. That is the known
+        // F19 limit; do not change the import-side memo handling for it.
+        let user_tags = flags
+            .get(&i)
+            .map(|entry| entry.tags.clone())
+            .unwrap_or_default();
+        for tag in user_tags {
+            let token = format!("[{}]", tag);
+            if !final_memo.contains(&token) {
+                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
+                    final_memo.push(' ');
+                }
+                final_memo.push_str(&token);
+            }
+        }
+
         match final_flag.as_str() {
             "safe" => safe_flags[i] = 1,
             "suspicious" => suspicious_flags[i] = 1,

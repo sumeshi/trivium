@@ -108,6 +108,8 @@ fn take_trivium_columns(df: &mut DataFrame) -> HashMap<usize, FlagEntry> {
             memo: memo_val
                 .map(|m| m.trim().to_string())
                 .filter(|m| !m.is_empty()),
+            tags: Vec::new(),
+            bookmarked: false,
         };
         if !flag_entry.flag.is_empty() || flag_entry.memo.is_some() {
             imported_flags.insert(row_idx, flag_entry);
