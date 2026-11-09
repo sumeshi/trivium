@@ -860,7 +860,7 @@ import type {
 </script>
 
 <section class="project-view">
-  <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} />
+  <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} on:refresh={() => dispatch('refresh')} />
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 

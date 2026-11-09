@@ -132,3 +132,11 @@ export interface GroupTreeResponse {
   nodes: GroupTreeNode[];
   total: number;
 }
+
+export interface BulkCount {
+  count: number;
+}
+
+export interface BulkApplied {
+  updated: number;
+}

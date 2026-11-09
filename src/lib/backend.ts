@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type {
   ConditionNode,
   IocEntry,
+  BulkApplied,
+  BulkCount,
   ColumnStats,
   GroupTreeResponse,
   Histogram,
@@ -123,6 +125,22 @@ export interface GroupTreeArgs {
   condition?: ConditionNode | null;
 }
 
+export interface BulkAnnotateArgs {
+  projectId: string;
+  target: "selection" | "filter" | "all";
+  rowIndices?: number[];
+  search?: string;
+  flagFilter?: FlagFilterValue;
+  columns?: string[];
+  condition?: ConditionNode | null;
+  flag: string;
+  memo: string | null;
+}
+
+export interface BulkUndoArgs {
+  projectId: string;
+}
+
 export interface Backend {
   readonly isNative: boolean;
   listProjects(): Promise<ProjectSummary[]>;
@@ -137,6 +155,9 @@ export interface Backend {
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
   groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse>;
+  bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount>;
+  bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied>;
+  bulkUndo(args: BulkUndoArgs): Promise<BulkApplied>;
   saveIocs(args: SaveIocsArgs): Promise<void>;
   importIocs(args: ImportIocsArgs): Promise<void>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
@@ -254,6 +275,46 @@ class NativeBackend implements Backend {
         columns: args.columns ?? null,
         condition: args.condition ?? null,
         groupColumns: args.groupColumns,
+      },
+    });
+  }
+
+  bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount> {
+    return invoke("bulk_preview", {
+      payload: {
+        projectId: args.projectId,
+        target: args.target,
+        rowIndices: args.rowIndices ?? null,
+        search: args.search ?? null,
+        flagFilter: args.flagFilter ?? null,
+        columns: args.columns ?? null,
+        condition: args.condition ?? null,
+        flag: args.flag,
+        memo: args.memo,
+      },
+    });
+  }
+
+  bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
+    return invoke("bulk_update", {
+      payload: {
+        projectId: args.projectId,
+        target: args.target,
+        rowIndices: args.rowIndices ?? null,
+        search: args.search ?? null,
+        flagFilter: args.flagFilter ?? null,
+        columns: args.columns ?? null,
+        condition: args.condition ?? null,
+        flag: args.flag,
+        memo: args.memo,
+      },
+    });
+  }
+
+  bulkUndo(args: BulkUndoArgs): Promise<BulkApplied> {
+    return invoke("bulk_undo", {
+      payload: {
+        projectId: args.projectId,
       },
     });
   }

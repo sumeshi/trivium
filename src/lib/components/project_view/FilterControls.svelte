@@ -16,6 +16,7 @@
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
   import GroupingPanel from './GroupingPanel.svelte';
+  import BulkControls from './BulkControls.svelte';
 
 
   let columnsOpen = false;
@@ -185,6 +186,7 @@
   <StatsPanel />
   <TimePanel />
   <GroupingPanel />
+  <BulkControls on:refresh />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
       {$isExporting ? 'Exporting…' : 'Export CSV'}
