@@ -1,5 +1,6 @@
 mod dupes;
 mod export;
+mod histogram;
 mod flags;
 mod iocs;
 mod projects;
@@ -8,6 +9,7 @@ mod stats;
 
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};
 pub use export::{__cmd__export_project, export_project};
+pub use histogram::{__cmd__histogram, histogram};
 pub use flags::{__cmd__set_hidden_columns, __cmd__update_flag, set_hidden_columns, update_flag};
 pub use iocs::{
     __cmd__export_iocs, __cmd__import_iocs, __cmd__save_iocs, export_iocs, import_iocs, save_iocs,

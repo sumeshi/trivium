@@ -19,6 +19,7 @@ use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
+use trivium_engine::ops::histogram::HistogramPayload;
 use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::store::ProjectsStore;
 
@@ -601,6 +602,164 @@ fn duplicate_rows_match_fixture_duplicates() {
     .expect("unique");
     assert_eq!(duplicates.rows.len() as u64, expected_dupes);
     assert_eq!(unique.rows.len() as u64, expected_unique);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn bucket_sum(buckets: &[trivium_engine::analysis::HistogramBucket]) -> u64 {
+    buckets.iter().map(|bucket| bucket.count).sum()
+}
+
+#[test]
+fn histogram_bucket_sum_matches_filtered_rows() {
+    let (root, store, id) = setup_project();
+    let condition = Some(eq_condition("user", "alice"));
+    let queried = ops::rows::query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: condition.clone(),
+        },
+    )
+    .expect("query");
+    let hist = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "EventID".to_string(),
+            buckets: 4,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition,
+        },
+    )
+    .expect("histogram");
+    assert_eq!(hist.missing, 0);
+    assert_eq!(hist.buckets.len(), 4);
+    assert_eq!(bucket_sum(&hist.buckets), queried.total_filtered_rows as u64);
+
+    let searched = ops::rows::query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            search: Some("WS01".to_string()),
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: None,
+        },
+    )
+    .expect("search query");
+    let searched_hist = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "EventID".to_string(),
+            buckets: 4,
+            search: Some("WS01".to_string()),
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .expect("search histogram");
+    assert_eq!(
+        bucket_sum(&searched_hist.buckets) + searched_hist.missing,
+        searched.total_filtered_rows as u64
+    );
+
+    let omitted = format!(r#"{{"projectId":"{id}","column":"ts"}}"#);
+    let parsed: HistogramPayload = serde_json::from_str(&omitted).expect("payload");
+    assert_eq!(parsed.buckets, 50);
+    let timestamps = ops::histogram::histogram(&store, parsed).expect("timestamps");
+    assert_eq!(timestamps.kind, "datetime");
+    assert_eq!(timestamps.missing, 0);
+    assert_eq!(timestamps.buckets.len(), 50);
+    assert_eq!(bucket_sum(&timestamps.buckets), 20);
+
+    assert!(ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "user".to_string(),
+            buckets: 4,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn histogram_places_values_in_equal_width_buckets() {
+    let root = temp_root();
+    let csv = root.join("hist.csv");
+    fs::write(&csv, "n,x\n0,0.0\n10,0.5\n20,1.0\n").expect("write");
+    let store = ProjectsStore::new(root.clone()).expect("store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("create")
+    .meta
+    .id;
+    let ints = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "n".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .expect("ints");
+    assert_eq!(ints.kind, "int");
+    assert_eq!(bucket_sum(&ints.buckets), 3);
+    assert_eq!(ints.buckets[0].count, 1);
+    assert_eq!(ints.buckets[1].count, 2);
+    assert_eq!(ints.buckets[0].start, "0");
+    assert_eq!(ints.buckets[0].end, "10");
+    assert_eq!(ints.buckets[1].start, "10");
+    assert_eq!(ints.buckets[1].end, "20");
+
+    let floats = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "x".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .expect("floats");
+    assert_eq!(floats.kind, "float");
+    assert_eq!(floats.buckets[0].count, 1);
+    assert_eq!(floats.buckets[1].count, 2);
+    assert_eq!(bucket_sum(&floats.buckets), 3);
 
     let _ = fs::remove_dir_all(root);
 }

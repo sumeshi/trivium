@@ -55,6 +55,19 @@ export interface ColumnStats {
   rare: ValueCount[];
 }
 
+export interface HistogramBucket {
+  start: string;
+  end: string;
+  count: number;
+}
+
+export interface Histogram {
+  column: string;
+  kind: ColumnKind;
+  buckets: HistogramBucket[];
+  missing: number;
+}
+
 export type CompareOp =
   | "eq"
   | "ne"

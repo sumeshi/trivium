@@ -1,5 +1,6 @@
 pub mod dupes;
 pub mod export;
+pub mod histogram;
 pub mod flags;
 pub mod iocs;
 pub mod projects;

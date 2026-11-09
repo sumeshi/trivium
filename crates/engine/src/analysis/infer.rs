@@ -34,7 +34,7 @@ pub fn infer_column_kinds(df: &DataFrame) -> HashMap<String, ColumnKind> {
     df.get_columns()
         .iter()
         .filter(|series| series.name() != "__rowid")
-        .map(|series| (series.name().to_string(), kind_of_series(series)))
+        .map(|series| (series.name().to_string(), series_kind(series)))
         .collect()
 }
 
@@ -88,7 +88,7 @@ impl KindFlags {
     }
 }
 
-fn kind_of_series(series: &Series) -> ColumnKind {
+pub(crate) fn series_kind(series: &Series) -> ColumnKind {
     if let Some(kind) = dtype_kind(series.dtype()) {
         return kind;
     }
@@ -158,7 +158,7 @@ fn classify_text(text: &str) -> Option<ColumnKind> {
     Some(ColumnKind::String)
 }
 
-fn is_datetime(text: &str) -> bool {
+pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {
     const FORMATS: [&str; 5] = [
         "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%dT%H:%M:%S",
@@ -166,8 +166,18 @@ fn is_datetime(text: &str) -> bool {
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d",
     ];
-    FORMATS.iter().any(|format| {
-        NaiveDateTime::parse_from_str(text, format).is_ok()
-            || chrono::NaiveDate::parse_from_str(text, format).is_ok()
-    })
+    for format in FORMATS {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(text, format) {
+            return dt.and_utc().timestamp_nanos_opt();
+        }
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(text, format) {
+            let dt = date.and_hms_opt(0, 0, 0)?;
+            return dt.and_utc().timestamp_nanos_opt();
+        }
+    }
+    None
+}
+
+fn is_datetime(text: &str) -> bool {
+    parse_datetime_nanos(text).is_some()
 }

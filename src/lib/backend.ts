@@ -3,6 +3,7 @@ import type {
   ConditionNode,
   IocEntry,
   ColumnStats,
+  Histogram,
   LoadProjectResponse,
   ProjectRow,
   ProjectSummary,
@@ -59,6 +60,16 @@ export interface ColumnStatsArgs {
   rareMax?: number;
 }
 
+export interface HistogramArgs {
+  projectId: string;
+  column: string;
+  buckets?: number;
+  search?: string;
+  flagFilter?: FlagFilterValue;
+  columns?: string[];
+  condition?: ConditionNode | null;
+}
+
 export interface QueryProjectRowsArgs {
   projectId: string;
   search?: string;
@@ -86,6 +97,7 @@ export interface Backend {
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string): Promise<LoadProjectResponse>;
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
+  histogram(args: HistogramArgs): Promise<Histogram>;
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
@@ -132,6 +144,20 @@ class NativeBackend implements Backend {
         projectId: args.projectId,
         column: args.column,
         rareMax: args.rareMax ?? 1,
+      },
+    });
+  }
+
+  histogram(args: HistogramArgs): Promise<Histogram> {
+    return invoke("histogram", {
+      payload: {
+        projectId: args.projectId,
+        column: args.column,
+        buckets: args.buckets ?? 50,
+        search: args.search ?? null,
+        flagFilter: args.flagFilter ?? null,
+        columns: args.columns ?? null,
+        condition: args.condition ?? null,
       },
     });
   }
