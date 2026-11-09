@@ -368,7 +368,7 @@ src-tauri/src/
   希少値(頻度 1〜N) 件数と値」を 1 走査で計算。DataFrame 全件舐めでよい（100GB 非目標）。
 - 完了条件: fixtures で欠損数・ユニーク数が `python3 -c` で別計算した値と一致（I5 に組み込み）。
 
-#### F8: 列統計パネル UI
+#### F8: 列統計パネル UI → 実装済み（`80e7d5d`）、GUI 操作は未確認
 
 - 前提: F7
 - 対象: 新規 `src/lib/components/project_view/StatsPanel.svelte`
