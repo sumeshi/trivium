@@ -32,8 +32,9 @@
 - **B1 列絞り込みが検索に効いていない** → 修正済み（`d225992`）。
   `src/lib/backend.ts:127` が `visible_columns` を送るのに対し Rust 側は `columns` を期待し、
   serde が無視するため常に全列検索になっていた。
-- **B2 IOC タグ付与の表示/出力不一致**: `ops/rows.rs` はユーザーフラグがある行に `[tag]` を
-  付けないが、`ops/export.rs` は付ける。R5 の後に統一する。
+- **B2 IOC タグ付与の表示/出力不一致** → 修正済み（`c8b0ef2`、R5 の単一化の上で適用）。
+  統一ルール: 空でないユーザーフラグがフラグ列優先（メモのみのエントリは IOC を阻害しない）、
+  タグは IOC 一致なら常に付与。表示・出力・件数が一致することを `ioc_parity.rs` が固定。
 - **B3 1 行のフラグ更新が全走査を起こす** → 修正済み（`aebde10`）。
   `update_flag` が毎回 `calculate_ioc_applied_records`（全行×IOC×列）を呼んでいた。
 - **B4 検索キャッシュが列構成を見ていない** → 修正済み（`cf48a61`、I5 のスモークが発見）。
@@ -250,7 +251,7 @@ src-tauri/src/
   I5（スモーク）が engine 関数を直接呼べる形になること。
 - 禁止: 挙動の変更（引数・戻り値の型は現状維持）。
 
-### R1: search.rs の分割
+### R1: search.rs の分割 → 完了（`48cd8d3`）
 
 - 前提: R0a（I2 と並行可）
 - 対象: `crates/engine/src/search.rs`(392 行) → `crates/engine/src/search/{mod.rs, tokenize.rs, rpn.rs, mask.rs, text.rs}`
@@ -260,14 +261,14 @@ src-tauri/src/
 - 完了条件: `cargo test` 通過（I2 の表駆動テストが通れば移動検証になる）。各ファイル 200 行未満。
 - 禁止: トークナイザの挙動変更。
 
-### R2: rows 系の分割（R0b 実施後は消える可能性がある）
+### R2: rows 系の分割 → 完了（`815ed57`）
 
 - 前提: R0b
 - 手順: R0b 後に query 系 engine ファイルが 200 行超なら `crates/engine/src/ops/query/` へ
   ソート・IOC 適用・ページングに分割。200 行未満なら何もしない。
 - 完了条件: `scripts/check_rust_size.sh` 通過。I5 通過。
 
-### R3: 取込の分離
+### R3: 取込の分離 → 完了（`ee92a42`）
 
 - 前提: R0b
 - 対象: `crates/engine/src/ops/projects.rs`（create_project 本体）→ 新規 `crates/engine/src/import/csv.rs`
@@ -275,7 +276,7 @@ src-tauri/src/
   `import::csv::load(path) -> (DataFrame, HashMap<usize, FlagEntry>)` として切り出す。
 - 完了条件: I5 通過。該当呼び出し側が 200 行未満。
 
-### R4: 出力の分離
+### R4: 出力の分離 → 完了（`42a1513`）
 
 - 前提: R0b, R5
 - 対象: `crates/engine/src/ops/export.rs` → 新規 `crates/engine/src/export/csv.rs`
@@ -299,10 +300,10 @@ src-tauri/src/
 
 ### 条件モデル（IRFlow 差分の中核。この順で）
 
-#### F1: 条件モデルの型定義と直列化
+#### F1: 条件モデルの型定義と直列化 → 完了（`70a737c`）
 
 - 前提: R0
-- 対象: 新規 `src-tauri/src/condition/model.rs`
+- 対象: `crates/engine/src/condition/model.rs`（Tauri 非依存。カード記載の `src-tauri/src/condition` は R0 後の配置に合わせた）
 - 手順:
   1. `Condition { column, op, values, negated }`（op: Eq/Ne/Gt/Lt/Ge/Le/Contains/StartsWith/EndsWith/Regex/In）、
      `Group { kind: And|Or, children: Vec<Node> }`、`Node = Condition|Group` を serde で JSON 往復可能に定義
@@ -310,10 +311,10 @@ src-tauri/src/
 - 完了条件: `cargo test` のラウンドトリップテスト通過（30 ケース以上）。
 - 禁止: 検索バー構文との変換（F3 でやる）。
 
-#### F2: 条件評価器
+#### F2: 条件評価器 → 完了（`b3a736a`）
 
 - 前提: F1, R5
-- 対象: 新規 `src-tauri/src/condition/eval.rs`
+- 対象: `crates/engine/src/condition/eval.rs`
 - 手順:
   1. 行の値（`&HashMap<String, Value>` または Series 参照）に対する `eval(Node, row) -> bool`
   2. 数値比較は `f64` に行く前に `i64` 比較を試す（精度。F28 と同じ規則）
@@ -321,7 +322,7 @@ src-tauri/src/
      同一意味のケースでパリティテスト（部分一致の意味が同じであることの証明）
 - 完了条件: パリティテスト通過。`cargo test` 0 失敗。
 
-#### F3: 条件 → マスクへの統合（query_rows の一本化）
+#### F3: 条件 → マスクへの統合（query_rows の一本化） → 完了（`c893af7`）
 
 - 前提: F2, B1
 - 対象: `engine/query`（R0/R2 で分割後のファイル）
@@ -331,7 +332,7 @@ src-tauri/src/
 - 完了条件: 旧構文の I2 テストが全部通ったまま（互換維持）、I5 通過。
 - 禁止: 旧構文の破壊（D1 が (b)/(c) を選ぶまで）。
 
-#### F4: 条件エディタ UI（フラット）
+#### F4: 条件エディタ UI（フラット） → 実装済み（`fd092c5`）、GUI 操作は未確認
 
 - 前提: F3
 - 対象: 新規 `src/lib/components/project_view/ConditionEditor.svelte`、
