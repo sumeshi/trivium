@@ -9,3 +9,4 @@ src-tauri/Cargo.lock
 AGENTS.md
 *.csv/target/
 Cargo.lock
+/target/
