@@ -7,4 +7,5 @@ src-tauri/Cargo.lock
 *.log
 
 AGENTS.md
-*.csv
+*.csv/target/
+Cargo.lock
