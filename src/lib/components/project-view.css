@@ -171,6 +171,15 @@ button.ghost:hover {
   background: var(--hover);
 }
 
+button.ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.ghost:disabled:hover {
+  background: var(--surface-weak);
+}
+
 button.ghost:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: 2px;

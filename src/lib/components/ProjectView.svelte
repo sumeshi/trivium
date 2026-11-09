@@ -10,7 +10,18 @@
   import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
   import type { Backend } from '../backend';
   import './project-view.css';
-  import { conditionPayload, resetConditions } from '../stores/condition';
+  import { conditionPayload, conditionTree } from '../stores/condition';
+  import { cloneTree } from '../viewState';
+  import {
+    goBack,
+    goForward,
+    historyRestore,
+    loadProjectView,
+    recordAppliedCondition,
+    rememberOffset,
+    resetHistory,
+    saveProjectView,
+  } from '../stores/viewHistory';
   import {
     projectDetail as projectDetailStore,
     backend as backendStore,
@@ -99,6 +110,10 @@ import type {
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
+  let applyingHistory = false;
+  let suppressScrollRecord = false;
+  let appliedRestoreNonce = 0;
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
 
@@ -160,11 +175,56 @@ import type {
     columnWidths = next;
   };
 
+  const rowOffset = () => Math.max(0, Math.floor(get(scrollTop) / ROW_HEIGHT));
+
+  const flushPersist = (projectId: string | null) => {
+    if (!projectId) {
+      return;
+    }
+    saveProjectView(projectId, {
+      condition: get(conditionTree),
+      hiddenColumns: Array.from(get(hiddenColumns)),
+      sortKey: get(sortKey),
+      sortDirection: get(sortDirection),
+      offset: rowOffset(),
+    });
+  };
+
+  const schedulePersist = () => {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      flushPersist(get(currentProjectId));
+    }, 250);
+  };
+
+  const applyScrollOffset = (offset: number) => {
+    const px = Math.max(0, offset) * ROW_HEIGHT;
+    suppressScrollRecord = true;
+    scrollTop.set(px);
+    if ($bodyScrollEl) {
+      $bodyScrollEl.scrollTop = px;
+    }
+    suppressScrollRecord = false;
+  };
+
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
-    resetConditions();
-    lastConditionJson = 'null';
+    const previousId = get(currentProjectId);
+    if (previousId && previousId !== detail.project.meta.id) {
+      flushPersist(previousId);
+    }
+    const saved = loadProjectView(detail.project.meta.id, detail.columns);
+    const hidden = new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? []));
+    conditionTree.set(
+      saved ? cloneTree(saved.condition) : { type: 'group', id: 'root', kind: 'and', collapsed: false, children: [] }
+    );
+    lastConditionJson = JSON.stringify(get(conditionPayload));
     currentProjectId.set(detail.project.meta.id);
-    hiddenColumns.set(new Set(detail.hidden_columns ?? []));
+    hiddenColumns.set(hidden);
+    sortKey.set(saved?.sortKey ?? null);
+    sortDirection.set(saved?.sortDirection ?? 'asc');
     iocDraft.set(detail.iocs.map((entry) => ({
       id: crypto.randomUUID(),
       flag: normalizeIocFlag(entry.flag),
@@ -172,12 +232,12 @@ import type {
       query: entry.query
     })));
     initializeColumnWidths();
-    const currentColumns = detail.columns.filter((column) => !$hiddenColumns.has(column));
+    const currentColumns = detail.columns.filter((column) => !hidden.has(column));
     const filters: AppliedFilters = {
       search: $search.trim(),
       flag: $flagFilter,
       columns: currentColumns,
-      condition: null,
+      condition: get(conditionPayload),
     };
     lastHiddenColumnsRef.set([...(detail.hidden_columns ?? [])]);
     if (filterTimeout) {
@@ -199,18 +259,16 @@ import type {
     filterRequestId = 0;
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
-    sortKey.set(null);
-    sortDirection.set('asc');
     expandedCell.set(null);
+    resetHistory(get(conditionTree), saved?.offset ?? 0);
 
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
     totalFlagged.set(detail.project.meta.flagged_records);
     flaggedCount.set($totalFlagged);
-    scrollTop.set(0);
+    applyScrollOffset(saved?.offset ?? 0);
     if ($bodyScrollEl) {
-      $bodyScrollEl.scrollTop = 0;
       $bodyScrollEl.scrollLeft = 0;
     }
     if ($headerScrollEl) {
@@ -250,6 +308,13 @@ import type {
     lastHiddenColumnsRef.set([...nextHiddenColumns]);
   }
 
+  $: if ($historyRestore && initialized && $historyRestore.nonce !== appliedRestoreNonce) {
+    appliedRestoreNonce = $historyRestore.nonce;
+    applyingHistory = true;
+    conditionTree.set(cloneTree($historyRestore.tree));
+    applyScrollOffset($historyRestore.offset);
+  }
+
   $: if (initialized) {
     const searchValue = $search.trim();
     const flagValue = $flagFilter;
@@ -260,14 +325,34 @@ import type {
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
     const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
     const conditionChanged = conditionJson !== lastConditionJson;
+    let resetScroll = flagChanged || conditionChanged;
+    if (conditionChanged && applyingHistory) {
+      resetScroll = false;
+      applyingHistory = false;
+    } else if (conditionChanged) {
+      recordAppliedCondition(rowOffset(), get(conditionTree), 0);
+    }
 
     if (searchChanged || flagChanged || columnsChanged || conditionChanged) {
-      scheduleFilterRefresh(searchValue, flagValue, columns, flagChanged || conditionChanged);
+      scheduleFilterRefresh(searchValue, flagValue, columns, resetScroll);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
       lastColumnsSignature = signature;
       lastConditionJson = conditionJson;
     }
+  }
+
+  $: persistedView = initialized && projectDetail
+    ? {
+        hidden: Array.from($hiddenColumns),
+        sortKey: $sortKey,
+        sortDirection: $sortDirection,
+        offset: $scrollTop,
+        tree: $conditionTree,
+      }
+    : null;
+  $: if (persistedView) {
+    schedulePersist();
   }
 
   $: visibleCount =
@@ -282,6 +367,11 @@ import type {
   $: ensureRangeLoaded(startIndex, endIndex);
   $: offsetY = startIndex * ROW_HEIGHT;
   $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
+  $: if ($bodyScrollEl && totalHeight >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
+    suppressScrollRecord = true;
+    $bodyScrollEl.scrollTop = $scrollTop;
+    suppressScrollRecord = false;
+  }
   $: loadedRowCount = $rowsCache.size;
 
   const ensureRangeLoaded = (start: number, end: number) => {
@@ -493,7 +583,11 @@ import type {
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
+    if (suppressScrollRecord) {
+      return;
+    }
     scrollTop.set(target.scrollTop);
+    rememberOffset(Math.max(0, Math.floor(target.scrollTop / ROW_HEIGHT)));
     if (isSyncingBodyScroll) {
       isSyncingBodyScroll = false;
       return;
@@ -668,6 +762,23 @@ import type {
       }
     };
     const handleKeydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = !!target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      );
+      if (!typing && event.altKey && event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goBack();
+        return;
+      }
+      if (!typing && event.altKey && event.key === 'ArrowRight') {
+        event.preventDefault();
+        goForward();
+        return;
+      }
       if (event.key === 'Escape') {
         columnsOpen = false;
         flagMenuOpen = false;
@@ -713,6 +824,11 @@ import type {
   });
 
   onDestroy(() => {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    flushPersist(get(currentProjectId));
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
