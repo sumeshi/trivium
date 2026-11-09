@@ -28,6 +28,7 @@ fn main() {
             commands::export_project,
             commands::column_stats,
             commands::duplicate_rows,
+            commands::search_projects,
             commands::histogram,
             commands::time_analysis,
             commands::surrounding_rows

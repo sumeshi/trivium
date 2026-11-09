@@ -1,3 +1,4 @@
+mod cross;
 mod dupes;
 mod export;
 mod histogram;
@@ -9,6 +10,7 @@ mod stats;
 mod surround;
 mod time;
 
+pub use cross::{__cmd__search_projects, search_projects};
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};
 pub use export::{__cmd__export_project, export_project};
 pub use histogram::{__cmd__histogram, histogram};

@@ -18,6 +18,7 @@ use trivium_engine::ops::surround::{SurroundMode, SurroundingRowsPayload};
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::cross::CrossSearchPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
 use trivium_engine::ops::histogram::HistogramPayload;
 use trivium_engine::ops::stats::ColumnStatsPayload;
@@ -1306,5 +1307,77 @@ ts,note,secret
         },
     );
     assert!(missing.unwrap_err().to_string().contains("Row not found"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn cross_project_search_matches_each_query() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let first_csv = write_fixture_csv(&root);
+    let second_csv = root.join("other.csv");
+    fs::write(
+        &second_csv,
+        "\
+ts,EventID,host,user,proc,path,msg
+2024-01-01T00:00:01,4624,H1,alice,cmd.exe,C:\\Temp\\,a
+2024-01-01T00:00:02,4624,H1,bob,cmd.exe,C:\\Temp\\,b
+2024-01-01T00:00:03,4624,H1,alice,cmd.exe,C:\\Temp\\,c
+",
+    )
+    .expect("failed to write second fixture");
+    let create = |path: &std::path::Path| {
+        ops::projects::create_project(
+            &store,
+            CreateProjectPayload {
+                path: path.to_string_lossy().to_string(),
+                description: None,
+            },
+        )
+        .expect("failed to create project")
+        .meta
+        .id
+    };
+    let first = create(&first_csv);
+    let second = create(&second_csv);
+    let condition = eq_condition("user", "alice");
+    let hits = ops::cross::search_projects(
+        &store,
+        CrossSearchPayload {
+            project_ids: vec![first, second],
+            search: None,
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: Some(1),
+            sort_key: None,
+            sort_direction: None,
+            condition: Some(condition.clone()),
+        },
+    )
+    .expect("cross search failed");
+    assert_eq!(hits.len(), 2);
+    for hit in &hits {
+        let alone = ops::rows::query_project_rows(
+            &store,
+            QueryRowsPayload {
+                project_id: hit.project_id,
+                search: None,
+                columns: None,
+                flag_filter: None,
+                offset: None,
+                limit: Some(1),
+                sort_key: None,
+                sort_direction: None,
+                condition: Some(condition.clone()),
+            },
+        )
+        .expect("query failed");
+        assert_eq!(hit.total_filtered_rows, alone.total_filtered_rows);
+        assert_eq!(hit.rows.len(), alone.rows.len());
+        assert_eq!(hit.rows.len(), 1);
+    }
+    assert_eq!(hits[0].total_filtered_rows, 10);
+    assert_eq!(hits[1].total_filtered_rows, 2);
     let _ = fs::remove_dir_all(root);
 }

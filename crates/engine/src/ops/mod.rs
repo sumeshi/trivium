@@ -1,3 +1,4 @@
+pub mod cross;
 pub mod dupes;
 pub mod export;
 pub mod histogram;
