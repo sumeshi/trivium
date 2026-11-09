@@ -8,6 +8,6 @@ while IFS= read -r -d '' file; do
         printf '%s: %s (limit 500)\n' "$file" "$lines" >&2
         status=1
     fi
-done < <(find src-tauri/src -type f -name '*.rs' -print0 | sort -z)
+done < <(find src-tauri/src crates/engine/src -type f -name '*.rs' -print0 2>/dev/null | sort -z)
 
 exit "$status"
