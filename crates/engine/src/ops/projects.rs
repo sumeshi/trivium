@@ -1,53 +1,27 @@
-use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Context;
 use chrono::Utc;
-use polars::prelude::*;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    flags::normalize_flag_value,
+    import::csv,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
-    models::{FlagEntry, LoadProjectResponse, ProjectMeta, ProjectRow, ProjectSummary},
+    models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe},
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
         load_column_metrics, load_flags, save_column_metrics, save_flags,
     },
     store::ProjectsStore,
-    value_utils::anyvalue_to_search_string,
 };
 
-use super::util::{collect_row_record, DEFAULT_PAGE_SIZE};
+use super::util::{materialize_rows, DEFAULT_PAGE_SIZE};
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
-
-fn materialize_rows(
-    df: &DataFrame,
-    columns: &[String],
-    row_indices: impl Iterator<Item = usize>,
-    flags: &HashMap<usize, FlagEntry>,
-) -> Vec<ProjectRow> {
-    let mut rows = Vec::new();
-    for row_idx in row_indices {
-        let record = collect_row_record(df, columns, row_idx);
-        let flag_entry = flags.get(&row_idx);
-        rows.push(ProjectRow {
-            row_index: row_idx,
-            data: record,
-            flag: flag_entry
-                .as_ref()
-                .map(|entry| normalize_flag_value(&entry.flag))
-                .unwrap_or_default(),
-            memo: flag_entry.and_then(|entry| entry.memo.clone()),
-        });
-    }
-    rows
-}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProjectPayload {
@@ -77,116 +51,7 @@ pub fn create_project(
         return Err(AppError::Message("Selected file no longer exists.".into()).into());
     }
 
-    let file = File::open(&source_path)
-        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-    let mut df = CsvReader::new(file)
-        .finish()
-        .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
-
-    let mut imported_flags: HashMap<usize, FlagEntry> = HashMap::new();
-    let has_safe = df.get_column_names().iter().any(|c| c == &"trivium-safe");
-    let has_suspicious = df
-        .get_column_names()
-        .iter()
-        .any(|c| c == &"trivium-suspicious");
-    let has_critical = df
-        .get_column_names()
-        .iter()
-        .any(|c| c == &"trivium-critical");
-    let has_memo = df.get_column_names().iter().any(|c| c == &"trivium-memo");
-    if has_safe || has_suspicious || has_critical || has_memo {
-        let safe_col = if has_safe {
-            df.column("trivium-safe").ok()
-        } else {
-            None
-        };
-        let suspicious_col = if has_suspicious {
-            df.column("trivium-suspicious").ok()
-        } else {
-            None
-        };
-        let critical_col = if has_critical {
-            df.column("trivium-critical").ok()
-        } else {
-            None
-        };
-        let memo_col = if has_memo {
-            df.column("trivium-memo").ok()
-        } else {
-            None
-        };
-
-        let height = df.height();
-        for row_idx in 0..height {
-            let mut best_flag = String::new();
-            if let Some(series) = critical_col.as_ref() {
-                if let Ok(v) = series.get(row_idx) {
-                    if let Some(text) = anyvalue_to_search_string(&v) {
-                        if text != "0" && !text.is_empty() {
-                            best_flag = "critical".to_string();
-                        }
-                    }
-                }
-            }
-            if best_flag.is_empty() {
-                if let Some(series) = suspicious_col.as_ref() {
-                    if let Ok(v) = series.get(row_idx) {
-                        if let Some(text) = anyvalue_to_search_string(&v) {
-                            if text != "0" && !text.is_empty() {
-                                best_flag = "suspicious".to_string();
-                            }
-                        }
-                    }
-                }
-            }
-            if best_flag.is_empty() {
-                if let Some(series) = safe_col.as_ref() {
-                    if let Ok(v) = series.get(row_idx) {
-                        if let Some(text) = anyvalue_to_search_string(&v) {
-                            if text != "0" && !text.is_empty() {
-                                best_flag = "safe".to_string();
-                            }
-                        }
-                    }
-                }
-            }
-            let memo_val = if let Some(series) = memo_col.as_ref() {
-                series
-                    .get(row_idx)
-                    .ok()
-                    .and_then(|v| anyvalue_to_search_string(&v))
-            } else {
-                None
-            };
-            let flag_entry = FlagEntry {
-                flag: best_flag.clone(),
-                memo: memo_val
-                    .map(|m| m.trim().to_string())
-                    .filter(|m| !m.is_empty()),
-            };
-            if !flag_entry.flag.is_empty() || flag_entry.memo.is_some() {
-                imported_flags.insert(row_idx, flag_entry);
-            }
-        }
-
-        if let Ok(next) = df.drop("trivium-safe") {
-            df = next;
-        }
-        if let Ok(next) = df.drop("trivium-suspicious") {
-            df = next;
-        }
-        if let Ok(next) = df.drop("trivium-critical") {
-            df = next;
-        }
-        if let Ok(next) = df.drop("trivium-memo") {
-            df = next;
-        }
-    }
-
-    let row_ids: Vec<i64> = (0..df.height()).map(|idx| idx as i64).collect();
-    let row_id_series = Series::new("__rowid", row_ids);
-    df.with_column(row_id_series)
-        .map_err(|_| AppError::Message("Failed to add row ids to the dataset.".into()))?;
+    let (mut df, imported_flags) = csv::load(&source_path)?;
 
     let project_id = Uuid::new_v4();
     let project_dir = store.project_dir(&project_id);

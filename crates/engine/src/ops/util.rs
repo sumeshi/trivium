@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use serde_json::Value;
 
+use crate::flags::normalize_flag_value;
+use crate::models::{FlagEntry, ProjectRow};
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
@@ -90,4 +92,27 @@ pub fn build_row_search_text(
         }
     }
     (row_text, per_column)
+}
+
+pub fn materialize_rows(
+    df: &DataFrame,
+    columns: &[String],
+    row_indices: impl Iterator<Item = usize>,
+    flags: &HashMap<usize, FlagEntry>,
+) -> Vec<ProjectRow> {
+    let mut rows = Vec::new();
+    for row_idx in row_indices {
+        let record = collect_row_record(df, columns, row_idx);
+        let flag_entry = flags.get(&row_idx);
+        rows.push(ProjectRow {
+            row_index: row_idx,
+            data: record,
+            flag: flag_entry
+                .as_ref()
+                .map(|entry| normalize_flag_value(&entry.flag))
+                .unwrap_or_default(),
+            memo: flag_entry.and_then(|entry| entry.memo.clone()),
+        });
+    }
+    rows
 }
