@@ -29,16 +29,16 @@
 
 ### 発見済みバグ（要修正）
 
-- **B1 列絞り込みが検索に効いていない**: `src/lib/backend.ts:127` は `visible_columns` を送るが、
-  `src-tauri/src/commands/rows.rs:52` の `QueryRowsPayload.columns` は rename 無しの `columns`。
-  serde は未知フィールド `visible_columns` を無視するため常に `None` → 常に全列検索。
-  README の「検索は可視列のみ」の説明と不一致。
-- **B2 IOC タグ付与の表示/出力不一致**: `rows.rs:377` はユーザーフラグがある行に `[tag]` を
-  付けないが、`export.rs` はユーザーフラグがあっても `[tag]` を付ける。
-  画面で見えたものと出力が変わる。
-- **B3 1 行のフラグ更新が全走査を起こす**: `commands/flags.rs` の `update_flag` は
-  更新のたび `calculate_ioc_applied_records`（全行×IOC×列の再評価、`ioc.rs:184`）を呼ぶ。
-  履歴の「IOC 100件への1件追加 2.77秒」の原因はこれ。
+- **B1 列絞り込みが検索に効いていない** → 修正済み（`d225992`）。
+  `src/lib/backend.ts:127` が `visible_columns` を送るのに対し Rust 側は `columns` を期待し、
+  serde が無視するため常に全列検索になっていた。
+- **B2 IOC タグ付与の表示/出力不一致**: `ops/rows.rs` はユーザーフラグがある行に `[tag]` を
+  付けないが、`ops/export.rs` は付ける。R5 の後に統一する。
+- **B3 1 行のフラグ更新が全走査を起こす** → 修正済み（`aebde10`）。
+  `update_flag` が毎回 `calculate_ioc_applied_records`（全行×IOC×列）を呼んでいた。
+- **B4 検索キャッシュが列構成を見ていない** → 修正済み（`cf48a61`、I5 のスモークが発見）。
+  キャッシュが列セットを記録しておらず、列制限付き検索が別列構成のキャッシュを
+  再利用できた。`set_hidden_columns` がキャッシュをクリアするため GUI では隠れていた。
 
 ## 2. タスクカードの書式（以後、追加タスクもこれに従う）
 
@@ -170,18 +170,16 @@ src-tauri/src/
 - 完了条件: `bench` 実行で表が埋まる。数値の良し悪しは問わない（P 層の before になる）。
 - 禁止: 100GB 級の計測（§11 非目標）。
 
-### I5: 往復スモークの自動化
+### I5: 往復スモークの自動化 → 完了（`a2fe91d`）
 
-- 前提: R0b, I1
-- 対象: 新規 `crates/engine/tests/smoke.rs`
-- 手順:
-  1. `tempdir` に `ProjectsStore` を立て、fixtures/basic.csv から案件作成
-  2. 条件検索（search と列フィルタ）→ 該当行へフラグ/メモ設定 → CSV 出力 →
-     出力ファイルを再取込 → trivium-* 列が復元されることを検証
-  3. IOC を 1 件登録 → IOC フラグと `[tag]` が付く行数を検証
-- 完了条件: `cargo test -p trivium-engine --test smoke` が 0 失敗。
+- 対象: `crates/engine/tests/smoke.rs`
+- 実装メモ: fixtures は `*.csv` が gitignore 済みで CI の新規チェックアウトに存在しないため、
+  `scripts/gen_fixture.py` ではなく**テスト内で決定的な CSV を inline 生成**した。
+  カバー: 案件作成/読込、検索（列スコープ・列制限・AND/NOT/OR・列引き継ぎ）、
+  ソート+ページング、フラグ更新+フィルタ、IOC 適用（ユーザーフラグ優先・タグ・件数）、
+  出力→再取込の往復、案件削除。I5 実行中に B4（キャッシュの列キー不在）を発見し修正。
+- 完了条件: `cargo test -p trivium-engine --test smoke` が 0 失敗（7 テスト、達成済み）。
   以後、全 F/R タスクの完了条件にこのスモークの通過を含める（手動 GUI 確認の代わり）。
-- 禁止: GUI 起動を要求しない（Tauri に依存しないこと。engine の境界を守る）。
 
 ## 5. B 層 — バグ修正（I2 の後、R 層より先）
 
