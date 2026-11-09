@@ -127,13 +127,13 @@ pub fn query_project_rows(
             None
         }
     };
-    let mut searchable_text: Option<Vec<String>> = cached_search.and_then(|cached| {
-        if cached.len() == row_count && cached.iter().any(|s| !s.is_empty()) {
-            Some(cached)
-        } else {
-            None
-        }
-    });
+    let mut searchable_text: Option<Vec<String>> = cached_search
+        .filter(|cached| {
+            cached.columns == search_cols
+                && cached.text.len() == row_count
+                && cached.text.iter().any(|s| !s.is_empty())
+        })
+        .map(|cached| cached.text);
     let mut searchable_text_built = false;
     let mut per_column_text: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -444,7 +444,7 @@ pub fn query_project_rows(
 
     if searchable_text_built {
         if let Some(ref built) = searchable_text {
-            if let Err(err) = save_searchable_cache(&project_dir, built) {
+            if let Err(err) = save_searchable_cache(&project_dir, &search_cols, built) {
                 eprintln!(
                     "[cache] failed to persist searchable cache for {:?}: {:?}",
                     project_dir, err

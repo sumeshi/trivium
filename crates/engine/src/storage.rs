@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use polars::prelude::DataFrame;
+use serde::{Deserialize, Serialize};
 use sled::Db;
 
 use crate::{
@@ -15,6 +16,15 @@ use crate::{
 
 const SEARCHABLE_CACHE_KEY: &[u8] = b"searchable_cache";
 const IOC_FLAG_CACHE_KEY: &[u8] = b"ioc_flag_cache";
+
+/// Cached searchable text, keyed by the column set it was built from.
+/// A cache written by an older version (a bare `Vec<String>`) fails to
+/// deserialize and is treated as absent, forcing a rebuild.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchableCacheEntry {
+    pub columns: Vec<String>,
+    pub text: Vec<String>,
+}
 
 fn encode_row_key(row_index: usize) -> [u8; 8] {
     (row_index as u64).to_be_bytes()
@@ -212,12 +222,12 @@ pub fn count_flagged(path: &Path) -> Result<usize> {
     Ok(count)
 }
 
-pub fn load_searchable_cache(project_dir: &Path) -> Result<Option<Vec<String>>> {
+pub fn load_searchable_cache(project_dir: &Path) -> Result<Option<SearchableCacheEntry>> {
     let db = open_cache_db(&cache_db_path(project_dir))?;
     match db.get(SEARCHABLE_CACHE_KEY) {
         Ok(Some(value)) => {
-            let cache: Vec<String> =
-                serde_json::from_slice(&value).context("failed to deserialize searchable cache")?;
+            let cache: SearchableCacheEntry = serde_json::from_slice(&value)
+                .context("failed to deserialize searchable cache")?;
             Ok(Some(cache))
         }
         Ok(None) => Ok(None),
@@ -225,9 +235,17 @@ pub fn load_searchable_cache(project_dir: &Path) -> Result<Option<Vec<String>>> 
     }
 }
 
-pub fn save_searchable_cache(project_dir: &Path, cache: &[String]) -> Result<()> {
+pub fn save_searchable_cache(
+    project_dir: &Path,
+    columns: &[String],
+    text: &[String],
+) -> Result<()> {
     let db = open_cache_db(&cache_db_path(project_dir))?;
-    let data = serde_json::to_vec(cache).context("failed to serialize searchable cache")?;
+    let entry = SearchableCacheEntry {
+        columns: columns.to_vec(),
+        text: text.to_vec(),
+    };
+    let data = serde_json::to_vec(&entry).context("failed to serialize searchable cache")?;
     db.insert(SEARCHABLE_CACHE_KEY, data)
         .with_context(|| "failed to persist searchable cache")?;
     db.flush()
