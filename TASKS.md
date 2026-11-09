@@ -7,9 +7,13 @@
 ## 0. 現在地（2026-11-09 確認済み）
 
 - ブランチ `main` のみ、`00a9c1a`、バージョン `0.1.4`。`develop` なし。CI は `build.yml`（Windows exe のみ）。
-- Tauri 1 + Polars 0.40 + Svelte 4 + sled。`docs/` なし。`scripts/` なし。
+- Tauri 1 + Polars 0.40 + Svelte 4 + sled。`docs/` なし。`scripts/` は `gen_fixture.py`(I1) / `check_rust_size.sh`(I3) を追加済み。
 - **テストが一切無い**: `#[cfg(test)]` 0 件、`src-tauri/tests/` 無し、package.json に Playwright/vitest なし。
 - サーバー実装（HTTP API）は存在しない。バイナリは Tauri デスクトップのみ。
+- **ローカル環境の制約**: webkit2gtk-4.0 / gtk+-3.0 の開発パッケージが無く sudo 不可。
+  ため `src-tauri`（Tauri アプリ）のビルドはローカルで検証できない（CI のみ）。
+  このため純粋ロジックはワークスペースの `crates/engine`（クレート名 `trivium-engine`）へ分離し、
+  `cargo test -p trivium-engine` で検証する（R0a）。Cargo.lock はコミットされていない。
 
 ## 1. v1 からの妥当性整理（本書を書き直した理由）
 
@@ -50,9 +54,40 @@
 **全タスク共通ルール**（各カードには書かない）:
 
 - 1 タスク = 1 コミット。コミットメッセージは `fix:`/`feat:`/`refactor:`/`test:`/`chore:` + ID。
-- 追加・変更する Rust は 1 ファイル 400 行以内（§9）。
-- コミット前に必ず: `scripts/check_rust_size.sh` → `cargo test` → `npm run lint`。
-  いずれか失敗したらコミットしない。
+- 追加・変更する Rust は 1 ファイル 400 行以内（下記 §2.1）。
+
+### 2.1 Rust 規模規律
+
+- **単一ファイル 500 行を上限**（`scripts/check_rust_size.sh` が機械的に強制）。
+  新規ファイルは 400 行以内を目指す。行数基準（トークン数でなく）で判定する。
+- `#[cfg(test)]` の単体テストは行数起算から除外しない。大きくなったら
+  `crates/engine/tests/` へ統合テストとして分ける。
+- 例外は自動生成コードのみ。現状 `commands/rows.rs`(468 行) は上限未満だが、
+  R0b で engine へ移動する際に必ず分割する。
+- ワークスペース構成（R0a 後）:
+
+```
+/Cargo.toml               # workspace（src-tauri + crates/engine）
+crates/engine/src/        # trivium-engine: Tauri 非依存の処理エンジン
+  lib.rs
+  store.rs                # ProjectsStore
+  error.rs flags.rs value_utils.rs models.rs
+  ioc/                    # R5 後: mod.rs + evaluate.rs
+  search/                 # R1 後: mod.rs tokenize.rs rpn.rs mask.rs text.rs
+  import/                 # R3 後: csv.rs（F22-F25 で拡張）
+  export/                 # R4 後: csv.rs（F16/F27 で拡張）
+  ops/                    # R0b 後: query/create/load/export 相当の engine 関数
+  analysis/               # F7 以降: stats.rs dupes.rs time.rs
+  condition/              # F1 以降: model.rs eval.rs
+src-tauri/src/
+  main.rs                 # 起動のみ
+  state.rs                # AppState（tauri setup）のみ
+  commands/               # 5〜10 行の薄いラッパのみ（R0b 後 400 行未満）
+```
+- コミット前に必ず: `scripts/check_rust_size.sh` → `cargo test -p trivium-engine`（R0a 以降。
+  それ以前は `cargo test`）→ `npm run lint`。いずれか失敗したらコミットしない。
+  `src-tauri` 側のコンパイルはローカルで検証できないため CI で確認する（手元では
+  `use` パスの grep 検証で代用する）。
 - 「〜だと思われる」「おそらく」をコミットメッセージと完了報告に書かない。
   確認できていないことは「未確認」と書く。
 - 完了報告には実行したコマンドとその結果だけを書く。履歴上の過去報告を根拠にしない。
@@ -100,8 +135,8 @@
 
 ### I2: cargo test の雛形（純粋関数のテストのみ）
 
-- 前提: なし
-- 対象: 新規 `src-tauri/tests/search_test.rs`、`src-tauri/tests/flags_test.rs`
+- 前提: R0a（テストは `trivium-engine` クレートに置く。src-tauri はローカルでビルドできないため）
+- 対象: 新規 `crates/engine/tests/search_test.rs`、`crates/engine/tests/flags_test.rs`
 - 手順:
   1. `tokenize_search_query` / `to_rpn` / `build_search_mask_boolean` について
      README「Search Syntax」節の全例（`malware beacon`、`error|warn`、`beacon -test`、
@@ -109,8 +144,8 @@
      列引き継ぎ `com:WS01|WS02`）を表駆動テストにする
   2. `normalize_flag_value` / `severity_rank` の全分岐
   3. `anyvalue_to_search_string` の各 AnyValue バリアント
-- 完了条件: `cargo test` が 0 失敗。テストは現在の実装の挙動を固定する（良し悪しの判断はしない）。
-- 禁止: `src/`（実装）の変更。期待値は実装に合わせ、仕様判断は D1 に残す。
+- 完了条件: `cargo test -p trivium-engine` が 0 失敗。テストは現在の実装の挙動を固定する（良し悪しの判断はしない）。
+- 禁止: `crates/engine/src/`（実装）の変更。期待値は実装に合わせ、仕様判断は D1 に残す。
 
 ### I3: Rust 規模ガード
 
@@ -122,11 +157,11 @@
   `src-tauri/src/` に置いた場合のみ exit 1（検証後削除）。
 - 禁止: `*.rs` の実装変更。
 
-### I4: エンジンベンチバイナリ（R0 の後）
+### I4: エンジンベンチバイナリ（R0b の後）
 
-- 前提: R0
-- 対象: 新規 `src-tauri/src/bin/bench.rs`（または `cargo test --release` のみで足りるなら
-  `src-tauri/tests/bench.rs` に `#[ignore]` テストとして置く）
+- 前提: R0b
+- 対象: 新規 `crates/engine/src/bin/bench.rs`（または `cargo test --release` のみで足りるなら
+  `crates/engine/tests/bench.rs` に `#[ignore]` テストとして置く）
 - 手順:
   1. fixtures 100k / 400k / 2M に対し: 取込(create)、初回ソート、抽出書出、
      検索切替（2 条件の交互）、IOC 100 件 + 1 件追加 を実行し所要時間を出力
@@ -137,16 +172,16 @@
 
 ### I5: 往復スモークの自動化
 
-- 前提: R0, I1
-- 対象: 新規 `src-tauri/tests/smoke.rs`
+- 前提: R0b, I1
+- 対象: 新規 `crates/engine/tests/smoke.rs`
 - 手順:
   1. `tempdir` に `ProjectsStore` を立て、fixtures/basic.csv から案件作成
   2. 条件検索（search と列フィルタ）→ 該当行へフラグ/メモ設定 → CSV 出力 →
      出力ファイルを再取込 → trivium-* 列が復元されることを検証
   3. IOC を 1 件登録 → IOC フラグと `[tag]` が付く行数を検証
-- 完了条件: `cargo test --test smoke` が 0 失敗。
+- 完了条件: `cargo test -p trivium-engine --test smoke` が 0 失敗。
   以後、全 F/R タスクの完了条件にこのスモークの通過を含める（手動 GUI 確認の代わり）。
-- 禁止: GUI 起動を要求しない（Tauri に依存しないこと。R0 の境界を守る）。
+- 禁止: GUI 起動を要求しない（Tauri に依存しないこと。engine の境界を守る）。
 
 ## 5. B 層 — バグ修正（I2 の後、R 層より先）
 
@@ -162,7 +197,7 @@
 ### B2: IOC タグの表示/出力不一致
 
 - 前提: R5（評価の単一化後でないと二重修正になる）
-- 対象: `src-tauri/src/ioc.rs`、`commands/rows.rs`、`commands/export.rs`
+- 対象: `crates/engine/src/ioc/evaluate.rs` 統合後の query 系・export 系・flags 系
 - 手順: 「ユーザーフラグ優先、タグは IOC 一致なら常に付与」に一本化し、
   表示・出力・`calculate_ioc_applied_records` が同一結果を返すことを I5 で検証。
 - 完了条件: I5 に「ユーザーフラグ行 + IOC 一致」ケースを追加して通過。
@@ -171,7 +206,8 @@
 ### B3: update_flag の全走査
 
 - 前提: なし
-- 対象: `src-tauri/src/commands/flags.rs`、`ioc.rs:184`
+- 対象: `src-tauri/src/commands/flags.rs`、`crates/engine/src/ioc.rs`（R0a 前
+  に着手する場合は `src-tauri/src/ioc.rs`）
 - 手順:
   1. `calculate_ioc_applied_records` の呼び出しを 1 行更新の経路から外す
   2. IOC 適用件数は IOC 保存時（`save_iocs`）に一度計算して `ProjectMeta` に持たせる
@@ -180,61 +216,85 @@
 
 ## 6. R 層 — リファクタ（規模規律の適用。F 層の前に済ませる）
 
-### R0: engine を Tauri から分離する
+### R0a: ワークスペース分割（trivium-engine クレートの作成）
 
-- 前提: I2
-- 対象: `src-tauri/src/commands/*.rs`（全 468+336+178+121+112+91+19 行）、新規 `src-tauri/src/engine/`
+- 前提: なし（I2 の前）
+- 対象: 新規 `/Cargo.toml`、`crates/engine/`、`src-tauri/Cargo.toml`、`src-tauri/src/main.rs`、
+  `src-tauri/src/state.rs`、`src-tauri/src/commands/*.rs`
 - 手順:
-  1. 各 `#[tauri::command]` の中身を、`&ProjectsStore`（または素の `PathBuf`）だけを
-     受け取る `engine::` 関数へ移動する。戻り値は `Result<T, AppError>` のまま
+  1. ルート `Cargo.toml` に `[workspace]`（members = `src-tauri`, `crates/engine`、resolver = "2"）
+  2. 移動するモジュール（tauri 非依存）: `error.rs`, `flags.rs`, `ioc.rs`, `models.rs`,
+     `project_io.rs`, `search.rs`, `storage.rs`, `value_utils.rs` → `crates/engine/src/` へ
+     `git mv`。`lib.rs` に `pub mod` 宣言
+  3. `state.rs` の `ProjectsStore`（tauri 非依存）→ `crates/engine/src/store.rs` へ移動。
+     `state.rs` には `AppState` のみ残す
+  4. `crates/engine/Cargo.toml` に依存を移す: anyhow, chrono(serde), csv, parking_lot,
+     polars(lazy,parquet,serde,fmt), serde(derive), serde_json, sled, thiserror, uuid(v4,serde)
+  5. `src-tauri/Cargo.toml` から engine 側にのみ必要な依存（csv, sled）を削除し、
+     `trivium-engine = { path = "../crates/engine" }` を追加
+  6. `main.rs` の `mod` 宣言を移動分だけ削除。commands/*.rs と state.rs の
+     `use crate::{...}`（移動モジュール参照）を `use trivium_engine::{...}` に置換
+- 完了条件: `cargo check -p trivium-engine` と `cargo test -p trivium-engine` が通過。
+  `grep -rn "use crate::" src-tauri/src/` の結果が `crate::commands` / `crate::state` のみを
+  参照している。`src-tauri` のビルドは CI で確認（ローカル不可）。
+- 禁止: 挙動の変更。モジュールの中身の編集（移動と `use` 置換のみ）。
+
+### R0b: コマンド本体の engine 移動
+
+- 前提: R0a
+- 対象: `src-tauri/src/commands/*.rs` の関数本体 → `crates/engine/src/`
+- 手順:
+  1. 各 `#[tauri::command]` の中身を、`&ProjectsStore` または `PathBuf` を受け取る
+     `engine::` 関数（`crates/engine/src/ops/` に配置）へ移動。戻り値は `Result<T, AppError>`
   2. コマンドは「State を展開して engine 関数を呼び、`String` に直す」だけの 5〜10 行にする
-  3. I5（スモーク）が engine 関数を直接呼べる形にする
-- 完了条件: `cargo test` + I5 通過。`commands/` 配下の合計行数が 400 行未満。
+  3. この時点ではファイル分割（R2〜R4）はしない。移動のみ
+- 完了条件: `cargo test -p trivium-engine` 通過。`commands/` 配下の合計行数が 400 行未満。
+  I5（スモーク）が engine 関数を直接呼べる形になること。
 - 禁止: 挙動の変更（引数・戻り値の型は現状維持）。
 
 ### R1: search.rs の分割
 
-- 前提: なし（I2 と並行可）
-- 対象: `src-tauri/src/search.rs`(392 行) → `src-tauri/src/search/{mod.rs, tokenize.rs, rpn.rs, mask.rs, text.rs}`
+- 前提: R0a（I2 と並行可）
+- 対象: `crates/engine/src/search.rs`(392 行) → `crates/engine/src/search/{mod.rs, tokenize.rs, rpn.rs, mask.rs, text.rs}`
 - 手順: `SearchToken` と字句解析は `tokenize.rs`、`to_rpn` は `rpn.rs`、
   `build_search_mask_boolean` は `mask.rs`、`build/ensure_searchable_text` は `text.rs`。
   `mod.rs` は re-export のみ（50 行以内）。`use` パスの更新のみでロジック変更はしない。
 - 完了条件: `cargo test` 通過（I2 の表駆動テストが通れば移動検証になる）。各ファイル 200 行未満。
 - 禁止: トークナイザの挙動変更。
 
-### R2: rows.rs の分割（R0 実施後は消える可能性がある）
+### R2: rows 系の分割（R0b 実施後は消える可能性がある）
 
-- 前提: R0
-- 手順: R0 後に `commands/rows.rs` が 200 行超なら `engine/query/` へ
+- 前提: R0b
+- 手順: R0b 後に query 系 engine ファイルが 200 行超なら `crates/engine/src/ops/query/` へ
   ソート・IOC 適用・ページングに分割。200 行未満なら何もしない。
 - 完了条件: `scripts/check_rust_size.sh` 通過。I5 通過。
 
 ### R3: 取込の分離
 
-- 前提: R0
-- 対象: `commands/projects.rs`(336 行) → 新規 `src-tauri/src/import/csv.rs`
+- 前提: R0b
+- 対象: `crates/engine/src/ops/projects.rs`（create_project 本体）→ 新規 `crates/engine/src/import/csv.rs`
 - 手順: `create_project` の CSV 読込〜trivium-* 列取込〜`__rowid` 付与までを
   `import::csv::load(path) -> (DataFrame, HashMap<usize, FlagEntry>)` として切り出す。
-- 完了条件: I5 通過。`commands/projects.rs` が 200 行未満。
+- 完了条件: I5 通過。該当呼び出し側が 200 行未満。
 
 ### R4: 出力の分離
 
-- 前提: R0, R5
-- 対象: `commands/export.rs`(178 行) → 新規 `src-tauri/src/export/csv.rs`
+- 前提: R0b, R5
+- 対象: `crates/engine/src/ops/export.rs` → 新規 `crates/engine/src/export/csv.rs`
 - 完了条件: I5 通過（出力→再取込の復元はスモークが検証済み）。
 
 ### R5: IOC 評価の単一化（最重要リファクタ）
 
-- 前提: R0, I2
-- 対象: 現在 3 箇所にある重複実装 — `ioc.rs:15-54`(row_contains_query)、
-  `ioc.rs:184-280`(calculate_ioc_applied_records)、`rows.rs:198-271` と `rows.rs:370-437`、
-  `export.rs` の IOC ブロック → 新規 `src-tauri/src/ioc/evaluate.rs`
+- 前提: R0b, I2
+- 対象: 現在 3 箇所にある重複実装 — `crates/engine/src/ioc.rs`（row_contains_query と
+  calculate_ioc_applied_records）、query 系（rows 相当）の IOC ブロック、
+  export 系の IOC ブロック → 新規 `crates/engine/src/ioc/evaluate.rs`
 - 手順:
   1. 「IOC エントリ一覧 × DataFrame → 行ごとの (flag, tags)」を 1 関数にまとめる
-  2. `rows.rs` / `export.rs` / `flags.rs` はそれを呼ぶだけにする
+  2. query / export / flags 経路はそれを呼ぶだけにする
   3. I2 に「3 呼び出し経路で同一入力に同一結果」のパリティテストを追加
-- 完了条件: パリティテスト通過。`grep -rn "tokenize_search_query" src-tauri/src | wc -l` が
-  `ioc/evaluate.rs` と `engine/query` の 2 箇所以下。
+- 完了条件: パリティテスト通過。`grep -rn "tokenize_search_query" crates/engine/src | wc -l` が
+  `ioc/evaluate.rs` と query 系の 2 箇所以下。
 - 禁止: 評価順序（severity 降順）の変更。
 
 ## 7. F 層 — 機能（各カードは 1 PR 相当。D1 の推奨 (a) を前提）
@@ -505,9 +565,11 @@
 - 手順:
   1. トリガ: `push: branches: [develop]` + `workflow_dispatch`
   2. `runs-on: ubuntu-24.04`、Node 18、Rust stable
-  3. `npm ci` → `npm run tauri build -- --bundles deb`
-  4. アーティファクト: `src-tauri/target/release/bundle/deb/*.deb` + `SHA256SUMS` 生成
-  5. `retention-days: 3`
+  3. Tauri のシステム依存を導入:
+     `sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev build-essential curl wget file libxdo-dev libssl-dev`
+  4. `npm ci` → `npm run tauri build -- --bundles deb`
+  5. アーティファクト: `src-tauri/target/release/bundle/deb/*.deb` + `SHA256SUMS` 生成
+  6. `retention-days: 3`
 - 完了条件: develop への push でアーティファクトが 3 日保持で上がる（Actions の URL を完了報告に）。
 - 禁止: サーバー .deb（サーバー実装が存在しない。X2 まで保留）。100GB は問わない。
 
@@ -538,8 +600,8 @@
 ```
 D1/D2/D3 は推奨判断を固定済み。異議が無ければこの順に着手する。
 
-I1 → I2 → I3 → B1 → B3
-→ R0 → I5 → I4 → R5 → B2 → R1 → R2 → R3 → R4
+I1 → I3 → R0a → I2 → B1 → B3
+→ R0b → I5 → I4 → R5 → B2 → R1 → R2 → R3 → R4
 → F1 → F2 → F3 → F4 → F5 → F6        （条件モデル列）
 → F7 → F8 → F9 → F10 → F11           （分析列。F7 が足場）
 → F17 → F18 → F19 → F20 → F21        （注釈列。F18 が足場）
