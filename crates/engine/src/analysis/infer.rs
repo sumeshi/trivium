@@ -1,0 +1,156 @@
+use std::collections::HashMap;
+
+use chrono::NaiveDateTime;
+use polars::prelude::{AnyValue, DataFrame, DataType, Series};
+use serde::{Deserialize, Serialize};
+
+use crate::value_utils::anyvalue_to_search_string;
+
+/// Column type used by the condition editor and, later, column stats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColumnKind {
+    Null,
+    Int,
+    Float,
+    Datetime,
+    String,
+}
+
+impl ColumnKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Null => "null",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Datetime => "datetime",
+            Self::String => "string",
+        }
+    }
+}
+
+/// One pass over the frame. Integer text is parsed as `i64` before `f64`.
+pub fn infer_column_kinds(df: &DataFrame) -> HashMap<String, ColumnKind> {
+    df.get_columns()
+        .iter()
+        .filter(|series| series.name() != "__rowid")
+        .map(|series| (series.name().to_string(), kind_of_series(series)))
+        .collect()
+}
+
+fn kind_of_series(series: &Series) -> ColumnKind {
+    match series.dtype() {
+        DataType::Null => ColumnKind::Null,
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64 => ColumnKind::Int,
+        DataType::Float32 | DataType::Float64 => ColumnKind::Float,
+        DataType::Date | DataType::Datetime(_, _) | DataType::Time => ColumnKind::Datetime,
+        _ => kind_from_values(series),
+    }
+}
+
+fn kind_from_values(series: &Series) -> ColumnKind {
+    let mut saw_int = false;
+    let mut saw_float = false;
+    let mut saw_datetime = false;
+    let mut saw_string = false;
+    for idx in 0..series.len() {
+        let Ok(value) = series.get(idx) else {
+            continue;
+        };
+        match classify_any(&value) {
+            None => {}
+            Some(ColumnKind::Null) => {}
+            Some(ColumnKind::Int) => saw_int = true,
+            Some(ColumnKind::Float) => saw_float = true,
+            Some(ColumnKind::Datetime) => saw_datetime = true,
+            Some(ColumnKind::String) => saw_string = true,
+        }
+    }
+    if saw_string {
+        return ColumnKind::String;
+    }
+    match (saw_int, saw_float, saw_datetime) {
+        (false, false, false) => ColumnKind::Null,
+        (true, false, false) => ColumnKind::Int,
+        (_, true, false) => ColumnKind::Float,
+        (false, false, true) => ColumnKind::Datetime,
+        _ => ColumnKind::String,
+    }
+}
+
+fn classify_any(value: &AnyValue) -> Option<ColumnKind> {
+    match value {
+        AnyValue::Null => None,
+        AnyValue::Int8(_)
+        | AnyValue::Int16(_)
+        | AnyValue::Int32(_)
+        | AnyValue::Int64(_)
+        | AnyValue::UInt8(_)
+        | AnyValue::UInt16(_)
+        | AnyValue::UInt32(_)
+        | AnyValue::UInt64(_) => Some(ColumnKind::Int),
+        AnyValue::Float32(value) => Some(numeric_kind(f64::from(*value))),
+        AnyValue::Float64(value) => Some(numeric_kind(*value)),
+        AnyValue::Date(_) | AnyValue::Datetime(_, _, _) | AnyValue::Time(_) => {
+            Some(ColumnKind::Datetime)
+        }
+        _ => anyvalue_to_search_string(value).and_then(|text| classify_text(&text)),
+    }
+}
+
+fn numeric_kind(value: f64) -> ColumnKind {
+    if !value.is_finite() {
+        return ColumnKind::String;
+    }
+    if value.fract() == 0.0 && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
+        ColumnKind::Int
+    } else {
+        ColumnKind::Float
+    }
+}
+
+fn classify_text(text: &str) -> Option<ColumnKind> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Ok(value) = text.parse::<i64>() {
+        return Some(if text == value.to_string() {
+            ColumnKind::Int
+        } else {
+            ColumnKind::String
+        });
+    }
+    if text.chars().any(|ch| ch.is_ascii_digit()) {
+        if let Ok(value) = text.parse::<f64>() {
+            if value.is_finite() {
+                return Some(ColumnKind::Float);
+            }
+        }
+    }
+    if is_datetime(text) {
+        return Some(ColumnKind::Datetime);
+    }
+    Some(ColumnKind::String)
+}
+
+fn is_datetime(text: &str) -> bool {
+    const FORMATS: [&str; 5] = [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ];
+    FORMATS.iter().any(|format| {
+        NaiveDateTime::parse_from_str(text, format).is_ok()
+            || chrono::NaiveDate::parse_from_str(text, format).is_ok()
+    })
+}

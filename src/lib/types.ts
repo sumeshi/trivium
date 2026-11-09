@@ -29,11 +29,14 @@ export interface IocEntry {
   query: string;
 }
 
+export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
+
 export interface LoadProjectResponse {
   project: ProjectSummary;
   columns: string[];
   hidden_columns: string[];
   column_max_chars: Record<string, number>;
+  column_kinds: Record<string, ColumnKind>;
   iocs: IocEntry[];
   initial_rows: ProjectRow[];
 }

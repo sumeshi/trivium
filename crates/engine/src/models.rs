@@ -45,6 +45,7 @@ pub struct LoadProjectResponse {
     pub columns: Vec<String>,
     pub hidden_columns: Vec<String>,
     pub column_max_chars: HashMap<String, usize>,
+    pub column_kinds: HashMap<String, String>,
     pub iocs: Vec<IocEntry>,
     pub initial_rows: Vec<ProjectRow>,
 }

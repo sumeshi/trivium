@@ -132,6 +132,9 @@ fn create_and_load_project() {
     assert!(response.hidden_columns.is_empty());
     assert!(response.iocs.is_empty());
     assert_eq!(response.initial_rows.len(), 20);
+    assert_eq!(response.column_kinds.get("ts").map(String::as_str), Some("datetime"));
+    assert_eq!(response.column_kinds.get("EventID").map(String::as_str), Some("int"));
+    assert_eq!(response.column_kinds.get("user").map(String::as_str), Some("string"));
 
     let listed = ops::projects::list_projects(&store).expect("list failed");
     assert!(listed.iter().any(|s| s.meta.id == id));
@@ -244,6 +247,59 @@ fn nested_condition_matches_either_group() {
             (Some("alice"), Some("4624")) | (Some("bob"), Some("4688"))
         )
     }));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn nanosecond_integer_is_not_rounded() {
+    let root = temp_root();
+    let csv = root.join("ns.csv");
+    fs::write(
+        &csv,
+        "name,n,ts\na,1700000000123456789,2024-01-01T00:00:01\nb,2,2024-01-01T00:00:02\n",
+    )
+    .expect("failed to write ns csv");
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("failed to create project")
+    .meta
+    .id;
+    let loaded = ops::projects::load_project(
+        &store,
+        ProjectRequest { project_id: id },
+    )
+    .expect("load failed");
+    assert_eq!(loaded.column_kinds.get("n").map(String::as_str), Some("int"));
+    assert_eq!(loaded.column_kinds.get("ts").map(String::as_str), Some("datetime"));
+
+    let exact = "1700000000123456789";
+    let response = ops::rows::query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: Some(eq_condition("n", exact)),
+        },
+    )
+    .expect("query failed");
+    assert_eq!(response.total_filtered_rows, 1);
+    let cell = response.rows[0].data.get("n").expect("n");
+    let preserved = cell.as_i64() == Some(1_700_000_000_123_456_789)
+        || cell.as_str() == Some(exact);
+    assert!(preserved, "value was rounded: {cell}");
+
     let _ = fs::remove_dir_all(root);
 }
 

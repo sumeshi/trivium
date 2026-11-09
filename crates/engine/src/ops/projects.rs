@@ -7,6 +7,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
+    analysis::infer_column_kinds,
     error::AppError,
     import::csv,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
@@ -181,7 +182,6 @@ pub fn load_project(
         df.height(),
         initial_rows.len()
     );
-
     let summary = ProjectSummary { meta: meta.clone() };
 
     Ok(LoadProjectResponse {
@@ -189,6 +189,10 @@ pub fn load_project(
         columns,
         hidden_columns: meta.hidden_columns.clone(),
         column_max_chars,
+        column_kinds: infer_column_kinds(&df)
+            .into_iter()
+            .map(|(name, kind)| (name, kind.as_str().to_string()))
+            .collect(),
         iocs,
         initial_rows,
     })

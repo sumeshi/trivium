@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { CompareOp } from "../../types";
   import type { EditorNode } from "../../stores/condition";
+  import { projectDetail } from "./state";
   import {
     COMPARE_OPS,
     addCondition,
@@ -27,6 +28,21 @@
     if (value === "and" || value === "or") {
       setGroupKind(id, value);
     }
+  };
+
+  const valueInput = (column: string): { type: string; inputmode?: "numeric" | "decimal"; step?: string } => {
+    const kind = $projectDetail?.column_kinds?.[column];
+    // Integer text stays a string. type=number would round values above 2^53.
+    if (kind === "int") {
+      return { type: "text", inputmode: "numeric" };
+    }
+    if (kind === "float") {
+      return { type: "number", inputmode: "decimal", step: "any" };
+    }
+    if (kind === "datetime") {
+      return { type: "datetime-local", step: "1" };
+    }
+    return { type: "text" };
   };
 </script>
 
@@ -97,7 +113,9 @@
         {/each}
       </select>
       <input
-        type="text"
+        type={valueInput(node.column).type}
+        inputmode={valueInput(node.column).inputmode}
+        step={valueInput(node.column).step}
         value={node.value}
         placeholder={node.op === "in" ? "a, b, c" : "Value"}
         on:input={(event) => patchCondition(node.id, { value: event.currentTarget.value })}
