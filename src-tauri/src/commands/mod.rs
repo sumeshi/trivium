@@ -6,6 +6,7 @@ mod iocs;
 mod projects;
 mod rows;
 mod stats;
+mod time;
 
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};
 pub use export::{__cmd__export_project, export_project};
@@ -20,3 +21,4 @@ pub use projects::{
 };
 pub use rows::{__cmd__query_project_rows, query_project_rows};
 pub use stats::{__cmd__column_stats, column_stats};
+pub use time::{__cmd__time_analysis, time_analysis};

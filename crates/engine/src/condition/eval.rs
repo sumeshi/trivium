@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::analysis::infer::parse_datetime_nanos;
+
 use super::model::{Condition, GroupKind, Node, Op};
 
 /// Evaluates a condition tree against one row.
@@ -91,14 +93,24 @@ fn numeric_any(cell: Option<&Value>, values: &[String], want: Ordering, or_equal
     })
 }
 
-/// `i64` when both sides are integers, otherwise `f64`.
+/// `i64` when both sides are integers, otherwise `f64`, otherwise datetime order.
 fn numeric_cmp(cell: &Value, raw: &str) -> Option<Ordering> {
     if let (Some(left), Some(right)) = (as_i64(cell), raw.parse::<i64>().ok()) {
         return Some(left.cmp(&right));
     }
-    let left = as_f64(cell)?;
-    let right = raw.parse::<f64>().ok()?;
-    left.partial_cmp(&right)
+    if let (Some(left), Some(right)) = (as_f64(cell), raw.parse::<f64>().ok()) {
+        return left.partial_cmp(&right);
+    }
+    let left = datetime_nanos(cell)?;
+    let right = parse_datetime_nanos(raw.trim())?;
+    Some(left.cmp(&right))
+}
+
+fn datetime_nanos(value: &Value) -> Option<i64> {
+    match value {
+        Value::String(text) => parse_datetime_nanos(text.trim()),
+        _ => None,
+    }
 }
 
 fn as_i64(value: &Value) -> Option<i64> {

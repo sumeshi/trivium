@@ -1,8 +1,7 @@
 //! End-to-end smoke test over the engine ops, without any GUI:
 //! create -> query -> annotate -> IOC -> export -> re-import -> delete.
 //!
-//! The fixture CSV is generated inline (deterministic) instead of depending on
-//! scripts/gen_fixture.py, so the test runs on any fresh checkout.
+//! Most fixtures are inline. Gap and duplicate checks also call python3.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +20,7 @@ use trivium_engine::ops::rows::QueryRowsPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
 use trivium_engine::ops::histogram::HistogramPayload;
 use trivium_engine::ops::stats::ColumnStatsPayload;
+use trivium_engine::ops::time::TimeAnalysisPayload;
 use trivium_engine::store::ProjectsStore;
 
 /// Column layout: ts,EventID,host,user,proc,path,msg
@@ -760,6 +760,177 @@ fn histogram_places_values_in_equal_width_buckets() {
     assert_eq!(floats.buckets[0].count, 1);
     assert_eq!(floats.buckets[1].count, 2);
     assert_eq!(bucket_sum(&floats.buckets), 3);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn python_fixture_gaps(csv: &Path) -> serde_json::Value {
+    let script = r#"
+import csv, json, sys
+from datetime import datetime
+with open(sys.argv[1], newline="") as handle:
+    times = [datetime.fromisoformat(row["ts"]) for row in csv.DictReader(handle)]
+gaps = []
+sessions = 1 if times else 0
+for left, right in zip(times, times[1:]):
+    if (right - left).total_seconds() >= 60:
+        gaps.append((right - left).total_seconds())
+        sessions += 1
+print(json.dumps({
+    "rows": len(times),
+    "gaps": len(gaps),
+    "min_gap": min(gaps) if gaps else 0,
+    "sessions": sessions,
+}))
+"#;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(csv)
+        .output()
+        .expect("python3");
+    assert!(
+        output.status.success(),
+        "python3 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("python json")
+}
+
+#[test]
+fn time_analysis_finds_fixture_gaps() {
+    let root = temp_root();
+    let csv = root.join("fixture.csv");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/gen_fixture.py");
+    let status = Command::new("python3")
+        .arg(&script)
+        .args(["--rows", "300", "--seed", "42", "--out"])
+        .arg(&csv)
+        .status()
+        .expect("python3");
+    assert!(status.success(), "gen_fixture failed");
+    let expected = python_fixture_gaps(&csv);
+    let store = ProjectsStore::new(root.clone()).expect("store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("create")
+    .meta
+    .id;
+    let analysis = ops::time::time_analysis(
+        &store,
+        TimeAnalysisPayload {
+            project_id: id,
+            column: "ts".to_string(),
+            gap_seconds: 60,
+            session_minutes: 1,
+            burst_window_seconds: 60,
+            burst_min: 10,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .expect("time analysis");
+    assert_eq!(analysis.gaps.len() as u64, expected["gaps"].as_u64().expect("gaps"));
+    assert!(analysis.gaps.len() >= 2);
+    assert!(analysis.gaps.iter().all(|gap| gap.count >= 37 * 60));
+    assert_eq!(
+        analysis.sessions.len() as u64,
+        expected["sessions"].as_u64().expect("sessions")
+    );
+    assert_eq!(
+        analysis.sessions.iter().map(|span| span.count).sum::<u64>(),
+        expected["rows"].as_u64().expect("rows")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn time_analysis_gap_range_matches_bounds() {
+    let root = temp_root();
+    let csv = root.join("gaps.csv");
+    fs::write(
+        &csv,
+        "ts\n2024-01-01T00:00:00\n2024-01-01T00:00:01\n2024-01-01T00:00:02\n2024-01-01T00:02:00\n",
+    )
+    .expect("write");
+    let store = ProjectsStore::new(root.clone()).expect("store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("create")
+    .meta
+    .id;
+    let analysis = ops::time::time_analysis(
+        &store,
+        TimeAnalysisPayload {
+            project_id: id,
+            column: "ts".to_string(),
+            gap_seconds: 30,
+            session_minutes: 1,
+            burst_window_seconds: 10,
+            burst_min: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+        },
+    )
+    .expect("time analysis");
+    assert_eq!(analysis.gaps.len(), 1);
+    assert_eq!(analysis.gaps[0].start, "2024-01-01T00:00:02");
+    assert_eq!(analysis.gaps[0].end, "2024-01-01T00:02:00");
+    assert_eq!(analysis.gaps[0].count, 118);
+    assert_eq!(analysis.sessions.len(), 2);
+    assert_eq!(analysis.sessions[0].count, 3);
+    assert_eq!(analysis.sessions[1].count, 1);
+    assert_eq!(analysis.bursts.len(), 1);
+    assert_eq!(analysis.bursts[0].count, 3);
+
+    let condition = Node::Group(Group {
+        kind: GroupKind::And,
+        children: vec![
+            Node::Condition(Condition {
+                column: "ts".to_string(),
+                op: Op::Ge,
+                values: vec![analysis.gaps[0].start.clone()],
+                negated: false,
+            }),
+            Node::Condition(Condition {
+                column: "ts".to_string(),
+                op: Op::Le,
+                values: vec![analysis.gaps[0].end.clone()],
+                negated: false,
+            }),
+        ],
+    });
+    let queried = ops::rows::query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            offset: None,
+            limit: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: Some(condition),
+        },
+    )
+    .expect("query");
+    assert_eq!(queried.total_filtered_rows, 2);
 
     let _ = fs::remove_dir_all(root);
 }

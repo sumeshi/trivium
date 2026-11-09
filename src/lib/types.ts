@@ -68,6 +68,19 @@ export interface Histogram {
   missing: number;
 }
 
+export interface TimeSpan {
+  start: string;
+  end: string;
+  count: number;
+}
+
+export interface TimeAnalysis {
+  column: string;
+  gaps: TimeSpan[];
+  sessions: TimeSpan[];
+  bursts: TimeSpan[];
+}
+
 export type CompareOp =
   | "eq"
   | "ne"

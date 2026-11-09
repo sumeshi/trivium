@@ -5,6 +5,7 @@ import type {
   ColumnStats,
   Histogram,
   LoadProjectResponse,
+  TimeAnalysis,
   ProjectRow,
   ProjectSummary,
 } from "./types";
@@ -70,6 +71,19 @@ export interface HistogramArgs {
   condition?: ConditionNode | null;
 }
 
+export interface TimeAnalysisArgs {
+  projectId: string;
+  column: string;
+  gapSeconds?: number;
+  sessionMinutes?: number;
+  burstWindowSeconds?: number;
+  burstMin?: number;
+  search?: string;
+  flagFilter?: FlagFilterValue;
+  columns?: string[];
+  condition?: ConditionNode | null;
+}
+
 export interface QueryProjectRowsArgs {
   projectId: string;
   search?: string;
@@ -98,6 +112,7 @@ export interface Backend {
   loadProject(projectId: string): Promise<LoadProjectResponse>;
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
   histogram(args: HistogramArgs): Promise<Histogram>;
+  timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis>;
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
@@ -154,6 +169,23 @@ class NativeBackend implements Backend {
         projectId: args.projectId,
         column: args.column,
         buckets: args.buckets ?? 50,
+        search: args.search ?? null,
+        flagFilter: args.flagFilter ?? null,
+        columns: args.columns ?? null,
+        condition: args.condition ?? null,
+      },
+    });
+  }
+
+  timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis> {
+    return invoke("time_analysis", {
+      payload: {
+        projectId: args.projectId,
+        column: args.column,
+        gapSeconds: args.gapSeconds ?? 60,
+        sessionMinutes: args.sessionMinutes ?? 30,
+        burstWindowSeconds: args.burstWindowSeconds ?? 60,
+        burstMin: args.burstMin ?? 10,
         search: args.search ?? null,
         flagFilter: args.flagFilter ?? null,
         columns: args.columns ?? null,

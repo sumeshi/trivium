@@ -7,4 +7,5 @@ pub mod projects;
 mod query;
 pub mod rows;
 pub mod stats;
+pub mod time;
 pub mod util;

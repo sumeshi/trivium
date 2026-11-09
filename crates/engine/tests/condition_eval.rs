@@ -224,3 +224,12 @@ fn regex_starts_with_and_group_edges() {
         &cells
     ));
 }
+
+#[test]
+fn datetime_ordering_compares_parsed_timestamps() {
+    let cells = row(&[("ts", "2024-01-01T00:00:02")]);
+    assert!(eval(&condition("ts", Op::Ge, &["2024-01-01T00:00:01"], false), &cells));
+    assert!(eval(&condition("ts", Op::Le, &["2024-01-01T00:00:02"], false), &cells));
+    assert!(!eval(&condition("ts", Op::Gt, &["2024-01-01T00:00:02"], false), &cells));
+    assert!(eval(&condition("ts", Op::Lt, &["2024-01-02"], false), &cells));
+}

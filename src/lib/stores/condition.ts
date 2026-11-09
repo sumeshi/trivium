@@ -104,6 +104,26 @@ export function filterByValue(column: string, value: string): void {
   });
 }
 
+/** Replaces the editor with `column >= start AND column <= end`. */
+export function filterByRange(column: string, start: string, end: string): void {
+  const bound = (op: "ge" | "le", value: string): EditorCondition => ({
+    type: "condition",
+    id: crypto.randomUUID(),
+    column,
+    op,
+    value,
+    exact: true,
+    negated: false,
+  });
+  conditionTree.set({
+    type: "group",
+    id: ROOT_ID,
+    kind: "and",
+    collapsed: false,
+    children: [bound("ge", start), bound("le", end)],
+  });
+}
+
 export function addCondition(groupId: string, column: string): void {
   const child = leaf(column);
   edit((root) => mapNode(root, (node) => {
