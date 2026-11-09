@@ -347,11 +347,11 @@
                     }
                     on:click={() => {
                       if (!item.row) return;
-                      _openCell(column, cellValue);
+                      _openCell(column, cellValue, item.row);
                     }}
                     on:keydown={(event) => {
                       if (!item.row) return;
-                      _handleCellKeydown(event, column, cellValue);
+                      _handleCellKeydown(event, column, cellValue, item.row);
                     }}
                     disabled={!item.row}
                   >

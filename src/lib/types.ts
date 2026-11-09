@@ -81,6 +81,10 @@ export interface TimeAnalysis {
   bursts: TimeSpan[];
 }
 
+export interface SurroundingRows {
+  rows: ProjectRow[];
+}
+
 export type CompareOp =
   | "eq"
   | "ne"

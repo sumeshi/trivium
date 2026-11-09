@@ -1123,6 +1123,62 @@ button.primary:disabled {
   max-height: 60vh;
 }
 
+.row-detail-dialog {
+  width: min(760px, 92vw);
+}
+
+.row-detail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: 65vh;
+}
+
+.row-fields {
+  display: grid;
+  grid-template-columns: minmax(7rem, 28%) 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.row-fields dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.row-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row-fields dt.is-focus {
+  color: var(--fg);
+}
+
+.row-around {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row-around li {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row-around li.is-anchor {
+  border-color: var(--accent);
+}
+
 .close-dialog {
   padding: 6px 12px;
 }

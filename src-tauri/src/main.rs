@@ -29,7 +29,8 @@ fn main() {
             commands::column_stats,
             commands::duplicate_rows,
             commands::histogram,
-            commands::time_analysis
+            commands::time_analysis,
+            commands::surrounding_rows
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,6 +6,7 @@ mod iocs;
 mod projects;
 mod rows;
 mod stats;
+mod surround;
 mod time;
 
 pub use dupes::{__cmd__duplicate_rows, duplicate_rows};
@@ -21,4 +22,5 @@ pub use projects::{
 };
 pub use rows::{__cmd__query_project_rows, query_project_rows};
 pub use stats::{__cmd__column_stats, column_stats};
+pub use surround::{__cmd__surrounding_rows, surrounding_rows};
 pub use time::{__cmd__time_analysis, time_analysis};

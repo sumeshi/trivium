@@ -485,33 +485,8 @@ import type {
   };
 
 
-  const openCell = (column: string, value: string) => {
-    expandedCell.set({ column, value });
-  };
-
   const closeCell = () => {
     expandedCell.set(null);
-  };
-
-
-  const handleCellKeydown = (event: KeyboardEvent, column: string, value: string) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openCell(column, value);
-    }
-  };
-
-  const handleBackdropKey = (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      closeCell();
-    }
-  };
-
-  const handleBackdropClick = (event: MouseEvent) => {
-    if (event.target === event.currentTarget) {
-      closeCell();
-    }
   };
 
 

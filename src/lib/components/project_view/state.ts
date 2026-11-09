@@ -90,9 +90,11 @@ export const flaggedCount = writable(0);
 // Maps display position (offset + i) to backend row_index to preserve backend ordering
 export const positionToRowIndex = writable<Map<number, number>>(new Map());
 
-export const expandedCell = writable<{ column: string; value: string } | null>(
-  null
-);
+export const expandedCell = writable<{
+  column: string;
+  value: string;
+  row: CachedRow;
+} | null>(null);
 export const memoEditor = writable<{ row: CachedRow } | null>(null);
 export const iocManagerOpen = writable(false);
 
@@ -279,17 +281,18 @@ export const editMemo = (row: CachedRow) => {
   memoEditor.set({ row });
 };
 
-export const openCell = (column: string, value: string) => {
-  expandedCell.set({ column, value });
+export const openCell = (column: string, value: string, row: CachedRow) => {
+  expandedCell.set({ column, value, row });
 };
 
 export const handleCellKeydown = (
   event: KeyboardEvent,
   column: string,
-  value: string
+  value: string,
+  row: CachedRow
 ) => {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
-    openCell(column, value);
+    openCell(column, value, row);
   }
 };

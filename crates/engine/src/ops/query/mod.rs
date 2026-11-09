@@ -4,7 +4,7 @@ mod search;
 mod sort;
 
 pub(crate) use ioc::final_flags;
-pub(crate) use page::filtered_indices;
+pub(crate) use page::{filtered_indices, materialize_page};
 pub(crate) use search::prepare_search;
 
 use serde::{Deserialize, Serialize};

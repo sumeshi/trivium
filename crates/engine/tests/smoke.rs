@@ -13,7 +13,8 @@ use trivium_engine::condition::{Condition, Group, GroupKind, Node, Op};
 use trivium_engine::models::IocEntry;
 use trivium_engine::ops;
 use trivium_engine::ops::export::ExportProjectPayload;
-use trivium_engine::ops::flags::UpdateFlagPayload;
+use trivium_engine::ops::flags::{HiddenColumnsPayload, UpdateFlagPayload};
+use trivium_engine::ops::surround::{SurroundMode, SurroundingRowsPayload};
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
@@ -1192,5 +1193,118 @@ fn delete_project_removes_files_and_meta() {
     assert!(!project_dir.exists());
     let listed = ops::projects::list_projects(&store).expect("list failed");
     assert!(listed.iter().all(|s| s.meta.id != id));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn surrounding_rows_keep_hidden_values_and_time_order() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let csv = root.join("around.csv");
+    // File order is not time order. Row 0 is the middle timestamp.
+    fs::write(
+        &csv,
+        "\
+ts,note,secret
+2024-01-01T00:00:05,c,hidden-c
+2024-01-01T00:00:01,a,hidden-a
+2024-01-01T00:00:03,b,hidden-b
+2024-01-01T00:00:09,e,hidden-e
+2024-01-01T00:00:07,d,hidden-d
+",
+    )
+    .expect("failed to write fixture");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: Some("around".to_string()),
+        },
+    )
+    .expect("failed to create project")
+    .meta
+    .id;
+    ops::flags::set_hidden_columns(
+        &store,
+        HiddenColumnsPayload {
+            project_id: id,
+            hidden_columns: vec!["secret".to_string()],
+        },
+    )
+    .expect("failed to hide secret");
+
+    let around = |mode: SurroundMode, count: u64| {
+        ops::surround::surrounding_rows(
+            &store,
+            SurroundingRowsPayload {
+                project_id: id,
+                row_index: 0,
+                column: "ts".to_string(),
+                mode,
+                count,
+            },
+        )
+        .expect("surrounding rows failed")
+    };
+    let secrets = |rows: &[trivium_engine::models::ProjectRow]| -> Vec<String> {
+        rows.iter()
+            .map(|row| {
+                row.data
+                    .get("secret")
+                    .and_then(|value| value.as_str())
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
+    };
+
+    let neighbors = around(SurroundMode::Neighbors, 1);
+    assert_eq!(
+        neighbors
+            .rows
+            .iter()
+            .map(|row| row.row_index)
+            .collect::<Vec<_>>(),
+        vec![2, 0, 4]
+    );
+    assert_eq!(
+        secrets(&neighbors.rows),
+        vec!["hidden-b", "hidden-c", "hidden-d"]
+    );
+
+    let window = around(SurroundMode::Window, 2);
+    assert_eq!(
+        secrets(&window.rows),
+        vec!["hidden-b", "hidden-c", "hidden-d"]
+    );
+
+    let wide = around(SurroundMode::Neighbors, 4);
+    assert_eq!(
+        secrets(&wide.rows),
+        vec!["hidden-a", "hidden-b", "hidden-c", "hidden-d", "hidden-e"]
+    );
+
+    let not_time = ops::surround::surrounding_rows(
+        &store,
+        SurroundingRowsPayload {
+            project_id: id,
+            row_index: 0,
+            column: "note".to_string(),
+            mode: SurroundMode::Neighbors,
+            count: 1,
+        },
+    );
+    assert!(not_time.unwrap_err().to_string().contains("not datetime"));
+    let missing = ops::surround::surrounding_rows(
+        &store,
+        SurroundingRowsPayload {
+            project_id: id,
+            row_index: 99,
+            column: "ts".to_string(),
+            mode: SurroundMode::Window,
+            count: 1,
+        },
+    );
+    assert!(missing.unwrap_err().to_string().contains("Row not found"));
     let _ = fs::remove_dir_all(root);
 }

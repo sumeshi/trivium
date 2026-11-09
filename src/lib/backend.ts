@@ -6,6 +6,7 @@ import type {
   Histogram,
   LoadProjectResponse,
   TimeAnalysis,
+  SurroundingRows,
   ProjectRow,
   ProjectSummary,
 } from "./types";
@@ -71,6 +72,14 @@ export interface HistogramArgs {
   condition?: ConditionNode | null;
 }
 
+export interface SurroundingRowsArgs {
+  projectId: string;
+  rowIndex: number;
+  column: string;
+  mode: "neighbors" | "window";
+  count: number;
+}
+
 export interface TimeAnalysisArgs {
   projectId: string;
   column: string;
@@ -113,6 +122,7 @@ export interface Backend {
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
   histogram(args: HistogramArgs): Promise<Histogram>;
   timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis>;
+  surroundingRows(args: SurroundingRowsArgs): Promise<SurroundingRows>;
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
@@ -190,6 +200,18 @@ class NativeBackend implements Backend {
         flagFilter: args.flagFilter ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
+      },
+    });
+  }
+
+  surroundingRows(args: SurroundingRowsArgs): Promise<SurroundingRows> {
+    return invoke("surrounding_rows", {
+      payload: {
+        projectId: args.projectId,
+        rowIndex: args.rowIndex,
+        column: args.column,
+        mode: args.mode,
+        count: args.count,
       },
     });
   }
