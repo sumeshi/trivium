@@ -5,7 +5,6 @@ use uuid::Uuid;
 use crate::state::AppState;
 use trivium_engine::{
     error::AppError,
-    ioc::calculate_ioc_applied_records,
     models::{FlagEntry, ProjectRow},
     project_io::read_project_dataframe,
     storage::{
@@ -70,13 +69,6 @@ pub fn update_flag(
     state
         .projects
         .update_flagged_records(&payload.project_id, flagged_records)
-        .map_err(AppError::from)?;
-
-    let ioc_applied_records =
-        calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
-    state
-        .projects
-        .update_ioc_applied_records(&payload.project_id, ioc_applied_records)
         .map_err(AppError::from)?;
 
     let parquet_path = project_dir.join("data.parquet");
