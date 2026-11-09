@@ -6,6 +6,7 @@ mod histogram;
 mod flags;
 mod iocs;
 mod projects;
+mod report;
 mod rows;
 mod stats;
 mod surround;
@@ -24,6 +25,7 @@ pub use projects::{
     __cmd__create_project, __cmd__delete_project, __cmd__list_projects, __cmd__load_project,
     create_project, delete_project, list_projects, load_project,
 };
+pub use report::{__cmd__build_report, build_report};
 pub use rows::{__cmd__query_project_rows, query_project_rows};
 pub use stats::{__cmd__column_stats, column_stats};
 pub use surround::{__cmd__surrounding_rows, surrounding_rows};

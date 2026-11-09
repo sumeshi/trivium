@@ -3,11 +3,35 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use serde_json::Value;
 
+use crate::error::AppError;
 use crate::flags::normalize_flag_value;
 use crate::models::{FlagEntry, ProjectRow};
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
+
+/// Maps requested column names (case-insensitive) to the frame's actual names.
+pub fn resolve_columns(
+    df: &DataFrame,
+    requested: &[String],
+    label: &str,
+) -> Result<Vec<String>, AppError> {
+    let mut lookup: HashMap<String, String> = HashMap::new();
+    for name in df.get_column_names() {
+        lookup.insert(name.to_lowercase(), name.to_string());
+    }
+    let mut resolved = Vec::with_capacity(requested.len());
+    for name in requested {
+        let actual = lookup.get(&name.to_lowercase()).ok_or_else(|| {
+            AppError::Message(format!(
+                "Column '{}' not found in project {}.",
+                name, label
+            ))
+        })?;
+        resolved.push(actual.clone());
+    }
+    Ok(resolved)
+}
 
 /// Collects a row's data into a JSON map using the provided column ordering.
 pub fn collect_row_record(

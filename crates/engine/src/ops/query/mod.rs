@@ -5,7 +5,8 @@ mod sort;
 
 pub(crate) use ioc::final_flags;
 pub(crate) use page::{filtered_indices, materialize_page};
-pub(crate) use search::prepare_search;
+pub(crate) use search::{persist_search_cache, prepare_search};
+pub(crate) use sort::ordered_row_indices;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

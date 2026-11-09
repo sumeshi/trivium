@@ -14,6 +14,8 @@ use crate::project_io::read_project_dataframe;
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
+use super::util::resolve_columns;
+
 #[derive(Debug, Deserialize)]
 pub struct DiffProjectsPayload {
     #[serde(rename = "projectIdA")]
@@ -61,8 +63,8 @@ pub fn diff_projects(
 
     let df_a = load_frame(store, &payload.project_id_a)?;
     let df_b = load_frame(store, &payload.project_id_b)?;
-    let names_a = resolve_key_columns(&df_a, &requested, "A")?;
-    let names_b = resolve_key_columns(&df_b, &requested, "B")?;
+    let names_a = resolve_columns(&df_a, &requested, "A")?;
+    let names_b = resolve_columns(&df_b, &requested, "B")?;
 
     let accum_a = count_keys(&df_a, &names_a);
     let accum_b = count_keys(&df_b, &names_b);
@@ -133,29 +135,6 @@ fn load_frame(store: &ProjectsStore, id: &Uuid) -> Result<DataFrame, AppError> {
         return Err(AppError::Message("Project data file missing.".into()));
     }
     read_project_dataframe(&parquet_path).map_err(AppError::from)
-}
-
-/// Maps requested key names (case-insensitive) to the frame's actual column names.
-fn resolve_key_columns(
-    df: &DataFrame,
-    requested: &[String],
-    label: &str,
-) -> Result<Vec<String>, AppError> {
-    let mut lookup: HashMap<String, String> = HashMap::new();
-    for name in df.get_column_names() {
-        lookup.insert(name.to_lowercase(), name.to_string());
-    }
-    let mut resolved = Vec::with_capacity(requested.len());
-    for name in requested {
-        let actual = lookup.get(&name.to_lowercase()).ok_or_else(|| {
-            AppError::Message(format!(
-                "Key column '{}' not found in project {}.",
-                name, label
-            ))
-        })?;
-        resolved.push(actual.clone());
-    }
-    Ok(resolved)
 }
 
 /// Counts rows per key string and records the first row's values per key.

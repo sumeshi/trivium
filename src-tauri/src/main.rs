@@ -32,7 +32,8 @@ fn main() {
             commands::diff_projects,
             commands::histogram,
             commands::time_analysis,
-            commands::surrounding_rows
+            commands::surrounding_rows,
+            commands::build_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
