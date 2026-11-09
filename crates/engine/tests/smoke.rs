@@ -18,6 +18,7 @@ use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
 use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::store::ProjectsStore;
 
@@ -460,6 +461,146 @@ fn column_stats_match_python_counts() {
         },
     )
     .is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn duplicate_rows_keep_every_occurrence() {
+    let root = temp_root();
+    let csv = root.join("dupes.csv");
+    fs::write(&csv, "user,proc\nalice,cmd\nalice,cmd\nalice,cmd\nbob,cmd\n").expect("write");
+    let store = ProjectsStore::new(root.clone()).expect("store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("create")
+    .meta
+    .id;
+
+    let duplicates = ops::dupes::duplicate_rows(
+        &store,
+        DupesPayload {
+            project_id: id,
+            columns: vec!["user".to_string(), "proc".to_string()],
+            mode: DupeMode::Duplicates,
+        },
+    )
+    .expect("duplicates");
+    assert_eq!(
+        duplicates.rows.iter().map(|row| row.row_index).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+
+    let unique = ops::dupes::duplicate_rows(
+        &store,
+        DupesPayload {
+            project_id: id,
+            columns: vec!["user".to_string(), "proc".to_string()],
+            mode: DupeMode::Unique,
+        },
+    )
+    .expect("unique");
+    assert_eq!(
+        unique.rows.iter().map(|row| row.row_index).collect::<Vec<_>>(),
+        vec![3]
+    );
+    assert!(ops::dupes::duplicate_rows(
+        &store,
+        DupesPayload {
+            project_id: id,
+            columns: Vec::new(),
+            mode: DupeMode::Duplicates,
+        },
+    )
+    .is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn python_duplicate_counts(csv: &Path) -> serde_json::Value {
+    let script = r#"
+import csv, json, sys
+from collections import Counter
+with open(sys.argv[1], newline="") as handle:
+    rows = list(csv.DictReader(handle))
+keys = [(row["user"], row["proc"]) for row in rows]
+counts = Counter(keys)
+print(json.dumps({
+    "rows": len(rows),
+    "duplicates": sum(1 for key in keys if counts[key] > 1),
+    "unique": sum(1 for key in keys if counts[key] == 1),
+}))
+"#;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(csv)
+        .output()
+        .expect("python3");
+    assert!(
+        output.status.success(),
+        "python3 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("python json")
+}
+
+#[test]
+fn duplicate_rows_match_fixture_duplicates() {
+    let root = temp_root();
+    let csv = root.join("fixture.csv");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/gen_fixture.py");
+    let status = Command::new("python3")
+        .arg(&script)
+        .args(["--rows", "1000", "--seed", "42", "--out"])
+        .arg(&csv)
+        .status()
+        .expect("python3");
+    assert!(status.success(), "gen_fixture failed");
+    let expected = python_duplicate_counts(&csv);
+    let expected_rows = expected["rows"].as_u64().expect("rows");
+    let expected_dupes = expected["duplicates"].as_u64().expect("duplicates");
+    let expected_unique = expected["unique"].as_u64().expect("unique");
+    assert_eq!(expected_rows, 1000);
+    assert!(expected_dupes > 0, "fixture produced no duplicate user/proc keys");
+    assert_eq!(expected_dupes + expected_unique, expected_rows);
+
+    let store = ProjectsStore::new(root.clone()).expect("store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("create")
+    .meta
+    .id;
+    let duplicates = ops::dupes::duplicate_rows(
+        &store,
+        DupesPayload {
+            project_id: id,
+            columns: vec!["user".to_string(), "proc".to_string()],
+            mode: DupeMode::Duplicates,
+        },
+    )
+    .expect("duplicates");
+    let unique = ops::dupes::duplicate_rows(
+        &store,
+        DupesPayload {
+            project_id: id,
+            columns: vec!["user".to_string(), "proc".to_string()],
+            mode: DupeMode::Unique,
+        },
+    )
+    .expect("unique");
+    assert_eq!(duplicates.rows.len() as u64, expected_dupes);
+    assert_eq!(unique.rows.len() as u64, expected_unique);
 
     let _ = fs::remove_dir_all(root);
 }

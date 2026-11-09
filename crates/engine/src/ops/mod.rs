@@ -1,3 +1,4 @@
+pub mod dupes;
 pub mod export;
 pub mod flags;
 pub mod iocs;
