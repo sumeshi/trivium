@@ -97,6 +97,7 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
             limit: None,
             sort_key: None,
             sort_direction: None,
+            condition: None,
         },
     )
     .expect("query failed")
@@ -152,6 +153,7 @@ fn search_scoping_and_operators() {
                 limit: None,
                 sort_key: None,
                 sort_direction: None,
+            condition: None,
             },
         )
         .expect("query failed")
@@ -203,6 +205,7 @@ fn sort_and_pagination() {
             limit: Some(5),
             sort_key: Some("EventID".to_string()),
             sort_direction: Some("desc".to_string()),
+            condition: None,
         },
     )
     .expect("query failed");
@@ -225,6 +228,7 @@ fn sort_and_pagination() {
             limit: Some(5),
             sort_key: Some("EventID".to_string()),
             sort_direction: Some("desc".to_string()),
+            condition: None,
         },
     )
     .expect("query failed");
@@ -264,6 +268,7 @@ fn flag_update_and_flag_filter() {
             limit: None,
             sort_key: None,
             sort_direction: None,
+            condition: None,
         },
     )
     .expect("query failed");

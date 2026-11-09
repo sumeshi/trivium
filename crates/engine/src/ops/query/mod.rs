@@ -35,6 +35,9 @@ pub struct QueryRowsPayload {
     pub sort_key: Option<String>,
     #[serde(rename = "sortDirection", default)]
     pub sort_direction: Option<String>,
+    /// Structured filter. Combined with `search` by AND. Absent means no extra filter.
+    #[serde(default)]
+    pub condition: Option<crate::condition::Node>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +85,7 @@ pub fn query_project_rows(
         payload.columns.as_deref(),
         &columns,
         payload.search.as_deref(),
+        payload.condition.as_ref(),
     );
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = ioc::final_flags(df.height(), &flags, &ioc_outcomes);

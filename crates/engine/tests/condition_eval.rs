@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::{Number, Value};
 
-use trivium_engine::condition::{eval, Condition, Group, GroupKind, Node, Op};
+use trivium_engine::condition::{eval, search_to_node, Condition, Group, GroupKind, Node, Op};
 use trivium_engine::search::{
     build_search_mask_boolean, to_rpn, tokenize_search_query, SearchToken,
 };
@@ -167,6 +167,9 @@ fn contains_and_or_not_match_search_mask() {
         let mask = search_mask(&rows, query);
         let evaluated: Vec<bool> = rows.iter().map(|cells| eval(&node, cells)).collect();
         assert_eq!(evaluated, mask, "parity failed for {query}");
+        let converted = search_to_node(query).unwrap_or_else(|| panic!("no node for {query}"));
+        let from_syntax: Vec<bool> = rows.iter().map(|cells| eval(&converted, cells)).collect();
+        assert_eq!(from_syntax, mask, "search syntax diverged for {query}");
     }
 }
 

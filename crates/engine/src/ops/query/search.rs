@@ -2,13 +2,12 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use polars::prelude::*;
+use serde_json::Value;
 
-use crate::search::{
-    build_search_mask_boolean, ensure_searchable_text, to_rpn, tokenize_search_query, SearchToken,
-};
+use crate::condition::{and_nodes, eval, search_to_node, Node};
+use crate::search::{ensure_searchable_text, tokenize_search_query, SearchToken};
 use crate::storage::{load_searchable_cache, save_searchable_cache};
-
-use super::super::util::ensure_column_text_cache;
+use crate::value_utils::anyvalue_to_search_string;
 
 pub struct SearchState {
     pub mask: Option<Vec<bool>>,
@@ -23,15 +22,8 @@ pub fn prepare_search(
     requested_columns: Option<&[String]>,
     column_names: &[String],
     search: Option<&str>,
+    condition: Option<&Node>,
 ) -> SearchState {
-    let column_series: HashMap<&str, &Series> =
-        df.get_columns().iter().map(|s| (s.name(), s)).collect();
-    let column_series_lower: HashMap<String, &Series> = df
-        .get_columns()
-        .iter()
-        .map(|s| (s.name().to_lowercase(), s))
-        .collect();
-
     let search_cols: Vec<String> = requested_columns
         .map(|cols| cols.to_vec())
         .unwrap_or_else(|| column_names.to_vec());
@@ -54,42 +46,45 @@ pub fn prepare_search(
         })
         .map(|cached| cached.text);
     let mut searchable_text_built = false;
-    let mut per_column_text: HashMap<String, Vec<String>> = HashMap::new();
 
-    let mut search_mask: Option<Vec<bool>> = None;
-    if let Some(search_str_raw) = search.map(str::trim).filter(|s| !s.is_empty()) {
-        let tokens = tokenize_search_query(search_str_raw);
-        let mut terms: Vec<(Option<String>, String)> = Vec::new();
-        let mut needed_cols: Vec<String> = Vec::new();
-        for token in &tokens {
-            if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = token {
-                let key = (col.clone(), text.clone());
-                if !text.is_empty() && !terms.contains(&key) {
-                    terms.push(key);
-                }
-                if let Some(column_name) = col {
-                    if !needed_cols.contains(column_name) {
-                        needed_cols.push(column_name.clone());
-                    }
-                }
-            }
-        }
-        for column in needed_cols {
-            ensure_column_text_cache(&column, &column_series_lower, &mut per_column_text, df.height());
-        }
-        if !terms.is_empty() {
-            let rpn = to_rpn(&tokens);
-            let search_text = ensure_searchable_text(
-                &mut searchable_text,
-                &mut searchable_text_built,
-                row_count,
-                &search_cols,
-                &column_series,
-            );
-            let mask = build_search_mask_boolean(&rpn, &terms, search_text, Some(&per_column_text));
-            search_mask = Some(mask);
-        }
+    let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
+    let has_terms = search_raw.is_some_and(|query| {
+        tokenize_search_query(query).iter().any(|token| match token {
+            SearchToken::Term { text, .. } | SearchToken::QuotedTerm { text, .. } => !text.is_empty(),
+            _ => false,
+        })
+    });
+    if has_terms {
+        let column_series: HashMap<&str, &Series> =
+            df.get_columns().iter().map(|series| (series.name(), series)).collect();
+        let _ = ensure_searchable_text(
+            &mut searchable_text,
+            &mut searchable_text_built,
+            row_count,
+            &search_cols,
+            &column_series,
+        );
     }
+
+    let search_node = if has_terms {
+        search_raw.and_then(search_to_node)
+    } else {
+        None
+    };
+    let combined = match (search_node, condition.cloned()) {
+        (Some(search_node), Some(condition)) => Some(and_nodes(search_node, condition)),
+        (Some(search_node), None) => Some(search_node),
+        (None, Some(condition)) => Some(condition),
+        (None, None) => None,
+    };
+    let search_mask = combined.map(|node| {
+        let joined = if has_terms {
+            searchable_text.clone().unwrap_or_default()
+        } else {
+            vec![String::new(); row_count]
+        };
+        eval_frame(df, &node, &joined)
+    });
 
     SearchState {
         mask: search_mask,
@@ -109,5 +104,45 @@ pub fn persist_search_cache(project_dir: &Path, state: &SearchState) {
                 );
             }
         }
+    }
+}
+
+fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Vec<bool> {
+    let mut mask = vec![false; df.height()];
+    for row_idx in 0..df.height() {
+        let mut row: HashMap<String, Value> = HashMap::new();
+        for series in df.get_columns() {
+            if series.name() == "__rowid" {
+                continue;
+            }
+            if let Ok(value) = series.get(row_idx) {
+                if let Some(cell) = cell_value(&value) {
+                    row.insert(series.name().to_string(), cell);
+                }
+            }
+        }
+        if let Some(text) = joined.get(row_idx) {
+            row.insert(String::new(), Value::String(text.clone()));
+        }
+        mask[row_idx] = eval(node, &row);
+    }
+    mask
+}
+
+fn cell_value(value: &AnyValue) -> Option<Value> {
+    match value {
+        AnyValue::Null => None,
+        AnyValue::Int8(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::Int16(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::Int32(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::Int64(v) => Some(Value::from(*v)),
+        AnyValue::UInt8(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::UInt16(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::UInt32(v) => Some(Value::from(i64::from(*v))),
+        AnyValue::UInt64(v) => i64::try_from(*v)
+            .ok()
+            .map(Value::from)
+            .or_else(|| Some(Value::String(v.to_string()))),
+        _ => anyvalue_to_search_string(value).map(Value::String),
     }
 }

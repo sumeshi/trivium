@@ -110,6 +110,7 @@ fn query_flags(store: &ProjectsStore, id: uuid::Uuid) -> Vec<(String, Option<Str
             limit: None,
             sort_key: None,
             sort_direction: None,
+            condition: None,
         },
     )
     .expect("query failed");
