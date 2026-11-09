@@ -1,3 +1,4 @@
+pub mod condition;
 pub mod error;
 pub mod export;
 pub mod flags;
