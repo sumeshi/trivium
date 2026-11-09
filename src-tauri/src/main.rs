@@ -25,7 +25,8 @@ fn main() {
             commands::export_iocs,
             commands::update_flag,
             commands::set_hidden_columns,
-            commands::export_project
+            commands::export_project,
+            commands::column_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

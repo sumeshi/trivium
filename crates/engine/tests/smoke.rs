@@ -5,7 +5,8 @@
 //! scripts/gen_fixture.py, so the test runs on any fresh checkout.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use uuid::Uuid;
 
@@ -17,6 +18,7 @@ use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::store::ProjectsStore;
 
 /// Column layout: ts,EventID,host,user,proc,path,msg
@@ -299,6 +301,165 @@ fn nanosecond_integer_is_not_rounded() {
     let preserved = cell.as_i64() == Some(1_700_000_000_123_456_789)
         || cell.as_str() == Some(exact);
     assert!(preserved, "value was rounded: {cell}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn python_missing_unique(csv: &Path) -> serde_json::Value {
+    let script = r#"
+import csv, json, sys
+with open(sys.argv[1], newline="") as handle:
+    rows = list(csv.DictReader(handle))
+out = {}
+for column in rows[0].keys():
+    values = [row[column] for row in rows]
+    present = [value for value in values if value != ""]
+    out[column] = {"missing": sum(value == "" for value in values), "unique": len(set(present))}
+print(json.dumps(out))
+"#;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(csv)
+        .output()
+        .expect("python3");
+    assert!(
+        output.status.success(),
+        "python3 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("python json")
+}
+
+#[test]
+fn column_stats_match_python_counts() {
+    let root = temp_root();
+    let csv = root.join("stats.csv");
+    let mut body = String::from("user,event,note,token\n");
+    for index in 0..30 {
+        let user = match index % 5 {
+            0 => "",
+            1 | 2 => "alice",
+            _ => "bob",
+        };
+        let event = if index == 7 {
+            ""
+        } else if index % 2 == 0 {
+            "4624"
+        } else {
+            "4625"
+        };
+        let note = if index % 6 == 0 { "" } else { "alpha" };
+        let token = if index < 2 {
+            "dup".to_string()
+        } else {
+            format!("t{index:02}")
+        };
+        body.push_str(&format!("{user},{event},{note},{token}\n"));
+    }
+    fs::write(&csv, body).expect("failed to write stats csv");
+    let expected = python_missing_unique(&csv);
+
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: csv.to_string_lossy().to_string(),
+            description: None,
+        },
+    )
+    .expect("failed to create project")
+    .meta
+    .id;
+
+    let omitted = format!(r#"{{"projectId":"{id}","column":"user"}}"#);
+    let parsed: ColumnStatsPayload = serde_json::from_str(&omitted).expect("payload");
+    assert_eq!(parsed.rare_max, 1);
+
+    for column in ["user", "event", "note", "token"] {
+        let stats = ops::stats::column_stats(
+            &store,
+            ColumnStatsPayload {
+                project_id: id,
+                column: column.to_string(),
+                rare_max: 1,
+            },
+        )
+        .expect("stats");
+        let want = &expected[column];
+        assert_eq!(
+            stats.missing,
+            want["missing"].as_u64().expect("missing"),
+            "{column} missing"
+        );
+        assert_eq!(
+            stats.unique,
+            want["unique"].as_u64().expect("unique"),
+            "{column} unique"
+        );
+    }
+
+    let user = ops::stats::column_stats(
+        &store,
+        ColumnStatsPayload {
+            project_id: id,
+            column: "user".to_string(),
+            rare_max: 1,
+        },
+    )
+    .expect("user stats");
+    assert_eq!(user.kind, "string");
+    assert_eq!(
+        user.top.iter().map(|item| item.count).sum::<u64>() + user.missing,
+        30
+    );
+
+    let event = ops::stats::column_stats(
+        &store,
+        ColumnStatsPayload {
+            project_id: id,
+            column: "event".to_string(),
+            rare_max: 1,
+        },
+    )
+    .expect("event stats");
+    assert_eq!(event.kind, "int");
+
+    let token = ops::stats::column_stats(
+        &store,
+        ColumnStatsPayload {
+            project_id: id,
+            column: "token".to_string(),
+            rare_max: 1,
+        },
+    )
+    .expect("token stats");
+    assert_eq!(token.top.len(), 20);
+    assert_eq!(token.top[0].value, "dup");
+    assert_eq!(token.top[0].count, 2);
+    assert!(token.top.windows(2).all(|pair| pair[0].count >= pair[1].count));
+    assert!(token.rare.iter().all(|item| item.count == 1));
+    assert_eq!(token.rare.len() as u64, token.unique - 1);
+    assert!(!token.rare.iter().any(|item| item.value == "dup"));
+
+    assert!(ops::stats::column_stats(
+        &store,
+        ColumnStatsPayload {
+            project_id: id,
+            column: "nope".to_string(),
+            rare_max: 1,
+        },
+    )
+    .is_err());
+    assert!(ops::stats::column_stats(
+        &store,
+        ColumnStatsPayload {
+            project_id: id,
+            column: "__rowid".to_string(),
+            rare_max: 1,
+        },
+    )
+    .is_err());
 
     let _ = fs::remove_dir_all(root);
 }

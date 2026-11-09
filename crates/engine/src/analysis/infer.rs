@@ -38,9 +38,9 @@ pub fn infer_column_kinds(df: &DataFrame) -> HashMap<String, ColumnKind> {
         .collect()
 }
 
-fn kind_of_series(series: &Series) -> ColumnKind {
-    match series.dtype() {
-        DataType::Null => ColumnKind::Null,
+pub(crate) fn dtype_kind(dtype: &DataType) -> Option<ColumnKind> {
+    match dtype {
+        DataType::Null => Some(ColumnKind::Null),
         DataType::Int8
         | DataType::Int16
         | DataType::Int32
@@ -48,41 +48,58 @@ fn kind_of_series(series: &Series) -> ColumnKind {
         | DataType::UInt8
         | DataType::UInt16
         | DataType::UInt32
-        | DataType::UInt64 => ColumnKind::Int,
-        DataType::Float32 | DataType::Float64 => ColumnKind::Float,
-        DataType::Date | DataType::Datetime(_, _) | DataType::Time => ColumnKind::Datetime,
-        _ => kind_from_values(series),
+        | DataType::UInt64 => Some(ColumnKind::Int),
+        DataType::Float32 | DataType::Float64 => Some(ColumnKind::Float),
+        DataType::Date | DataType::Datetime(_, _) | DataType::Time => Some(ColumnKind::Datetime),
+        _ => None,
     }
 }
 
-fn kind_from_values(series: &Series) -> ColumnKind {
-    let mut saw_int = false;
-    let mut saw_float = false;
-    let mut saw_datetime = false;
-    let mut saw_string = false;
+#[derive(Default)]
+pub(crate) struct KindFlags {
+    saw_int: bool,
+    saw_float: bool,
+    saw_datetime: bool,
+    saw_string: bool,
+}
+
+impl KindFlags {
+    pub(crate) fn observe(&mut self, value: &AnyValue) {
+        match classify_any(value) {
+            None | Some(ColumnKind::Null) => {}
+            Some(ColumnKind::Int) => self.saw_int = true,
+            Some(ColumnKind::Float) => self.saw_float = true,
+            Some(ColumnKind::Datetime) => self.saw_datetime = true,
+            Some(ColumnKind::String) => self.saw_string = true,
+        }
+    }
+
+    pub(crate) fn finish(self) -> ColumnKind {
+        if self.saw_string {
+            return ColumnKind::String;
+        }
+        match (self.saw_int, self.saw_float, self.saw_datetime) {
+            (false, false, false) => ColumnKind::Null,
+            (true, false, false) => ColumnKind::Int,
+            (_, true, false) => ColumnKind::Float,
+            (false, false, true) => ColumnKind::Datetime,
+            _ => ColumnKind::String,
+        }
+    }
+}
+
+fn kind_of_series(series: &Series) -> ColumnKind {
+    if let Some(kind) = dtype_kind(series.dtype()) {
+        return kind;
+    }
+    let mut flags = KindFlags::default();
     for idx in 0..series.len() {
         let Ok(value) = series.get(idx) else {
             continue;
         };
-        match classify_any(&value) {
-            None => {}
-            Some(ColumnKind::Null) => {}
-            Some(ColumnKind::Int) => saw_int = true,
-            Some(ColumnKind::Float) => saw_float = true,
-            Some(ColumnKind::Datetime) => saw_datetime = true,
-            Some(ColumnKind::String) => saw_string = true,
-        }
+        flags.observe(&value);
     }
-    if saw_string {
-        return ColumnKind::String;
-    }
-    match (saw_int, saw_float, saw_datetime) {
-        (false, false, false) => ColumnKind::Null,
-        (true, false, false) => ColumnKind::Int,
-        (_, true, false) => ColumnKind::Float,
-        (false, false, true) => ColumnKind::Datetime,
-        _ => ColumnKind::String,
-    }
+    flags.finish()
 }
 
 fn classify_any(value: &AnyValue) -> Option<ColumnKind> {

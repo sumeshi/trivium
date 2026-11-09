@@ -3,6 +3,7 @@ mod flags;
 mod iocs;
 mod projects;
 mod rows;
+mod stats;
 
 pub use export::{__cmd__export_project, export_project};
 pub use flags::{__cmd__set_hidden_columns, __cmd__update_flag, set_hidden_columns, update_flag};
@@ -14,3 +15,4 @@ pub use projects::{
     create_project, delete_project, list_projects, load_project,
 };
 pub use rows::{__cmd__query_project_rows, query_project_rows};
+pub use stats::{__cmd__column_stats, column_stats};
