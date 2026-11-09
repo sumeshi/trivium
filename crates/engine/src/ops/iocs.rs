@@ -1,0 +1,106 @@
+use std::path::PathBuf;
+
+use serde::Deserialize;
+use uuid::Uuid;
+
+use crate::{
+    error::AppError,
+    ioc::{
+        calculate_ioc_applied_records, load_ioc_entries, prepare_ioc_entries, read_ioc_csv,
+        save_ioc_entries, write_ioc_csv,
+    },
+    models::IocEntry,
+    storage::clear_ioc_flag_cache,
+    store::ProjectsStore,
+};
+
+#[derive(Debug, Deserialize)]
+pub struct SaveIocsPayload {
+    #[serde(rename = "projectId")]
+    pub project_id: Uuid,
+    pub entries: Vec<IocEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportIocsPayload {
+    #[serde(rename = "projectId")]
+    pub project_id: Uuid,
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExportIocsPayload {
+    #[serde(rename = "projectId")]
+    pub project_id: Uuid,
+    pub destination: String,
+}
+
+/// Normalizes and persists IOC definitions, updating cached counts.
+pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), AppError> {
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = store.project_dir(&meta.id);
+    let entries = prepare_ioc_entries(payload.entries);
+    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
+
+    let ioc_applied_records =
+        calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
+    store
+        .update_ioc_applied_records(&payload.project_id, ioc_applied_records)
+        .map_err(AppError::from)?;
+
+    Ok(())
+}
+
+/// Imports IOC rules from a CSV, replacing the current set.
+pub fn import_iocs(
+    store: &ProjectsStore,
+    payload: ImportIocsPayload,
+) -> Result<Vec<IocEntry>, AppError> {
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = store.project_dir(&meta.id);
+    let source = PathBuf::from(payload.path);
+    if !source.exists() {
+        return Err(AppError::Message("Selected file does not exist.".into()).into());
+    }
+    let entries = prepare_ioc_entries(read_ioc_csv(&source).map_err(AppError::from)?);
+    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+
+    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
+        eprintln!(
+            "[cache] failed to clear IOC cache for {:?}: {:?}",
+            project_dir, err
+        );
+    }
+
+    let ioc_applied_records =
+        calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
+    store
+        .update_ioc_applied_records(&payload.project_id, ioc_applied_records)
+        .map_err(AppError::from)?;
+
+    let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    Ok(final_entries)
+}
+
+/// Writes the current IOC set to a destination CSV file.
+pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<(), AppError> {
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()).into());
+    };
+    let project_dir = store.project_dir(&meta.id);
+    let entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let destination = PathBuf::from(payload.destination);
+    write_ioc_csv(&entries, &destination).map_err(AppError::from)?;
+    Ok(())
+}

@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use serde_json::Value;
 
-use trivium_engine::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
+use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
+
+pub const DEFAULT_PAGE_SIZE: usize = 250;
 
 /// Collects a row's data into a JSON map using the provided column ordering.
-pub(crate) fn collect_row_record(
+pub fn collect_row_record(
     df: &DataFrame,
     column_names: &[String],
     row_idx: usize,
@@ -20,7 +22,7 @@ pub(crate) fn collect_row_record(
 }
 
 /// Collects a row's data using a precomputed series map to avoid repeated lookups.
-pub(crate) fn collect_row_record_from_series(
+pub fn collect_row_record_from_series(
     series_map: &HashMap<&str, &Series>,
     column_names: &[String],
     row_idx: usize,
@@ -37,7 +39,7 @@ pub(crate) fn collect_row_record_from_series(
 }
 
 /// Ensures lowercase string caches exist for a column, returning the cached vector.
-pub(crate) fn ensure_column_text_cache<'a>(
+pub fn ensure_column_text_cache<'a>(
     column: &str,
     column_series_lower: &HashMap<String, &Series>,
     cache: &'a mut HashMap<String, Vec<String>>,
@@ -64,7 +66,7 @@ pub(crate) fn ensure_column_text_cache<'a>(
 }
 
 /// Builds concatenated row text and per-column single-row caches.
-pub(crate) fn build_row_search_text(
+pub fn build_row_search_text(
     column_names: &[String],
     column_series: &HashMap<&str, &Series>,
     row_idx: usize,

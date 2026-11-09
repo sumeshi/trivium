@@ -1,11 +1,8 @@
-pub(crate) const DEFAULT_PAGE_SIZE: usize = 250;
-
 mod export;
 mod flags;
 mod iocs;
 mod projects;
 mod rows;
-mod utils;
 
 pub use export::{__cmd__export_project, export_project};
 pub use flags::{__cmd__set_hidden_columns, __cmd__update_flag, set_hidden_columns, update_flag};

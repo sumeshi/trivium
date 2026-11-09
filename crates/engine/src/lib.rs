@@ -2,6 +2,7 @@ pub mod error;
 pub mod flags;
 pub mod ioc;
 pub mod models;
+pub mod ops;
 pub mod project_io;
 pub mod search;
 pub mod storage;
