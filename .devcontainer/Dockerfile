@@ -21,7 +21,6 @@ RUN apt-get update -y \
         libxcb-render0-dev \
         libxcb-shape0-dev \
         libxcb-xfixes0-dev \
-        libwebkit2gtk-4.0-dev \
         libwebkit2gtk-4.1-dev \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \

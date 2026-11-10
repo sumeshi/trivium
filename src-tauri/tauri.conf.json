@@ -1,51 +1,18 @@
 {
-  "package": {
-    "productName": "Trivium",
-    "version": "0.1.4"
-  },
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Trivium",
+  "version": "0.1.4",
+  "identifier": "com.trivium.app",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devPath": "http://localhost:5173",
-    "distDir": "../dist"
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
   },
-  "tauri": {
-    "allowlist": {
-      "dialog": {
-        "open": true,
-        "save": true
-      },
-      "fs": {
-        "readFile": true,
-        "writeFile": true,
-        "exists": true,
-        "createDir": true,
-        "removeFile": true,
-        "removeDir": true
-      },
-      "path": {
-        "all": true
-      },
-      "shell": {
-        "open": true
-      }
-    },
-    "bundle": {
-      "active": true,
-      "identifier": "com.trivium.app",
-      "icon": [
-        "icons/icon.ico",
-        "icons/icon.png"
-      ],
-      "windows": {
-        "webviewInstallMode": {
-          "type": "downloadBootstrapper",
-          "silent": true
-        }
-      }
-    },
+  "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Trivium",
         "width": 1400,
         "height": 900,
@@ -53,5 +20,15 @@
         "fullscreen": false
       }
     ]
+  },
+  "bundle": {
+    "targets": ["deb"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
   }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { open } from '@tauri-apps/api/dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { createBackend } from './lib/backend';
   import type { Backend } from './lib/backend';
   import Sidebar from './lib/components/app/Sidebar.svelte';

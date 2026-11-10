@@ -1,4 +1,4 @@
-import { createDir, readTextFile, writeTextFile } from "@tauri-apps/api/fs";
+import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
 
@@ -53,7 +53,7 @@ async function persistTheme(next: Theme) {
   try {
     const base = await appLocalDataDir();
     // ensure dir exists (no-op if already exists)
-    await createDir(base, { recursive: true });
+    await mkdir(base, { recursive: true });
     const path = await join(base, THEME_FILE);
     await writeTextFile(path, JSON.stringify({ theme: next }, null, 2));
   } catch (_err) {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import { open, save } from '@tauri-apps/api/dialog';
+  import { open, save } from '@tauri-apps/plugin-dialog';
   import { conditionPayload, conditionTree, presetCondition } from '../../stores/condition';
   import { backend, hiddenColumns, projectDetail, sortDirection, sortKey } from './state';
 

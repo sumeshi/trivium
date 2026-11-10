@@ -11,14 +11,17 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^1.5.4",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-opener": "^2",
     "dayjs": "^1.11.13",
     "svelte": "^4.2.18"
   },
   "devDependencies": {
     "@openai/codex": "^0.47.0",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
-    "@tauri-apps/cli": "^1.5.12",
+    "@tauri-apps/cli": "^2",
     "@types/node": "^20.14.12",
     "@typescript-eslint/eslint-plugin": "^7.16.1",
     "@typescript-eslint/parser": "^7.16.1",

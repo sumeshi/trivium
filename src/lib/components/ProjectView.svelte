@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { open, save } from '@tauri-apps/api/dialog';
+  import { open, save } from '@tauri-apps/plugin-dialog';
   import DataTable from './project_view/DataTable.svelte';
   import IocManagerDialog from './project_view/IocManagerDialog.svelte';
   import MemoEditorDialog from './project_view/MemoEditorDialog.svelte';

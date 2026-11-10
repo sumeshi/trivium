@@ -9,6 +9,9 @@ use crate::state::AppState;
 
 fn main() {
     tauri::Builder::new()
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let state = AppState::new(app)?;
             app.manage(state);

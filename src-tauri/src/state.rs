@@ -1,6 +1,7 @@
 use std::fs;
 
 use anyhow::{Context, Result};
+use tauri::Manager;
 
 pub struct AppState {
     pub projects: trivium_engine::store::ProjectsStore,
@@ -8,7 +9,9 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(app: &tauri::App<tauri::Wry>) -> Result<Self> {
-        let base_dir = tauri::api::path::app_local_data_dir(&app.config())
+        let base_dir = app
+            .path()
+            .app_local_data_dir()
             .context("failed to resolve app data dir")?
             .join("trivium");
         fs::create_dir_all(&base_dir)

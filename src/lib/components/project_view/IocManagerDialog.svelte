@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
-  import { open, save } from '@tauri-apps/api/dialog';
-  import { writeFile } from '@tauri-apps/api/fs';
+  import { open, save } from '@tauri-apps/plugin-dialog';
+  import { writeTextFile } from '@tauri-apps/plugin-fs';
   import {
     iocManagerOpen,
     iocDraft,
@@ -179,7 +179,7 @@ import FlagSelect from './FlagSelect.svelte';
         return;
       }
       const csv = buildIocCsv(sanitized);
-      await writeFile(destination, csv);
+      await writeTextFile(destination, csv);
       dispatch('notify', { message: 'Exported IOC rules.', tone: 'success' });
     } catch (error) {
       console.error(error);

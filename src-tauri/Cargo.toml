@@ -11,13 +11,16 @@ parking_lot = "0.12"
 polars = { version = "0.40", features = ["lazy", "parquet", "serde", "fmt"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "1.5", default-features = false, features = [ "wry", "fs-remove-dir", "fs-read-file", "fs-create-dir", "shell-open", "fs-exists", "fs-write-file", "fs-remove-file", "dialog-open", "dialog-save", "path-all"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 trivium-engine = { path = "../crates/engine" }
 
 [build-dependencies]
-tauri-build = { version = "1.5", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [profile.release]
 opt-level = "s"        # minimize size (use 3 for max performance)
