@@ -512,11 +512,16 @@ src-tauri/src/
   空行は読飛ばし、オブジェクト以外の行・壊れた JSON は行番号付きでエラー。
   テストは `jsonl_test.rs` 4 ケース平坦化・和集合+null・型維持・ops 経由の取込。
 
-#### F25: 原本 SHA-256 と対応の保持
+#### F25: 原本 SHA-256 と対応の保持 → 完了（`8328b5e`）
 
 - 前提: R3
 - 手順: 取込時に SHA-256 を計算し `ProjectMeta` に保存。UI は案件詳細に表示のみ。
 - 完了条件: I5 で `sha256sum` と一致。
+- 実装メモ: `ProjectMeta` に `source_sha256: Option<String>`（`#[serde(default)]` で
+  旧 meta JSON も読込可）。`create_project` が取込元ファイルのダイジェストを
+  `sha2`（`crates/engine/Cargo.toml` に追加）で計算し保存。UI は `Header.svelte` の
+  案件詳細に等幅で表示（ホバーで全文）。テストは `import_test.rs` 2 ケース追加
+  （作成した meta のダイジェストがファイル内容と一致、旧形式 meta JSON の読込）。
 
 #### F26: 数値・ナノ秒精度
 
