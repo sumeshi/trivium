@@ -10,6 +10,7 @@ use crate::{
     analysis::infer_column_kinds,
     error::AppError,
     import::csv,
+    import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe},
@@ -44,7 +45,7 @@ pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppEr
     Ok(result)
 }
 
-/// Creates a new project from a CSV file and persists metadata plus optional flags.
+/// Creates a new project from a CSV or JSONL file and persists metadata plus optional flags.
 pub fn create_project(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
@@ -54,8 +55,12 @@ pub fn create_project(
         return Err(AppError::Message("Selected file no longer exists.".into()).into());
     }
 
-    let (mut df, imported_flags) =
-        csv::load(&source_path, csv::build_delimiter(payload.delimiter.as_deref())?)?;
+    let (mut df, imported_flags) = if source_path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+    {
+        jsonl::load(&source_path)?
+    } else {
+        csv::load(&source_path, csv::build_delimiter(payload.delimiter.as_deref())?)?
+    };
 
     let project_id = Uuid::new_v4();
     let project_dir = store.project_dir(&project_id);
