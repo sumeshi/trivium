@@ -335,3 +335,62 @@ the call sites.
   T15/T19/T20b.
 
 Next card: T06.
+
+## T06 — annotation save result matches the displayed state
+
+Recorded: 2026-11-11.
+
+- `src/lib/components/project_view/state.ts`: `memoEditor` now holds
+  `{ projectId, rowIndex, row }`, where `row` is the row snapshot taken when
+  editing started. `editMemo(row, projectId)` captures the project id and the
+  original row id instead of relying on the page cache.
+- Added a per-row monotonic request sequence (`nextAnnotationRequest` /
+  `isLatestAnnotationRequest`) shared by `setFlag` and memo saves. A failed
+  request only rolls back while it is still the newest request for that row.
+- `setFlag` reads the current optimistic row from `rowsCache` so rapid clicks
+  toggle from what the table shows, updates the cache only when the row exists,
+  and rolls back only the flag and the affected counts. It no longer restores
+  the whole click-time row snapshot, so an older failure cannot erase a newer
+  success or touch memo/tags/bookmark. Successful responses apply only the
+  returned flag. Responses for a project that is no longer current are ignored.
+- `src/lib/components/project_view/MemoEditorDialog.svelte`: memo save uses the
+  captured `projectId` / `rowIndex` and the edit-start annotations as its
+  rollback baseline. The row cache is updated optimistically when present, but
+  saving no longer depends on it: an evicted row still sends the patch for the
+  original row id. Failures revert only memo/tags/bookmark for the latest
+  request, set `memoError`, keep the draft and the dialog open, and allow a
+  retry. Success applies the returned memo/tags/bookmark and closes only the
+  same editor target.
+- Every save path now clears `memoSaving`; the missing-row early return and the
+  never-unsubscribed `memoEditor` subscription are gone. The subscription is
+  unsubscribed in `onDestroy`, and the `await tick()` focus step is skipped when
+  the dialog was closed or retargeted. Escape no longer lets the window-level
+  handler close the dialog while a save is in flight.
+- `src/lib/components/project_view/DataTable.svelte`: passes
+  `$projectDetail.project.meta.id` to `editMemo`.
+- `src/lib/backend.ts` needed no change: since T02, `updateFlag` already accepts
+  `AnnotationPatch` and omits fields the caller did not send.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | 118 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+There is no frontend test runner in this repository, so the request-ordering
+and cache-eviction paths have no automated UI test.
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised. The completion scenarios (a save failure is
+  visible and can be retried; Safe then Critical with only the first request
+  failing leaves Critical; a row evicted while editing still saves to the
+  original row id) have not been reproduced in the app or a browser mock. They
+  are scheduled for real-app confirmation in T26.
+- Bookmark-only count parity and virtual-scroll count/position behaviour remain
+  for T07.
+
+Next card: T07.
