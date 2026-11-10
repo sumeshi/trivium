@@ -118,10 +118,11 @@ src-tauri/src/
 
 ## 4. I 層 — 足場（最初にやる。これが無いと完了条件が全部嘘になる）
 
-### I1: 合成データ生成スクリプト
+### I1: 合成データ生成スクリプト → 完了（実装済み。再確認日 2026-11-10）
 
 - 前提: なし
 - 対象: 新規 `scripts/gen_fixture.py`
+- 再確認: `--rows 1000 --seed 42` を 2 回生成 → sha256 完全一致（`b197f2b6...`）、1001 行。
 - 手順:
   1. `argparse` で `--rows N --seed 42 --out PATH --variant {ascii,utf16,wide}` を取る
   2. 列: `ts`(ISO8601。1 行おきにミリ秒/ナノ秒)、`EventID`(4624/4625/4688/4103 を分布付き)、
@@ -134,10 +135,11 @@ src-tauri/src/
   バイト列が完全一致する（`sha256sum` で確認）。
 - 禁止: アプリ本体のコードに触れない。
 
-### I2: cargo test の雛形（純粋関数のテストのみ）
+### I2: cargo test の雛形（純粋関数のテストのみ） → 完了（実装済み。再確認日 2026-11-10）
 
 - 前提: R0a（テストは `trivium-engine` クレートに置く。src-tauri はローカルでビルドできないため）
 - 対象: 新規 `crates/engine/tests/search_test.rs`、`crates/engine/tests/flags_test.rs`
+- 再確認: 両テストファイルは Z3 の全テスト実行（23 スイート 97 テスト 0 失敗）に含まれる。
 - 手順:
   1. `tokenize_search_query` / `to_rpn` / `build_search_mask_boolean` について
      README「Search Syntax」節の全例（`malware beacon`、`error|warn`、`beacon -test`、
@@ -148,10 +150,11 @@ src-tauri/src/
 - 完了条件: `cargo test -p trivium-engine` が 0 失敗。テストは現在の実装の挙動を固定する（良し悪しの判断はしない）。
 - 禁止: `crates/engine/src/`（実装）の変更。期待値は実装に合わせ、仕様判断は D1 に残す。
 
-### I3: Rust 規模ガード
+### I3: Rust 規模ガード → 完了（実装済み。再確認日 2026-11-10）
 
 - 前提: なし
 - 対象: 新規 `scripts/check_rust_size.sh`
+- 再確認: 501 行のダミーを `src-tauri/src/` に置くと exit 1、削除後 exit 0。
 - 手順: `src-tauri/src` 配下の `*.rs` を `wc -l` し、500 行超で exit 1 する。
   現状の `commands/rows.rs`(468) は 500 未満のため通る。
 - 完了条件: `scripts/check_rust_size.sh` が exit 0。`touch` で 501 行のダミーを
