@@ -35,6 +35,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev build-essential curl wget file libxdo-dev libssl-dev
 
+      - name: Quality gates
+        run: |
+          bash scripts/check_rust_size.sh
+          cargo test -p trivium-engine
+          npm run lint
+
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
 

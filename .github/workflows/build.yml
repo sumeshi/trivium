@@ -33,6 +33,13 @@ jobs:
         with:
           targets: ${{ matrix.platform }}
 
+      - name: Quality gates
+        shell: bash
+        run: |
+          bash scripts/check_rust_size.sh
+          cargo test -p trivium-engine
+          npm run lint
+
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
 
