@@ -629,12 +629,20 @@ src-tauri/src/
     25.1s → 2.624s（2M）。`ioc_1_more_query` 1.32s → 116.7ms（100k）、
     5.31s → 402.1ms（400k）、27.1s → 1.965s（2M）。
 
-### P4: ページ表示の IOC タグ再計算削減
+### P4: ページ表示の IOC タグ再計算削減 → 実装済み（R5 の一括評価統合時）、追加変更なし
 
 - 前提: R5
 - 対象: `rows.rs:370-437`（ページ行ごとに IOC クエリをトークナイズし直している）
 - 手順: R5 の一括評価結果（tags 含む）をキャッシュから読むだけにする。
 - 完了条件: I4 の検索切替ケースが改善。
+- 確認メモ（2026-11-10）: カード記載の旧経路（`row_contains_query` による
+  ページ行ごとの再トークナイズ）は現ツリーに存在しない
+  （`grep -rn "row_contains_query" crates/engine/src` はコメント 1 件のみ）。
+  ページ経路は `ops/query/page.rs:92` で `append_ioc_tags(&mut final_memo, &ioc_outcomes[row_idx].tags)`
+  を読むだけで、`ioc_outcomes` は `ops/query/mod.rs:97` の `cached_ioc_outcomes`
+  （sled キャッシュ、P3 で増分マージ対応済み）から供給される。
+  つまり手順は R5 の統合時に実現済みで、I4 ベースライン（検索切替 cold/warm）にも
+  織り込まれているため、ベースラインに対する追加の改善数値は発生しない。
 
 ## 9. C 層 — CI・配布
 
