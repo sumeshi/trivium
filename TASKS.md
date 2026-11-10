@@ -124,15 +124,18 @@ src-tauri/src/
     （`tauri::Manager`）へ変更した。コマンドのシグネチャ変更は無し。
   - `bundle.windows.webviewInstallMode` は v2 の config リファレンスに存在するため維持した
   - **CI 修正（2026-11-11、v2 移行後の初回 CI で判明）**: `generate_handler!` が
-    `__tauri_command_name_*` を見つけられず src-tauri がコンパイル失敗。
-    原因: v2 の `#[tauri::command]` は `__cmd__*` に加えて `__tauri_command_name_*`
-    隠しマクロを `#[macro_export]` で生成し、**クレートルートに配置される**
-    （tauri-macros 2.7.4 の wrapper.rs で確認。`pub use my_macro;` には
-    `#[macro_export]` が必要と明記）。v1 時代の mod.rs は
-    `pub use projects::__cmd__*`（定義モジュールパス）だったため失敗。
-    ミニマルモデルクレートで v2 展開形を実証した上で、
-    mod.rs を `pub use crate::{隠しマクロ27種}` + `pub use モジュール::{公開関数}` に修正。
-    src-tauri のコンパイル検証は引き続き CI で実施。
+    隠しマクロを解決できず src-tauri がコンパイル失敗。
+    v2 の `#[tauri::command]` は `__cmd__*` / `__tauri_command_name_*` 隠しマクロを
+    `#[macro_export]` 付きで生成し、generate_handler は **generate_handler に渡した
+    パスそのもの**で両マクロを呼び出す（tauri-macros 2.7.4 の handler.rs /
+    wrapper.rs で確認）。
+    再エクスポート方式は不可能（`#[macro_export]` をマクロ展開で生成した場合、
+    絶対パス参照は rust-lang/rust#52234 で deny、定義モジュールパス経由も
+    解決不可 — いずれもミニマルモデルクレートで実証）。
+    **解法**: generate_handler にベア識別子を渡し、`main.rs` に
+    `use commands::*;` でコマンド関数を取り込む。隠しマクロは crate root に
+    テキストスコープで解決される（モデル検証済み）。mod.rs は公開関数の
+    再エクスポートのみに戻した。
     （2026-11-10 確認）。
   - ローカルでは pango/cairo の pkg-config 欠落で `cargo check -p trivium-desktop` が止まる。
     src-tauri の Rust コンパイルと deb 生成は CI（debian.yml）で確認する。

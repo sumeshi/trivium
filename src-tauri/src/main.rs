@@ -3,6 +3,13 @@
 mod commands;
 mod state;
 
+// Re-exported command functions, used by `generate_handler!` via bare
+// identifiers: the v2 command macro emits its hidden `__cmd__*` /
+// `__tauri_command_name_*` macros with `#[macro_export]`, which places them
+// at the crate root — so the handler macros resolve textually here, and a
+// module-qualified path (`commands::...`) cannot find them.
+use commands::*;
+
 use tauri::Manager;
 
 use crate::state::AppState;
@@ -18,33 +25,33 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::list_projects,
-            commands::create_project,
-            commands::delete_project,
-            commands::load_project,
-            commands::query_project_rows,
-            commands::save_iocs,
-            commands::import_iocs,
-            commands::export_iocs,
-            commands::update_flag,
-            commands::set_hidden_columns,
-            commands::export_project,
-            commands::column_stats,
-            commands::duplicate_rows,
-            commands::search_projects,
-            commands::diff_projects,
-            commands::histogram,
-            commands::group_tree,
-            commands::time_analysis,
-            commands::surrounding_rows,
-            commands::build_report,
-            commands::bulk_preview,
-            commands::bulk_update,
-            commands::bulk_undo,
-            commands::save_color_rules,
-            commands::color_rules,
-            commands::save_preset,
-            commands::load_preset
+            list_projects,
+            create_project,
+            delete_project,
+            load_project,
+            query_project_rows,
+            save_iocs,
+            import_iocs,
+            export_iocs,
+            update_flag,
+            set_hidden_columns,
+            export_project,
+            column_stats,
+            duplicate_rows,
+            search_projects,
+            diff_projects,
+            histogram,
+            group_tree,
+            time_analysis,
+            surrounding_rows,
+            build_report,
+            bulk_preview,
+            bulk_update,
+            bulk_undo,
+            save_color_rules,
+            color_rules,
+            save_preset,
+            load_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
