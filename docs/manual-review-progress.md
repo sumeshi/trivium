@@ -87,3 +87,57 @@ Recorded: 2026-11-11.
   here and remains for T08b.
 
 Next card: T02.
+
+## T02 — single and bulk annotation updates are partial updates
+
+Recorded: 2026-11-11.
+
+- `crates/engine/src/annotation.rs` (new): `AnnotationPatch` and the pure
+  `apply_annotation_patch(existing, patch)` function. A missing field keeps the
+  stored value; `Some("")` (flag), `Some(None)`/blank (memo), `Some(vec![])`
+  (tags), and `Some(false)` (bookmark) clear that field. The entry is deleted
+  only when the flag is blank, the memo is blank/absent, tags are empty, and
+  the bookmark is false. `deserialize_double_option` separates a missing memo
+  key (`None`) from an explicit `null` (`Some(None)`).
+- `crates/engine/src/ops/flags.rs`: `UpdateFlagPayload.flag` is now
+  `Option<String>` and `memo` is `Option<Option<String>>`; the payload builds
+  an `AnnotationPatch` and `update_flag` persists/deletes through the shared
+  function. The returned `ProjectRow` is derived from the stored entry (its
+  shape is unchanged; T13 narrows it).
+- `crates/engine/src/ops/bulk.rs`: `BulkAnnotatePayload` carries the same patch
+  fields (`flag`, `memo`, optional `tags`, optional `bookmarked`). The manual
+  tags/bookmark carry-over was removed; omitted fields are kept by the patch.
+- `src/lib/backend.ts`: TS `AnnotationPatch` with optional fields;
+  `UpdateFlagArgs` and `BulkAnnotateArgs` extend it. `annotationFields` omits
+  undefined keys from the IPC payload so Rust sees "missing", not null.
+- UI: the flag buttons send `{ flag }` only; the memo dialog sends
+  `{ memo, tags, bookmarked }` (no stale flag); bulk controls still send the
+  selected flag and an explicit memo clear when the memo box is empty.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New regression suite | `cargo test -p trivium-engine --test annotation_patch_test` | 5 passed, 0 failed |
+| Patch unit tests | `cargo test -p trivium-engine --lib annotation::` | 6 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+
+Regression coverage: single flag clear keeps memo/tags/bookmark; memo save
+keeps flag/tags/bookmark and leaves other rows untouched; omitted vs explicit
+clear; bulk flag/memo clear keeps tags/bookmarks and tag-only entries; payload
+serde distinguishes missing, null, and values (`annotation_patch_test.rs`).
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised; only engine tests and the TypeScript
+  checker/build cover the UI call sites.
+- `cargo check -p trivium-desktop` could not run here because the native
+  GTK/GDK development libraries (`gdk-3.0.pc`) are missing. `src-tauri` command
+  signatures are unchanged; CI's Linux job remains the native compile check.
+- Return-value shrinking and avoiding the full Parquet read on a single flag
+  update remain for T13.
+
+Next card: T03.
