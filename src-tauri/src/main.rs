@@ -39,7 +39,9 @@ fn main() {
             commands::bulk_update,
             commands::bulk_undo,
             commands::save_color_rules,
-            commands::color_rules
+            commands::color_rules,
+            commands::save_preset,
+            commands::load_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

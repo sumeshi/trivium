@@ -7,6 +7,7 @@ pub mod group;
 pub mod histogram;
 pub mod flags;
 pub mod iocs;
+pub mod preset;
 pub mod projects;
 mod query;
 pub mod report;
