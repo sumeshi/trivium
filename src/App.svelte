@@ -107,8 +107,10 @@
       creating={$projectState.creating}
       pendingDescription={$projectState.pendingDescription}
       pendingFileName={$projectState.pendingFileName}
+      pendingDelimiter={$projectState.pendingDelimiter}
       canCreateProject={$canCreateProject}
       on:descriptionChange={(e) => projectController.setPendingDescription(e.detail)}
+      on:delimiterChange={(e) => projectController.setPendingDelimiter(e.detail)}
       on:selectProject={(e) => handleSelectProject(e.detail)}
       on:deleteProject={(e) => deleteProject(e.detail)}
       on:pickCsv={pickCsv}

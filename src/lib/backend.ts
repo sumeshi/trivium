@@ -19,6 +19,7 @@ import type {
 export interface CreateProjectArgs {
   description?: string | null;
   path?: string;
+  delimiter?: string | null;
 }
 
 export interface UpdateFlagArgs {
@@ -218,6 +219,7 @@ class NativeBackend implements Backend {
       payload: {
         path: args.path,
         description: args.description ?? null,
+        delimiter: args.delimiter ?? null,
       },
     });
   }

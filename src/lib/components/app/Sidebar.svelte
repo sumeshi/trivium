@@ -13,6 +13,7 @@
   export let creating: boolean;
   export let pendingDescription: string;
   export let pendingFileName: string;
+  export let pendingDelimiter: string;
   export let canCreateProject: boolean;
 
   const truncateText = (text: string, length: number) => {
@@ -22,6 +23,11 @@
   const handleDescriptionInput = (event: Event) => {
     const nextValue = (event.target as HTMLInputElement | null)?.value ?? '';
     dispatch('descriptionChange', nextValue);
+  };
+
+  const handleDelimiterChange = (event: Event) => {
+    const nextValue = (event.target as HTMLSelectElement | null)?.value ?? '';
+    dispatch('delimiterChange', nextValue);
   };
 </script>
 
@@ -96,6 +102,19 @@
             on:input={handleDescriptionInput}
             class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
+          <select
+            id="project-delimiter"
+            aria-label="CSV delimiter"
+            value={pendingDelimiter}
+            on:change={handleDelimiterChange}
+            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+          >
+            <option value="">auto (default)</option>
+            <option value=",">Comma ,</option>
+            <option value={'\t'}>Tab</option>
+            <option value=";">Semicolon ;</option>
+            <option value="|">Pipe |</option>
+          </select>
         </div>
         <button
           class="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 disabled:cursor-not-allowed disabled:bg-emerald-500/30 disabled:text-emerald-900"

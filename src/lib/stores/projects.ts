@@ -13,6 +13,7 @@ export interface ProjectsState {
   pendingDescription: string;
   pendingFilePath: string | null;
   pendingFileName: string;
+  pendingDelimiter: string;
 }
 
 interface LoadDetailOptions {
@@ -34,6 +35,7 @@ export function createProjectController(backend: Backend) {
     pendingDescription: "",
     pendingFilePath: null,
     pendingFileName: "",
+    pendingDelimiter: "",
   };
 
   const state = writable<ProjectsState>(initialState);
@@ -45,6 +47,13 @@ export function createProjectController(backend: Backend) {
     state.update((current) => ({
       ...current,
       pendingDescription: description,
+    }));
+  }
+
+  function setPendingDelimiter(delimiter: string) {
+    state.update((current) => ({
+      ...current,
+      pendingDelimiter: delimiter,
     }));
   }
 
@@ -62,6 +71,7 @@ export function createProjectController(backend: Backend) {
       pendingDescription: "",
       pendingFilePath: null,
       pendingFileName: "",
+      pendingDelimiter: "",
     }));
   }
 
@@ -195,6 +205,7 @@ export function createProjectController(backend: Backend) {
       const summary = await backend.createProject({
         path: current.pendingFilePath,
         description: current.pendingDescription || null,
+        delimiter: current.pendingDelimiter,
       });
 
       resetPending();
@@ -284,6 +295,7 @@ export function createProjectController(backend: Backend) {
     createProject,
     deleteProject,
     setPendingDescription,
+    setPendingDelimiter,
     setPendingFile,
     resetPending,
     updateSummary,
