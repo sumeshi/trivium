@@ -31,6 +31,7 @@
       }
     },
     "bundle": {
+      "active": true,
       "identifier": "com.trivium.app",
       "icon": [
         "icons/icon.ico",

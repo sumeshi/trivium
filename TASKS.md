@@ -699,6 +699,16 @@ src-tauri/src/
     build.yml は main（ワークスペース化前の 0.1.4）のみトリガのため現状問題なし。
   - push 検証: 1 回目は C2 ゲートで I5 の Python 3.10 互換問題が赤化（ゲート動作確認）、
     2 回目は SHA256SUMS のパス誤りで失敗（ゲート・コンパイルは通過）。3 回目でアーティファクト確認予定。
+  - **根本原因の修正（3 回目の CI 失敗で判明）**: `tauri build` が exit 0 なのに
+    deb を生成しない原因は、`tauri.conf.json` の `tauri.bundle.active` 未設定
+    （CLI 1.6.3 のデフォルトは **false** — node_modules/@tauri-apps/cli/schema.json で確認）。
+    v1 CLI の `build.rs` は `if config_.tauri.bundle.active` でバンドリング全体をスキップする。
+    `"active": true` を conf に追加した。併せて、バンドラは `cargo metadata` の
+    target_directory（ワークスペースの root `target/`）配下 `bundle/deb/` に
+    出力することを CLI ソース（interface/rust.rs の `get_target_dir`、
+    bundler の `project_out_directory`）で確認済み。ワークフローのパス修正は正しい。
+    なお main の conf も `active` 未設定のため、build.yml の Windows exe は
+    歴史的報告とは異なり実は生成されていなかった可能性がある（main は旧 conf のまま未修正）。
 
 ### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は実動作で確認済み
 
