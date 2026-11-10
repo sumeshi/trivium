@@ -94,8 +94,23 @@ export const isExporting = writable(false);
 export const isUpdatingColumns = writable(false);
 
 export const rowsCache = writable<Map<number, CachedRow>>(new Map()); // Keyed by row_index
-export const pendingPages = writable<Set<number>>(new Set());
+/** Current screen generation. Bumped on project changes and on unmount. */
+export const viewGeneration = writable(0);
+/** Pending pages are keyed by generation and page so stale responses cannot clear new work. */
+export const pendingPages = writable<Set<string>>(new Set());
 export const loadedPages = writable<Set<number>>(new Set());
+
+export function pendingPageKey(
+  generation: number,
+  searchGeneration: number,
+  page: number
+): string {
+  return `${generation}:${searchGeneration}:${page}`;
+}
+
+export function invalidateViewRequests(): void {
+  viewGeneration.update((value) => value + 1);
+}
 export const totalRows = writable(0);
 export const totalFilteredRows = writable(0);
 /** Annotated rows in the whole project. */

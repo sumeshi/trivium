@@ -15,13 +15,28 @@ const STORAGE_PREFIX = "trivium:view:";
 
 export const canGoBack = writable(false);
 export const canGoForward = writable(false);
-export const historyRestore = writable<{ tree: EditorGroup; offset: number; nonce: number } | null>(null);
+export const historyRestore = writable<{
+  projectId: string | null;
+  tree: EditorGroup;
+  offset: number;
+  nonce: number;
+} | null>(null);
 
 let history: History = emptyHistory(
   { type: "group", id: "root", kind: "and", collapsed: false, children: [] },
   0
 );
 let nonce = 0;
+let historyProjectId: string | null = null;
+
+/**
+ * Bind the history to a project. A queued restore for the previous project is
+ * dropped so it cannot be applied to the newly selected project.
+ */
+export function setHistoryProject(projectId: string | null): void {
+  historyProjectId = projectId;
+  historyRestore.set(null);
+}
 
 function publish(): void {
   canGoBack.set(history.index > 0);
@@ -54,7 +69,12 @@ export function goBack(): void {
   history = next;
   publish();
   const entry = history.entries[history.index];
-  historyRestore.set({ tree: entry.condition, offset: entry.offset, nonce: ++nonce });
+  historyRestore.set({
+    projectId: historyProjectId,
+    tree: entry.condition,
+    offset: entry.offset,
+    nonce: ++nonce,
+  });
 }
 
 export function goForward(): void {
@@ -65,7 +85,12 @@ export function goForward(): void {
   history = next;
   publish();
   const entry = history.entries[history.index];
-  historyRestore.set({ tree: entry.condition, offset: entry.offset, nonce: ++nonce });
+  historyRestore.set({
+    projectId: historyProjectId,
+    tree: entry.condition,
+    offset: entry.offset,
+    nonce: ++nonce,
+  });
 }
 
 export function loadProjectView(projectId: string, columns: readonly string[]): SavedView | null {

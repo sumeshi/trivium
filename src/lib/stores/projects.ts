@@ -23,6 +23,8 @@ interface LoadDetailOptions {
 
 export function createProjectController(backend: Backend) {
   const projectCache = new Map<string, LoadProjectResponse>();
+  /** Monotonic generation for project detail requests. Older responses are ignored. */
+  let detailGeneration = 0;
 
   const initialState: ProjectsState = {
     projects: [],
@@ -115,15 +117,34 @@ export function createProjectController(backend: Backend) {
     }
   }
 
+  function beginDetailRequest(): number {
+    detailGeneration += 1;
+    return detailGeneration;
+  }
+
+  function isCurrentDetailRequest(
+    generation: number,
+    projectId: string
+  ): boolean {
+    return (
+      generation === detailGeneration &&
+      get(state).selectedProjectId === projectId
+    );
+  }
+
   async function loadProjectDetail(
     projectId: string,
     options: LoadDetailOptions = {}
   ) {
     const { force = false, skipLoadingState = false } = options;
+    const requestGeneration = beginDetailRequest();
 
     if (!force) {
       const cached = projectCache.get(projectId);
       if (cached) {
+        if (requestGeneration !== detailGeneration) {
+          return;
+        }
         state.update((value) => ({
           ...value,
           selectedProjectId: projectId,
@@ -145,6 +166,9 @@ export function createProjectController(backend: Backend) {
 
     try {
       const detail = await backend.loadProject(projectId);
+      if (!isCurrentDetailRequest(requestGeneration, projectId)) {
+        return;
+      }
       projectCache.set(projectId, detail);
       state.update((value) => ({
         ...value,
@@ -153,6 +177,10 @@ export function createProjectController(backend: Backend) {
         isLoadingDetail: false,
       }));
     } catch (error) {
+      // A stale failure must not clear the loading state of a newer request.
+      if (!isCurrentDetailRequest(requestGeneration, projectId)) {
+        return;
+      }
       state.update((value) => ({
         ...value,
         isLoadingDetail: false,
@@ -162,6 +190,8 @@ export function createProjectController(backend: Backend) {
   }
 
   async function selectProject(projectId: string) {
+    // Invalidate any in-flight detail request for the previously selected project.
+    beginDetailRequest();
     projectCache.delete(projectId);
     state.update((value) => ({
       ...value,
@@ -170,20 +200,16 @@ export function createProjectController(backend: Backend) {
       isLoadingDetail: true,
     }));
 
-    try {
-      await loadProjectDetail(projectId, { force: true, skipLoadingState: true });
-    } catch (error) {
-      state.update((value) => ({
-        ...value,
-        isLoadingDetail: false,
-      }));
-      throw error;
-    }
+    await loadProjectDetail(projectId, {
+      force: true,
+      skipLoadingState: true,
+    });
   }
 
   async function refreshSelected() {
     const current = get(state);
     if (current.selectedProjectId) {
+      beginDetailRequest();
       projectCache.delete(current.selectedProjectId);
       await loadProjectDetail(current.selectedProjectId, { force: true });
     }

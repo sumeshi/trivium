@@ -112,7 +112,7 @@
     end: number,
     cache: Map<number, CachedRow>,
     posMap: Map<number, number>,
-    pendingPages: Set<number>
+    pendingPages: Set<string>
   ): VirtualRow[] => {
     if (end <= start) {
       return [];

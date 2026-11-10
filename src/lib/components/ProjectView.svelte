@@ -22,6 +22,7 @@
     rememberOffset,
     resetHistory,
     saveProjectView,
+    setHistoryProject,
   } from '../stores/viewHistory';
   import {
     projectDetail as projectDetailStore,
@@ -75,7 +76,10 @@
     PREFETCH_PAGES,
     currentProjectId,
     lastHiddenColumnsRef,
-    positionToRowIndex
+    positionToRowIndex,
+    viewGeneration,
+    pendingPageKey,
+    invalidateViewRequests
   } from './project_view/state';
 import type {
     FlagFilterValue,
@@ -215,6 +219,8 @@ import type {
   };
 
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
+    // Any response from the previous project or screen must be ignored from here on.
+    invalidateViewRequests();
     const previousId = get(currentProjectId);
     if (previousId && previousId !== detail.project.meta.id) {
       flushPersist(previousId);
@@ -226,6 +232,7 @@ import type {
     );
     lastConditionJson = JSON.stringify(get(conditionPayload));
     currentProjectId.set(detail.project.meta.id);
+    setHistoryProject(detail.project.meta.id);
     hiddenColumns.set(hidden);
     searchColumns.set([]);
     sortKey.set(saved?.sortKey ?? null);
@@ -263,15 +270,21 @@ import type {
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
     lastSearchColumnsSignature = filters.searchColumns.join('|');
-    filterRequestId = 0;
+    filterRequestId += 1;
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
+    // Dialog state belongs to the previous project and must not be applied here.
     expandedCell.set(null);
+    memoEditor.set(null);
+    iocManagerOpen.set(false);
+    iocError = null;
+    isSavingIocs = false;
     resetHistory(get(conditionTree), saved?.offset ?? 0);
 
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
+    totalFilteredRows.set(0);
     flaggedCount.set(detail.project.meta.flagged_records);
     applyScrollOffset(saved?.offset ?? 0);
     if ($bodyScrollEl) {
@@ -307,9 +320,12 @@ import type {
 
   $: if ($historyRestore && initialized && $historyRestore.nonce !== appliedRestoreNonce) {
     appliedRestoreNonce = $historyRestore.nonce;
-    applyingHistory = true;
-    conditionTree.set(cloneTree($historyRestore.tree));
-    applyScrollOffset($historyRestore.offset);
+    // A restore recorded for another project must not rewrite this project's view.
+    if ($historyRestore.projectId === $currentProjectId) {
+      applyingHistory = true;
+      conditionTree.set(cloneTree($historyRestore.tree));
+      applyScrollOffset($historyRestore.offset);
+    }
   }
 
   $: if (initialized) {
@@ -385,8 +401,10 @@ import type {
     const lastPage = Math.max(firstPage, Math.floor(lastPosition / PAGE_SIZE) + PREFETCH_PAGES);
     const maxPageIndex = Math.max(0, Math.floor(Math.max(effectiveTotalRows - 1, 0) / PAGE_SIZE));
     const clampedLastPage = Math.min(lastPage, maxPageIndex);
+    const generation = get(viewGeneration);
     for (let page = firstPage; page <= clampedLastPage; page += 1) {
-      if (!$loadedPages.has(page) && !$pendingPages.has(page)) {
+      const pendingKey = pendingPageKey(generation, filterRequestId, page);
+      if (!$loadedPages.has(page) && !$pendingPages.has(pendingKey)) {
         void requestPage(page);
       }
     }
@@ -395,22 +413,36 @@ import type {
   const requestPage = (pageIndex: number, force = false): Promise<void> => {
     if (!projectDetail) return Promise.resolve();
     const normalizedPage = Math.max(0, pageIndex);
+    const requestProjectId = projectDetail.project.meta.id;
+    const requestGeneration = get(viewGeneration);
+    const requestId = filterRequestId;
+    const pendingKey = pendingPageKey(
+      requestGeneration,
+      requestId,
+      normalizedPage
+    );
+    const isCurrentRequest = () =>
+      requestId === filterRequestId &&
+      requestGeneration === get(viewGeneration) &&
+      requestProjectId === get(currentProjectId);
+
     if (!force && $loadedPages.has(normalizedPage)) {
       return Promise.resolve();
     }
-    if (!force && $pendingPages.has(normalizedPage)) {
+    if (!force && $pendingPages.has(pendingKey)) {
       return Promise.resolve();
     }
     const offset = normalizedPage * PAGE_SIZE;
     const limit = PAGE_SIZE;
-    const requestId = filterRequestId;
     const filters = activeFilters;
-    const nextPending = new Set($pendingPages);
-    nextPending.add(normalizedPage);
-    pendingPages.set(nextPending);
+    pendingPages.update((pending) => {
+      const next = new Set(pending);
+      next.add(pendingKey);
+      return next;
+    });
 
     const payload = {
-      projectId: projectDetail.project.meta.id,
+      projectId: requestProjectId,
       flagFilter: filters.flag,
       bookmarkedOnly: filters.bookmarkedOnly,
       search: filters.search.trim(),
@@ -425,10 +457,7 @@ import type {
     return backend
       .queryProjectRows(payload)
       .then((response) => {
-        const nextPendingPages = new Set($pendingPages);
-        nextPendingPages.delete(normalizedPage);
-        pendingPages.set(nextPendingPages);
-        if (requestId !== filterRequestId) {
+        if (!isCurrentRequest()) {
           return;
         }
         totalRows.set(response.total_rows);
@@ -459,9 +488,18 @@ import type {
       })
       .catch((error) => {
         console.error(error);
-        const nextPendingPages = new Set($pendingPages);
-        nextPendingPages.delete(normalizedPage);
-        pendingPages.set(nextPendingPages);
+      })
+      .finally(() => {
+        // Remove only this request's pending key; a stale request must not
+        // clear the pending state of a newer generation.
+        pendingPages.update((pending) => {
+          if (!pending.has(pendingKey)) {
+            return pending;
+          }
+          const next = new Set(pending);
+          next.delete(pendingKey);
+          return next;
+        });
       });
   };
 
@@ -831,6 +869,8 @@ import type {
   });
 
   onDestroy(() => {
+    // Invalidate in-flight page requests from this screen instance.
+    invalidateViewRequests();
     if (persistTimer) {
       clearTimeout(persistTimer);
       persistTimer = null;
