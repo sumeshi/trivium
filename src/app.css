@@ -31,6 +31,15 @@
     --flag-safe-text: var(--fg);
     --flag-suspicious-text: var(--fg);
     --flag-critical-text: #ffffff;
+    /* 条件色パレット。値は src/lib/skin.ts と同期 */
+    --rule-red: #4a2b2f;
+    --rule-orange: #4a3323;
+    --rule-amber: #463d20;
+    --rule-green: #24402f;
+    --rule-teal: #1f3b3b;
+    --rule-blue: #26364f;
+    --rule-purple: #362c4a;
+    --rule-pink: #472a3b;
     --shadow-strong: 0 22px 48px rgba(10, 12, 18, 0.65);
     --shadow-soft: 0 12px 24px rgba(12, 16, 24, 0.42);
   }
@@ -137,5 +146,14 @@
     --flag-safe-text: #092712;
     --flag-suspicious-text: #3d2203;
     --flag-critical-text: #3f0505;
+    /* 条件色パレット。値は src/lib/skin.ts と同期 */
+    --rule-red: #fbe4e4;
+    --rule-orange: #fbe9db;
+    --rule-amber: #faf1d5;
+    --rule-green: #e2f3e8;
+    --rule-teal: #dcf2f0;
+    --rule-blue: #e3ecfb;
+    --rule-purple: #ece6fb;
+    --rule-pink: #fbe4ef;
   }
 }

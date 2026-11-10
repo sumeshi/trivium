@@ -7,11 +7,22 @@ import type {
   LoadProjectResponse,
   ProjectRow,
 } from "../../types";
+import { FLAG_HINTS } from "../../skin";
 
 export const FLAG_OPTIONS = [
-  { value: "safe", label: "Safe", hint: "✓", tone: "safe" },
-  { value: "suspicious", label: "Suspicious", hint: "?", tone: "suspicious" },
-  { value: "critical", label: "Critical", hint: "!", tone: "critical" },
+  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe, tone: "safe" },
+  {
+    value: "suspicious",
+    label: "Suspicious",
+    hint: FLAG_HINTS.suspicious,
+    tone: "suspicious",
+  },
+  {
+    value: "critical",
+    label: "Critical",
+    hint: FLAG_HINTS.critical,
+    tone: "critical",
+  },
 ] as const;
 
 export type FlagFilterValue = FlagSymbol | "all" | "none" | "priority";
@@ -24,9 +35,9 @@ export const FLAG_FILTER_OPTIONS: Array<{
   hint?: string;
 }> = [
   { value: "all", label: "All" },
-  { value: "safe", label: "Safe", hint: "✓" },
-  { value: "suspicious", label: "Suspicious", hint: "?" },
-  { value: "critical", label: "Critical", hint: "!" },
+  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe },
+  { value: "suspicious", label: "Suspicious", hint: FLAG_HINTS.suspicious },
+  { value: "critical", label: "Critical", hint: FLAG_HINTS.critical },
   { value: "priority", label: "Sus + Crit", hint: "!?" },
   { value: "none", label: "Unflagged", hint: "–" },
 ];

@@ -1,14 +1,22 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { get } from "svelte/store";
   import type { ColorRule, CompareOp, ConditionNode } from "../../types";
   import { COMPARE_OPS } from "../../stores/condition";
+  import { theme } from "../../theme";
+  import {
+    CONDITION_COLORS,
+    displayRowColor,
+    resolveConditionColor,
+  } from "../../skin";
   import { backend, projectDetail } from "./state";
 
   let rules: ColorRule[] = [];
   let column = "";
   let op: CompareOp = "contains";
   let value = "";
-  let color = "#ff0000";
+  let color =
+    resolveConditionColor(CONDITION_COLORS[0].name, get(theme)) ?? "#ff0000";
   let message = "";
   let error = "";
   let saving = false;
@@ -109,6 +117,20 @@
   {#if error}
     <p class="condition-count">{error}</p>
   {/if}
+  <div class="color-palette" role="group" aria-label="Color palette">
+    {#each CONDITION_COLORS as entry}
+      <button
+        type="button"
+        class="palette-swatch"
+        class:selected={`var(--rule-${entry.name})` ===
+          displayRowColor(color, $theme)}
+        style={`background-color: var(--rule-${entry.name});`}
+        title={entry.name}
+        aria-label={`Use ${entry.name}`}
+        on:click={() => (color = resolveConditionColor(entry.name, $theme) ?? color)}
+      ></button>
+    {/each}
+  </div>
   <div class="condition-toolbar">
     <select bind:value={column} aria-label="Color rule column">
       {#each columns as name}
@@ -141,7 +163,10 @@
   {:else}
     {#each rules as rule, index (index)}
       <div class="condition-toolbar">
-        <span class="color-swatch" style={`background-color: ${rule.color};`}></span>
+        <span
+          class="color-swatch"
+          style={`background-color: ${displayRowColor(rule.color, $theme)};`}
+        ></span>
         <span class="condition-count">{rule.name} — {describe(rule.condition)}</span>
         <button
           type="button"
@@ -157,6 +182,27 @@
 </div>
 
 <style>
+  .color-palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .palette-swatch {
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .palette-swatch.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
   .color-swatch {
     display: inline-block;
     width: 1rem;

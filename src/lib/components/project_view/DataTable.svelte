@@ -38,6 +38,8 @@
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
   import { conditionPayload } from '../../stores/condition';
+  import { theme } from '../../theme';
+  import { displayRowColor } from '../../skin';
 
   const _toggleSort = toggleSort;
   const _setFlag = setFlag;
@@ -289,7 +291,9 @@
                 class:alt-row={item.position % 2 === 1}
                 class:loading={!item.row}
                 style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
-                  item.row?.color ? ` background-color: ${item.row.color};` : ''
+                  item.row?.color
+                    ? ` background-color: ${displayRowColor(item.row.color, $theme)};`
+                    : ''
                 }`}
               >
                 <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
