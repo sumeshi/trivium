@@ -280,3 +280,58 @@ text.
   behaviour remain for T23/T22. Undo is unchanged (T14).
 
 Next card: T05.
+
+## T05 — stale project and search responses are discarded
+
+Recorded: 2026-11-11.
+
+- `src/lib/stores/projects.ts`: added a monotonic `detailGeneration`.
+  `loadProjectDetail`, `selectProject`, and `refreshSelected` start a new
+  generation before requesting. A detail response (success or failure) only
+  updates `projectDetail`, `selectedProjectId`, `isLoadingDetail`, or
+  `projectCache` when its generation is current and its project id still equals
+  `selectedProjectId`. A stale failure is ignored instead of clearing the
+  loading state of a newer request.
+- `src/lib/components/project_view/state.ts`: added `viewGeneration`,
+  `invalidateViewRequests()`, and `pendingPageKey()`. `pendingPages` changed
+  from `Set<number>` to `Set<string>` keyed by
+  `viewGeneration:filterRequestId:page`, so a stale request can only remove its
+  own entry. `DataTable.svelte` only needed the type change.
+- `ProjectView.svelte`: `requestPage` captures `projectId`, `viewGeneration`,
+  `filterRequestId`, and the page. The success path applies rows, counts, and
+  loaded pages only when all three generations/ids still match. Pending cleanup
+  runs in `finally` for the captured key. Applying a project detail bumps the
+  view generation (and `filterRequestId` is now incremented rather than reset
+  to 0); `onDestroy` also bumps it. Project switches clear `rowsCache`,
+  `pendingPages`, `loadedPages`, totals, the position map, and the
+  `memoEditor` / `expandedCell` / IOC manager dialog state; the old
+  `filtered` total is reset while the new page loads.
+- `src/lib/stores/viewHistory.ts`: `historyRestore` entries now carry the
+  project id captured via `setHistoryProject()`. `ProjectView` ignores a
+  restore whose project id differs from `currentProjectId` and consumes its
+  nonce; switching projects also drops a queued restore. Offset restoration
+  still uses the per-project saved view.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+There is no frontend test runner in this repository, so no unit test was added
+for the generation logic; the TypeScript checker and production build cover
+the call sites.
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised. The completion scenario (A slow, B fast,
+  A→B leaves B's columns/rows/counts/pending unchanged; an old search failure
+  leaves the new search pending intact) has not been reproduced in the app or
+  in a browser mock. It is scheduled for real-app confirmation in T26.
+- Cache limits and request cancellation at the engine boundary remain for
+  T15/T19/T20b.
+
+Next card: T06.
