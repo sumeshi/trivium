@@ -158,7 +158,7 @@ src-tauri/src/
   `src-tauri/src/` に置いた場合のみ exit 1（検証後削除）。
 - 禁止: `*.rs` の実装変更。
 
-### I4: エンジンベンチバイナリ（R0b の後）
+### I4: エンジンベンチバイナリ（R0b の後） → 完了（`e3f80a9`）
 
 - 前提: R0b
 - 対象: 新規 `crates/engine/src/bin/bench.rs`（または `cargo test --release` のみで足りるなら
@@ -170,6 +170,12 @@ src-tauri/src/
   3. 結果を `docs/performance.md` の表に追記
 - 完了条件: `bench` 実行で表が埋まる。数値の良し悪しは問わない（P 層の before になる）。
 - 禁止: 100GB 級の計測（§11 非目標）。
+- 実装メモ: `cargo run --release -p trivium-engine --bin bench -- FIXTURE...` で実行。
+  計測項目: create / sort_first（ts 昇順） / export_all / 検索 A・B の cold+warm 交互 /
+  IOC 100 件の保存+query、+1 件の保存+query / flag_update。
+  fixtures は `gen_fixture.py --seed 42` で 100k・400k・2M を生成（`*.csv` は
+  gitignore 済みのため再生成前提）。結果の表と環境は `docs/performance.md` に記録。
+  B3 の完了条件（400k で flag_update 100ms 以内）も 41ms で計測確認。
 
 ### I5: 往復スモークの自動化 → 完了（`a2fe91d`）
 
