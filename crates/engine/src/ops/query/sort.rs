@@ -2,6 +2,27 @@ use polars::prelude::*;
 
 use crate::value_utils::anyvalue_to_search_string;
 
+/// Numeric sort keys. Integers compare exactly (F26); only mixed int/float
+/// comparisons go through `f64`, matching the previous behavior.
+enum NumericKey {
+    Int(i64),
+    Float(f64),
+}
+
+fn parse_numeric(text: &str) -> Option<NumericKey> {
+    if let Ok(value) = text.parse::<i64>() {
+        return Some(NumericKey::Int(value));
+    }
+    text.parse::<f64>().ok().map(NumericKey::Float)
+}
+
+fn numeric_as_f64(key: &NumericKey) -> f64 {
+    match key {
+        NumericKey::Int(value) => *value as f64,
+        NumericKey::Float(value) => *value,
+    }
+}
+
 /// Row order before filtering. Unchanged when `sort_key` is absent or unknown.
 pub fn ordered_row_indices(
     df: &DataFrame,
@@ -27,13 +48,20 @@ pub fn ordered_row_indices(
             .and_then(|v| anyvalue_to_search_string(&v))
             .map(|s| s.trim().replace(',', "").replace('\u{00A0}', ""));
 
-        let a_num = a_s.as_ref().and_then(|s| s.parse::<f64>().ok());
-        let b_num = b_s.as_ref().and_then(|s| s.parse::<f64>().ok());
+        let a_num = a_s.as_ref().and_then(|s| parse_numeric(s));
+        let b_num = b_s.as_ref().and_then(|s| parse_numeric(s));
 
         if a_num.is_some() || b_num.is_some() {
-            let av = a_num.unwrap_or(f64::INFINITY);
-            let bv = b_num.unwrap_or(f64::INFINITY);
-            let mut ord = av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal);
+            let mut ord = match (&a_num, &b_num) {
+                (Some(NumericKey::Int(av)), Some(NumericKey::Int(bv))) => av.cmp(bv),
+                (Some(av), Some(bv)) => numeric_as_f64(av)
+                    .partial_cmp(&numeric_as_f64(bv))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                // Missing values sort as +infinity (after every number, ascending).
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            };
             if sort_direction == Some("desc") {
                 ord = ord.reverse();
             }
