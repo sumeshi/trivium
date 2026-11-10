@@ -3,6 +3,7 @@
   import type { ProjectRow } from '../../types';
   import {
     backend,
+    columnLabels,
     expandedCell,
     formatCell,
     hiddenColumns,
@@ -149,7 +150,7 @@
         <dl class="row-fields">
           {#each detailColumns as name}
             <dt class:is-focus={name === focusColumn}>
-              {name}{$hiddenColumns.has(name) ? ' (hidden)' : ''}
+              {$columnLabels.get(name) ?? name}{$hiddenColumns.has(name) ? ' (hidden)' : ''}
             </dt>
             <dd>{row.displayCache[name] || '—'}</dd>
           {/each}
@@ -159,7 +160,7 @@
           {#if timeColumns.length > 0}
             <select bind:value={timeColumn} aria-label="Datetime column">
               {#each timeColumns as name}
-                <option value={name}>{name}</option>
+                <option value={name}>{$columnLabels.get(name) ?? name}</option>
               {/each}
             </select>
           {/if}

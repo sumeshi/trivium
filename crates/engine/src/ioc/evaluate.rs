@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::flags::{normalize_flag_value, severity_rank};
 use crate::models::IocEntry;
 use crate::ops::util::ensure_column_text_cache;
+use crate::project_io::is_internal_column;
 use crate::search::{
     build_search_mask_boolean, build_searchable_text, to_rpn, tokenize_search_query, SearchToken,
 };
@@ -104,7 +105,7 @@ fn evaluate_entries_internal(df: &DataFrame, iocs: &[IocEntry]) -> Vec<InternalO
     let all_columns: Vec<String> = df
         .get_column_names()
         .into_iter()
-        .filter(|name| *name != "__rowid")
+        .filter(|name| !is_internal_column(name))
         .map(|name| name.to_string())
         .collect();
 

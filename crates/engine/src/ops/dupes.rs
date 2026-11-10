@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::analysis::dupes::matching_row_indices;
 use crate::error::AppError;
 use crate::models::ProjectRow;
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -35,7 +35,12 @@ pub fn duplicate_rows(
     store: &ProjectsStore,
     payload: DupesPayload,
 ) -> Result<DupesResponse, AppError> {
-    if payload.columns.is_empty() || payload.columns.iter().any(|column| column == "__rowid") {
+    if payload.columns.is_empty()
+        || payload
+            .columns
+            .iter()
+            .any(|column| is_internal_column(column))
+    {
         return Err(AppError::Message("Column not found.".into()));
     }
     let meta = store
@@ -54,12 +59,7 @@ pub fn duplicate_rows(
             .map_err(|_| AppError::Message("Column not found.".into()))?;
         series.push(found);
     }
-    let data_columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let data_columns = super::query::data_columns(&df);
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let indices = matching_row_indices(&series, payload.mode == DupeMode::Duplicates);
     Ok(DupesResponse {

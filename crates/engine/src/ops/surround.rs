@@ -5,7 +5,7 @@ use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::models::ProjectRow;
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::anyvalue_to_json;
@@ -47,7 +47,7 @@ pub fn surrounding_rows(
     store: &ProjectsStore,
     payload: SurroundingRowsPayload,
 ) -> Result<SurroundingRowsResponse, AppError> {
-    if payload.column == "__rowid" {
+    if is_internal_column(&payload.column) {
         return Err(AppError::Message("Column not found.".into()));
     }
     let meta = store
@@ -62,12 +62,7 @@ pub fn surrounding_rows(
     if payload.row_index >= df.height() {
         return Err(AppError::Message("Row not found.".into()));
     }
-    let columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let columns = super::query::data_columns(&df);
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;

@@ -5,7 +5,7 @@ use crate::analysis::time::{analyze_series, TimeAnalysis};
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -55,7 +55,7 @@ pub fn time_analysis(
     store: &ProjectsStore,
     payload: TimeAnalysisPayload,
 ) -> Result<TimeAnalysis, AppError> {
-    if payload.column == "__rowid" {
+    if is_internal_column(&payload.column) {
         return Err(AppError::Message("Column not found.".into()));
     }
     let meta = store
@@ -67,12 +67,7 @@ pub fn time_analysis(
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let columns = super::query::data_columns(&df);
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;

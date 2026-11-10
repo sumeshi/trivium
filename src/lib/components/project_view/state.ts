@@ -77,6 +77,28 @@ export type AppliedFilters = {
 export const projectDetail = writable<LoadProjectResponse | null>(null);
 export const backend = writable<Backend | null>(null);
 
+/**
+ * Maps internal column ids to display labels. Data values, sort keys,
+ * conditions and search scopes keep using the id; only display code reads
+ * this map. Legacy projects map every id to its own name.
+ */
+export const columnLabels = derived(projectDetail, (detail) => {
+  const labels = new Map<string, string>();
+  for (const meta of detail?.columns_meta ?? []) {
+    labels.set(meta.id, meta.label);
+  }
+  for (const id of detail?.columns ?? []) {
+    if (!labels.has(id)) {
+      labels.set(id, id);
+    }
+  }
+  return labels;
+});
+
+export function columnLabel(id: string): string {
+  return get(columnLabels).get(id) ?? id;
+}
+
 export const currentProjectId = writable<string | null>(null);
 export const lastHiddenColumnsRef = writable<string[] | null>(null);
 export const hiddenColumns = writable(new Set<string>());

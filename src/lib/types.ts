@@ -1,3 +1,13 @@
+export interface ColumnMeta {
+  /** Internal column id (`c000001` for new projects, the column name for legacy projects). */
+  id: string;
+  /** Display label. Not guaranteed to be unique. */
+  label: string;
+  /** Original CSV header or JSON Pointer. */
+  source: string;
+  order: number;
+}
+
 export interface ProjectMeta {
   id: string;
   name: string;
@@ -8,6 +18,8 @@ export interface ProjectMeta {
   ioc_applied_records: number;
   source_sha256?: string | null;
   hidden_columns: string[];
+  storage_version?: number;
+  columns?: ColumnMeta[];
 }
 
 export interface ProjectSummary {
@@ -74,7 +86,10 @@ export interface PresetData {
 
 export interface LoadProjectResponse {
   project: ProjectSummary;
+  /** Data column ids in source order. Legacy ids are the original column names. */
   columns: string[];
+  /** Display/source metadata for `columns`. */
+  columns_meta: ColumnMeta[];
   hidden_columns: string[];
   column_max_chars: Record<string, number>;
   column_kinds: Record<string, ColumnKind>;

@@ -4,6 +4,7 @@ use chrono::NaiveDateTime;
 use polars::prelude::{AnyValue, DataFrame, DataType, Series};
 use serde::{Deserialize, Serialize};
 
+use crate::project_io::is_internal_column;
 use crate::value_utils::anyvalue_to_search_string;
 
 /// Column type used by the condition editor and, later, column stats.
@@ -33,7 +34,7 @@ impl ColumnKind {
 pub fn infer_column_kinds(df: &DataFrame) -> HashMap<String, ColumnKind> {
     df.get_columns()
         .iter()
-        .filter(|series| series.name() != "__rowid")
+        .filter(|series| !is_internal_column(series.name()))
         .map(|series| (series.name().to_string(), series_kind(series)))
         .collect()
 }

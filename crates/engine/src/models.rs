@@ -5,6 +5,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+/// Where a data column came from and how it is displayed.
+///
+/// Legacy projects (storage version 0) have no column metadata; their ids and
+/// labels are synthesized from the original frame column names. New projects
+/// use an internal id (`c000001`) so the display label and the source path can
+/// differ from the column the query paths address.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ColumnMeta {
+    /// Internal column id. `c000001` for the new storage format, the original
+    /// column name for legacy projects.
+    pub id: String,
+    /// Display label. Not guaranteed to be unique.
+    pub label: String,
+    /// Original CSV header or JSON Pointer.
+    pub source: String,
+    /// Column order in the source.
+    pub order: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMeta {
     pub id: Uuid,
@@ -19,6 +38,11 @@ pub struct ProjectMeta {
     #[serde(default)]
     pub source_sha256: Option<String>,
     pub hidden_columns: Vec<String>,
+    /// 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
+    #[serde(default)]
+    pub storage_version: u32,
+    #[serde(default)]
+    pub columns: Vec<ColumnMeta>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,7 +83,11 @@ pub struct IocEntry {
 #[derive(Debug, Clone, Serialize)]
 pub struct LoadProjectResponse {
     pub project: ProjectSummary,
+    /// Data column ids in source order. For legacy projects these are the
+    /// original column names.
     pub columns: Vec<String>,
+    /// Display and source metadata for `columns`.
+    pub columns_meta: Vec<ColumnMeta>,
     pub hidden_columns: Vec<String>,
     pub column_max_chars: HashMap<String, usize>,
     pub column_kinds: HashMap<String, String>,

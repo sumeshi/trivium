@@ -25,6 +25,7 @@
     COLUMN_PADDING,
     BUFFER,
     projectDetail,
+    columnLabels,
     toggleSort,
     FLAG_OPTIONS,
     normalizeFlag,
@@ -277,7 +278,7 @@
               on:click={() => _toggleSort(column)}
               aria-pressed={$sortKey === column}
             >
-              <span class="header-label">{column}</span>
+              <span class="header-label">{$columnLabels.get(column) ?? column}</span>
               {#if $sortKey === column}
                 <span class="sort-indicator" aria-hidden="true">
                   {$sortDirection === 'asc' ? '▲' : '▼'}

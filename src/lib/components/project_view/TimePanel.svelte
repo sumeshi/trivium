@@ -3,7 +3,7 @@
   import type { Backend } from "../../backend";
   import type { ConditionNode, TimeAnalysis } from "../../types";
   import { conditionPayload, filterByRange } from "../../stores/condition";
-  import { backend, flagFilter, projectDetail, search, visibleColumns } from "./state";
+  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
 
   let column = "";
@@ -97,7 +97,7 @@
       <span class="filter-label">Time</span>
       <select bind:value={column} aria-label="Time column">
         {#each timeColumns as name}
-          <option value={name}>{name}</option>
+          <option value={name}>{$columnLabels.get(name) ?? name}</option>
         {/each}
       </select>
       <label class="condition-count">

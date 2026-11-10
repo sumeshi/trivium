@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ioc::IocRowOutcome;
 use crate::models::FlagEntry;
+use crate::project_io::is_internal_column;
 
 use super::ioc::final_flags;
 use super::page::filtered_indices;
@@ -46,11 +47,11 @@ pub struct ResolvedTarget {
     pub annotated_total: usize,
 }
 
-/// Data columns in frame order, excluding the internal row id.
+/// Data columns in frame order, excluding internal storage columns.
 pub fn data_columns(df: &DataFrame) -> Vec<String> {
     df.get_column_names()
         .into_iter()
-        .filter(|name| name != &"__rowid")
+        .filter(|name| !is_internal_column(name))
         .map(|name| name.to_string())
         .collect()
 }

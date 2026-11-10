@@ -3,7 +3,7 @@
   import type { Backend } from "../../backend";
   import type { ColumnStats, ConditionNode, Histogram } from "../../types";
   import { conditionPayload, filterByValue } from "../../stores/condition";
-  import { backend, flagFilter, projectDetail, search, visibleColumns } from "./state";
+  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
 
   let column = "";
@@ -125,7 +125,7 @@
     <span class="filter-label">Column stats</span>
     <select bind:value={column} aria-label="Stats column">
       {#each columns as name}
-        <option value={name}>{name}</option>
+        <option value={name}>{$columnLabels.get(name) ?? name}</option>
       {/each}
     </select>
     <label class="condition-count">

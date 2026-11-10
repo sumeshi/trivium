@@ -11,7 +11,7 @@ use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
-use super::query::{filtered_indices, final_flags, prepare_search};
+use super::query::{data_columns, filtered_indices, final_flags, prepare_search};
 use super::util::resolve_columns;
 
 #[derive(Debug, Deserialize)]
@@ -69,12 +69,7 @@ pub fn group_tree(
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let columns = data_columns(&df);
     let resolved = resolve_columns(&df, &requested, "group columns")?;
     let group_series: Vec<Option<&Series>> =
         resolved.iter().map(|name| df.column(name).ok()).collect();

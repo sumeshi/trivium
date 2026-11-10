@@ -12,6 +12,7 @@ use sled::Db;
 
 use crate::{
     models::{ColorRule, FlagEntry},
+    project_io::is_internal_column,
     value_utils::{anyvalue_to_json, value_display_length},
 };
 
@@ -249,7 +250,7 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
     let columns: Vec<String> = df
         .get_column_names()
         .into_iter()
-        .filter(|name| name != &"__rowid")
+        .filter(|name| !is_internal_column(name))
         .map(|name| name.to_string())
         .collect();
     let mut column_max_chars: HashMap<String, usize> = columns

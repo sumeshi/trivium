@@ -13,7 +13,7 @@ use crate::{
     import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
-    project_io::{read_project_dataframe, write_project_dataframe},
+    project_io::{read_project_dataframe, write_project_dataframe, ProjectColumns},
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
         load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
@@ -101,6 +101,10 @@ pub fn create_project(
         ioc_applied_records: 0,
         source_sha256: Some(source_sha256(&source_path)?),
         hidden_columns: Vec::new(),
+        // The importers still write the legacy typed frame until T08b, so new
+        // projects created here remain storage version 0.
+        storage_version: 0,
+        columns: Vec::new(),
     };
 
     let parquet_path = project_dir.join("data.parquet");
@@ -166,12 +170,8 @@ pub fn load_project(
     }
 
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
+    let columns = project_columns.ids();
 
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
@@ -223,6 +223,7 @@ pub fn load_project(
     Ok(LoadProjectResponse {
         project: summary,
         columns,
+        columns_meta: project_columns.columns().to_vec(),
         hidden_columns: meta.hidden_columns.clone(),
         column_max_chars,
         column_kinds: infer_column_kinds(&df)

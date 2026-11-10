@@ -16,8 +16,8 @@ use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
 use super::query::{
-    filtered_indices, final_flags, materialize_page, ordered_row_indices, persist_search_cache,
-    prepare_search,
+    data_columns, filtered_indices, final_flags, materialize_page, ordered_row_indices,
+    persist_search_cache, prepare_search,
 };
 use super::util::resolve_columns;
 
@@ -62,12 +62,7 @@ pub fn build_report(
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let all_columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let all_columns = data_columns(&df);
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
 

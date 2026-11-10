@@ -3,7 +3,7 @@
   import type { Backend } from "../../backend";
   import type { ConditionNode, GroupTreeNode, GroupTreeResponse } from "../../types";
   import { conditionPayload, filterByValues } from "../../stores/condition";
-  import { backend, flagFilter, projectDetail, search, visibleColumns } from "./state";
+  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
 
   type FlatNode = {
@@ -185,7 +185,7 @@
     <span class="filter-label">Grouping</span>
     <select bind:value={pendingColumn} aria-label="Group column">
       {#each columns as name}
-        <option value={name}>{name}</option>
+        <option value={name}>{$columnLabels.get(name) ?? name}</option>
       {/each}
     </select>
     <button type="button" class="ghost" on:click={addColumn} disabled={!pendingColumn}>
@@ -207,7 +207,7 @@
     <div class="condition-toolbar">
       <span class="condition-count">Levels</span>
       {#each selectedColumns as name, index (name)}
-        <span class="condition-count">{index + 1}. {name}</span>
+        <span class="condition-count">{index + 1}. {$columnLabels.get(name) ?? name}</span>
         <button
           type="button"
           class="ghost"

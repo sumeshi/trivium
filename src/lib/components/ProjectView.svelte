@@ -29,6 +29,7 @@
     backend as backendStore,
     visibleColumns,
     hiddenColumns,
+    columnLabels,
     search,
     searchColumns,
     flagFilter,
@@ -172,8 +173,9 @@ import type {
     }
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
-      // Calculate width using maximum character count from Polars
-      const headerChars = Math.min(column.length, WIDTH_LIMIT_CHARS);
+      // Widths use the display label, while the column key stays the internal id.
+      const label = $columnLabels.get(column) ?? column;
+      const headerChars = Math.min(label.length, WIDTH_LIMIT_CHARS);
       const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
       const maxChars = Math.max(headerChars, dataChars);
       const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);

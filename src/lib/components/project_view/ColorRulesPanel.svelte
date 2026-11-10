@@ -9,7 +9,7 @@
     displayRowColor,
     resolveConditionColor,
   } from "../../skin";
-  import { backend, projectDetail } from "./state";
+  import { backend, columnLabels, projectDetail } from "./state";
 
   let rules: ColorRule[] = [];
   let column = "";
@@ -44,7 +44,8 @@
       return `${node.kind.toUpperCase()}(${node.children.map(describe).join(", ")})`;
     }
     const label = COMPARE_OPS.find((item) => item.value === node.op)?.label ?? node.op;
-    return `${node.column} ${label} ${node.values.join(", ")}`;
+    const column = $columnLabels.get(node.column) ?? node.column;
+    return `${column} ${label} ${node.values.join(", ")}`;
   };
 
   const addRule = () => {
@@ -62,7 +63,7 @@
     rules = [
       ...rules,
       {
-        name: `${column} ${op} ${trimmed}`,
+        name: `${$columnLabels.get(column) ?? column} ${op} ${trimmed}`,
         condition,
         color,
       },
@@ -134,7 +135,7 @@
   <div class="condition-toolbar">
     <select bind:value={column} aria-label="Color rule column">
       {#each columns as name}
-        <option value={name}>{name}</option>
+        <option value={name}>{$columnLabels.get(name) ?? name}</option>
       {/each}
     </select>
     <select bind:value={op} aria-label="Color rule operator">

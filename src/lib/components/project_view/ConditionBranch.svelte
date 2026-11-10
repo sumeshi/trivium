@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CompareOp } from "../../types";
   import type { EditorNode } from "../../stores/condition";
-  import { projectDetail } from "./state";
+  import { columnLabels, projectDetail } from "./state";
   import {
     COMPARE_OPS,
     addCondition,
@@ -100,7 +100,7 @@
         aria-label="Column"
       >
         {#each columns as column}
-          <option value={column}>{column}</option>
+          <option value={column}>{$columnLabels.get(column) ?? column}</option>
         {/each}
       </select>
       <select

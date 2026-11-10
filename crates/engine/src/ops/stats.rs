@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::analysis::stats::{summarize_series, ColumnStats};
 use crate::error::AppError;
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::store::ProjectsStore;
 
 #[derive(Debug, Deserialize)]
@@ -24,7 +24,7 @@ pub fn column_stats(
     store: &ProjectsStore,
     payload: ColumnStatsPayload,
 ) -> Result<ColumnStats, AppError> {
-    if payload.column == "__rowid" {
+    if is_internal_column(&payload.column) {
         return Err(AppError::Message("Column not found.".into()));
     }
     let meta = store

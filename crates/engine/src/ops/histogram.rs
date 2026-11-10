@@ -5,7 +5,7 @@ use crate::analysis::histogram::{histogram_series_ranged, Histogram, DEFAULT_BUC
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -42,7 +42,7 @@ fn default_buckets() -> u32 {
 
 /// Equal-width buckets for one numeric or datetime column over the filtered rows.
 pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<Histogram, AppError> {
-    if payload.column == "__rowid" {
+    if is_internal_column(&payload.column) {
         return Err(AppError::Message("Column not found.".into()));
     }
     let meta = store
@@ -57,7 +57,7 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
     let columns: Vec<String> = df
         .get_column_names()
         .into_iter()
-        .filter(|name| name != &"__rowid")
+        .filter(|name| !is_internal_column(name))
         .map(|name| name.to_string())
         .collect();
     let series = df

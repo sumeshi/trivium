@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -12,7 +12,9 @@ use crate::{
     flags::normalize_flag_value,
     ioc::{cached_ioc_outcomes, load_ioc_entries},
     ops::query::{data_columns, ordered_row_indices, resolve_target},
-    project_io::read_project_dataframe,
+    project_io::{
+        read_project_dataframe, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
+    },
     storage::load_flags,
     store::ProjectsStore,
 };
@@ -51,6 +53,7 @@ pub fn export_project(
     // IOC evaluation runs on the full column set so queries targeting hidden
     // columns keep matching even when the export restricts output columns.
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
     let all_columns = data_columns(&df);
 
     // Resolve rows and order before touching output columns. The search scope
@@ -150,22 +153,21 @@ pub fn export_project(
     // data. Annotation metadata now lives in `flags.json` and is exported as
     // the `trivium-*` columns below.
     if let Some(columns) = &payload.columns {
-        let existing: Vec<String> = df
-            .get_column_names()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect();
+        // Output columns are ids, never labels. Filtering happens after the
+        // target and annotations are fixed, and internal columns are excluded.
         let selected: Vec<String> = columns
             .iter()
-            .filter(|name| existing.contains(name))
+            .filter(|name| all_columns.contains(name))
             .cloned()
             .collect();
         df = df
             .select(&selected)
             .map_err(|e| AppError::Message(format!("Failed to select columns: {}", e)))?;
     }
-    if let Ok(next) = df.drop("__rowid") {
-        df = next;
+    for internal in [INTERNAL_ROW_ID, INTERNAL_ORIGINAL] {
+        if let Ok(next) = df.drop(internal) {
+            df = next;
+        }
     }
 
     let mut out_cols: Vec<Series> = Vec::new();
@@ -192,10 +194,36 @@ pub fn export_project(
             .map_err(AppError::from)?;
     }
 
+    // Export headers are display labels, not internal ids. Duplicate labels
+    // are written as-is until T23 adds the id correspondence metadata.
+    let headers: Vec<String> = df
+        .get_column_names()
+        .iter()
+        .map(|name| project_columns.label(name))
+        .collect();
+
     let file = File::create(&destination)
         .with_context(|| format!("failed to create export file {:?}", destination))
         .map_err(AppError::from)?;
-    let mut writer = CsvWriter::new(BufWriter::new(file));
+    let mut writer = BufWriter::new(file);
+
+    // Polars rejects duplicate DataFrame column names, so write the header
+    // separately to keep duplicate display labels intact.
+    let mut header_bytes = Vec::new();
+    {
+        let mut header_writer = csv::Writer::from_writer(&mut header_bytes);
+        header_writer
+            .write_record(&headers)
+            .context("failed to write export CSV header")?;
+        header_writer
+            .flush()
+            .context("failed to flush export CSV header")?;
+    }
+    writer
+        .write_all(&header_bytes)
+        .context("failed to write export CSV header")?;
+
+    let mut writer = CsvWriter::new(writer).include_header(false);
     let mut df_out = df.clone();
     writer
         .finish(&mut df_out)

@@ -3,7 +3,7 @@
   import type { Backend } from "../../backend";
   import type { ConditionNode, Histogram } from "../../types";
   import { conditionPayload, filterByRange } from "../../stores/condition";
-  import { backend, flagFilter, projectDetail, search, visibleColumns } from "./state";
+  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
 
   const BUCKET_COUNT = 60;
@@ -303,7 +303,7 @@
           Column
           <select bind:value={column} aria-label="Timeline column">
             {#each timeColumns as name}
-              <option value={name}>{name}</option>
+              <option value={name}>{$columnLabels.get(name) ?? name}</option>
             {/each}
           </select>
         </label>

@@ -5,6 +5,7 @@ use polars::prelude::*;
 use serde_json::Value;
 
 use crate::condition::{and_nodes, eval, search_to_node, Node};
+use crate::project_io::is_internal_column;
 use crate::search::{ensure_searchable_text, tokenize_search_query, SearchToken};
 use crate::storage::{load_searchable_cache, save_searchable_cache};
 use crate::value_utils::anyvalue_to_search_string;
@@ -112,7 +113,7 @@ fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Vec<bool> {
     for row_idx in 0..df.height() {
         let mut row: HashMap<String, Value> = HashMap::new();
         for series in df.get_columns() {
-            if series.name() == "__rowid" {
+            if is_internal_column(series.name()) {
                 continue;
             }
             if let Ok(value) = series.get(row_idx) {

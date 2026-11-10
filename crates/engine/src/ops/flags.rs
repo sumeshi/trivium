@@ -13,6 +13,7 @@ use crate::{
     store::ProjectsStore,
 };
 
+use super::query::data_columns;
 use super::util::{collect_row_record, matched_rule_color};
 
 #[derive(Debug, Deserialize)]
@@ -83,12 +84,7 @@ pub fn update_flag(
 
     let parquet_path = project_dir.join("data.parquet");
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let column_names: Vec<String> = df
-        .get_column_names()
-        .iter()
-        .filter(|name| **name != "__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let column_names = data_columns(&df);
     let record = collect_row_record(&df, &column_names, payload.row_index);
 
     // Same failure-tolerant behavior as the query path: a broken color file

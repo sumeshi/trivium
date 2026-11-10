@@ -11,6 +11,7 @@
     isUpdatingColumns,
     projectDetail,
     backend,
+    columnLabels,
     FLAG_FILTER_OPTIONS
   } from './state';
   import type { FlagFilterValue } from './state';
@@ -155,7 +156,9 @@
       type="search"
     />
     <span class="condition-count" title="Search scope">
-      {$searchColumns.length === 0 ? 'All columns' : $searchColumns.join(', ')}
+      {$searchColumns.length === 0
+        ? 'All columns'
+        : $searchColumns.map((column) => $columnLabels.get(column) ?? column).join(', ')}
     </span>
   </label>
   <div class="filter-columns">
@@ -183,7 +186,7 @@
                   disabled={$isUpdatingColumns}
                   on:change={() => toggleColumn(column)}
                 />
-                <label for="column-{column}">{column}</label>
+                <label for="column-{column}">{$columnLabels.get(column) ?? column}</label>
               </li>
             {/each}
           </ul>
