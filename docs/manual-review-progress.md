@@ -442,3 +442,69 @@ clamp have no automated UI test.
   browser mock. They are scheduled for real-app confirmation in T26.
 
 Next card: T08a.
+
+## T08a — column ids and the original record storage format
+
+Recorded: 2026-11-11.
+
+- `crates/engine/src/models.rs`: added `ColumnMeta { id, label, source, order }`
+  and `ProjectMeta { storage_version, columns }`. Both new metadata fields
+  default for existing `projects.json`, so old projects deserialize unchanged.
+  `LoadProjectResponse` now returns `columns_meta` alongside the compatibility
+  `columns` list.
+- `crates/engine/src/project_io.rs`: added `INTERNAL_ROW_ID` / `INTERNAL_ORIGINAL`
+  and `is_internal_column` as the single internal-column exclusion list. Added
+  `ProjectColumns` (id → label/source/order lookup; legacy projects synthesize
+  ids, labels and sources from the frame column names) and
+  `read_original_records`, which parses the new `__original` JSON column per
+  row.
+- `crates/engine/src/ops/projects.rs`: `load_project` builds columns from
+  metadata. Legacy projects keep the original names as ids, labels and sources;
+  no new id is guessed for them. New projects return internal ids in `columns`,
+  labels/sources/order in `columns_meta`, and keys in `column_kinds` /
+  `column_max_chars` by id. Internal columns are excluded.
+- Query, condition, sort, export, stats, histogram, time, group, dupes, report,
+  flags, surround, IOC and search paths now exclude `__rowid` and `__original`
+  through the shared helper. Column references keep using ids (legacy ids are
+  the old names), so existing conditions, presets and search scopes keep
+  working.
+- `crates/engine/src/export/csv.rs`: output columns are resolved by id and
+  exclude internal columns. CSV headers are display labels; because Polars
+  rejects duplicate DataFrame names, the header row is written separately with
+  the `csv` crate and Polars writes only the body. Duplicate labels are emitted
+  as-is until T23 adds the id correspondence metadata.
+- Frontend: `ColumnMeta` and `columns_meta` were added to `types.ts`. A derived
+  `columnLabels` map in `project_view/state.ts` resolves id → label for display.
+  Data table headers, condition/column pickers, search-scope text, stats,
+  grouping, time, timeline, color-rule and row-detail labels use that map.
+  Values, sort keys, conditions, search scopes, hidden columns and output
+  columns still use ids, so legacy projects display and behave as before.
+- `crates/engine/tests/storage_v2_test.rs`: a hand-built storage-version-2
+  fixture covers metadata loading, internal-column exclusion, two columns with
+  the same label addressed by different ids, a data column whose label equals
+  `__rowid`, original JSON records with long integers / explicit null / missing
+  keys / nested and dotted keys, label-based export headers, and the legacy
+  project path.
+- The CSV/JSONL/JSON importers were not changed. `create_project` still writes
+  the legacy typed frame and records `storage_version = 0` until T08b.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | 123 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised. The label display and id-based value access
+  have no automated UI test in this repository; the real-app confirmation is
+  scheduled for T26.
+- The new storage format is covered by the hand-built fixture only. No real
+  import writes `__original` or `c000001` ids until T08b, and no legacy project
+  was converted or overwritten.
+- `read_original_records` is exercised by the fixture; no UI path reads it yet.
+
+Next card: T08b.
