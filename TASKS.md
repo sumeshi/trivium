@@ -583,7 +583,7 @@ src-tauri/src/
   数値 vs テキストは f64 + テキスト=+inf、null は数値の後・テキストの前）を維持。
   計測: 2M sort_first 700ms → 521ms、400k 122ms → 113ms（docs/performance.md 参照）。
 
-### P2: 検索キャンセルと二重取得の削減（フロント）
+### P2: 検索キャンセルと二重取得の削減（フロント） → 実装済み（v1 コードに存在）、GUI 操作は未確認
 
 - 前提: I5
 - 対象: `src/lib/components/ProjectView.svelte`（filterTimeout/filterRequestId 周り）、
@@ -592,6 +592,15 @@ src-tauri/src/
   同一ページの重複発行を `pendingPages` で排除。Abort は不要（無視で十分）。
 - 完了条件: 40 万行 fixtures で検索文字列連続入力時の表示が最終条件のみになることを
   手動確認 1 回 + I5 通過。
+- 確認メモ（2026-11-10）: カードに記載の機構は v1 の 0.1.4 系コミット
+  （`4580132` "fix: more speeeeed" 等で導入）から現コードに存在する。
+  - デバウンス: `filterTimeout`（160ms、`ProjectView.svelte` の scheduleFilters）
+  - 応答採用: `requestPage` が `filterRequestId` をキャプチャし、
+    `requestId !== filterRequestId` の応答は破棄（`ProjectView.svelte:441`）
+  - 同一ページ重複排除: `pendingPages`（`:410`）+ フィルタ署名の同一適用スキップ
+    （`applyFilters` の `lastAppliedFilters`）
+  I5 スモーク 20 件 0 失敗、`npm run lint` 0 エラー。
+  GUI の手動確認はローカルで webkit2gtk が使えないため未確認（§0 の制約）。
 
 ### P3: キャッシュ無効化の明文化
 
