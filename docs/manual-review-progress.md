@@ -55,3 +55,35 @@ regenerates 100k / 400k / 2M rows into git-ignored `fixtures/`.
   not annotation metadata.
 
 App behaviour was not changed by this card.
+
+## T01 — CSV export keeps input `flag`/`memo` columns
+
+Recorded: 2026-11-11.
+
+- `crates/engine/src/export/csv.rs`: removed the unconditional `flag` and
+  `memo` drops. Only the internal `__rowid` column is removed. Input columns
+  named `flag`/`memo` are ordinary data; annotation metadata comes from
+  `flags.json` and is exported as the `trivium-*` columns.
+- `crates/engine/tests/export_options_test.rs`: added
+  `input_flag_and_memo_columns_survive_export_with_annotations`. It imports a
+  `flag,memo,msg` fixture, annotates row 0 (`safe`, memo, tag), exports without
+  a column list, and asserts the header contains both `flag,memo,msg` and
+  `trivium-*`, with the original values and `trivium-memo` intact.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Targeted test | `cargo test -p trivium-engine --test export_options_test` | 5 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+
+### Unverified / deferred
+
+- GUI export was not exercised; only the engine test above.
+- An input column named `__rowid` is still overwritten at import time, so its
+  original values are lost before export. Import-side handling is out of scope
+  here and remains for T08b.
+
+Next card: T02.
