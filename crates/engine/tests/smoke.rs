@@ -1121,8 +1121,8 @@ fn flag_update_and_flag_filter() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
-            flag: "suspicious".to_string(),
-            memo: Some("manual note".to_string()),
+            flag: Some("suspicious".to_string()),
+            memo: Some(Some("manual note".to_string())),
             tags: None,
             bookmarked: None,
         },
@@ -1168,7 +1168,7 @@ fn ioc_apply_and_query() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
-            flag: "safe".to_string(),
+            flag: Some("safe".to_string()),
             memo: None,
             tags: None,
             bookmarked: None,
@@ -1182,7 +1182,7 @@ fn ioc_apply_and_query() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 7,
-            flag: "safe".to_string(),
+            flag: Some("safe".to_string()),
             memo: None,
             tags: None,
             bookmarked: None,
@@ -1247,8 +1247,8 @@ fn export_and_reimport_roundtrip() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
-            flag: "suspicious".to_string(),
-            memo: Some("manual note".to_string()),
+            flag: Some("suspicious".to_string()),
+            memo: Some(Some("manual note".to_string())),
             tags: None,
             bookmarked: None,
         },

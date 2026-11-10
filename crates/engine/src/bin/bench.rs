@@ -149,8 +149,8 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
             UpdateFlagPayload {
                 project_id: id,
                 row_index: 0,
-                flag: "safe".to_string(),
-                memo: Some("bench".to_string()),
+                flag: Some("safe".to_string()),
+                memo: Some(Some("bench".to_string())),
                 tags: None,
                 bookmarked: None,
             },

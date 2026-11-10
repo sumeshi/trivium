@@ -97,8 +97,10 @@ fn payload(
         columns: None,
         flag_filter: None,
         condition: None,
-        flag: flag.to_string(),
-        memo: memo.map(|value| value.to_string()),
+        flag: Some(flag.to_string()),
+        memo: memo.map(|value| Some(value.to_string())),
+        tags: None,
+        bookmarked: None,
     }
 }
 

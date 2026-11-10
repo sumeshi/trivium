@@ -2,8 +2,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
+    annotation::{apply_annotation_patch, deserialize_double_option, AnnotationPatch},
     error::AppError,
-    models::{FlagEntry, ProjectRow},
+    models::ProjectRow,
     project_io::read_project_dataframe,
     storage::{
         clear_searchable_cache, count_flagged, load_color_rules, load_flags, remove_flag,
@@ -19,15 +20,29 @@ pub struct UpdateFlagPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub row_index: usize,
-    pub flag: String,
+    /// `None` keeps the stored flag; `Some("")` clears it.
     #[serde(default)]
-    pub memo: Option<String>,
+    pub flag: Option<String>,
+    /// `None` keeps the stored memo; `Some(None)` or a blank string clears it.
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub memo: Option<Option<String>>,
     /// `None` keeps the stored tags; `Some` replaces them.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// `None` keeps the stored bookmark state.
     #[serde(default)]
     pub bookmarked: Option<bool>,
+}
+
+impl UpdateFlagPayload {
+    fn annotation(&self) -> AnnotationPatch {
+        AnnotationPatch {
+            flag: self.flag.clone(),
+            memo: self.memo.clone(),
+            tags: self.tags.clone(),
+            bookmarked: self.bookmarked,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,32 +66,11 @@ pub fn update_flag(
         .map_err(AppError::from)?
         .get(&payload.row_index)
         .cloned();
-    let new_tags = payload
-        .tags
-        .clone()
-        .unwrap_or_else(|| existing.as_ref().map(|entry| entry.tags.clone()).unwrap_or_default());
-    let new_bookmarked = payload
-        .bookmarked
-        .unwrap_or_else(|| existing.as_ref().is_some_and(|entry| entry.bookmarked));
-    let should_clear = payload.flag.trim().is_empty()
-        && payload
-            .memo
-            .as_ref()
-            .map(|m| m.trim().is_empty())
-            .unwrap_or(true)
-        && new_tags.is_empty()
-        && !new_bookmarked;
+    let next = apply_annotation_patch(existing.as_ref(), &payload.annotation());
 
-    if should_clear {
-        remove_flag(&flags_path, payload.row_index).map_err(AppError::from)?;
-    } else {
-        let entry = FlagEntry {
-            flag: payload.flag.clone(),
-            memo: payload.memo.clone(),
-            tags: new_tags.clone(),
-            bookmarked: new_bookmarked,
-        };
-        upsert_flag(&flags_path, payload.row_index, &entry).map_err(AppError::from)?;
+    match &next {
+        Some(entry) => upsert_flag(&flags_path, payload.row_index, entry).map_err(AppError::from)?,
+        None => remove_flag(&flags_path, payload.row_index).map_err(AppError::from)?,
     }
 
     // The IOC outcome cache is independent of user flags, so a flag update
@@ -113,10 +107,13 @@ pub fn update_flag(
     Ok(ProjectRow {
         row_index: payload.row_index,
         data: record,
-        flag: payload.flag,
-        memo: payload.memo,
-        tags: if should_clear { Vec::new() } else { new_tags },
-        bookmarked: if should_clear { false } else { new_bookmarked },
+        flag: next.as_ref().map(|entry| entry.flag.clone()).unwrap_or_default(),
+        memo: next.as_ref().and_then(|entry| entry.memo.clone()),
+        tags: next
+            .as_ref()
+            .map(|entry| entry.tags.clone())
+            .unwrap_or_default(),
+        bookmarked: next.as_ref().is_some_and(|entry| entry.bookmarked),
         color,
     })
 }

@@ -5,6 +5,7 @@ use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::annotation::{apply_annotation_patch, deserialize_double_option, AnnotationPatch};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::models::FlagEntry;
@@ -32,9 +33,30 @@ pub struct BulkAnnotatePayload {
     pub flag_filter: Option<String>,
     #[serde(default)]
     pub condition: Option<crate::condition::Node>,
-    // 適用内容
-    pub flag: String,
-    pub memo: Option<String>,
+    // 適用内容（省略したフィールドは既存値を維持する）
+    /// `None` keeps the stored flag; `Some("")` clears it.
+    #[serde(default)]
+    pub flag: Option<String>,
+    /// `None` keeps the stored memo; `Some(None)` or a blank string clears it.
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub memo: Option<Option<String>>,
+    /// `None` keeps the stored tags; `Some(vec![])` clears them.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// `None` keeps the stored bookmark state; `Some(false)` clears it.
+    #[serde(default)]
+    pub bookmarked: Option<bool>,
+}
+
+impl BulkAnnotatePayload {
+    fn annotation(&self) -> AnnotationPatch {
+        AnnotationPatch {
+            flag: self.flag.clone(),
+            memo: self.memo.clone(),
+            tags: self.tags.clone(),
+            bookmarked: self.bookmarked,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -176,27 +198,16 @@ pub fn bulk_update(
         .map(|&row_index| (row_index, flags.get(&row_index).cloned()))
         .collect();
 
-    // update_flag と同じ should_clear 規約: flag も memo も空ならエントリ削除。
-    let should_clear = payload.flag.trim().is_empty()
-        && payload
-            .memo
-            .as_ref()
-            .map(|memo| memo.trim().is_empty())
-            .unwrap_or(true);
+    // 一括対象にも単行更新と同じ patch を適用する。省略したフィールドは
+    // 行ごとの既存値を維持し、全フィールドが空になった行だけ削除する。
+    let patch = payload.annotation();
     for &row_index in &target {
-        if should_clear {
-            remove_flag(&flags_path, row_index).map_err(AppError::from)?;
-        } else {
-            // The bulk payload only carries flag/memo; tags and bookmarks are
-            // per-row user data and must survive the overwrite.
-            let existing = flags.get(&row_index);
-            let entry = FlagEntry {
-                flag: payload.flag.clone(),
-                memo: payload.memo.clone(),
-                tags: existing.map(|entry| entry.tags.clone()).unwrap_or_default(),
-                bookmarked: existing.is_some_and(|entry| entry.bookmarked),
-            };
-            upsert_flag(&flags_path, row_index, &entry).map_err(AppError::from)?;
+        let next = apply_annotation_patch(flags.get(&row_index), &patch);
+        match next {
+            Some(entry) => {
+                upsert_flag(&flags_path, row_index, &entry).map_err(AppError::from)?
+            }
+            None => remove_flag(&flags_path, row_index).map_err(AppError::from)?,
         }
     }
 

@@ -22,13 +22,20 @@ export interface CreateProjectArgs {
   delimiter?: string | null;
 }
 
-export interface UpdateFlagArgs {
+export interface AnnotationPatch {
+  /** `undefined` keeps the stored flag; `""` clears it. */
+  flag?: "" | "safe" | "suspicious" | "critical";
+  /** `undefined` keeps the stored memo; `null` or `""` clears it. */
+  memo?: string | null;
+  /** `undefined` keeps the stored tags; `[]` clears them. */
+  tags?: string[];
+  /** `undefined` keeps the stored bookmark; `false` clears it. */
+  bookmarked?: boolean;
+}
+
+export interface UpdateFlagArgs extends AnnotationPatch {
   projectId: string;
   rowIndex: number;
-  flag: string;
-  memo: string | null;
-  tags?: string[] | null;
-  bookmarked?: boolean | null;
 }
 
 export interface HiddenColumnsArgs {
@@ -160,7 +167,7 @@ export interface GroupTreeArgs {
   condition?: ConditionNode | null;
 }
 
-export interface BulkAnnotateArgs {
+export interface BulkAnnotateArgs extends AnnotationPatch {
   projectId: string;
   target: "selection" | "filter" | "all";
   rowIndices?: number[];
@@ -168,8 +175,6 @@ export interface BulkAnnotateArgs {
   flagFilter?: FlagFilterValue;
   columns?: string[];
   condition?: ConditionNode | null;
-  flag: string;
-  memo: string | null;
 }
 
 export interface BulkUndoArgs {
@@ -203,6 +208,29 @@ export interface Backend {
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
+}
+
+/**
+ * Keeps AnnotationPatch's omission semantics across IPC: only fields the
+ * caller supplied are sent, so an absent key means "keep the stored value".
+ */
+function annotationFields(
+  args: AnnotationPatch
+): Record<string, string | string[] | boolean | null> {
+  const fields: Record<string, string | string[] | boolean | null> = {};
+  if (args.flag !== undefined) {
+    fields.flag = args.flag;
+  }
+  if (args.memo !== undefined) {
+    fields.memo = args.memo;
+  }
+  if (args.tags !== undefined) {
+    fields.tags = args.tags;
+  }
+  if (args.bookmarked !== undefined) {
+    fields.bookmarked = args.bookmarked;
+  }
+  return fields;
 }
 
 class NativeBackend implements Backend {
@@ -331,8 +359,7 @@ class NativeBackend implements Backend {
         flagFilter: args.flagFilter ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
-        flag: args.flag,
-        memo: args.memo,
+        ...annotationFields(args),
       },
     });
   }
@@ -347,8 +374,7 @@ class NativeBackend implements Backend {
         flagFilter: args.flagFilter ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
-        flag: args.flag,
-        memo: args.memo,
+        ...annotationFields(args),
       },
     });
   }
@@ -433,10 +459,7 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         row_index: args.rowIndex,
-        flag: args.flag,
-        memo: args.memo,
-        tags: args.tags ?? null,
-        bookmarked: args.bookmarked ?? null,
+        ...annotationFields(args),
       },
     });
   }

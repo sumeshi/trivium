@@ -59,8 +59,8 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             UpdateFlagPayload {
                 project_id: summary.meta.id,
                 row_index,
-                flag: flag.to_string(),
-                memo: memo.map(|m| m.to_string()),
+                flag: Some(flag.to_string()),
+                memo: memo.map(|m| Some(m.to_string())),
                 tags: None,
                 bookmarked: None,
             },

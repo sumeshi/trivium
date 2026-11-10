@@ -80,7 +80,6 @@
       await $backend.updateFlag({
         projectId: $projectDetail.project.meta.id,
         rowIndex: $memoEditor.row.row_index,
-        flag: $memoEditor.row.flag,
         memo: sanitized.length ? sanitized : null,
         tags,
         bookmarked

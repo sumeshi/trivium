@@ -269,7 +269,6 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
       projectId: projectDetailInstance.project.meta.id,
       rowIndex: row.row_index, // Still send row_index to backend
       flag: nextFlag ?? "",
-      memo: row.memo && row.memo.trim().length ? row.memo : null,
     });
   } catch (error) {
     console.error(error);

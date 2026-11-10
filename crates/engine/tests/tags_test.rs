@@ -93,8 +93,8 @@ fn update(
         UpdateFlagPayload {
             project_id: id,
             row_index,
-            flag: flag.to_string(),
-            memo: memo.map(|value| value.to_string()),
+            flag: Some(flag.to_string()),
+            memo: memo.map(|value| Some(value.to_string())),
             tags: tags.map(|values| values.into_iter().map(str::to_string).collect()),
             bookmarked,
         },
@@ -196,8 +196,10 @@ fn bulk_update_keeps_tags_and_bookmarks_and_undo_restores_them() {
             columns: None,
             flag_filter: None,
             condition: None,
-            flag: "safe".to_string(),
+            flag: Some("safe".to_string()),
             memo: None,
+            tags: None,
+            bookmarked: None,
         },
     )
     .expect("bulk update failed");

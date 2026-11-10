@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
-  import type { BulkAnnotateArgs } from "../../backend";
+  import type { AnnotationPatch, BulkAnnotateArgs } from "../../backend";
   import { conditionPayload } from "../../stores/condition";
   import {
     backend,
@@ -12,7 +12,7 @@
   } from "./state";
 
   let target: "filter" | "all" = "filter";
-  let flag: string = FLAG_OPTIONS[0].value;
+  let flag: NonNullable<AnnotationPatch["flag"]> = FLAG_OPTIONS[0].value;
   let memo = "";
   let count: number | null = null;
   let error = "";

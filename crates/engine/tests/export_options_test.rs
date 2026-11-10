@@ -196,8 +196,8 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
-            flag: "safe".to_string(),
-            memo: Some("investigated".to_string()),
+            flag: Some("safe".to_string()),
+            memo: Some(Some("investigated".to_string())),
             tags: Some(vec!["alpha".to_string()]),
             bookmarked: None,
         },

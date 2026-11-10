@@ -223,7 +223,7 @@ fn update_flag_returns_matching_row_color() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 0,
-            flag: "suspicious".to_string(),
+            flag: Some("suspicious".to_string()),
             memo: None,
             tags: None,
             bookmarked: None,
@@ -238,7 +238,7 @@ fn update_flag_returns_matching_row_color() {
         UpdateFlagPayload {
             project_id: id,
             row_index: 6,
-            flag: "safe".to_string(),
+            flag: Some("safe".to_string()),
             memo: None,
             tags: None,
             bookmarked: None,
