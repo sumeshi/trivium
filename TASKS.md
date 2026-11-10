@@ -615,6 +615,28 @@ src-tauri/src/
   `scripts/check_rust_size.sh`（exit 0）、`npm run build` 成功。
 - GUI はローカルで起動できないため、テーマ切替による実画面の追従は未確認。
 
+#### F29: タイムラインビュー → 実装済み（`0d14a0e`）、GUI 操作は未確認
+
+- 前提: F3, F10
+- 手順: 時間軸バービジュアル + ズーム/パン + ドラッグ期間選択。既存の
+  filterByRange と条件ツリー、histogram エンジンの range 窓拡張を利用。
+- 完了条件: バケット合計 + outside + missing = フィルタ後行数（テスト固定）。
+  ズーム/パン/ドラッグが条件ツリーに反映される（GUI 確認は deb で実施）。
+- 実装メモ: `HistogramPayload` に `range { min, max }`、`Histogram` に
+  `outside`（serde default 0）を追加。`analysis/histogram.rs` に
+  `histogram_series_ranged` を足し、int/float/datetime は既存の値パース規則で
+  窓境界を解釈、窓外を `outside` に数える。range 無しは従来の
+  `histogram_series` 経路をそのまま通す。フロントは
+  `TimelinePanel.svelte` を新設し、datetime 列の SVG バー（最大値で正規化）、
+  バークリック/ドラッグで `filterByRange`、`+`/`−`/ホイールの 20% ズーム、
+  `←`/`→` の 50% パン、Reset、窓のバケット境界スナップ、列・フィルタ変更時の
+  リセット、折り畳みのテキストバケットリストを実装。リクエストは TimePanel と
+  同じ ticket 方式で stale を破棄。テストは
+  `histogram_range_counts_outside_values`（int/datetime のパリティ、serde、
+  不正境界）を追加。`cargo test -p trivium-engine`・
+  `scripts/check_rust_size.sh`・`npm run lint`（0 errors / 0 warnings）・
+  `npm run build` は成功。GUI 操作はローカルで起動できないため未確認。
+
 ## 8. P 層 — 性能（I4 の before に対し after を出す。数値なしなら完了としない）
 
 ### P1: ソートキーの事前計算 → 完了（`121e9b0`）
