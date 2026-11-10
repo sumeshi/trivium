@@ -8,7 +8,7 @@ use uuid::Uuid;
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::ops::{projects, rows};
 use trivium_engine::store::ProjectsStore;
 
@@ -68,11 +68,14 @@ fn default_scope_exports_every_row() {
             project_id: id,
             destination: String::new(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -92,15 +95,18 @@ fn filtered_scope_row_count_matches_query_total() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: Some("max row".to_string()),
-            search_columns: None,
-            flag_filter: None,
-            bookmarked_only: None,
+            spec: QuerySpec {
+                search: Some("max row".to_string()),
+                search_columns: None,
+                flag_filter: None,
+                bookmarked_only: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
         },
     )
     .expect("query failed");
@@ -112,11 +118,14 @@ fn filtered_scope_row_count_matches_query_total() {
             project_id: id,
             destination: String::new(),
             scope: Some("filtered".to_string()),
-            search: Some("max row".to_string()),
-            condition: None,
+            spec: QuerySpec {
+                search: Some("max row".to_string()),
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -146,11 +155,14 @@ fn columns_option_limits_output_columns() {
             project_id: id,
             destination: String::new(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: Some(vec!["msg".to_string()]),
-            sort_key: None,
-            sort_direction: None,
         },
     );
     let header = exported.lines().next().expect("export must have a header");
@@ -211,11 +223,14 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             project_id: id,
             destination: String::new(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -267,15 +282,18 @@ fn sort_options_reflect_exported_row_order() {
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let id = create(&store, &root);
 
-    let build_payload = |direction: &str| ExportProjectPayload {
+    let build_payload = |direction: &str|     ExportProjectPayload {
         project_id: id,
         destination: String::new(),
         scope: None,
-        search: None,
-        condition: None,
+        spec: QuerySpec {
+            search: None,
+            condition: None,
+            sort_key: Some("eventid".to_string()),
+            sort_direction: Some(direction.to_string()),
+            ..Default::default()
+        },
         columns: None,
-        sort_key: Some("eventid".to_string()),
-        sort_direction: Some(direction.to_string()),
     };
 
     let asc = run_export(&store, &root, build_payload("asc"));

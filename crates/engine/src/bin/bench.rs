@@ -50,15 +50,17 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
 
     let build_query = |search: Option<String>, sort: Option<String>| QueryRowsPayload {
         project_id: id,
-        search,
-        search_columns: None,
-        flag_filter: None,
-        bookmarked_only: None,
+        spec: trivium_engine::ops::rows::QuerySpec {
+            search,
+            search_columns: None,
+            flag_filter: None,
+            bookmarked_only: None,
+            sort_key: sort,
+            sort_direction: Some("asc".to_string()),
+            condition: None,
+        },
         offset: None,
         limit: Some(100),
-        sort_key: sort,
-        sort_direction: Some("asc".to_string()),
-        condition: None,
     };
 
     timed("sort_first", || {
@@ -72,11 +74,8 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
                 project_id: id,
                 destination: root.join("bench-export.csv").to_string_lossy().to_string(),
                 scope: None,
-                search: None,
-                condition: None,
+                spec: Default::default(),
                 columns: None,
-                sort_key: None,
-                sort_direction: None,
             },
         )
     })?;

@@ -2,11 +2,15 @@ mod ioc;
 mod page;
 mod search;
 mod sort;
+mod target;
 
 pub(crate) use ioc::final_flags;
 pub(crate) use page::{filtered_indices, materialize_page};
 pub(crate) use search::{persist_search_cache, prepare_search};
 pub(crate) use sort::ordered_row_indices;
+pub use target::{
+    data_columns, resolve_target, spec_token_json, QuerySpec, ResolvedTarget,
+};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,31 +28,19 @@ use super::util::{matched_rule_color, DEFAULT_PAGE_SIZE};
 
 /// QuerySpec fields (shared contract) plus project selection and paging.
 ///
-/// `search_columns` is the search scope, not the visible columns. `None` or an
-/// empty list means every data column; hiding a column never narrows search.
+/// The flattened `spec` keeps the existing IPC keys (`search`,
+/// `searchColumns`, `flagFilter`, `bookmarkedOnly`, `sortKey`,
+/// `sortDirection`, `condition`) while sharing one resolution path.
 #[derive(Debug, Deserialize)]
 pub struct QueryRowsPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
-    #[serde(default)]
-    pub search: Option<String>,
-    #[serde(default, rename = "searchColumns")]
-    pub search_columns: Option<Vec<String>>,
-    #[serde(default, rename = "flagFilter")]
-    pub flag_filter: Option<String>,
-    #[serde(default, rename = "bookmarkedOnly")]
-    pub bookmarked_only: Option<bool>,
+    #[serde(flatten)]
+    pub spec: QuerySpec,
     #[serde(default)]
     pub offset: Option<usize>,
     #[serde(default)]
     pub limit: Option<usize>,
-    #[serde(rename = "sortKey", default)]
-    pub sort_key: Option<String>,
-    #[serde(rename = "sortDirection", default)]
-    pub sort_direction: Option<String>,
-    /// Structured filter. Combined with `search` by AND. Absent means no extra filter.
-    #[serde(default)]
-    pub condition: Option<crate::condition::Node>,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,12 +72,7 @@ pub fn query_project_rows(
     }
 
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
+    let columns = data_columns(&df);
 
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
@@ -95,42 +82,17 @@ pub fn query_project_rows(
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
     let total_rows = df.height();
 
-    // An empty search scope is the same as "every data column".
-    let search_columns = payload
-        .search_columns
-        .as_deref()
-        .filter(|requested| !requested.is_empty());
-    let search_state = search::prepare_search(
+    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    let target = resolve_target(
         &df,
         &project_dir,
-        search_columns,
+        &payload.spec,
         &columns,
-        payload.search.as_deref(),
-        payload.condition.as_ref(),
+        &flags,
+        &ioc_outcomes,
     );
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let final_flag_vec = ioc::final_flags(df.height(), &flags, &ioc_outcomes);
-    let bookmarked: Vec<bool> = (0..df.height())
-        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
-        .collect();
-    let ordered = sort::ordered_row_indices(
-        &df,
-        payload.sort_key.as_deref(),
-        payload.sort_direction.as_deref(),
-    );
-    let (filtered_indices, annotated_filtered) = page::filtered_indices(
-        &ordered,
-        &final_flag_vec,
-        &bookmarked,
-        payload.bookmarked_only,
-        payload.flag_filter.as_deref(),
-        search_state.mask.as_deref(),
-    );
-    let annotated_total = final_flag_vec
-        .iter()
-        .filter(|flag| !flag.trim().is_empty())
-        .count();
-    let selected_indices: Vec<usize> = filtered_indices
+    let selected_indices: Vec<usize> = target
+        .filtered
         .iter()
         .skip(offset)
         .take(limit)
@@ -141,7 +103,7 @@ pub fn query_project_rows(
         &selected_indices,
         &columns,
         &flags,
-        &final_flag_vec,
+        &ioc::final_flags(df.height(), &flags, &ioc_outcomes),
         &ioc_outcomes,
         !iocs.is_empty(),
     )?;
@@ -162,14 +124,12 @@ pub fn query_project_rows(
         row.color = matched_rule_color(&row.data, &color_rules);
     }
 
-    search::persist_search_cache(&project_dir, &search_state);
-
     Ok(QueryRowsResponse {
         rows,
-        annotated_total,
-        annotated_filtered,
+        annotated_total: target.annotated_total,
+        annotated_filtered: target.annotated_filtered,
         total_rows,
-        total_filtered_rows: filtered_indices.len(),
+        total_filtered_rows: target.filtered.len(),
         offset,
     })
 }

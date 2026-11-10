@@ -1,1 +1,3 @@
-pub use super::query::{query_project_rows, QueryRowsPayload, QueryRowsResponse};
+pub use super::query::{
+    query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec, ResolvedTarget,
+};

@@ -17,7 +17,7 @@ use trivium_engine::ops::flags::{HiddenColumnsPayload, UpdateFlagPayload};
 use trivium_engine::ops::surround::{SurroundMode, SurroundingRowsPayload};
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
-use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::ops::cross::CrossSearchPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
 use trivium_engine::ops::group::GroupTreePayload;
@@ -99,15 +99,18 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
         store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed")
@@ -159,15 +162,18 @@ fn search_scoping_and_operators() {
             &store,
             QueryRowsPayload {
                 project_id: id,
-                search,
-                search_columns,
-                flag_filter: None,
+                spec: QuerySpec {
+                    search: search,
+                    search_columns: search_columns,
+                    flag_filter: None,
+                    sort_key: None,
+                    sort_direction: None,
+                    condition: None,
+                    bookmarked_only: None,
+                    ..Default::default()
+                },
                 offset: None,
                 limit: None,
-                sort_key: None,
-                sort_direction: None,
-            condition: None,
-                bookmarked_only: None,
             },
         )
         .expect("query failed")
@@ -237,15 +243,18 @@ fn nested_condition_matches_either_group() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: Some(condition),
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: Some(condition),
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -295,15 +304,18 @@ fn nanosecond_integer_is_not_rounded() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: Some(eq_condition("n", exact)),
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: Some(eq_condition("n", exact)),
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -630,15 +642,18 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: condition.clone(),
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: condition.clone(),
-            bookmarked_only: None,
         },
     )
     .expect("query");
@@ -664,15 +679,18 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: Some("WS01".to_string()),
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: Some("WS01".to_string()),
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("search query");
@@ -1047,15 +1065,18 @@ fn time_analysis_gap_range_matches_bounds() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: Some(condition),
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: Some(condition),
-            bookmarked_only: None,
         },
     )
     .expect("query");
@@ -1071,15 +1092,18 @@ fn sort_and_pagination() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: Some("EventID".to_string()),
+                sort_direction: Some("desc".to_string()),
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: Some(5),
-            sort_key: Some("EventID".to_string()),
-            sort_direction: Some("desc".to_string()),
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -1095,15 +1119,18 @@ fn sort_and_pagination() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: Some("EventID".to_string()),
+                sort_direction: Some("desc".to_string()),
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: Some(5),
             limit: Some(5),
-            sort_key: Some("EventID".to_string()),
-            sort_direction: Some("desc".to_string()),
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -1138,15 +1165,18 @@ fn flag_update_and_flag_filter() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: Some("suspicious".to_string()),
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: Some("suspicious".to_string()),
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -1274,11 +1304,14 @@ fn export_and_reimport_roundtrip() {
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     )
     .expect("export failed");
@@ -1509,15 +1542,18 @@ ts,EventID,host,user,proc,path,msg
             &store,
             QueryRowsPayload {
                 project_id: hit.project_id,
-                search: None,
-                search_columns: None,
-                flag_filter: None,
+                spec: QuerySpec {
+                    search: None,
+                    search_columns: None,
+                    flag_filter: None,
+                    sort_key: None,
+                    sort_direction: None,
+                    condition: Some(condition.clone()),
+                    bookmarked_only: None,
+                    ..Default::default()
+                },
                 offset: None,
                 limit: Some(1),
-                sort_key: None,
-                sort_direction: None,
-                condition: Some(condition.clone()),
-                bookmarked_only: None,
             },
         )
         .expect("query failed");

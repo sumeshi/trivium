@@ -9,7 +9,7 @@ use uuid::Uuid;
 use trivium_engine::ops;
 use trivium_engine::ops::group::{group_tree, GroupTreeNode, GroupTreePayload, GroupTreeResponse};
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 // 12 rows: the first 6 are alice, the last 6 are bob.
@@ -92,15 +92,18 @@ fn query_total(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> usize {
         store,
         QueryRowsPayload {
             project_id: id,
-            search: search.map(|value| value.to_string()),
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: search.map(|value| value.to_string()),
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed")

@@ -8,11 +8,13 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
+use trivium_engine::annotation::AnnotationPatch;
 use trivium_engine::models::{FlagEntry, ProjectRow};
 use trivium_engine::ops;
-use trivium_engine::ops::bulk::{bulk_update, BulkAnnotatePayload};
+use trivium_engine::ops::bulk::{bulk_preview, bulk_update, BulkAnnotatePayload};
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
+use trivium_engine::ops::rows::QuerySpec;
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
@@ -74,24 +76,32 @@ fn bulk(
     tags: Option<Vec<&str>>,
     bookmarked: Option<bool>,
 ) -> usize {
-    bulk_update(
-        store,
-        BulkAnnotatePayload {
-            project_id: id,
-            target: "all".to_string(),
-            row_indices: None,
+    let payload = BulkAnnotatePayload {
+        project_id: id,
+        target: "all".to_string(),
+        row_indices: None,
+        preview_token: None,
+        spec: QuerySpec {
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             condition: None,
+            ..Default::default()
+        },
+        patch: AnnotationPatch {
             flag: flag.map(str::to_string),
             memo: memo.map(|value| value.map(str::to_string)),
             tags: tags.map(|values| values.into_iter().map(str::to_string).collect()),
             bookmarked,
+            ..Default::default()
         },
-    )
-    .expect("bulk update failed")
-    .updated
+    };
+    let preview = bulk_preview(store, payload.clone()).expect("preview failed");
+    let mut payload = payload;
+    payload.preview_token = Some(preview.preview_token);
+    bulk_update(store, payload)
+        .expect("bulk update failed")
+        .updated
 }
 
 fn stored(store: &ProjectsStore, id: Uuid, row_index: usize) -> Option<FlagEntry> {
@@ -146,10 +156,10 @@ fn payloads_keep_the_omitted_and_explicit_clear_contract() {
         "memo": "note",
     }))
     .expect("bulk annotation fields");
-    assert_eq!(bulk.flag, None);
-    assert_eq!(bulk.memo, Some(Some("note".to_string())));
-    assert_eq!(bulk.tags, None);
-    assert_eq!(bulk.bookmarked, None);
+    assert_eq!(bulk.patch.flag, None);
+    assert_eq!(bulk.patch.memo, Some(Some("note".to_string())));
+    assert_eq!(bulk.patch.tags, None);
+    assert_eq!(bulk.patch.bookmarked, None);
 }
 
 #[test]

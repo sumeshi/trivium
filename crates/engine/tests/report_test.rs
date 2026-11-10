@@ -11,7 +11,7 @@ use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::report::{build_report, BuildReportPayload};
-use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 // 12 rows. Rows 0..4 are alice; rows 4..12 use bob, carol, dave, erin.
@@ -107,15 +107,18 @@ fn report_hit_rows_match_query() {
         &store,
         QueryRowsPayload {
             project_id: id,
-            search: Some("alice".to_string()),
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: Some("alice".to_string()),
+                search_columns: None,
+                flag_filter: None,
+                sort_key: Some("EventID".to_string()),
+                sort_direction: Some("desc".to_string()),
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: Some("EventID".to_string()),
-            sort_direction: Some("desc".to_string()),
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed");

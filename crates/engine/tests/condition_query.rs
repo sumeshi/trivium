@@ -6,21 +6,24 @@ use uuid::Uuid;
 use trivium_engine::condition::{Condition, Node, Op};
 use trivium_engine::ops;
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 fn payload(id: Uuid, search: Option<String>, condition: Option<Node>) -> QueryRowsPayload {
     QueryRowsPayload {
         project_id: id,
-        search,
-        search_columns: None,
-        flag_filter: None,
+        spec: QuerySpec {
+            search: search,
+            search_columns: None,
+            flag_filter: None,
+            sort_key: None,
+            sort_direction: None,
+            condition: condition,
+            bookmarked_only: None,
+            ..Default::default()
+        },
         offset: None,
         limit: None,
-        sort_key: None,
-        sort_direction: None,
-        condition,
-        bookmarked_only: None,
     }
 }
 

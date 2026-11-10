@@ -11,7 +11,7 @@ use trivium_engine::models::ColorRule;
 use trivium_engine::ops;
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
 use trivium_engine::ops::rules::{color_rules, save_color_rules, SaveColorRulesPayload};
 use trivium_engine::store::ProjectsStore;
 
@@ -92,15 +92,18 @@ fn query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
         store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
-            bookmarked_only: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                bookmarked_only: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
         },
     )
     .expect("query failed")
@@ -111,15 +114,18 @@ fn sorted_query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
         store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
-            bookmarked_only: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                bookmarked_only: None,
+                sort_key: Some("EventID".to_string()),
+                sort_direction: Some("asc".to_string()),
+                condition: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: Some("EventID".to_string()),
-            sort_direction: Some("asc".to_string()),
-            condition: None,
         },
     )
     .expect("sorted query failed")

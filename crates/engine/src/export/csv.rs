@@ -10,32 +10,28 @@ use uuid::Uuid;
 use crate::{
     error::AppError,
     flags::normalize_flag_value,
-    ioc::{evaluate_iocs, load_ioc_entries},
+    ioc::{cached_ioc_outcomes, load_ioc_entries},
+    ops::query::{data_columns, ordered_row_indices, resolve_target},
     project_io::read_project_dataframe,
     storage::load_flags,
     store::ProjectsStore,
 };
 
+/// Export selection. `scope = "all"` (default) exports every row; `"filtered"`
+/// exports the rows selected by the flattened `QuerySpec`. Input/output column
+/// restriction is `columns`; search scope is `QuerySpec.searchColumns`.
 #[derive(Debug, Deserialize)]
 pub struct ExportProjectPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub destination: String,
-    /// `"all"` (default) exports every row; `"filtered"` exports rows matching
-    /// `search` and/or `condition`, evaluated by the same predicates as query.
     #[serde(default)]
     pub scope: Option<String>,
-    #[serde(default)]
-    pub search: Option<String>,
-    #[serde(default)]
-    pub condition: Option<crate::condition::Node>,
+    #[serde(flatten)]
+    pub spec: crate::ops::query::QuerySpec,
     /// Output only these base columns (derived trivium columns are kept).
     #[serde(default)]
     pub columns: Option<Vec<String>>,
-    #[serde(default, rename = "sortKey")]
-    pub sort_key: Option<String>,
-    #[serde(default, rename = "sortDirection")]
-    pub sort_direction: Option<String>,
 }
 
 /// Exports the project data with derived trivium columns to a CSV file.
@@ -54,57 +50,34 @@ pub fn export_project(
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     // IOC evaluation runs on the full column set so queries targeting hidden
     // columns keep matching even when the export restricts output columns.
-    let ioc_outcomes = if iocs.is_empty() {
-        Vec::new()
-    } else {
-        evaluate_iocs(&df, &iocs)
-    };
+    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    let all_columns = data_columns(&df);
 
-    // F27: restrict output columns first, then compute the row selection and
-    // ordering on the surviving columns. Flags are keyed by the original row
-    // positions, so the selection is applied after the trivium columns are built.
-    if let Some(columns) = &payload.columns {
-        let existing: Vec<String> = df
-            .get_column_names()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect();
-        let selected: Vec<String> = columns
-            .iter()
-            .filter(|name| existing.contains(name))
-            .cloned()
-            .collect();
-        df = df
-            .select(&selected)
-            .map_err(|e| AppError::Message(format!("Failed to select columns: {}", e)))?;
-    }
-    let column_names: Vec<String> = df
-        .get_column_names()
-        .into_iter()
-        .filter(|name| name != &"__rowid")
-        .map(|name| name.to_string())
-        .collect();
-
-    let scope_filtered = payload.scope.as_deref() == Some("filtered");
-    let mask = if scope_filtered {
-        let state = crate::ops::query::prepare_search(
+    // Resolve rows and order before touching output columns. The search scope
+    // is `spec.search_columns`, never the output column list.
+    let final_indices: Vec<IdxSize> = if payload.scope.as_deref() == Some("filtered") {
+        resolve_target(
             &df,
             &project_dir,
-            payload.columns.as_deref(),
-            &column_names,
-            payload.search.as_deref(),
-            payload.condition.as_ref(),
-        );
-        crate::ops::query::persist_search_cache(&project_dir, &state);
-        state.mask
+            &payload.spec,
+            &all_columns,
+            &flags,
+            &ioc_outcomes,
+        )
+        .filtered
+        .into_iter()
+        .map(|row_idx| row_idx as IdxSize)
+        .collect()
     } else {
-        None
+        ordered_row_indices(
+            &df,
+            payload.spec.sort_key.as_deref(),
+            payload.spec.sort_direction.as_deref(),
+        )
+        .into_iter()
+        .map(|row_idx| row_idx as IdxSize)
+        .collect()
     };
-    let ordered = crate::ops::query::ordered_row_indices(
-        &df,
-        payload.sort_key.as_deref(),
-        payload.sort_direction.as_deref(),
-    );
 
     let mut safe_flags: Vec<i32> = vec![0; df.height()];
     let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
@@ -170,13 +143,27 @@ pub fn export_project(
         memo_series[i] = final_memo;
     }
 
-    // Only the internal row id is removed here. `flag` and `memo` used to be
-    // internal annotation columns, but input CSVs may legitimately have
+    // Apply the output column restriction after the target and annotations are
+    // fixed. Only the internal row id is removed here. `flag` and `memo` used
+    // to be internal annotation columns, but input CSVs may legitimately have
     // columns with those names, so dropping them unconditionally erased user
     // data. Annotation metadata now lives in `flags.json` and is exported as
-    // the `trivium-*` columns below; any input `flag`/`memo` columns are
-    // ordinary data and must be kept. Internal metadata is identified by its
-    // own reserved names, not by these legacy column names.
+    // the `trivium-*` columns below.
+    if let Some(columns) = &payload.columns {
+        let existing: Vec<String> = df
+            .get_column_names()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+        let selected: Vec<String> = columns
+            .iter()
+            .filter(|name| existing.contains(name))
+            .cloned()
+            .collect();
+        df = df
+            .select(&selected)
+            .map_err(|e| AppError::Message(format!("Failed to select columns: {}", e)))?;
+    }
     if let Ok(next) = df.drop("__rowid") {
         df = next;
     }
@@ -193,13 +180,6 @@ pub fn export_project(
     }
     df = DataFrame::new(out_cols).map_err(|e| AppError::Other(e.into()))?;
 
-    // Apply the sorted order and (optionally) the filtered mask to the
-    // assembled frame so flag columns stay aligned with their rows.
-    let final_indices: Vec<IdxSize> = ordered
-        .into_iter()
-        .filter(|row_idx| mask.as_ref().map_or(true, |m| m[*row_idx]))
-        .map(|row_idx| row_idx as IdxSize)
-        .collect();
     let index_column = IdxCa::from_vec("", final_indices);
     df = df
         .take(&index_column)

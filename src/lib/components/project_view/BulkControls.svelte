@@ -4,17 +4,21 @@
   import { conditionPayload } from "../../stores/condition";
   import {
     backend,
+    bookmarkedOnly,
     flagFilter,
     projectDetail,
     search,
-    visibleColumns,
+    searchColumns,
+    sortDirection,
+    sortKey,
     FLAG_OPTIONS,
   } from "./state";
 
-  let target: "filter" | "all" = "filter";
+  let target: "filtered" | "all" = "filtered";
   let flag: NonNullable<AnnotationPatch["flag"]> = FLAG_OPTIONS[0].value;
   let memo = "";
   let count: number | null = null;
+  let previewToken: string | null = null;
   let error = "";
   let busy = false;
   let alive = true;
@@ -27,24 +31,20 @@
 
   $: projectId = $projectDetail?.project.meta.id ?? "";
 
-  const buildArgs = (): BulkAnnotateArgs => {
-    const base: BulkAnnotateArgs = {
-      projectId,
-      target,
-      flag,
-      memo: memo.trim() ? memo : null,
-    };
-    if (target === "all") {
-      return base;
-    }
-    return {
-      ...base,
-      search: $search.trim() || undefined,
-      flagFilter: $flagFilter,
-      columns: $visibleColumns,
-      condition: $conditionPayload,
-    };
-  };
+  const buildArgs = (): BulkAnnotateArgs => ({
+    projectId,
+    target,
+    search: $search.trim() || undefined,
+    searchColumns: $searchColumns,
+    flagFilter: $flagFilter,
+    bookmarkedOnly: $bookmarkedOnly,
+    sortKey: $sortKey,
+    sortDirection: $sortDirection,
+    condition: $conditionPayload,
+    flag,
+    memo: memo.trim() ? memo : null,
+    ...(previewToken ? { previewToken } : {}),
+  });
 
   const run = async (operation: "preview" | "apply" | "undo") => {
     if (!$backend || !projectId || busy) {
@@ -57,12 +57,18 @@
         const result = await $backend.bulkPreview(buildArgs());
         if (!alive) return;
         count = result.count;
+        previewToken = result.previewToken;
         return;
       }
       if (operation === "apply") {
+        if (!previewToken) {
+          error = "Preview again before applying.";
+          return;
+        }
         const result = await $backend.bulkUpdate(buildArgs());
         if (!alive) return;
         count = result.updated;
+        previewToken = null;
         dispatch("refresh");
         return;
       }
@@ -85,7 +91,7 @@
   <div class="condition-toolbar">
     <span class="filter-label">Bulk annotate</span>
     <select bind:value={target} aria-label="Bulk target">
-      <option value="filter">Filtered rows</option>
+      <option value="filtered">Filtered rows</option>
       <option value="all">All rows</option>
     </select>
     <select bind:value={flag} aria-label="Bulk flag">

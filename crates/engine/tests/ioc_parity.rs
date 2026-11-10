@@ -23,7 +23,7 @@ use trivium_engine::ops::export::ExportProjectPayload;
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::QueryRowsPayload;
+use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 // 10 rows: rows 0..4 are EventID 4624 (alice), rows 5..9 are 4625 (bob).
@@ -106,15 +106,18 @@ fn query_flags(store: &ProjectsStore, id: uuid::Uuid) -> Vec<(String, Option<Str
         store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed");
@@ -182,11 +185,14 @@ fn query_export_and_count_agree_on_flags_and_tags() {
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     )
     .expect("export failed");

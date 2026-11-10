@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use uuid::Uuid;
 
+use trivium_engine::annotation::AnnotationPatch;
 use trivium_engine::models::IocEntry;
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{
@@ -13,7 +14,7 @@ use trivium_engine::ops::bulk::{
 };
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 /// The undo layer is process-global, so tests sharing this binary must not
@@ -92,16 +93,30 @@ fn payload(
     BulkAnnotatePayload {
         project_id: id,
         target: target.to_string(),
-        row_indices,
-        search: search.map(|value| value.to_string()),
-        columns: None,
-        flag_filter: None,
-        condition: None,
-        flag: Some(flag.to_string()),
-        memo: memo.map(|value| Some(value.to_string())),
-        tags: None,
-        bookmarked: None,
+        row_indices: row_indices,
+        preview_token: None,
+        spec: QuerySpec {
+            search: search.map(|value| value.to_string()),
+            search_columns: None,
+            flag_filter: None,
+            condition: None,
+            ..Default::default()
+        },
+        patch: AnnotationPatch {
+            flag: Some(flag.to_string()),
+            memo: memo.map(|value| Some(value.to_string())),
+            tags: None,
+            bookmarked: None,
+            ..Default::default()
+        },
     }
+}
+
+fn previewed(store: &ProjectsStore, payload: BulkAnnotatePayload) -> BulkAnnotatePayload {
+    let preview = bulk_preview(store, payload.clone()).expect("preview failed");
+    let mut payload = payload;
+    payload.preview_token = Some(preview.preview_token);
+    payload
 }
 
 fn query(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> QueryRowsResponse {
@@ -109,15 +124,18 @@ fn query(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> QueryRowsResp
         store,
         QueryRowsPayload {
             project_id: id,
-            search: search.map(|value| value.to_string()),
-            search_columns: None,
-            flag_filter: None,
+            spec: QuerySpec {
+                search: search.map(|value| value.to_string()),
+                search_columns: None,
+                flag_filter: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                bookmarked_only: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
-            bookmarked_only: None,
         },
     )
     .expect("query failed")
@@ -158,7 +176,7 @@ fn bulk_all_applies_and_undo_restores() {
 
     let applied = bulk_update(
         &store,
-        payload(id, "all", None, None, "suspicious", Some("bulk")),
+        previewed(&store, payload(id, "all", None, None, "suspicious", Some("bulk"))),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 12);
@@ -195,7 +213,7 @@ fn bulk_filter_matches_the_query_path() {
 
     let preview = bulk_preview(
         &store,
-        payload(id, "filter", Some("user:alice"), None, "suspicious", None),
+        payload(id, "filtered", Some("user:alice"), None, "suspicious", None),
     )
     .expect("preview failed");
     assert_eq!(preview.count, 6);
@@ -207,7 +225,7 @@ fn bulk_filter_matches_the_query_path() {
 
     let applied = bulk_update(
         &store,
-        payload(id, "filter", Some("user:alice"), None, "suspicious", None),
+        previewed(&store, payload(id, "filtered", Some("user:alice"), None, "suspicious", None)),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 6);
@@ -242,7 +260,7 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 
     let applied = bulk_update(
         &store,
-        payload(id, "selection", None, Some(vec![1, 1, 4]), "safe", None),
+        previewed(&store, payload(id, "selection", None, Some(vec![1, 1, 4]), "safe", None)),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 2);
@@ -293,8 +311,11 @@ fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
         );
     }
 
-    let applied = bulk_update(&store, payload(id, "all", None, None, "safe", None))
-        .expect("bulk update failed");
+    let applied = bulk_update(
+        &store,
+        previewed(&store, payload(id, "all", None, None, "safe", None)),
+    )
+    .expect("bulk update failed");
     assert_eq!(applied.updated, 12);
 
     let rows = query_flags(&store, id);
@@ -334,12 +355,18 @@ fn bulk_clear_removes_entries_and_reveals_ioc_flags() {
     let _guard = undo_guard();
     let (root, store, id) = setup(true);
 
-    bulk_update(&store, payload(id, "all", None, None, "suspicious", None))
-        .expect("bulk update failed");
+    bulk_update(
+        &store,
+        previewed(&store, payload(id, "all", None, None, "suspicious", None)),
+    )
+    .expect("bulk update failed");
     assert_eq!(flagged(&store, id), 12);
 
-    let cleared =
-        bulk_update(&store, payload(id, "all", None, None, "", None)).expect("bulk clear failed");
+    let cleared = bulk_update(
+        &store,
+        previewed(&store, payload(id, "all", None, None, "", None)),
+    )
+    .expect("bulk clear failed");
     assert_eq!(cleared.updated, 12);
     assert_eq!(flagged(&store, id), 0);
 

@@ -3,65 +3,48 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::annotation::{apply_annotation_patch, deserialize_double_option, AnnotationPatch};
+use crate::annotation::{apply_annotation_patch, AnnotationPatch};
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
+use crate::ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome};
 use crate::models::FlagEntry;
 use crate::project_io::read_project_dataframe;
 use crate::storage::{count_flagged, load_flags, remove_flag, upsert_flag};
 use crate::store::ProjectsStore;
 
-use super::query::{filtered_indices, final_flags, prepare_search};
+use super::query::{
+    data_columns, final_flags, resolve_target, spec_token_json, QuerySpec,
+};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BulkAnnotatePayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
-    /// "selection" | "filter" | "all"
+    /// "selection" | "filtered" | "all"
     pub target: String,
     /// target = "selection" のときだけ使う。重複は破格に dedupe、範囲外はエラー。
     #[serde(default, rename = "rowIndices")]
     pub row_indices: Option<Vec<usize>>,
-    // target = "filter" のときのフィルタ（query と同一語彙）
-    #[serde(default)]
-    pub search: Option<String>,
-    #[serde(default)]
-    pub columns: Option<Vec<String>>,
-    #[serde(default, rename = "flagFilter")]
-    pub flag_filter: Option<String>,
-    #[serde(default)]
-    pub condition: Option<crate::condition::Node>,
-    // 適用内容（省略したフィールドは既存値を維持する）
-    /// `None` keeps the stored flag; `Some("")` clears it.
-    #[serde(default)]
-    pub flag: Option<String>,
-    /// `None` keeps the stored memo; `Some(None)` or a blank string clears it.
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub memo: Option<Option<String>>,
-    /// `None` keeps the stored tags; `Some(vec![])` clears them.
-    #[serde(default)]
-    pub tags: Option<Vec<String>>,
-    /// `None` keeps the stored bookmark state; `Some(false)` clears it.
-    #[serde(default)]
-    pub bookmarked: Option<bool>,
-}
-
-impl BulkAnnotatePayload {
-    fn annotation(&self) -> AnnotationPatch {
-        AnnotationPatch {
-            flag: self.flag.clone(),
-            memo: self.memo.clone(),
-            tags: self.tags.clone(),
-            bookmarked: self.bookmarked,
-        }
-    }
+    /// target = "filtered" のときの条件（query と同一語彙）。
+    #[serde(flatten)]
+    pub spec: QuerySpec,
+    /// 適用内容（省略したフィールドは既存値を維持する）。
+    #[serde(flatten)]
+    pub patch: AnnotationPatch,
+    /// `bulk_preview` が返したトークン。`bulk_update` では必須。
+    #[serde(default, rename = "previewToken")]
+    pub preview_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct BulkCount {
     pub count: usize,
+    /// Binds a later `bulk_update` to the same spec, row set, and annotated
+    /// count that this preview observed.
+    #[serde(rename = "previewToken")]
+    pub preview_token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,49 +90,42 @@ fn load_frame(store: &ProjectsStore, project_id: &Uuid) -> Result<(PathBuf, Data
     Ok((project_dir, df))
 }
 
+fn annotated_count(final_flag_vec: &[String], row_ids: &[usize]) -> usize {
+    row_ids
+        .iter()
+        .filter(|idx| !final_flag_vec[**idx].trim().is_empty())
+        .count()
+}
+
 /// 対象行インデックスの解決（プレビューと実行で共通）。target:
 /// - "all"       -> 0..df.height()
-/// - "filter"    -> query パスと同一の helper で一致行
+/// - "filtered"  -> query パスと同一の `resolve_target` で一致行（ソート順）
 /// - "selection" -> dedupe + ソートした row_indices（範囲外はエラー）
-fn resolve_target_like(
+fn resolve_bulk_target(
     df: &DataFrame,
     project_dir: &Path,
     payload: &BulkAnnotatePayload,
-) -> Result<Vec<usize>, AppError> {
+    flags: &std::collections::HashMap<usize, FlagEntry>,
+    ioc_outcomes: &[IocRowOutcome],
+) -> Result<(Vec<usize>, usize), AppError> {
     match payload.target.as_str() {
-        "all" => Ok((0..df.height()).collect()),
-        "filter" => {
-            let columns: Vec<String> = df
-                .get_column_names()
-                .into_iter()
-                .filter(|name| name != &"__rowid")
-                .map(|name| name.to_string())
-                .collect();
-            let search_state = prepare_search(
+        "all" => {
+            let row_ids: Vec<usize> = (0..df.height()).collect();
+            let final_flag_vec = final_flags(df.height(), flags, ioc_outcomes);
+            let annotated = annotated_count(&final_flag_vec, &row_ids);
+            Ok((row_ids, annotated))
+        }
+        "filtered" => {
+            let columns = data_columns(df);
+            let target = resolve_target(
                 df,
                 project_dir,
-                payload.columns.as_deref(),
+                &payload.spec,
                 &columns,
-                payload.search.as_deref(),
-                payload.condition.as_ref(),
+                flags,
+                ioc_outcomes,
             );
-            let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-            let iocs = load_ioc_entries(project_dir).map_err(AppError::from)?;
-            let ioc_outcomes = cached_ioc_outcomes(project_dir, df, &iocs);
-            let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
-            let bookmarked: Vec<bool> = (0..df.height())
-                .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
-                .collect();
-            let ordered: Vec<usize> = (0..df.height()).collect();
-            let (filtered, _) = filtered_indices(
-                &ordered,
-                &final_flag_vec,
-                &bookmarked,
-                None,
-                payload.flag_filter.as_deref(),
-                search_state.mask.as_deref(),
-            );
-            Ok(filtered)
+            Ok((target.filtered, target.annotated_filtered))
         }
         "selection" => {
             let mut indices = payload.row_indices.clone().unwrap_or_default();
@@ -161,10 +137,47 @@ fn resolve_target_like(
                     out_of_range
                 )));
             }
-            Ok(indices)
+            let final_flag_vec = final_flags(df.height(), flags, ioc_outcomes);
+            let annotated = annotated_count(&final_flag_vec, &indices);
+            Ok((indices, annotated))
         }
         _ => Err(AppError::Message("Unknown bulk target.".into())),
     }
+}
+
+fn target_token(spec: &QuerySpec, row_ids: &[usize], annotated_filtered: usize) -> String {
+    let joined = row_ids
+        .iter()
+        .map(|row_id| row_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let material = format!(
+        "{}|{}|{}",
+        spec_token_json(spec),
+        joined,
+        annotated_filtered
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(material.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect()
+}
+
+fn resolve_and_token(
+    df: &DataFrame,
+    project_dir: &Path,
+    payload: &BulkAnnotatePayload,
+) -> Result<(Vec<usize>, String), AppError> {
+    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let iocs = load_ioc_entries(project_dir).map_err(AppError::from)?;
+    let ioc_outcomes = cached_ioc_outcomes(project_dir, df, &iocs);
+    let (row_ids, annotated_filtered) =
+        resolve_bulk_target(df, project_dir, payload, &flags, &ioc_outcomes)?;
+    let token = target_token(&payload.spec, &row_ids, annotated_filtered);
+    Ok((row_ids, token))
 }
 
 /// 対象件数プレビュー（状態を変更しない）
@@ -173,9 +186,10 @@ pub fn bulk_preview(
     payload: BulkAnnotatePayload,
 ) -> Result<BulkCount, AppError> {
     let (project_dir, df) = load_frame(store, &payload.project_id)?;
-    let target = resolve_target_like(&df, &project_dir, &payload)?;
+    let (target, preview_token) = resolve_and_token(&df, &project_dir, &payload)?;
     Ok(BulkCount {
         count: target.len(),
+        preview_token,
     })
 }
 
@@ -188,7 +202,20 @@ pub fn bulk_update(
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let target = resolve_target_like(&df, &project_dir, &payload)?;
+    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    let (target, annotated_filtered) =
+        resolve_bulk_target(&df, &project_dir, &payload, &flags, &ioc_outcomes)?;
+    let current_token = target_token(&payload.spec, &target, annotated_filtered);
+
+    // A missing token is the same failure as a stale one: the caller did not
+    // preview this exact target. This also covers selection targets.
+    if payload.preview_token.as_deref() != Some(current_token.as_str()) {
+        return Err(AppError::Message(
+            "Target changed; preview again.".into(),
+        ));
+    }
+
     if target.is_empty() {
         return Ok(BulkApplied { updated: 0 });
     }
@@ -200,9 +227,8 @@ pub fn bulk_update(
 
     // 一括対象にも単行更新と同じ patch を適用する。省略したフィールドは
     // 行ごとの既存値を維持し、全フィールドが空になった行だけ削除する。
-    let patch = payload.annotation();
     for &row_index in &target {
-        let next = apply_annotation_patch(flags.get(&row_index), &patch);
+        let next = apply_annotation_patch(flags.get(&row_index), &payload.patch);
         match next {
             Some(entry) => {
                 upsert_flag(&flags_path, row_index, &entry).map_err(AppError::from)?

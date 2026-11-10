@@ -5,7 +5,7 @@ use crate::error::AppError;
 use crate::models::ProjectRow;
 use crate::store::ProjectsStore;
 
-use super::rows::{query_project_rows, QueryRowsPayload};
+use super::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 
 #[derive(Debug, Deserialize)]
 pub struct CrossSearchPayload {
@@ -47,15 +47,17 @@ pub fn search_projects(
             store,
             QueryRowsPayload {
                 project_id,
-                search: payload.search.clone(),
-                search_columns: payload.columns.clone(),
-                flag_filter: payload.flag_filter.clone(),
-                bookmarked_only: None,
+                spec: QuerySpec {
+                    search: payload.search.clone(),
+                    search_columns: payload.columns.clone(),
+                    flag_filter: payload.flag_filter.clone(),
+                    bookmarked_only: None,
+                    sort_key: payload.sort_key.clone(),
+                    sort_direction: payload.sort_direction.clone(),
+                    condition: payload.condition.clone(),
+                },
                 offset: payload.offset,
                 limit: payload.limit,
-                sort_key: payload.sort_key.clone(),
-                sort_direction: payload.sort_direction.clone(),
-                condition: payload.condition.clone(),
             },
         )?;
         hits.push(CrossSearchHit {

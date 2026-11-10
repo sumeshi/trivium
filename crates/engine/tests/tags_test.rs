@@ -6,15 +6,18 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
+use trivium_engine::annotation::AnnotationPatch;
 use trivium_engine::models::FlagEntry;
 use trivium_engine::ops;
-use trivium_engine::ops::bulk::{bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload};
+use trivium_engine::ops::bulk::{
+    bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
+};
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::group::GroupTreePayload;
 use trivium_engine::ops::histogram::HistogramPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::report::{build_report, BuildReportPayload};
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
 use trivium_engine::ops::time::TimeAnalysisPayload;
 use trivium_engine::storage::{load_flags, upsert_flag};
 use trivium_engine::store::ProjectsStore;
@@ -65,15 +68,18 @@ fn query(
         store,
         QueryRowsPayload {
             project_id: id,
-            search: None,
-            search_columns: None,
-            flag_filter: None,
-            bookmarked_only,
+            spec: QuerySpec {
+                search: None,
+                search_columns: None,
+                flag_filter: None,
+                bookmarked_only: bookmarked_only,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
         },
     )
     .expect("query failed")
@@ -186,23 +192,30 @@ fn bulk_update_keeps_tags_and_bookmarks_and_undo_restores_them() {
         Some(true),
     );
 
-    bulk_update(
-        &store,
-        BulkAnnotatePayload {
-            project_id: id,
-            target: "all".to_string(),
-            row_indices: None,
+    let payload = BulkAnnotatePayload {
+        project_id: id,
+        target: "all".to_string(),
+        row_indices: None,
+        preview_token: None,
+        spec: QuerySpec {
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             condition: None,
+            ..Default::default()
+        },
+        patch: AnnotationPatch {
             flag: Some("safe".to_string()),
             memo: None,
             tags: None,
             bookmarked: None,
+            ..Default::default()
         },
-    )
-    .expect("bulk update failed");
+    };
+    let preview = bulk_preview(&store, payload.clone()).expect("preview failed");
+    let mut payload = payload;
+    payload.preview_token = Some(preview.preview_token);
+    bulk_update(&store, payload).expect("bulk update failed");
 
     let rows = query(&store, id, None).rows;
     let row0 = rows.iter().find(|row| row.row_index == 0).expect("row0");
@@ -324,11 +337,14 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,
-            search: None,
-            condition: None,
+            spec: QuerySpec {
+                search: None,
+                condition: None,
+                sort_key: None,
+                sort_direction: None,
+                ..Default::default()
+            },
             columns: None,
-            sort_key: None,
-            sort_direction: None,
         },
     )
     .expect("export failed");

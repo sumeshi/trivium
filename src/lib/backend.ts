@@ -50,6 +50,17 @@ export interface HiddenColumnsArgs {
 export interface ExportProjectArgs {
   projectId: string;
   destination?: string;
+  /** `"all"` (default) exports every row; `"filtered"` uses the query fields. */
+  scope?: "all" | "filtered";
+  search?: string;
+  searchColumns?: string[];
+  condition?: ConditionNode | null;
+  flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
+  sortKey?: string | null;
+  sortDirection?: "asc" | "desc";
+  /** Output columns only; search scope is `searchColumns`. */
+  columns?: string[];
 }
 
 export interface SaveIocsArgs {
@@ -159,12 +170,17 @@ export interface GroupTreeArgs {
 
 export interface BulkAnnotateArgs extends AnnotationPatch {
   projectId: string;
-  target: "selection" | "filter" | "all";
+  target: "selection" | "filtered" | "all";
   rowIndices?: number[];
   search?: string;
-  flagFilter?: FlagFilterValue;
-  columns?: string[];
+  searchColumns?: string[];
   condition?: ConditionNode | null;
+  flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
+  sortKey?: string | null;
+  sortDirection?: "asc" | "desc";
+  /** Token returned by `bulkPreview`; required by `bulkUpdate`. */
+  previewToken?: string;
 }
 
 export interface BulkUndoArgs {
@@ -346,9 +362,13 @@ class NativeBackend implements Backend {
         target: args.target,
         rowIndices: args.rowIndices ?? null,
         search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
-        columns: args.columns ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
         condition: args.condition ?? null,
+        previewToken: args.previewToken ?? null,
         ...annotationFields(args),
       },
     });
@@ -361,9 +381,13 @@ class NativeBackend implements Backend {
         target: args.target,
         rowIndices: args.rowIndices ?? null,
         search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
-        columns: args.columns ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
         condition: args.condition ?? null,
+        previewToken: args.previewToken ?? null,
         ...annotationFields(args),
       },
     });
@@ -473,6 +497,15 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+        scope: args.scope ?? "all",
+        search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
+        condition: args.condition ?? null,
+        flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
+        columns: args.columns ?? null,
       },
     });
   }

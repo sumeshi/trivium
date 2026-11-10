@@ -10,7 +10,7 @@ use uuid::Uuid;
 use trivium_engine::ops;
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 const CSV: &str = "name,detail\n\
@@ -70,15 +70,18 @@ fn query(
         store,
         QueryRowsPayload {
             project_id: id,
-            search: search.map(str::to_string),
-            search_columns,
-            flag_filter: None,
-            bookmarked_only: None,
+            spec: QuerySpec {
+                search: search.map(str::to_string),
+                search_columns: search_columns,
+                flag_filter: None,
+                bookmarked_only: None,
+                sort_key: None,
+                sort_direction: None,
+                condition: None,
+                ..Default::default()
+            },
             offset: None,
             limit: None,
-            sort_key: None,
-            sort_direction: None,
-            condition: None,
         },
     )
     .expect("query failed")
@@ -89,7 +92,7 @@ fn payload_accepts_camel_case_search_columns() {
     let id = Uuid::new_v4();
     let json = format!(r#"{{"projectId":"{id}","searchColumns":["name"]}}"#);
     let parsed: QueryRowsPayload = serde_json::from_str(&json).expect("payload should parse");
-    assert_eq!(parsed.search_columns, Some(vec!["name".to_string()]));
+    assert_eq!(parsed.spec.search_columns, Some(vec!["name".to_string()]));
 }
 
 #[test]

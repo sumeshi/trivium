@@ -170,6 +170,7 @@ export interface GroupTreeResponse {
 
 export interface BulkCount {
   count: number;
+  previewToken: string;
 }
 
 export interface BulkApplied {
