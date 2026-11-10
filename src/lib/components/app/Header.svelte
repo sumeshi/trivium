@@ -27,6 +27,14 @@
         {#if projectDetail?.project.meta.description}
           <p class="text-xs text-muted sm:text-sm">{projectDetail.project.meta.description}</p>
         {/if}
+        {#if projectDetail?.project.meta.source_sha256}
+          <p
+            class="max-w-md truncate font-mono text-[0.65rem] text-muted"
+            title={projectDetail.project.meta.source_sha256}
+          >
+            sha256: {projectDetail.project.meta.source_sha256}
+          </p>
+        {/if}
       </div>
     </div>
       <button

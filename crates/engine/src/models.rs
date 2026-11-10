@@ -16,6 +16,8 @@ pub struct ProjectMeta {
     pub flagged_records: usize,
     #[serde(default)]
     pub ioc_applied_records: usize,
+    #[serde(default)]
+    pub source_sha256: Option<String>,
     pub hidden_columns: Vec<String>,
 }
 

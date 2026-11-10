@@ -6,6 +6,7 @@ export interface ProjectMeta {
   total_records: number;
   flagged_records: number;
   ioc_applied_records: number;
+  source_sha256?: string | null;
   hidden_columns: string[];
 }
 

@@ -230,6 +230,44 @@ fn ops_create_project_accepts_tab_delimiter() {
 }
 
 #[test]
+fn create_project_records_source_sha256() {
+    use sha2::{Digest, Sha256};
+
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let path = write_fixture(&root, "sha.csv", ',');
+
+    let summary = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: path.to_string_lossy().to_string(),
+            description: None,
+            delimiter: None,
+        },
+    )
+    .expect("failed to create project from fixture");
+
+    let bytes = fs::read(&path).expect("failed to read fixture");
+    let expected = format!("{:x}", Sha256::digest(&bytes));
+    assert_eq!(
+        summary.meta.source_sha256.as_deref(),
+        Some(expected.as_str()),
+        "recorded sha256 must match the source file digest"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_project_meta_json_loads_without_sha256() {
+    use trivium_engine::models::ProjectMeta;
+
+    let json = r#"{"id":"0f8f1f7e-6f10-4f6a-9f8a-0f8f1f7e6f10","name":"old","description":null,"created_at":"2024-01-01T00:00:00Z","total_records":3,"flagged_records":0,"ioc_applied_records":0,"hidden_columns":[]}"#;
+    let meta: ProjectMeta = serde_json::from_str(json).expect("legacy meta failed to parse");
+    assert_eq!(meta.source_sha256, None, "legacy meta must default to no digest");
+}
+
+#[test]
 fn utf16_le_fixture_imports_same_as_ascii() {
     let root = temp_root();
     let ascii_path = write_fixture(&root, "ascii.csv", ',');

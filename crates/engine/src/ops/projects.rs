@@ -21,6 +21,9 @@ use crate::{
     store::ProjectsStore,
 };
 
+use sha2::{Digest, Sha256};
+use std::io::Read;
+
 use super::util::{materialize_rows, DEFAULT_PAGE_SIZE};
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
@@ -43,6 +46,18 @@ pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppEr
     }
     result.sort_by(|a, b| b.meta.created_at.cmp(&a.meta.created_at));
     Ok(result)
+}
+
+/// Computes the lowercase hex SHA-256 digest of a file's bytes.
+fn source_sha256(path: &std::path::Path) -> Result<String, AppError> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Creates a new project from a CSV or JSONL file and persists metadata plus optional flags.
@@ -84,6 +99,7 @@ pub fn create_project(
             .filter(|entry| !entry.flag.trim().is_empty())
             .count(),
         ioc_applied_records: 0,
+        source_sha256: Some(source_sha256(&source_path)?),
         hidden_columns: Vec::new(),
     };
 
