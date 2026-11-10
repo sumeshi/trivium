@@ -260,4 +260,94 @@ function toNode(node: EditorNode): ConditionNode | null {
   return { kind: node.kind, children };
 }
 
+const COMPARE_OP_SET = new Set<CompareOp>(COMPARE_OPS.map((option) => option.value));
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function conditionFromNode(value: unknown): EditorCondition | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const op = value.op;
+  if (typeof op !== "string" || !COMPARE_OP_SET.has(op as CompareOp)) {
+    return null;
+  }
+  const values = Array.isArray(value.values)
+    ? value.values.filter((item): item is string => typeof item === "string")
+    : [];
+  const typedOp = op as CompareOp;
+  const exact = typedOp === "in" && values.length === 1;
+  return {
+    type: "condition",
+    id: crypto.randomUUID(),
+    column: typeof value.column === "string" ? value.column : "",
+    op: typedOp,
+    value: typedOp === "in" && !exact ? values.join(",") : values[0] ?? "",
+    exact,
+    negated: value.negated === true,
+  };
+}
+
+function fromNode(value: unknown): EditorNode | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value.kind === "and" || value.kind === "or") {
+    const children = Array.isArray(value.children)
+      ? value.children
+          .map((child) => fromNode(child))
+          .filter((child): child is EditorNode => child != null)
+      : [];
+    return {
+      type: "group",
+      id: crypto.randomUUID(),
+      kind: value.kind,
+      collapsed: false,
+      children,
+    };
+  }
+  return conditionFromNode(value);
+}
+
+/** F21: portability between engine Node JSON and the editor tree. */
+export function treeFromNode(node: unknown): EditorGroup {
+  const converted = fromNode(node);
+  if (!converted) {
+    return rootGroup();
+  }
+  if (converted.type === "group") {
+    return { ...converted, id: ROOT_ID };
+  }
+  return {
+    type: "group",
+    id: ROOT_ID,
+    kind: "and",
+    collapsed: false,
+    children: [converted],
+  };
+}
+
+/** Returns an editor tree for a preset condition, or null when it is absent. */
+export function presetCondition(node: unknown): EditorGroup | null {
+  if (node == null) {
+    return null;
+  }
+  const converted = fromNode(node);
+  if (!converted) {
+    return null;
+  }
+  if (converted.type === "group") {
+    return { ...converted, id: ROOT_ID };
+  }
+  return {
+    type: "group",
+    id: ROOT_ID,
+    kind: "and",
+    collapsed: false,
+    children: [converted],
+  };
+}
+
 export const conditionPayload = derived(conditionTree, ($tree) => toNode($tree));

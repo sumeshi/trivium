@@ -40,6 +40,15 @@ export interface ColorRule {
   color: string;
 }
 
+export interface PresetData {
+  name?: string | null;
+  condition?: ConditionNode | null;
+  hiddenColumns: string[];
+  sortKey: string | null;
+  sortDirection: "asc" | "desc" | null;
+  unknown_columns: string[];
+}
+
 export interface LoadProjectResponse {
   project: ProjectSummary;
   columns: string[];

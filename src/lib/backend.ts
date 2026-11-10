@@ -9,6 +9,7 @@ import type {
   GroupTreeResponse,
   Histogram,
   LoadProjectResponse,
+  PresetData,
   TimeAnalysis,
   SurroundingRows,
   ProjectRow,
@@ -52,6 +53,21 @@ export interface ImportIocsArgs {
 export interface ExportIocsArgs {
   projectId: string;
   destination: string;
+}
+
+export interface SavePresetArgs {
+  projectId: string;
+  name?: string | null;
+  condition?: unknown;
+  hiddenColumns: string[];
+  sortKey?: string | null;
+  sortDirection?: "asc" | "desc" | null;
+  destination: string;
+}
+
+export interface LoadPresetArgs {
+  projectId?: string | null;
+  source: string;
 }
 
 export interface ColorRuleArgs {
@@ -178,6 +194,8 @@ export interface Backend {
   saveIocs(args: SaveIocsArgs): Promise<void>;
   importIocs(args: ImportIocsArgs): Promise<void>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
+  savePreset(args: SavePresetArgs): Promise<void>;
+  loadPreset(args: LoadPresetArgs): Promise<PresetData>;
   colorRules(args: ColorRuleArgs): Promise<ColorRulesResponse>;
   saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse>;
   updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
@@ -362,6 +380,29 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+      },
+    });
+  }
+
+  savePreset(args: SavePresetArgs): Promise<void> {
+    return invoke("save_preset", {
+      payload: {
+        projectId: args.projectId,
+        name: args.name ?? null,
+        condition: args.condition ?? null,
+        hiddenColumns: args.hiddenColumns,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
+        destination: args.destination,
+      },
+    });
+  }
+
+  loadPreset(args: LoadPresetArgs): Promise<PresetData> {
+    return invoke("load_preset", {
+      payload: {
+        projectId: args.projectId ?? null,
+        source: args.source,
       },
     });
   }
