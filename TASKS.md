@@ -538,11 +538,21 @@ src-tauri/src/
   完全一致を確認。テストは `precision_test.rs` 2 ケース追加
   （`i64::MAX` 付近のソート順・完全一致検索・出力の桁一致、ナノ秒/マイクロ秒の文字列化）。
 
-#### F27: 出力の条件・列反映
+#### F27: 出力の条件・列反映 → 完了（`99debe8`）
 
 - 前提: F3, R4
 - 手順: `export_project` に「全件 / 現在の条件一致 / 表示列のみ / ソート順反映」オプションを追加。
 - 完了条件: 条件一致で出力した CSV の行数 = `total_filtered_rows`（I5）。
+- 実装メモ: `ExportProjectPayload` に `scope`（既定 `all`、`filtered` で
+  search+condition を query と同一述語で評価）、`search`、`condition`、
+  `columns`（指定列のみ。未知列は無視）、`sortKey`/`sortDirection` を追加
+  （serde default のため既存フロントの呼び出しは不変）。
+  `ops::query` を `pub(crate)` にして `prepare_search` / `ordered_row_indices` /
+  `persist_search_cache` を再利用（第二の述語は作らない）。
+  列制限前に IOC 評価を実施し隠し列を対象とする IOC クエリの一致を維持、
+  行選択・並べ替えは trivium 列組立後の frame に適用してフラグの行対応を保持。
+  テストは `export_options_test.rs` 4 ケース追加
+  （既定の全件出力、filtered の行数 = `total_filtered_rows`、列制限、ソート昇順/降順）。
 
 ### 拡張
 
