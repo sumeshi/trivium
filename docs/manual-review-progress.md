@@ -394,3 +394,51 @@ and cache-eviction paths have no automated UI test.
   for T07.
 
 Next card: T07.
+
+## T07 — bookmark-only and virtual scroll counts match
+
+Recorded: 2026-11-11.
+
+- `src/lib/components/project_view/DataTable.svelte`: removed the local
+  `flagFilter` / `search` / condition predicate. `effectiveTotalRows` is now
+  `$totalFilteredRows`, the backend count for the applied QuerySpec, so
+  bookmark-only and every other filter use the same number. `totalRows` remains
+  only in the `{filtered} / {total} rows` meta label.
+- `src/lib/components/ProjectView.svelte`: removed the duplicated predicate.
+  `effectiveTotalRows` is also `$totalFilteredRows`, so prefetch ranges, spacer
+  height and table rendering all use the applied result count instead of
+  falling back to the whole project.
+- `src/lib/components/project_view/state.ts`: documented that
+  `totalFilteredRows` is the applied QuerySpec count and the sole source for the
+  virtual row count.
+- Scroll clamp: when the total height or viewport height changes and
+  `$scrollTop` exceeds `max(0, totalHeight - viewportHeight)`, both the
+  `scrollTop` store and `$bodyScrollEl.scrollTop` are set to that maximum. The
+  clamp waits for `$pendingPages` to settle so the saved offset restored during
+  project load (when the count is briefly 0) is not reset. Setting the store
+  and the element to the same value keeps subsequent reactive runs stable.
+- Zero results already render the existing `.empty-rows` message
+  ("No rows match your filters.") once pending requests finish. The spacer is
+  now derived from the same zero count, so no full-project blank area remains.
+- Selection, sorting and paging requests were not changed.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | 118 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+There is no frontend test runner in this repository, so the count and scroll
+clamp have no automated UI test.
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised. The completion scenarios (100 rows with one
+  bookmark shows one row; zero results shows the empty state; narrowing near the
+  end leaves no long blank table) have not been reproduced in the app or a
+  browser mock. They are scheduled for real-app confirmation in T26.
+
+Next card: T08a.
