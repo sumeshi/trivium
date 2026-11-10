@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -91,7 +92,7 @@ fn open_flags_db(path: &Path) -> Result<Db> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create flags db dir {:?}", parent))?;
     }
-    sled::open(path).with_context(|| format!("failed to open flags db at {:?}", path))
+    open_sled(path).with_context(|| format!("failed to open flags db at {:?}", path))
 }
 
 fn open_cache_db(path: &Path) -> Result<Db> {
@@ -99,7 +100,31 @@ fn open_cache_db(path: &Path) -> Result<Db> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create cache db dir {:?}", parent))?;
     }
-    sled::open(path).with_context(|| format!("failed to open cache db at {:?}", path))
+    open_sled(path).with_context(|| format!("failed to open cache db at {:?}", path))
+}
+
+/// sled takes an exclusive flock on the database file. A previous instance's
+/// background threads can still hold the lock for a short while after the
+/// handle is dropped, so an immediate re-open fails with `WouldBlock`. Retry
+/// briefly instead of surfacing the error (observed as a flaky failure on
+/// slower CI runners when a test closes and re-opens the same database).
+const SLED_OPEN_ATTEMPTS: usize = 50;
+const SLED_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
+fn open_sled(path: &Path) -> Result<sled::Db, sled::Error> {
+    for attempt in 1..=SLED_OPEN_ATTEMPTS {
+        match sled::open(path) {
+            Ok(db) => return Ok(db),
+            Err(sled::Error::Io(err))
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    && attempt < SLED_OPEN_ATTEMPTS =>
+            {
+                std::thread::sleep(SLED_OPEN_RETRY_INTERVAL);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("retry loop always returns within the attempt limit")
 }
 
 fn read_flags_from_json(path: &Path) -> Result<HashMap<usize, FlagEntry>> {

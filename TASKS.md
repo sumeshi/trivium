@@ -207,6 +207,12 @@ src-tauri/src/
   （3.11+ のみ許容、手元の 3.14 では通過していた）。スニペットを小数秒 6 桁へ
   丸めてからパースするよう修正し、Python 3.10 でも動作するようにした
   （検証対象は 60 秒以上のギャップ検出のため丸めの影響なし）。
+- CI 追記（2026-11-10、2 回目）: ubuntu-24.04 runner で `colors_test` の
+  `update_flag_returns_matching_row_color` が sled の `WouldBlock` で失敗。
+  同一 flags.db を「閉じた直後に再オープン」すると、前インスタンスの
+  バックグラウンドスレッドがまだ flock を保持していることが原因のタイミング依存
+  フレーキー（run 2 では通過）。`storage.rs` の sled オープンを
+  WouldBlock 時に最大 1 秒リトライする構造に修正（プロダクト側の頑健性改善も兼ねる）。
 
 - 対象: `crates/engine/tests/smoke.rs`
 - 実装メモ: fixtures は `*.csv` が gitignore 済みで CI の新規チェックアウトに存在しないため、
