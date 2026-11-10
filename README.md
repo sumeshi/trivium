@@ -32,6 +32,11 @@ This tool is primarily for anyone who needs to sift through large amounts of tab
 - **Filtering & Sorting**: Instantly filter the view by flag status, search for text across all columns, and sort data by any column.
 - **Column Management**: Toggle the visibility of columns to focus on the data that matters.
 - **Data Export**: Export your work—including all flags and memos—back to a CSV file for use in other tools.
+- **Condition Editor**: Build filters from nested AND/OR groups with per-column operators (`=`, `≠`, `>`, `<`, `≥`, `≤`, `contains`, `starts`, `ends`, `regex`, `in`), while the text search bar remains available.
+- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and row details with surrounding events. Back/forward navigation and per-project view state make it easy to move between filters.
+- **Bulk Annotation & Organization**: Annotate every matching row at once with undo, add tags and bookmarks, group rows hierarchically, and color rows with condition rules. Presets store a condition, column set, and sort order for reuse across projects.
+- **Project Comparison & Reports**: Search the same condition across projects, diff projects by key columns, and produce a self-contained HTML report.
+- **Flexible Import & Export**: Choose a delimiter, import UTF-16 files via BOM detection, and load JSONL with nested keys flattened to `a.b`. The source file's SHA-256 is kept in the project details, and exports can honor the current condition, visible columns, and sort order while preserving integer and nanosecond precision.
 
 ## Search Syntax
 
@@ -74,6 +79,29 @@ Notes
 - Regular expressions are not supported.
 - Searching very large datasets is cached; the first run may build masks, subsequent runs are faster.
 
+### Structured Conditions
+
+The condition editor builds a filter tree that the engine evaluates with the same predicate as the text search. It does not replace the search bar: both remain available, and when both are set a row must match the text search and the condition tree (AND).
+
+- Condition rows
+  - Each row selects a column, an operator, and a value.
+  - Operators: `=` (`Eq`), `≠` (`Ne`), `>` (`Gt`), `<` (`Lt`), `≥` (`Ge`), `≤` (`Le`), `contains`, `starts`, `ends`, `regex`, and `in`.
+  - `in` accepts a comma-separated list of values, for example `4624,4625,4688`.
+  - `Not` negates an individual row.
+
+- Groups
+  - Every group combines its children with AND or OR.
+  - Groups can be nested; the root group is an AND group.
+  - Rows and groups can be reordered with `Up`/`Down`, and groups can be collapsed.
+
+- Typed values
+  - Numeric columns use numeric input and datetime columns use `datetime-local` input.
+  - Integer and nanosecond values are sent as text, so values beyond `2^53` are not rounded.
+
+- Scope and notes
+  - Conditions name their columns explicitly, so they can target columns that are currently hidden.
+  - The text search bar does not support regular expressions; `regex` is available only as a structured condition operator.
+
 ## Getting Started
 
 1.  **Import Data**: Launch the app and click "Import CSV" from the sidebar to create a new project.
@@ -112,6 +140,24 @@ To build the distributable application for your platform:
 npm install
 npm run tauri build
 ```
+
+#### Development Scripts
+
+- `scripts/gen_fixture.py` generates deterministic synthetic log fixtures for tests and benchmarks.
+
+  ```bash
+  python3 scripts/gen_fixture.py --rows 1000 --seed 42 --out fixtures/basic.csv
+  ```
+
+  It accepts `--rows N --seed N --out PATH --variant {ascii,utf16,wide}`. A fixed seed reproduces the same bytes; `utf16` writes a BOM-prefixed UTF-16LE file, and `wide` adds twelve extra columns.
+
+- `scripts/check_rust_size.sh` enforces the 500-line limit on Rust source files under `src-tauri/src` and `crates/engine/src`. It exits non-zero when a file exceeds the limit and runs as a quality gate in CI.
+
+  ```bash
+  bash scripts/check_rust_size.sh
+  ```
+
+Benchmark results are recorded in [docs/performance.md](docs/performance.md).
 
 ## Windows System Requirement: WebView2
 
