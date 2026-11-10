@@ -92,33 +92,6 @@ pub fn ensure_column_text_cache<'a>(
     cache.get(&key).expect("column cache must exist")
 }
 
-/// Builds concatenated row text and per-column single-row caches.
-pub fn build_row_search_text(
-    column_names: &[String],
-    column_series: &HashMap<&str, &Series>,
-    row_idx: usize,
-) -> (String, HashMap<String, Vec<String>>) {
-    let mut row_text = String::new();
-    let mut per_column: HashMap<String, Vec<String>> = HashMap::new();
-    for column in column_names {
-        if let Some(series) = column_series.get(column.as_str()) {
-            if let Ok(value) = series.get(row_idx) {
-                if let Some(text) = anyvalue_to_search_string(&value) {
-                    let lower = text.to_lowercase();
-                    if !lower.is_empty() {
-                        if !row_text.is_empty() {
-                            row_text.push(' ');
-                        }
-                        row_text.push_str(&lower);
-                        per_column.insert(column.to_lowercase(), vec![lower]);
-                    }
-                }
-            }
-        }
-    }
-    (row_text, per_column)
-}
-
 /// Returns the color of the first matching rule, or `None` when nothing matches.
 /// Row data is passed directly to the shared condition evaluator, so color
 /// matching uses exactly the same predicate as search and filters.

@@ -132,14 +132,6 @@ export interface ConditionGroup {
 
 export type ConditionNode = ConditionLeaf | ConditionGroup;
 
-export interface QueryRowsResponse {
-  rows: ProjectRow[];
-  total_flagged: number;
-  total_rows: number;
-  total_filtered_rows: number;
-  offset: number;
-}
-
 export interface GroupTreeNode {
   value: unknown;
   label: string;

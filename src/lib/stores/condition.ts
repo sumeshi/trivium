@@ -80,10 +80,6 @@ function edit(update: (root: EditorGroup) => EditorGroup): void {
   conditionTree.update(update);
 }
 
-export function resetConditions(): void {
-  conditionTree.set(rootGroup());
-}
-
 /** Replaces the editor with one `in` condition so a stats value filters the table. */
 export function filterByValue(column: string, value: string): void {
   const row: EditorCondition = {
@@ -309,24 +305,6 @@ function fromNode(value: unknown): EditorNode | null {
     };
   }
   return conditionFromNode(value);
-}
-
-/** F21: portability between engine Node JSON and the editor tree. */
-export function treeFromNode(node: unknown): EditorGroup {
-  const converted = fromNode(node);
-  if (!converted) {
-    return rootGroup();
-  }
-  if (converted.type === "group") {
-    return { ...converted, id: ROOT_ID };
-  }
-  return {
-    type: "group",
-    id: ROOT_ID,
-    kind: "and",
-    collapsed: false,
-    children: [converted],
-  };
 }
 
 /** Returns an editor tree for a preset condition, or null when it is absent. */

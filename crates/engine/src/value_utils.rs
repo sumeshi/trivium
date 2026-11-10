@@ -40,16 +40,6 @@ pub fn value_display_length(value: &Value) -> usize {
     }
 }
 
-pub fn value_to_search_string(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(boolean) => Some(boolean.to_string()),
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
-    }
-}
-
 pub fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
     match value {
         AnyValue::Null => None,

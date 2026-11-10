@@ -1,10 +1,9 @@
 //! Single IOC evaluation path.
 //!
 //! Every consumer of IOC results (query rows, export, applied-record counts,
-//! and the page-level tag path via `row_contains_query`) must agree on what a
-//! given IOC set means for a given frame. This module owns the frame-level
-//! evaluation; the per-row helper in the parent module covers materialized
-//! pages.
+//! and the initial page of a loaded project) must agree on what a given IOC set
+//! means for a given frame. This module owns the frame-level evaluation; the
+//! per-row helper in the parent module covers materialized pages.
 //!
 //! IOC matching is a data-level predicate: all data columns participate,
 //! regardless of which columns the UI happens to show.

@@ -73,8 +73,6 @@ export type AppliedFilters = {
   condition: ConditionNode | null;
 };
 
-export type ScheduledFilters = AppliedFilters & { resetScroll: boolean };
-
 export const projectDetail = writable<LoadProjectResponse | null>(null);
 export const backend = writable<Backend | null>(null);
 
