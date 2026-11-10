@@ -508,3 +508,28 @@ Recorded: 2026-11-11.
 - `read_original_records` is exercised by the fixture; no UI path reads it yet.
 
 Next card: T08b.
+
+## T08b — import CSV/JSONL with column ids
+
+Changes:
+- CSV import assigns positional ids `c000001…`, so duplicate/empty headers and
+  input columns named `__rowid` / `trivium-*` no longer collide. Every row also
+  stores `__original` as the raw cell-string array.
+- JSONL import flattens objects with JSON Pointers (`/a/b` vs `/a.b` stay
+  distinct); `__original` holds the source object, arrays stay in one cell.
+- Annotation restore is explicit: `CreateProjectPayload.restore_annotations`
+  (default false). `create_project` writes storage version 2 with column
+  metadata for new projects.
+- Internal columns (`__rowid`, `__original`) are excluded from search, display,
+  analysis, and export by the shared `is_internal_column` check.
+
+Verification:
+- `cargo test -p trivium-engine`: all suites pass (28 test binaries green).
+- `cargo test -p trivium-engine --test import_ids_test`: 4 passed.
+- `bash scripts/check_rust_size.sh`: exit 0.
+- `npm run lint`: 0 errors / 0 warnings. `npm run build`: success.
+
+Unverified: GUI import paths are not exercised (T26); value/type preservation
+for long integers and CSV raw strings is refined in T09.
+
+Next card: T09.
