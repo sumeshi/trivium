@@ -204,3 +204,79 @@ restricting the scope to another column removes the match. The camel-case
   remain for T04 onward.
 
 Next card: T04.
+
+## T04 — page, export, and bulk resolve the same target rows
+
+Recorded: 2026-11-11.
+
+- `crates/engine/src/ops/query/target.rs` (new): `QuerySpec`,
+  `ResolvedTarget`, `data_columns`, and `resolve_target`. `resolve_target`
+  runs `prepare_search` (`searchColumns` scope and `condition`), then
+  `ordered_row_indices`, then `filtered_indices` (flag filter, bookmark-only,
+  search mask), so the page query, filtered export, and bulk-filtered target
+  share one implementation and one order. It also returns
+  `annotated_filtered` and `annotated_total`.
+- `crates/engine/src/ops/query/mod.rs`: `QueryRowsPayload` is now
+  `projectId` + flattened `QuerySpec` + `offset`/`limit`. The IPC keys are
+  unchanged (`search`, `searchColumns`, `flagFilter`, `bookmarkedOnly`,
+  `sortKey`, `sortDirection`, `condition`). `query_project_rows` uses
+  `resolve_target`; the response meaning is unchanged.
+- `crates/engine/src/export/csv.rs`: `ExportProjectPayload` is
+  `projectId` + `destination` + `scope` + flattened `QuerySpec` + output
+  `columns`. Search/condition/sort keys are no longer export-only fields.
+  Row selection and order are resolved on the full frame before output
+  columns are restricted, so `columns` no longer acts as the search scope.
+  `scope=filtered` applies search, condition, flag filter, bookmark-only, and
+  sort; `scope=all` (default) exports every row in the requested sort order.
+  The `trivium-*` columns stay first, and input `flag`/`memo` columns are
+  still preserved (T01).
+- `crates/engine/src/ops/bulk.rs`: `BulkAnnotatePayload` is `projectId` +
+  `target` (`selection`/`filtered`/`all`) + `rowIndices` + flattened
+  `QuerySpec` + flattened `AnnotationPatch` + `previewToken`. The old `filter`
+  target is now `filtered`. `bulk_preview` returns `count` and
+  `previewToken = sha256(spec JSON | row ids | annotated_filtered)`.
+  `bulk_update` recomputes that token from the current frame, flags, and IOC
+  outcomes and rejects a missing or different token with
+  `Target changed; preview again.` Selection targets go through the same
+  check. The patch application path is still `apply_annotation_patch`.
+- `src/lib/backend.ts` / `src/lib/types.ts`: export and bulk args carry
+  `searchColumns`, `flagFilter`, `bookmarkedOnly`, `sortKey`,
+  `sortDirection`, `condition`, and `previewToken`; `BulkCount` returns
+  `previewToken`. `BulkControls.svelte` sends the applied query state and
+  passes the preview token to update. No new output-scope or row-selection UI
+  was added (T23/T22).
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New regression suite | `cargo test -p trivium-engine --test target_parity_test` | 4 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+
+Regression coverage (`target_parity_test.rs`, 20 rows): a search term in a
+column excluded from output, a condition on another column, a flag filter,
+bookmark-only, and descending sort are set together. The page query returns
+row ids `[6, 0]`; filtered export returns the same rows in that order both
+when `id` is included and when only `msg` is exported. Bulk preview reports
+the same count, update without the token or with a stale token fails, and the
+matching token updates only rows 0 and 6. Clearing a flag inside a target
+invalidates the token even when the row set is unchanged. `scope=all` with a
+sort key exports all 20 rows from `r19` to `r00` regardless of the search
+text.
+
+### Unverified / deferred
+
+- GUI bulk preview/apply and export were not exercised; only engine tests,
+  svelte-check, and the production build cover the call sites.
+- The preview token binds the spec, the original row-id sequence, and the
+  annotated count in the target. It does not detect an external change to
+  `data.parquet` that leaves the same row ids, or a memo-only edit that does
+  not change whether a row counts as annotated. Input-change detection is
+  T12; request generations and cache limits are T05/T19.
+- Output scope selection, selected-row export, and the empty-selection
+  behaviour remain for T23/T22. Undo is unchanged (T14).
+
+Next card: T05.
