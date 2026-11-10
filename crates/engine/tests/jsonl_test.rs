@@ -1,4 +1,5 @@
-//! JSONL import: nested key flattening, column union, typed columns, and create_project dispatch.
+//! JSONL import: JSON Pointer flattening, column union, typed columns, and
+//! create_project dispatch.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,7 +36,7 @@ fn value_at<'a>(
 }
 
 #[test]
-fn nested_objects_flatten_to_dotted_columns() {
+fn nested_objects_flatten_to_pointer_columns() {
     let root = temp_root();
     let path = write_jsonl(
         &root,
@@ -46,20 +47,35 @@ fn nested_objects_flatten_to_dotted_columns() {
         ],
     );
 
-    let (df, flags) = jsonl::load(&path).expect("jsonl load failed");
-    assert!(flags.is_empty(), "jsonl import carries no flag entries");
+    let imported = jsonl::load(&path).expect("jsonl load failed");
+    assert!(imported.flags.is_empty(), "jsonl import carries no flag entries");
     assert_eq!(
-        df.get_column_names(),
-        vec!["ts", "host.name", "host.ip", "user", "__rowid"],
-        "columns must be the first-appearance union with dotted nested keys"
+        imported
+            .columns
+            .iter()
+            .map(|column| column.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/ts", "/host/name", "/host/ip", "/user"],
+        "columns must be the first-appearance union with JSON Pointer paths"
     );
+    assert_eq!(
+        imported
+            .columns
+            .iter()
+            .map(|column| column.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ts", "host/name", "host/ip", "user"]
+    );
+    let df = imported.frame;
     assert_eq!(df.height(), 2);
+    let name_id = imported.columns[1].id.clone();
+    let ip_id = imported.columns[2].id.clone();
     assert_eq!(
-        value_at(&df, "host.name", 0).get_str(),
+        value_at(&df, &name_id, 0).get_str(),
         Some("WS01"),
-        "one-level nested keys must flatten to a.b columns"
+        "one-level nested keys must flatten to pointer columns"
     );
-    assert_eq!(value_at(&df, "host.ip", 1).get_str(), Some("10.0.0.2"));
+    assert_eq!(value_at(&df, &ip_id, 1).get_str(), Some("10.0.0.2"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -76,11 +92,21 @@ fn missing_keys_become_null_across_column_union() {
         ],
     );
 
-    let (df, _) = jsonl::load(&path).expect("jsonl load failed");
-    assert_eq!(df.get_column_names(), vec!["a", "b", "__rowid"]);
+    let imported = jsonl::load(&path).expect("jsonl load failed");
+    assert_eq!(
+        imported
+            .columns
+            .iter()
+            .map(|column| column.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/a", "/b"]
+    );
+    let df = imported.frame;
     assert_eq!(df.height(), 2);
-    assert!(value_at(&df, "b", 0).is_null(), "absent key row 0 must be null");
-    assert!(value_at(&df, "a", 1).is_null(), "absent key row 1 must be null");
+    let a_id = imported.columns[0].id.clone();
+    let b_id = imported.columns[1].id.clone();
+    assert!(value_at(&df, &b_id, 0).is_null(), "absent key row 0 must be null");
+    assert!(value_at(&df, &a_id, 1).is_null(), "absent key row 1 must be null");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -97,19 +123,23 @@ fn numeric_and_boolean_columns_keep_their_types() {
         ],
     );
 
-    let (df, _) = jsonl::load(&path).expect("jsonl load failed");
+    let imported = jsonl::load(&path).expect("jsonl load failed");
+    let df = imported.frame;
+    let event_id = imported.columns[0].id.clone();
+    let score_id = imported.columns[1].id.clone();
+    let ok_id = imported.columns[2].id.clone();
     assert_eq!(
-        df.column("eventid").expect("eventid").dtype(),
+        df.column(&event_id).expect("eventid").dtype(),
         &DataType::Int64,
         "all-integer columns must stay Int64"
     );
     assert_eq!(
-        df.column("score").expect("score").dtype(),
+        df.column(&score_id).expect("score").dtype(),
         &DataType::Float64,
         "float columns must stay Float64"
     );
     assert_eq!(
-        df.column("ok").expect("ok").dtype(),
+        df.column(&ok_id).expect("ok").dtype(),
         &DataType::Boolean,
         "all-boolean columns must stay Boolean"
     );
@@ -136,10 +166,13 @@ fn ops_create_project_accepts_jsonl_extension() {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project from jsonl fixture");
     assert_eq!(summary.meta.total_records, 2);
+    assert_eq!(summary.meta.storage_version, 2);
+    assert_eq!(summary.meta.columns.len(), 3);
 
     let loaded = ops::projects::load_project(
         &store,
@@ -150,8 +183,11 @@ fn ops_create_project_accepts_jsonl_extension() {
     .expect("failed to load created project");
     assert_eq!(loaded.columns.len(), 3);
     assert!(
-        loaded.columns.contains(&"proc.pid".to_string()),
-        "flattened proc.pid column must be present"
+        loaded
+            .columns_meta
+            .iter()
+            .any(|column| column.source == "/proc/pid"),
+        "flattened /proc/pid column must be present"
     );
 
     let _ = fs::remove_dir_all(root);

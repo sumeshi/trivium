@@ -12,6 +12,8 @@ use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::ops::{projects, rows};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("trivium-export-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
@@ -36,6 +38,7 @@ fn create(store: &ProjectsStore, root: &Path) -> uuid::Uuid {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
@@ -147,6 +150,8 @@ fn columns_option_limits_output_columns() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let id = create(&store, &root);
+    let ids = common::column_ids(&store, id);
+    let msg_id = common::id(&ids, "msg");
 
     let exported = run_export(
         &store,
@@ -162,7 +167,7 @@ fn columns_option_limits_output_columns() {
                 sort_direction: None,
                 ..Default::default()
             },
-            columns: Some(vec!["msg".to_string()]),
+            columns: Some(vec![msg_id]),
         },
     );
     let header = exported.lines().next().expect("export must have a header");
@@ -198,6 +203,7 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
@@ -281,6 +287,8 @@ fn sort_options_reflect_exported_row_order() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let id = create(&store, &root);
+    let ids = common::column_ids(&store, id);
+    let event_id = common::id(&ids, "eventid");
 
     let build_payload = |direction: &str|     ExportProjectPayload {
         project_id: id,
@@ -289,7 +297,7 @@ fn sort_options_reflect_exported_row_order() {
         spec: QuerySpec {
             search: None,
             condition: None,
-            sort_key: Some("eventid".to_string()),
+            sort_key: Some(event_id.clone()),
             sort_direction: Some(direction.to_string()),
             ..Default::default()
         },

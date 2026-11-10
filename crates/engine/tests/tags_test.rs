@@ -22,6 +22,8 @@ use trivium_engine::ops::time::TimeAnalysisPayload;
 use trivium_engine::storage::{load_flags, upsert_flag};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 // 12 rows; timestamps are one second apart so time analysis sees one session.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
     let path = root.join("tags.csv");
@@ -42,7 +44,7 @@ fn write_fixture(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid) {
+fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-tags-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -53,10 +55,12 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
-    (root, store, summary.meta.id)
+    let ids = common::column_ids(&store, summary.meta.id);
+    (root, store, summary.meta.id, ids)
 }
 
 fn query(
@@ -147,7 +151,7 @@ fn legacy_flags_json_loads_and_keeps_tags() {
 
 #[test]
 fn update_flag_preserves_tags_and_bookmark_when_omitted() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
 
     let created = update(
         &store,
@@ -180,7 +184,7 @@ fn update_flag_preserves_tags_and_bookmark_when_omitted() {
 
 #[test]
 fn bulk_update_keeps_tags_and_bookmarks_and_undo_restores_them() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
 
     update(
         &store,
@@ -244,8 +248,10 @@ fn bulk_update_keeps_tags_and_bookmarks_and_undo_restores_them() {
 
 #[test]
 fn bookmarked_only_filters_query_but_not_other_analyses() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
 
+    let event_id = common::id(&ids, "EventID");
+    let ts_id = common::id(&ids, "ts");
     for row_index in [0usize, 4, 9] {
         update(&store, id, row_index, "", None, None, Some(true));
     }
@@ -262,7 +268,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             columns: None,
             flag_filter: None,
             condition: None,
-            group_columns: vec!["EventID".to_string()],
+            group_columns: vec![event_id.clone()],
         },
     )
     .expect("group failed");
@@ -272,7 +278,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "EventID".to_string(),
+            column: event_id,
             buckets: 4,
             search: None,
             columns: None,
@@ -291,7 +297,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
         &store,
         TimeAnalysisPayload {
             project_id: id,
-            column: "ts".to_string(),
+            column: ts_id,
             gap_seconds: 60,
             session_minutes: 30,
             burst_window_seconds: 60,
@@ -326,7 +332,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
 
 #[test]
 fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
 
     update(&store, id, 0, "safe", Some("manual note"), Some(vec!["pc"]), None);
 
@@ -361,6 +367,7 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
             path: destination.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: Some(true),
         },
     )
     .expect("reimport failed");
@@ -381,7 +388,7 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
 
 #[test]
 fn query_feedback_includes_tags_and_bookmark() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
 
     update(
         &store,

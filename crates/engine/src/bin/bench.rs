@@ -40,6 +40,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
         path: fixture.to_string(),
         description: None,
         delimiter: None,
+        restore_annotations: None,
     };
     let id = timed("create", || create_project(&store, build_create()))?.meta.id;
     println!(
@@ -47,6 +48,20 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
         "rows_imported",
         store.find(&id).map(|meta| meta.total_records).unwrap_or(0)
     );
+
+    // Fixture headers are not data ids in the new storage format. Resolve the
+    // ids from the project metadata before building queries.
+    let columns = store.find(&id).map(|meta| meta.columns).unwrap_or_default();
+    let column_id = |source: &str| -> String {
+        columns
+            .iter()
+            .find(|column| column.source == source)
+            .map(|column| column.id.clone())
+            .unwrap_or_else(|| source.to_string())
+    };
+    let ts_id = column_id("ts");
+    let user_id = column_id("user");
+    let host_id = column_id("host");
 
     let build_query = |search: Option<String>, sort: Option<String>| QueryRowsPayload {
         project_id: id,
@@ -64,7 +79,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     };
 
     timed("sort_first", || {
-        query_project_rows(&store, build_query(None, Some("ts".to_string()))).map(|_| ())
+        query_project_rows(&store, build_query(None, Some(ts_id.clone()))).map(|_| ())
     })?;
 
     timed("export_all", || {
@@ -81,7 +96,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     })?;
 
     timed("search_A_cold", || {
-        query_project_rows(&store, build_query(Some("user:alice".to_string()), None)).map(|_| ())
+        query_project_rows(&store, build_query(Some(format!("{}:alice", user_id)), None)).map(|_| ())
     })?;
     timed("search_B_cold", || {
         query_project_rows(
@@ -91,7 +106,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
         .map(|_| ())
     })?;
     timed("search_A_warm", || {
-        query_project_rows(&store, build_query(Some("user:alice".to_string()), None)).map(|_| ())
+        query_project_rows(&store, build_query(Some(format!("{}:alice", user_id)), None)).map(|_| ())
     })?;
     timed("search_B_warm", || {
         query_project_rows(
@@ -110,14 +125,14 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
             .map(|index| trivium_engine::models::IocEntry {
                 flag: "critical".to_string(),
                 tag: format!("ioc{}", index),
-                query: format!("host:WS{:02} user:alice", index % 50 + 1),
+                query: format!("{}:WS{:02} {}:alice", host_id, index % 50 + 1, user_id),
             })
             .collect();
         if extra {
             entries.push(trivium_engine::models::IocEntry {
                 flag: "suspicious".to_string(),
                 tag: "ioc_extra".to_string(),
-                query: "user:frank".to_string(),
+                query: format!("{}:frank", user_id),
             });
         }
         entries

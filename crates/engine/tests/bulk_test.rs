@@ -17,6 +17,8 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 /// The undo layer is process-global, so tests sharing this binary must not
 /// interleave their bulk_update/bulk_undo pairs.
 static UNDO_LOCK: Mutex<()> = Mutex::new(());
@@ -48,7 +50,7 @@ fn write_fixture(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid) {
+fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-bulk-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -59,10 +61,12 @@ fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
     let id = summary.meta.id;
+    let ids = common::column_ids(&store, id);
 
     if with_ioc {
         ops::iocs::save_iocs(
@@ -72,14 +76,14 @@ fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid) {
                 entries: vec![IocEntry {
                     flag: "critical".to_string(),
                     tag: "logon-fail".to_string(),
-                    query: "eventid:4625".to_string(),
+                    query: common::search(&ids, "EventID", "4625"),
                 }],
             },
         )
         .expect("failed to save iocs");
     }
 
-    (root, store, id)
+    (root, store, id, ids)
 }
 
 fn payload(
@@ -165,7 +169,7 @@ fn undo(store: &ProjectsStore, id: Uuid) -> usize {
 #[test]
 fn bulk_all_applies_and_undo_restores() {
     let _guard = undo_guard();
-    let (root, store, id) = setup(false);
+    let (root, store, id, _ids) = setup(false);
 
     let preview = bulk_preview(
         &store,
@@ -209,23 +213,23 @@ fn bulk_all_applies_and_undo_restores() {
 #[test]
 fn bulk_filter_matches_the_query_path() {
     let _guard = undo_guard();
-    let (root, store, id) = setup(false);
+    let (root, store, id, ids) = setup(false);
 
     let preview = bulk_preview(
         &store,
-        payload(id, "filtered", Some("user:alice"), None, "suspicious", None),
+        payload(id, "filtered", Some(&common::search(&ids, "user", "alice")), None, "suspicious", None),
     )
     .expect("preview failed");
     assert_eq!(preview.count, 6);
     assert_eq!(
         preview.count,
-        query(&store, id, Some("user:alice")).total_filtered_rows,
+        query(&store, id, Some(&common::search(&ids, "user", "alice"))).total_filtered_rows,
         "preview must agree with the query path"
     );
 
     let applied = bulk_update(
         &store,
-        previewed(&store, payload(id, "filtered", Some("user:alice"), None, "suspicious", None)),
+        previewed(&store, payload(id, "filtered", Some(&common::search(&ids, "user", "alice")), None, "suspicious", None)),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 6);
@@ -249,7 +253,7 @@ fn bulk_filter_matches_the_query_path() {
 #[test]
 fn bulk_selection_dedupes_and_rejects_out_of_range() {
     let _guard = undo_guard();
-    let (root, store, id) = setup(false);
+    let (root, store, id, _ids) = setup(false);
 
     let preview = bulk_preview(
         &store,
@@ -296,7 +300,7 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 #[test]
 fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
     let _guard = undo_guard();
-    let (root, store, id) = setup(true);
+    let (root, store, id, _ids) = setup(true);
 
     let initial = query_flags(&store, id);
     for index in [2usize, 4, 7, 10] {
@@ -353,7 +357,7 @@ fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
 #[test]
 fn bulk_clear_removes_entries_and_reveals_ioc_flags() {
     let _guard = undo_guard();
-    let (root, store, id) = setup(true);
+    let (root, store, id, _ids) = setup(true);
 
     bulk_update(
         &store,

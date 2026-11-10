@@ -101,7 +101,10 @@ fn text_at(df: &DataFrame, column: &str, row: usize) -> Option<String> {
 fn assert_same_import(ascii: &DataFrame, decoded: &DataFrame) {
     assert_eq!(ascii.get_column_names(), decoded.get_column_names());
     assert_eq!(ascii.height(), decoded.height());
-    for column in ["ts", "EventID", "host", "user", "proc", "path", "msg"] {
+    for column in ascii.get_column_names() {
+        if column == "__rowid" || column == "__original" {
+            continue;
+        }
         for row in 0..ascii.height() {
             assert_eq!(
                 text_at(ascii, column, row),
@@ -118,7 +121,7 @@ macro_rules! column_count {
     ($df:expr) => {
         $df.get_column_names()
             .into_iter()
-            .filter(|name| name != &"__rowid")
+            .filter(|name| *name != "__rowid" && *name != "__original")
             .count()
     };
 }
@@ -128,9 +131,11 @@ fn comma_fixture_loads_with_automatic_delimiter() {
     let root = temp_root();
     let path = write_fixture(&root, "comma.csv", ',');
 
-    let (df, _) = csv::load(&path, None).expect("comma load failed");
+    let imported = csv::load(&path, None, false).expect("comma load failed");
+    let df = imported.frame;
     assert_eq!(column_count!(&df), 7);
     assert_eq!(df.height(), 3);
+    assert_eq!(imported.columns.len(), 7);
 
     let _ = fs::remove_dir_all(root);
 }
@@ -140,9 +145,11 @@ fn tab_fixture_loads_with_tab_delimiter() {
     let root = temp_root();
     let path = write_fixture(&root, "tab.tsv", '\t');
 
-    let (df, _) = csv::load(&path, Some(b'\t')).expect("tab load failed");
+    let imported = csv::load(&path, Some(b'\t'), false).expect("tab load failed");
+    let df = imported.frame;
     assert_eq!(column_count!(&df), 7);
     assert_eq!(df.height(), 3);
+    assert_eq!(imported.columns.len(), 7);
 
     let _ = fs::remove_dir_all(root);
 }
@@ -152,9 +159,11 @@ fn pipe_fixture_loads_with_pipe_delimiter() {
     let root = temp_root();
     let path = write_fixture(&root, "pipe.psv", '|');
 
-    let (df, _) = csv::load(&path, Some(b'|')).expect("pipe load failed");
+    let imported = csv::load(&path, Some(b'|'), false).expect("pipe load failed");
+    let df = imported.frame;
     assert_eq!(column_count!(&df), 7);
     assert_eq!(df.height(), 3);
+    assert_eq!(imported.columns.len(), 7);
 
     let _ = fs::remove_dir_all(root);
 }
@@ -164,10 +173,10 @@ fn wrong_delimiter_never_yields_seven_columns() {
     let root = temp_root();
     let path = write_fixture(&root, "pipe.psv", '|');
 
-    match csv::load(&path, Some(b',')) {
+    match csv::load(&path, Some(b','), false) {
         Err(_) => {}
-        Ok((df, _)) => assert_ne!(
-            column_count!(&df),
+        Ok(imported) => assert_ne!(
+            column_count!(&imported.frame),
             7,
             "comma-parsed pipe data must not look like a valid 7-column import"
         ),
@@ -212,6 +221,7 @@ fn ops_create_project_accepts_tab_delimiter() {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: Some("\t".to_string()),
+            restore_annotations: None,
         },
     )
     .expect("failed to create project from tab fixture");
@@ -243,6 +253,7 @@ fn create_project_records_source_sha256() {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project from fixture");
@@ -273,8 +284,12 @@ fn utf16_le_fixture_imports_same_as_ascii() {
     let ascii_path = write_fixture(&root, "ascii.csv", ',');
     let utf16_path = write_utf16_fixture(&root, "utf16le.csv", false);
 
-    let (ascii, _) = csv::load(&ascii_path, None).expect("ascii load failed");
-    let (decoded, _) = csv::load(&utf16_path, None).expect("utf16le load failed");
+    let ascii = csv::load(&ascii_path, None, false)
+        .expect("ascii load failed")
+        .frame;
+    let decoded = csv::load(&utf16_path, None, false)
+        .expect("utf16le load failed")
+        .frame;
     assert_same_import(&ascii, &decoded);
 
     let _ = fs::remove_dir_all(root);
@@ -286,8 +301,12 @@ fn utf16_be_fixture_imports_same_as_ascii() {
     let ascii_path = write_fixture(&root, "ascii.csv", ',');
     let utf16_path = write_utf16_fixture(&root, "utf16be.csv", true);
 
-    let (ascii, _) = csv::load(&ascii_path, None).expect("ascii load failed");
-    let (decoded, _) = csv::load(&utf16_path, None).expect("utf16be load failed");
+    let ascii = csv::load(&ascii_path, None, false)
+        .expect("ascii load failed")
+        .frame;
+    let decoded = csv::load(&utf16_path, None, false)
+        .expect("utf16be load failed")
+        .frame;
     assert_same_import(&ascii, &decoded);
 
     let _ = fs::remove_dir_all(root);
@@ -303,11 +322,19 @@ fn utf16_fixture_imports_with_explicit_delimiter() {
     let path = root.join("utf16le.tsv");
     fs::write(&path, out).expect("failed to write fixture");
 
-    let (df, _) = csv::load(&path, Some(b'\t')).expect("utf16 tsv load failed");
+    let imported = csv::load(&path, Some(b'\t'), false).expect("utf16 tsv load failed");
+    let msg_id = imported
+        .columns
+        .iter()
+        .find(|column| column.source == "msg")
+        .expect("msg column")
+        .id
+        .clone();
+    let df = imported.frame;
     assert_eq!(column_count!(&df), 7);
     assert_eq!(df.height(), 3);
     assert_eq!(
-        text_at(&df, "msg", 0),
+        text_at(&df, &msg_id, 0),
         Some("logon ok".to_string()),
         "representative value must survive the utf16 decode"
     );

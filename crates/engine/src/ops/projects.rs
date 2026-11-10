@@ -34,6 +34,10 @@ pub struct CreateProjectPayload {
     pub description: Option<String>,
     #[serde(default)]
     pub delimiter: Option<String>,
+    /// Only an explicit Trivium export re-import lifts `trivium-*` columns into
+    /// annotations. The columns themselves stay in the data either way.
+    #[serde(default)]
+    pub restore_annotations: Option<bool>,
 }
 
 /// Lists saved projects ordered by creation time (newest first).
@@ -70,12 +74,18 @@ pub fn create_project(
         return Err(AppError::Message("Selected file no longer exists.".into()).into());
     }
 
-    let (mut df, imported_flags) = if source_path.extension().and_then(|e| e.to_str()) == Some("jsonl")
-    {
+    let restore_annotations = payload.restore_annotations.unwrap_or(false);
+    let imported = if source_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
         jsonl::load(&source_path)?
     } else {
-        csv::load(&source_path, csv::build_delimiter(payload.delimiter.as_deref())?)?
+        csv::load(
+            &source_path,
+            csv::build_delimiter(payload.delimiter.as_deref())?,
+            restore_annotations,
+        )?
     };
+    let mut df = imported.frame;
+    let imported_flags = imported.flags;
 
     let project_id = Uuid::new_v4();
     let project_dir = store.project_dir(&project_id);
@@ -101,10 +111,10 @@ pub fn create_project(
         ioc_applied_records: 0,
         source_sha256: Some(source_sha256(&source_path)?),
         hidden_columns: Vec::new(),
-        // The importers still write the legacy typed frame until T08b, so new
-        // projects created here remain storage version 0.
-        storage_version: 0,
-        columns: Vec::new(),
+        // New projects always use internal column ids and the `__original`
+        // record column. Legacy version 0 projects are only read.
+        storage_version: 2,
+        columns: imported.columns,
     };
 
     let parquet_path = project_dir.join("data.parquet");

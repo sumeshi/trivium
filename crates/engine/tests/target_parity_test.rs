@@ -21,7 +21,9 @@ use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec}
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid) {
+mod common;
+
+fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-target-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let csv = root.join("targets.csv");
@@ -42,6 +44,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
@@ -70,23 +73,24 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
         .expect("failed to annotate row");
     }
 
-    (root, store, id)
+    let ids = common::column_ids(&store, id);
+    (root, store, id, ids)
 }
 
-fn spec() -> QuerySpec {
+fn spec(ids: &std::collections::HashMap<String, String>) -> QuerySpec {
     QuerySpec {
         search: Some("needle".to_string()),
         // The search column is deliberately absent from `columns` below.
-        search_columns: Some(vec!["hidden".to_string()]),
+        search_columns: Some(vec![common::id(ids, "hidden")]),
         condition: Some(Node::Condition(Condition {
-            column: "cond".to_string(),
+            column: common::id(ids, "cond"),
             op: Op::Eq,
             values: vec!["keep".to_string()],
             negated: false,
         })),
         flag_filter: Some("priority".to_string()),
         bookmarked_only: Some(true),
-        sort_key: Some("rank".to_string()),
+        sort_key: Some(common::id(ids, "rank")),
         sort_direction: Some("desc".to_string()),
     }
 }
@@ -167,9 +171,9 @@ fn bulk_payload(id: Uuid, spec: QuerySpec) -> BulkAnnotatePayload {
 
 #[test]
 fn query_export_and_bulk_preview_share_target_rows_and_order() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
 
-    let queried = query_ids(&store, id, spec());
+    let queried = query_ids(&store, id, spec(&ids));
     assert_eq!(queried, vec![6, 0]);
 
     let exported_ids = export_column(
@@ -178,8 +182,8 @@ fn query_export_and_bulk_preview_share_target_rows_and_order() {
         id,
         "id",
         "filtered",
-        spec(),
-        vec!["id".to_string(), "msg".to_string()],
+        spec(&ids),
+        vec![common::id(&ids, "id"), common::id(&ids, "msg")],
     );
     assert_eq!(exported_ids, vec!["r06".to_string(), "r00".to_string()]);
 
@@ -191,12 +195,12 @@ fn query_export_and_bulk_preview_share_target_rows_and_order() {
         id,
         "msg",
         "filtered",
-        spec(),
-        vec!["msg".to_string()],
+        spec(&ids),
+        vec![common::id(&ids, "msg")],
     );
     assert_eq!(exported_msgs, vec!["m06".to_string(), "m00".to_string()]);
 
-    let preview = bulk_preview(&store, bulk_payload(id, spec())).expect("preview failed");
+    let preview = bulk_preview(&store, bulk_payload(id, spec(&ids))).expect("preview failed");
     assert_eq!(preview.count, queried.len());
     assert!(!preview.preview_token.is_empty());
 
@@ -205,19 +209,19 @@ fn query_export_and_bulk_preview_share_target_rows_and_order() {
 
 #[test]
 fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
 
-    let preview = bulk_preview(&store, bulk_payload(id, spec())).expect("preview failed");
+    let preview = bulk_preview(&store, bulk_payload(id, spec(&ids))).expect("preview failed");
     assert_eq!(preview.count, 2);
 
-    let missing = bulk_update(&store, bulk_payload(id, spec()))
+    let missing = bulk_update(&store, bulk_payload(id, spec(&ids)))
         .expect_err("update without a preview token must fail");
     assert!(
         missing.to_string().contains("Target changed; preview again."),
         "unexpected error: {missing}"
     );
 
-    let mut stale = bulk_payload(id, spec());
+    let mut stale = bulk_payload(id, spec(&ids));
     stale.preview_token = Some("not-the-token".to_string());
     let mismatch = bulk_update(&store, stale).expect_err("stale token must fail");
     assert!(
@@ -227,7 +231,7 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
 
     // A changed condition must invalidate the token even when the target row
     // count happens to stay the same.
-    let mut changed_spec = spec();
+    let mut changed_spec = spec(&ids);
     changed_spec.search = Some("other".to_string());
     let mut changed = bulk_payload(id, changed_spec);
     changed.preview_token = Some(preview.preview_token.clone());
@@ -239,7 +243,7 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
         "unexpected error: {changed_error}"
     );
 
-    let mut current = bulk_payload(id, spec());
+    let mut current = bulk_payload(id, spec(&ids));
     current.preview_token = Some(preview.preview_token);
     let applied = bulk_update(&store, current).expect("matching token must apply");
     assert_eq!(applied.updated, 2);
@@ -262,10 +266,10 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
 
 #[test]
 fn bulk_preview_token_detects_annotation_changes_in_the_target() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
     let open_spec = QuerySpec {
         search: Some("needle".to_string()),
-        search_columns: Some(vec!["hidden".to_string()]),
+        search_columns: Some(vec![common::id(&ids, "hidden")]),
         ..Default::default()
     };
 
@@ -300,10 +304,10 @@ fn bulk_preview_token_detects_annotation_changes_in_the_target() {
 
 #[test]
 fn scope_all_applies_the_requested_sort_order() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
     let all_spec = QuerySpec {
         search: Some("does-not-match".to_string()),
-        sort_key: Some("rank".to_string()),
+        sort_key: Some(common::id(&ids, "rank")),
         sort_direction: Some("desc".to_string()),
         ..Default::default()
     };
@@ -315,7 +319,7 @@ fn scope_all_applies_the_requested_sort_order() {
         "id",
         "all",
         all_spec,
-        vec!["id".to_string()],
+        vec![common::id(&ids, "id")],
     );
     assert_eq!(ids.len(), 20, "scope=all exports every row");
     assert_eq!(ids.first().map(String::as_str), Some("r19"));

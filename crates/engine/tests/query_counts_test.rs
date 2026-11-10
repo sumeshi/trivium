@@ -13,6 +13,8 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 const CSV: &str = "name,detail\n\
                    uniquehit,alpha\n\
                    b,beta\n\
@@ -25,7 +27,7 @@ const CSV: &str = "name,detail\n\
                    i,iota\n\
                    j,kappa\n";
 
-fn setup_project() -> (std::path::PathBuf, ProjectsStore, Uuid) {
+fn setup_project() -> (std::path::PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-counts-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let csv = root.join("counts.csv");
@@ -37,12 +39,14 @@ fn setup_project() -> (std::path::PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
     .meta
     .id;
-    (root, store, id)
+    let ids = common::column_ids(&store, id);
+    (root, store, id, ids)
 }
 
 fn annotate(store: &ProjectsStore, id: Uuid, row_index: usize, flag: &str) {
@@ -97,7 +101,7 @@ fn payload_accepts_camel_case_search_columns() {
 
 #[test]
 fn whole_project_and_result_annotation_counts_are_distinct() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, _ids) = setup_project();
     annotate(&store, id, 0, "safe");
     annotate(&store, id, 1, "suspicious");
     annotate(&store, id, 2, "critical");
@@ -115,8 +119,8 @@ fn whole_project_and_result_annotation_counts_are_distinct() {
 
 #[test]
 fn default_and_explicit_all_column_search_match() {
-    let (root, store, id) = setup_project();
-    let all_columns = vec!["name".to_string(), "detail".to_string()];
+    let (root, store, id, ids) = setup_project();
+    let all_columns = vec![common::id(&ids, "name"), common::id(&ids, "detail")];
 
     let default_scope = query(&store, id, Some("alpha"), None);
     let explicit_scope = query(&store, id, Some("alpha"), Some(all_columns.clone()));
@@ -135,14 +139,14 @@ fn default_and_explicit_all_column_search_match() {
 
 #[test]
 fn explicit_search_columns_narrow_the_scope() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
 
     // "alpha" only appears in `detail`.
     let narrowed = query(
         &store,
         id,
         Some("alpha"),
-        Some(vec!["name".to_string()]),
+        Some(vec![common::id(&ids, "name")]),
     );
     assert_eq!(narrowed.total_filtered_rows, 0);
 
@@ -151,7 +155,7 @@ fn explicit_search_columns_narrow_the_scope() {
         &store,
         id,
         Some("alpha"),
-        Some(vec!["name".to_string(), "detail".to_string()]),
+        Some(vec![common::id(&ids, "name"), common::id(&ids, "detail")]),
     );
     assert_eq!(widened.total_filtered_rows, 1);
 

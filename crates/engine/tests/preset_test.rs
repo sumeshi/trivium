@@ -12,6 +12,8 @@ use trivium_engine::ops::preset::{load_preset, save_preset, LoadPresetPayload, S
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn create_project(store: &ProjectsStore, path: &Path) -> Uuid {
     ops::projects::create_project(
         store,
@@ -19,6 +21,7 @@ fn create_project(store: &ProjectsStore, path: &Path) -> Uuid {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
@@ -40,7 +43,7 @@ fn write_csv(path: &Path, rows: usize) {
     fs::write(path, text).expect("failed to write fixture");
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid) {
+fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-preset-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -52,15 +55,16 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid) {
 
     let id_a = create_project(&store, &path_a);
     let id_b = create_project(&store, &path_b);
-    (root, store, id_a, id_b)
+    let ids = common::column_ids(&store, id_a);
+    (root, store, id_a, id_b, ids)
 }
 
-fn nested_condition() -> Node {
+fn nested_condition(ids: &std::collections::HashMap<String, String>) -> Node {
     Node::Group(Group {
         kind: GroupKind::And,
         children: vec![
             Node::Condition(Condition {
-                column: "host".into(),
+                column: common::id(ids, "host"),
                 op: Op::Contains,
                 values: vec!["WS".into()],
                 negated: false,
@@ -69,13 +73,13 @@ fn nested_condition() -> Node {
                 kind: GroupKind::Or,
                 children: vec![
                     Node::Condition(Condition {
-                        column: "user".into(),
+                        column: common::id(ids, "user"),
                         op: Op::Eq,
                         values: vec!["alice".into()],
                         negated: false,
                     }),
                     Node::Condition(Condition {
-                        column: "proc".into(),
+                        column: common::id(ids, "proc"),
                         op: Op::Eq,
                         values: vec!["cmd".into()],
                         negated: true,
@@ -86,13 +90,17 @@ fn nested_condition() -> Node {
     })
 }
 
-fn save_payload(project_id: Uuid, destination: &Path) -> SavePresetPayload {
+fn save_payload(
+    project_id: Uuid,
+    ids: &std::collections::HashMap<String, String>,
+    destination: &Path,
+) -> SavePresetPayload {
     SavePresetPayload {
         project_id,
         name: Some("Hunt".into()),
-        condition: Some(nested_condition()),
-        hidden_columns: vec!["host".into()],
-        sort_key: Some("EventID".into()),
+        condition: Some(nested_condition(ids)),
+        hidden_columns: vec![common::id(ids, "host")],
+        sort_key: Some(common::id(ids, "EventID")),
         sort_direction: Some("desc".into()),
         destination: destination.to_string_lossy().to_string(),
     }
@@ -107,15 +115,15 @@ fn load_payload(project_id: Option<Uuid>, source: &Path) -> LoadPresetPayload {
 
 #[test]
 fn preset_round_trips_between_projects() {
-    let (root, store, id_a, id_b) = setup();
+    let (root, store, id_a, id_b, ids) = setup();
     let destination = root.join("preset.json");
-    save_preset(&store, save_payload(id_a, &destination)).expect("save failed");
+    save_preset(&store, save_payload(id_a, &ids, &destination)).expect("save failed");
 
     let loaded = load_preset(&store, load_payload(Some(id_b), &destination)).expect("load failed");
     assert_eq!(loaded.name.as_deref(), Some("Hunt"));
-    assert_eq!(loaded.condition, Some(nested_condition()));
-    assert_eq!(loaded.hidden_columns, vec!["host".to_string()]);
-    assert_eq!(loaded.sort_key.as_deref(), Some("EventID"));
+    assert_eq!(loaded.condition, Some(nested_condition(&ids)));
+    assert_eq!(loaded.hidden_columns, vec![common::id(&ids, "host")]);
+    assert_eq!(loaded.sort_key, Some(common::id(&ids, "EventID")));
     assert_eq!(loaded.sort_direction.as_deref(), Some("desc"));
     assert_eq!(loaded.unknown_columns, Vec::<String>::new());
 
@@ -124,13 +132,13 @@ fn preset_round_trips_between_projects() {
 
 #[test]
 fn preset_reports_unknown_columns_case_insensitively() {
-    let (root, store, id_a, id_b) = setup();
+    let (root, store, id_a, id_b, ids) = setup();
     let destination = root.join("preset.json");
     let condition = Node::Group(Group {
         kind: GroupKind::And,
         children: vec![
             Node::Condition(Condition {
-                column: "HOST".into(),
+                column: common::id(&ids, "host").to_uppercase(),
                 op: Op::Contains,
                 values: vec!["WS".into()],
                 negated: false,
@@ -165,7 +173,7 @@ fn preset_reports_unknown_columns_case_insensitively() {
 
 #[test]
 fn preset_rejects_unsupported_version() {
-    let (root, store, _id_a, id_b) = setup();
+    let (root, store, _id_a, id_b, _ids) = setup();
     let destination = root.join("preset.json");
     fs::write(&destination, r#"{"version":2,"hiddenColumns":[]}"#).expect("failed to write");
     let error = load_preset(&store, load_payload(Some(id_b), &destination))
@@ -180,7 +188,7 @@ fn preset_rejects_unsupported_version() {
 
 #[test]
 fn preset_without_condition_loads_sort_and_columns() {
-    let (root, store, id_a, id_b) = setup();
+    let (root, store, id_a, id_b, ids) = setup();
     let destination = root.join("preset.json");
     save_preset(
         &store,
@@ -188,8 +196,8 @@ fn preset_without_condition_loads_sort_and_columns() {
             project_id: id_a,
             name: None,
             condition: None,
-            hidden_columns: vec!["host".into()],
-            sort_key: Some("EventID".into()),
+            hidden_columns: vec![common::id(&ids, "host")],
+            sort_key: Some(common::id(&ids, "EventID")),
             sort_direction: Some("asc".into()),
             destination: destination.to_string_lossy().to_string(),
         },
@@ -198,8 +206,8 @@ fn preset_without_condition_loads_sort_and_columns() {
 
     let loaded = load_preset(&store, load_payload(Some(id_b), &destination)).expect("load failed");
     assert_eq!(loaded.condition, None);
-    assert_eq!(loaded.hidden_columns, vec!["host".to_string()]);
-    assert_eq!(loaded.sort_key.as_deref(), Some("EventID"));
+    assert_eq!(loaded.hidden_columns, vec![common::id(&ids, "host")]);
+    assert_eq!(loaded.sort_key, Some(common::id(&ids, "EventID")));
     assert_eq!(loaded.sort_direction.as_deref(), Some("asc"));
     assert_eq!(loaded.unknown_columns, Vec::<String>::new());
 

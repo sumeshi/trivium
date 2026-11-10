@@ -9,6 +9,8 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn payload(id: Uuid, search: Option<String>, condition: Option<Node>) -> QueryRowsPayload {
     QueryRowsPayload {
         project_id: id,
@@ -44,11 +46,15 @@ fn query_accepts_condition_and_keeps_search_syntax() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .unwrap()
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let name_id = common::id(&ids, "name");
+    let n_id = common::id(&ids, "n");
 
     let gt = ops::rows::query_project_rows(
         &store,
@@ -56,7 +62,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
             id,
             None,
             Some(Node::Condition(Condition {
-                column: "n".into(),
+                column: n_id.clone(),
                 op: Op::Gt,
                 values: vec!["2".into()],
                 negated: false,
@@ -72,7 +78,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
             id,
             None,
             Some(Node::Condition(Condition {
-                column: "n".into(),
+                column: n_id.clone(),
                 op: Op::Eq,
                 values: vec!["1700000000123456789".into()],
                 negated: false,
@@ -81,11 +87,11 @@ fn query_accepts_condition_and_keeps_search_syntax() {
     )
     .unwrap();
     assert_eq!(exact.total_filtered_rows, 1);
-    assert_eq!(exact.rows[0].data["name"], json!("b"));
+    assert_eq!(exact.rows[0].data[&name_id], json!("b"));
 
     let search_only = ops::rows::query_project_rows(
         &store,
-        payload(id, Some("name:a|c".into()), None),
+        payload(id, Some(format!("{}:a|c", name_id)), None),
     )
     .unwrap();
     assert_eq!(search_only.total_filtered_rows, 2);
@@ -94,9 +100,9 @@ fn query_accepts_condition_and_keeps_search_syntax() {
         &store,
         payload(
             id,
-            Some("name:a|b|c".into()),
+            Some(format!("{}:a|b|c", name_id)),
             Some(Node::Condition(Condition {
-                column: "name".into(),
+                column: name_id.clone(),
                 op: Op::Eq,
                 values: vec!["a".into()],
                 negated: false,
@@ -105,7 +111,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
     )
     .unwrap();
     assert_eq!(both.total_filtered_rows, 1);
-    assert_eq!(both.rows[0].data["name"], json!("a"));
+    assert_eq!(both.rows[0].data[&name_id], json!("a"));
 
     let _ = fs::remove_dir_all(root);
 }

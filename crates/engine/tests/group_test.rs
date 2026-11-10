@@ -12,6 +12,8 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 // 12 rows: the first 6 are alice, the last 6 are bob.
 // EventID is spread evenly: 4624 / 4625 / 4688 four rows each.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
@@ -33,7 +35,7 @@ fn write_fixture(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid) {
+fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-group-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -44,10 +46,12 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
-    (root, store, summary.meta.id)
+    let ids = common::column_ids(&store, summary.meta.id);
+    (root, store, summary.meta.id, ids)
 }
 
 fn payload(id: Uuid, group_columns: Vec<&str>, search: Option<&str>) -> GroupTreePayload {
@@ -112,10 +116,11 @@ fn query_total(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> usize {
 
 #[test]
 fn grouping_without_filters_matches_query_parity() {
-    let (root, store, id) = setup();
-    let response = run(&store, id, vec!["EventID"], None);
+    let (root, store, id, ids) = setup();
+    let event_id = common::id(&ids, "EventID");
+    let response = run(&store, id, vec![event_id.as_str()], None);
 
-    assert_eq!(response.columns, vec!["EventID".to_string()]);
+    assert_eq!(response.columns, vec![event_id]);
     assert_eq!(response.total, 12);
     assert_eq!(
         counts(&response.nodes),
@@ -134,8 +139,14 @@ fn grouping_without_filters_matches_query_parity() {
 
 #[test]
 fn grouping_respects_search_filters() {
-    let (root, store, id) = setup();
-    let or_search = run(&store, id, vec!["EventID"], Some("user:alice|bob"));
+    let (root, store, id, ids) = setup();
+    let event_id = common::id(&ids, "EventID");
+    let or_search = run(
+        &store,
+        id,
+        vec![event_id.as_str()],
+        Some(&common::search(&ids, "user", "alice|bob")),
+    );
     assert_eq!(or_search.total, 12, "OR search covers every fixture row");
     assert_eq!(
         counts(&or_search.nodes),
@@ -147,10 +158,10 @@ fn grouping_respects_search_filters() {
     );
     assert_eq!(
         or_search.total,
-        query_total(&store, id, Some("user:alice|bob"))
+        query_total(&store, id, Some(&common::search(&ids, "user", "alice|bob")))
     );
 
-    let narrowed = run(&store, id, vec!["EventID"], Some("4625"));
+    let narrowed = run(&store, id, vec![event_id.as_str()], Some("4625"));
     assert_eq!(narrowed.total, 4);
     assert_eq!(narrowed.nodes.len(), 1);
     assert_eq!(narrowed.nodes[0].label, "4625");
@@ -162,13 +173,12 @@ fn grouping_respects_search_filters() {
 
 #[test]
 fn grouping_stacks_second_level_counts() {
-    let (root, store, id) = setup();
-    let response = run(&store, id, vec!["user", "proc"], None);
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
+    let proc_id = common::id(&ids, "proc");
+    let response = run(&store, id, vec![user_id.as_str(), proc_id.as_str()], None);
 
-    assert_eq!(
-        response.columns,
-        vec!["user".to_string(), "proc".to_string()]
-    );
+    assert_eq!(response.columns, vec![user_id, proc_id]);
     assert_eq!(
         counts(&response.nodes),
         HashMap::from([("alice".to_string(), 6), ("bob".to_string(), 6),])
@@ -194,8 +204,9 @@ fn grouping_stacks_second_level_counts() {
 
 #[test]
 fn grouping_orders_children_by_label() {
-    let (root, store, id) = setup();
-    let response = run(&store, id, vec!["EventID"], None);
+    let (root, store, id, ids) = setup();
+    let event_id = common::id(&ids, "EventID");
+    let response = run(&store, id, vec![event_id.as_str()], None);
     let labels: Vec<&str> = response
         .nodes
         .iter()
@@ -203,7 +214,12 @@ fn grouping_orders_children_by_label() {
         .collect();
     assert_eq!(labels, ["4624", "4625", "4688"]);
 
-    let nested = run(&store, id, vec!["user", "proc"], None);
+    let nested = run(
+        &store,
+        id,
+        vec![common::id(&ids, "user").as_str(), common::id(&ids, "proc").as_str()],
+        None,
+    );
     let alice = find(&nested.nodes, "alice");
     let proc_labels: Vec<&str> = alice
         .children
@@ -217,7 +233,7 @@ fn grouping_orders_children_by_label() {
 
 #[test]
 fn grouping_rejects_empty_columns() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
     let error = group_tree(&store, payload(id, vec!["  ", ""], None))
         .expect_err("empty group columns must fail");
     assert!(
@@ -230,7 +246,7 @@ fn grouping_rejects_empty_columns() {
 
 #[test]
 fn grouping_rejects_missing_columns() {
-    let (root, store, id) = setup();
+    let (root, store, id, _ids) = setup();
     let error = group_tree(&store, payload(id, vec!["not_exists"], None))
         .expect_err("missing group column must fail");
     assert!(

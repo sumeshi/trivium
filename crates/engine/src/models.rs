@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -22,6 +23,15 @@ pub struct ColumnMeta {
     pub source: String,
     /// Column order in the source.
     pub order: usize,
+}
+
+/// Result of reading one source file. The frame uses internal column ids, the
+/// metadata records the source header or JSON Pointer, and imported flags are
+/// separate from the data columns.
+pub struct ImportedData {
+    pub frame: DataFrame,
+    pub columns: Vec<ColumnMeta>,
+    pub flags: HashMap<usize, FlagEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

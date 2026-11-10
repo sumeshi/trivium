@@ -14,6 +14,8 @@ use trivium_engine::ops::report::{build_report, BuildReportPayload};
 use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 // 12 rows. Rows 0..4 are alice; rows 4..12 use bob, carol, dave, erin.
 fn write_fixture(root: &Path) -> PathBuf {
     let path = root.join("report.csv");
@@ -34,7 +36,7 @@ fn write_fixture(root: &Path) -> PathBuf {
     path
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid) {
+fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-report-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -45,9 +47,11 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
+    let ids = common::column_ids(&store, summary.meta.id);
 
     for (row_index, flag, memo) in [
         (0usize, "suspicious", Some("manual note")),
@@ -75,22 +79,26 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             entries: vec![IocEntry {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
-                query: "eventid:4625".to_string(),
+                query: common::search(&ids, "EventID", "4625"),
             }],
         },
     )
     .expect("failed to save iocs");
 
-    (root, store, summary.meta.id)
+    (root, store, summary.meta.id, ids)
 }
 
-fn report_payload(id: Uuid, destination: &Path) -> BuildReportPayload {
+fn report_payload(
+    id: Uuid,
+    ids: &std::collections::HashMap<String, String>,
+    destination: &Path,
+) -> BuildReportPayload {
     BuildReportPayload {
         project_id: id,
         search: Some("alice".to_string()),
         columns: None,
         flag_filter: None,
-        sort_key: Some("EventID".to_string()),
+        sort_key: Some(common::id(ids, "EventID")),
         sort_direction: Some("desc".to_string()),
         condition: None,
         destination: destination.to_string_lossy().to_string(),
@@ -99,9 +107,9 @@ fn report_payload(id: Uuid, destination: &Path) -> BuildReportPayload {
 
 #[test]
 fn report_hit_rows_match_query() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
     let destination = root.join("reports").join("filtered.html");
-    let meta = build_report(&store, report_payload(id, &destination)).expect("report failed");
+    let meta = build_report(&store, report_payload(id, &ids, &destination)).expect("report failed");
 
     let query = ops::rows::query_project_rows(
         &store,
@@ -111,7 +119,7 @@ fn report_hit_rows_match_query() {
                 search: Some("alice".to_string()),
                 search_columns: None,
                 flag_filter: None,
-                sort_key: Some("EventID".to_string()),
+                sort_key: Some(common::id(&ids, "EventID")),
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
@@ -152,9 +160,9 @@ fn report_hit_rows_match_query() {
 
 #[test]
 fn report_escapes_memos_and_omits_script_tags() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
     let destination = root.join("report.html");
-    let mut payload = report_payload(id, &destination);
+    let mut payload = report_payload(id, &ids, &destination);
     payload.search = None;
     payload.sort_key = None;
     payload.sort_direction = None;
@@ -180,19 +188,21 @@ fn report_escapes_memos_and_omits_script_tags() {
 
 #[test]
 fn report_resolves_display_columns_case_insensitively() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
     let destination = root.join("columns.html");
-    let mut payload = report_payload(id, &destination);
+    let mut payload = report_payload(id, &ids, &destination);
     payload.search = None;
     payload.sort_key = None;
     payload.sort_direction = None;
-    payload.columns = Some(vec!["USER".to_string(), "eventid".to_string()]);
+    let host_id = common::id(&ids, "host");
+    let event_id = common::id(&ids, "EventID");
+    payload.columns = Some(vec![host_id.to_uppercase(), event_id.clone()]);
     build_report(&store, payload).expect("report failed");
 
     let html = fs::read_to_string(&destination).expect("report was not written");
-    assert!(html.contains("data-column=\"user\""));
-    assert!(html.contains("data-column=\"EventID\""));
-    assert!(!html.contains("data-column=\"USER\""));
+    assert!(html.contains(&format!("data-column=\"{host_id}\"")));
+    assert!(html.contains(&format!("data-column=\"{event_id}\"")));
+    assert!(!html.contains(&format!("data-column=\"{}\"", host_id.to_uppercase())));
 
     let _ = fs::remove_dir_all(root);
 }

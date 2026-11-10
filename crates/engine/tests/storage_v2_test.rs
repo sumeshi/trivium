@@ -14,7 +14,7 @@ use uuid::Uuid;
 use trivium_engine::condition::{Condition, Node, Op};
 use trivium_engine::models::{ColumnMeta, ProjectMeta};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
-use trivium_engine::ops::projects::{create_project, load_project, CreateProjectPayload, ProjectRequest};
+use trivium_engine::ops::projects::{load_project, ProjectRequest};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::project_io::{read_original_records, write_project_dataframe};
 use trivium_engine::store::ProjectsStore;
@@ -308,29 +308,38 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
 #[test]
 fn legacy_project_loads_with_synthesized_column_metadata() {
     let root = temp_root();
-    let csv_path = root.join("legacy.csv");
-    fs::write(&csv_path, "name,count\nalpha,1\nbeta,2\n").expect("failed to write fixture");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let id = Uuid::new_v4();
+    let project_dir = store.project_dir(&id);
+    fs::create_dir_all(&project_dir).expect("failed to create project dir");
 
-    let summary = create_project(
-        &store,
-        CreateProjectPayload {
-            path: csv_path.to_string_lossy().to_string(),
+    // Version 0 stores the original column names as frame columns and has no
+    // column metadata. New imports never write this shape any more.
+    let mut df = DataFrame::new(vec![
+        Series::new("name", &["alpha", "beta"]),
+        Series::new("count", &[1_i64, 2]),
+        Series::new("__rowid", &[0_i64, 1]),
+    ])
+    .expect("failed to build legacy frame");
+    write_project_dataframe(&project_dir.join("data.parquet"), &mut df)
+        .expect("failed to write legacy parquet");
+    store
+        .insert(ProjectMeta {
+            id,
+            name: "legacy".to_string(),
             description: None,
-            delimiter: None,
-        },
-    )
-    .expect("failed to create legacy project");
-    assert_eq!(summary.meta.storage_version, 0);
-    assert!(summary.meta.columns.is_empty());
+            created_at: Utc::now(),
+            total_records: 2,
+            flagged_records: 0,
+            ioc_applied_records: 0,
+            source_sha256: None,
+            hidden_columns: Vec::new(),
+            storage_version: 0,
+            columns: Vec::new(),
+        })
+        .expect("failed to insert legacy metadata");
 
-    let loaded = load_project(
-        &store,
-        ProjectRequest {
-            project_id: summary.meta.id,
-        },
-    )
-    .expect("load failed");
+    let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load failed");
     assert_eq!(loaded.columns, vec!["name", "count"]);
     assert_eq!(
         loaded.columns_meta,
@@ -343,7 +352,7 @@ fn legacy_project_loads_with_synthesized_column_metadata() {
     // Legacy conditions keep referring to the original column name.
     let rows = query(
         &store,
-        summary.meta.id,
+        id,
         QuerySpec {
             condition: Some(condition("name", "alpha")),
             ..Default::default()

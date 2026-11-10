@@ -26,6 +26,8 @@ use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::ops::time::TimeAnalysisPayload;
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 /// Column layout: ts,EventID,host,user,proc,path,msg
 /// 20 rows total:
 /// - rows 0..9  : user=alice, EventID 4624 (rows 0..6) / 4625 (rows 6..10)
@@ -78,7 +80,7 @@ fn write_fixture_csv(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup_project() -> (PathBuf, ProjectsStore, uuid::Uuid) {
+fn setup_project() -> (PathBuf, ProjectsStore, uuid::Uuid, std::collections::HashMap<String, String>) {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let csv = write_fixture_csv(&root);
@@ -88,10 +90,12 @@ fn setup_project() -> (PathBuf, ProjectsStore, uuid::Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: Some("smoke".to_string()),
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
-    (root, store, summary.meta.id)
+    let ids = common::column_ids(&store, summary.meta.id);
+    (root, store, summary.meta.id, ids)
 }
 
 fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse {
@@ -118,7 +122,7 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
 
 #[test]
 fn create_and_load_project() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
     let response = ops::projects::load_project(
         &store,
         ProjectRequest {
@@ -129,24 +133,32 @@ fn create_and_load_project() {
 
     assert_eq!(response.project.meta.total_records, 20);
     assert_eq!(response.project.meta.name, "smoke");
+    let source_names = ["ts", "EventID", "host", "user", "proc", "path", "msg"];
+    let expected_ids: Vec<String> = source_names.iter().map(|name| common::id(&ids, name)).collect();
+    assert_eq!(response.columns, expected_ids);
     assert_eq!(
-        response.columns,
-        vec![
-            "ts".to_string(),
-            "EventID".to_string(),
-            "host".to_string(),
-            "user".to_string(),
-            "proc".to_string(),
-            "path".to_string(),
-            "msg".to_string()
-        ]
+        response
+            .columns_meta
+            .iter()
+            .map(|column| column.source.as_str())
+            .collect::<Vec<_>>(),
+        source_names
     );
     assert!(response.hidden_columns.is_empty());
     assert!(response.iocs.is_empty());
     assert_eq!(response.initial_rows.len(), 20);
-    assert_eq!(response.column_kinds.get("ts").map(String::as_str), Some("datetime"));
-    assert_eq!(response.column_kinds.get("EventID").map(String::as_str), Some("int"));
-    assert_eq!(response.column_kinds.get("user").map(String::as_str), Some("string"));
+    assert_eq!(
+        response.column_kinds.get(&common::id(&ids, "ts")).map(String::as_str),
+        Some("datetime")
+    );
+    assert_eq!(
+        response.column_kinds.get(&common::id(&ids, "EventID")).map(String::as_str),
+        Some("int")
+    );
+    assert_eq!(
+        response.column_kinds.get(&common::id(&ids, "user")).map(String::as_str),
+        Some("string")
+    );
 
     let listed = ops::projects::list_projects(&store).expect("list failed");
     assert!(listed.iter().any(|s| s.meta.id == id));
@@ -155,7 +167,7 @@ fn create_and_load_project() {
 
 #[test]
 fn search_scoping_and_operators() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
 
     let base = |search: Option<String>, search_columns: Option<Vec<String>>| {
         ops::rows::query_project_rows(
@@ -185,27 +197,41 @@ fn search_scoping_and_operators() {
     assert_eq!(r.rows.len(), 10);
 
     // Column-scoped term.
-    let r = base(Some("user:alice".to_string()), None);
+    let r = base(Some(common::search(&ids, "user", "alice")), None);
     assert_eq!(r.total_filtered_rows, 10);
 
     // An explicit search scope restricts the searchable text: searching
     // "alice" while only EventID is searchable finds nothing.
     let r = base(
         Some("alice".to_string()),
-        Some(vec!["EventID".to_string()]),
+        Some(vec![common::id(&ids, "EventID")]),
     );
     assert_eq!(r.total_filtered_rows, 0);
 
     // AND of two scoped terms.
-    let r = base(Some("user:alice eventid:4625".to_string()), None);
+    let r = base(
+        Some(format!(
+            "{} {}",
+            common::search(&ids, "user", "alice"),
+            common::search(&ids, "EventID", "4625")
+        )),
+        None,
+    );
     assert_eq!(r.total_filtered_rows, 4);
 
     // NOT: alice rows without 4625.
-    let r = base(Some("user:alice -eventid:4625".to_string()), None);
+    let r = base(
+        Some(format!(
+            "{} -{}",
+            common::search(&ids, "user", "alice"),
+            common::search(&ids, "EventID", "4625")
+        )),
+        None,
+    );
     assert_eq!(r.total_filtered_rows, 6);
 
     // OR with column carry-over: user:alice|bob covers all rows.
-    let r = base(Some("user:alice|bob".to_string()), None);
+    let r = base(Some(common::search(&ids, "user", "alice|bob")), None);
     assert_eq!(r.total_filtered_rows, 20);
 
     let _ = fs::remove_dir_all(root);
@@ -229,14 +255,22 @@ fn and_group(children: Vec<Node>) -> Node {
 
 #[test]
 fn nested_condition_matches_either_group() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
+    let user_id = common::id(&ids, "user");
+    let event_id = common::id(&ids, "EventID");
     // (user = alice AND EventID = 4624) OR (user = bob AND EventID = 4688)
     // Fixture: 6 alice/4624 rows and 5 bob/4688 rows.
     let condition = Node::Group(Group {
         kind: GroupKind::Or,
         children: vec![
-            and_group(vec![eq_condition("user", "alice"), eq_condition("EventID", "4624")]),
-            and_group(vec![eq_condition("user", "bob"), eq_condition("EventID", "4688")]),
+            and_group(vec![
+                eq_condition(&user_id, "alice"),
+                eq_condition(&event_id, "4624"),
+            ]),
+            and_group(vec![
+                eq_condition(&user_id, "bob"),
+                eq_condition(&event_id, "4688"),
+            ]),
         ],
     });
     let response = ops::rows::query_project_rows(
@@ -260,8 +294,8 @@ fn nested_condition_matches_either_group() {
     .expect("query failed");
     assert_eq!(response.total_filtered_rows, 11);
     assert!(response.rows.iter().all(|row| {
-        let user = row.data.get("user").and_then(|value| value.as_str());
-        let event = row.data.get("EventID").map(|value| value.to_string());
+        let user = row.data.get(&user_id).and_then(|value| value.as_str());
+        let event = row.data.get(&event_id).map(|value| value.to_string());
         matches!(
             (user, event.as_deref()),
             (Some("alice"), Some("4624")) | (Some("bob"), Some("4688"))
@@ -286,18 +320,22 @@ fn nanosecond_integer_is_not_rounded() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let n_id = common::id(&ids, "n");
+    let ts_id = common::id(&ids, "ts");
     let loaded = ops::projects::load_project(
         &store,
         ProjectRequest { project_id: id },
     )
     .expect("load failed");
-    assert_eq!(loaded.column_kinds.get("n").map(String::as_str), Some("int"));
-    assert_eq!(loaded.column_kinds.get("ts").map(String::as_str), Some("datetime"));
+    assert_eq!(loaded.column_kinds.get(&n_id).map(String::as_str), Some("int"));
+    assert_eq!(loaded.column_kinds.get(&ts_id).map(String::as_str), Some("datetime"));
 
     let exact = "1700000000123456789";
     let response = ops::rows::query_project_rows(
@@ -310,7 +348,7 @@ fn nanosecond_integer_is_not_rounded() {
                 flag_filter: None,
                 sort_key: None,
                 sort_direction: None,
-                condition: Some(eq_condition("n", exact)),
+                condition: Some(eq_condition(&n_id, exact)),
                 bookmarked_only: None,
                 ..Default::default()
             },
@@ -320,7 +358,7 @@ fn nanosecond_integer_is_not_rounded() {
     )
     .expect("query failed");
     assert_eq!(response.total_filtered_rows, 1);
-    let cell = response.rows[0].data.get("n").expect("n");
+    let cell = response.rows[0].data.get(&n_id).expect("n");
     let preserved = cell.as_i64() == Some(1_700_000_000_123_456_789)
         || cell.as_str() == Some(exact);
     assert!(preserved, "value was rounded: {cell}");
@@ -390,36 +428,49 @@ fn column_stats_match_python_counts() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let user_id = common::id(&ids, "user");
+    let event_id = common::id(&ids, "event");
+    let note_id = common::id(&ids, "note");
+    let token_id = common::id(&ids, "token");
 
-    let omitted = format!(r#"{{"projectId":"{id}","column":"user"}}"#);
+    let omitted = format!(r#"{{"projectId":"{id}","column":"{user_id}"}}"#);
     let parsed: ColumnStatsPayload = serde_json::from_str(&omitted).expect("payload");
     assert_eq!(parsed.rare_max, 1);
+    assert_eq!(parsed.column, user_id);
 
-    for column in ["user", "event", "note", "token"] {
+    let named_columns = [
+        ("user", user_id.clone()),
+        ("event", event_id.clone()),
+        ("note", note_id.clone()),
+        ("token", token_id.clone()),
+    ];
+    for (name, column) in &named_columns {
         let stats = ops::stats::column_stats(
             &store,
             ColumnStatsPayload {
                 project_id: id,
-                column: column.to_string(),
+                column: column.clone(),
                 rare_max: 1,
             },
         )
         .expect("stats");
-        let want = &expected[column];
+        let want = &expected[*name];
         assert_eq!(
             stats.missing,
             want["missing"].as_u64().expect("missing"),
-            "{column} missing"
+            "{name} missing"
         );
         assert_eq!(
             stats.unique,
             want["unique"].as_u64().expect("unique"),
-            "{column} unique"
+            "{name} unique"
         );
     }
 
@@ -427,7 +478,7 @@ fn column_stats_match_python_counts() {
         &store,
         ColumnStatsPayload {
             project_id: id,
-            column: "user".to_string(),
+            column: user_id,
             rare_max: 1,
         },
     )
@@ -442,7 +493,7 @@ fn column_stats_match_python_counts() {
         &store,
         ColumnStatsPayload {
             project_id: id,
-            column: "event".to_string(),
+            column: event_id,
             rare_max: 1,
         },
     )
@@ -453,7 +504,7 @@ fn column_stats_match_python_counts() {
         &store,
         ColumnStatsPayload {
             project_id: id,
-            column: "token".to_string(),
+            column: token_id,
             rare_max: 1,
         },
     )
@@ -500,17 +551,21 @@ fn duplicate_rows_keep_every_occurrence() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("create")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let user_id = common::id(&ids, "user");
+    let proc_id = common::id(&ids, "proc");
 
     let duplicates = ops::dupes::duplicate_rows(
         &store,
         DupesPayload {
             project_id: id,
-            columns: vec!["user".to_string(), "proc".to_string()],
+            columns: vec![user_id.clone(), proc_id.clone()],
             mode: DupeMode::Duplicates,
         },
     )
@@ -524,7 +579,7 @@ fn duplicate_rows_keep_every_occurrence() {
         &store,
         DupesPayload {
             project_id: id,
-            columns: vec!["user".to_string(), "proc".to_string()],
+            columns: vec![user_id, proc_id],
             mode: DupeMode::Unique,
         },
     )
@@ -601,16 +656,20 @@ fn duplicate_rows_match_fixture_duplicates() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("create")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let user_id = common::id(&ids, "user");
+    let proc_id = common::id(&ids, "proc");
     let duplicates = ops::dupes::duplicate_rows(
         &store,
         DupesPayload {
             project_id: id,
-            columns: vec!["user".to_string(), "proc".to_string()],
+            columns: vec![user_id.clone(), proc_id.clone()],
             mode: DupeMode::Duplicates,
         },
     )
@@ -619,7 +678,7 @@ fn duplicate_rows_match_fixture_duplicates() {
         &store,
         DupesPayload {
             project_id: id,
-            columns: vec!["user".to_string(), "proc".to_string()],
+            columns: vec![user_id, proc_id],
             mode: DupeMode::Unique,
         },
     )
@@ -636,8 +695,11 @@ fn bucket_sum(buckets: &[trivium_engine::analysis::HistogramBucket]) -> u64 {
 
 #[test]
 fn histogram_bucket_sum_matches_filtered_rows() {
-    let (root, store, id) = setup_project();
-    let condition = Some(eq_condition("user", "alice"));
+    let (root, store, id, ids) = setup_project();
+    let user_id = common::id(&ids, "user");
+    let event_id = common::id(&ids, "EventID");
+    let ts_id = common::id(&ids, "ts");
+    let condition = Some(eq_condition(&user_id, "alice"));
     let queried = ops::rows::query_project_rows(
         &store,
         QueryRowsPayload {
@@ -661,7 +723,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "EventID".to_string(),
+            column: event_id.clone(),
             buckets: 4,
             search: None,
             columns: None,
@@ -698,7 +760,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "EventID".to_string(),
+            column: event_id.clone(),
             buckets: 4,
             search: Some("WS01".to_string()),
             columns: None,
@@ -713,7 +775,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         searched.total_filtered_rows as u64
     );
 
-    let omitted = format!(r#"{{"projectId":"{id}","column":"ts"}}"#);
+    let omitted = format!(r#"{{"projectId":"{id}","column":"{ts_id}"}}"#);
     let parsed: HistogramPayload = serde_json::from_str(&omitted).expect("payload");
     assert_eq!(parsed.buckets, 50);
     let timestamps = ops::histogram::histogram(&store, parsed).expect("timestamps");
@@ -726,7 +788,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "user".to_string(),
+            column: user_id.clone(),
             buckets: 4,
             search: None,
             columns: None,
@@ -752,16 +814,20 @@ fn histogram_places_values_in_equal_width_buckets() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("create")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let n_id = common::id(&ids, "n");
+    let x_id = common::id(&ids, "x");
     let ints = ops::histogram::histogram(
         &store,
         HistogramPayload {
             project_id: id,
-            column: "n".to_string(),
+            column: n_id,
             buckets: 2,
             search: None,
             columns: None,
@@ -784,7 +850,7 @@ fn histogram_places_values_in_equal_width_buckets() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "x".to_string(),
+            column: x_id,
             buckets: 2,
             search: None,
             columns: None,
@@ -804,12 +870,14 @@ fn histogram_places_values_in_equal_width_buckets() {
 
 #[test]
 fn histogram_range_counts_outside_values() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
+    let event_id = common::id(&ids, "EventID");
+    let ts_id = common::id(&ids, "ts");
     let ints = ops::histogram::histogram(
         &store,
         HistogramPayload {
             project_id: id,
-            column: "EventID".to_string(),
+            column: event_id.clone(),
             buckets: 2,
             search: None,
             columns: None,
@@ -832,7 +900,7 @@ fn histogram_range_counts_outside_values() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "ts".to_string(),
+            column: ts_id.clone(),
             buckets: 2,
             search: None,
             columns: None,
@@ -855,7 +923,7 @@ fn histogram_range_counts_outside_values() {
     assert!(times.buckets[1].end.starts_with("2024-01-01T00:00:11"));
 
     let json = format!(
-        r#"{{"projectId":"{id}","column":"EventID","buckets":2,"range":{{"min":"4624","max":"4625"}}}}"#
+        r#"{{"projectId":"{id}","column":"{event_id}","buckets":2,"range":{{"min":"4624","max":"4625"}}}}"#
     );
     let parsed: HistogramPayload = serde_json::from_str(&json).expect("range payload");
     assert_eq!(parsed.range.expect("range").min, "4624");
@@ -864,7 +932,7 @@ fn histogram_range_counts_outside_values() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "ts".to_string(),
+            column: ts_id.clone(),
             buckets: 2,
             search: None,
             columns: None,
@@ -882,7 +950,7 @@ fn histogram_range_counts_outside_values() {
         &store,
         HistogramPayload {
             project_id: id,
-            column: "EventID".to_string(),
+            column: event_id.clone(),
             buckets: 2,
             search: None,
             columns: None,
@@ -961,16 +1029,19 @@ fn time_analysis_finds_fixture_gaps() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("create")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let ts_id = common::id(&ids, "ts");
     let analysis = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
             project_id: id,
-            column: "ts".to_string(),
+            column: ts_id,
             gap_seconds: 60,
             session_minutes: 1,
             burst_window_seconds: 60,
@@ -1013,16 +1084,19 @@ fn time_analysis_gap_range_matches_bounds() {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("create")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let ts_id = common::id(&ids, "ts");
     let analysis = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
             project_id: id,
-            column: "ts".to_string(),
+            column: ts_id.clone(),
             gap_seconds: 30,
             session_minutes: 1,
             burst_window_seconds: 10,
@@ -1048,13 +1122,13 @@ fn time_analysis_gap_range_matches_bounds() {
         kind: GroupKind::And,
         children: vec![
             Node::Condition(Condition {
-                column: "ts".to_string(),
+                column: ts_id.clone(),
                 op: Op::Ge,
                 values: vec![analysis.gaps[0].start.clone()],
                 negated: false,
             }),
             Node::Condition(Condition {
-                column: "ts".to_string(),
+                column: ts_id.clone(),
                 op: Op::Le,
                 values: vec![analysis.gaps[0].end.clone()],
                 negated: false,
@@ -1087,7 +1161,8 @@ fn time_analysis_gap_range_matches_bounds() {
 
 #[test]
 fn sort_and_pagination() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
+    let event_id = common::id(&ids, "EventID");
     let r = ops::rows::query_project_rows(
         &store,
         QueryRowsPayload {
@@ -1096,7 +1171,7 @@ fn sort_and_pagination() {
                 search: None,
                 search_columns: None,
                 flag_filter: None,
-                sort_key: Some("EventID".to_string()),
+                sort_key: Some(event_id.clone()),
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
@@ -1112,7 +1187,7 @@ fn sort_and_pagination() {
     assert_eq!(r.total_filtered_rows, 20);
     // 4688 is the largest EventID; descending sort puts those first.
     for row in &r.rows {
-        assert_eq!(row.data["EventID"], serde_json::json!(4688));
+        assert_eq!(row.data[&event_id], serde_json::json!(4688));
     }
 
     let r2 = ops::rows::query_project_rows(
@@ -1123,7 +1198,7 @@ fn sort_and_pagination() {
                 search: None,
                 search_columns: None,
                 flag_filter: None,
-                sort_key: Some("EventID".to_string()),
+                sort_key: Some(event_id.clone()),
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
@@ -1141,7 +1216,7 @@ fn sort_and_pagination() {
 
 #[test]
 fn flag_update_and_flag_filter() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, _ids) = setup_project();
 
     let updated = ops::flags::update_flag(
         &store,
@@ -1190,7 +1265,7 @@ fn flag_update_and_flag_filter() {
 
 #[test]
 fn ioc_apply_and_query() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
 
     // User flag on an alice/4624 row (no IOC match)...
     ops::flags::update_flag(
@@ -1227,7 +1302,7 @@ fn ioc_apply_and_query() {
             entries: vec![IocEntry {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
-                query: "eventid:4625".to_string(),
+                query: common::search(&ids, "EventID", "4625"),
             }],
         },
     )
@@ -1270,7 +1345,7 @@ fn ioc_apply_and_query() {
 
 #[test]
 fn export_and_reimport_roundtrip() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
 
     ops::flags::update_flag(
         &store,
@@ -1291,7 +1366,7 @@ fn export_and_reimport_roundtrip() {
             entries: vec![IocEntry {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
-                query: "eventid:4625".to_string(),
+                query: common::search(&ids, "EventID", "4625"),
             }],
         },
     )
@@ -1332,6 +1407,7 @@ fn export_and_reimport_roundtrip() {
             path: destination.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: Some(true),
         },
     )
     .expect("reimport failed");
@@ -1357,7 +1433,7 @@ fn export_and_reimport_roundtrip() {
 
 #[test]
 fn delete_project_removes_files_and_meta() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, _ids) = setup_project();
     let project_dir = store.project_dir(&id);
     assert!(project_dir.exists());
 
@@ -1399,16 +1475,21 @@ ts,note,secret
             path: csv.to_string_lossy().to_string(),
             description: Some("around".to_string()),
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project")
     .meta
     .id;
+    let ids = common::column_ids(&store, id);
+    let ts_id = common::id(&ids, "ts");
+    let note_id = common::id(&ids, "note");
+    let secret_id = common::id(&ids, "secret");
     ops::flags::set_hidden_columns(
         &store,
         HiddenColumnsPayload {
             project_id: id,
-            hidden_columns: vec!["secret".to_string()],
+            hidden_columns: vec![secret_id.clone()],
         },
     )
     .expect("failed to hide secret");
@@ -1419,7 +1500,7 @@ ts,note,secret
             SurroundingRowsPayload {
                 project_id: id,
                 row_index: 0,
-                column: "ts".to_string(),
+                column: ts_id.clone(),
                 mode,
                 count,
             },
@@ -1430,7 +1511,7 @@ ts,note,secret
         rows.iter()
             .map(|row| {
                 row.data
-                    .get("secret")
+                    .get(&secret_id)
                     .and_then(|value| value.as_str())
                     .unwrap()
                     .to_string()
@@ -1469,7 +1550,7 @@ ts,note,secret
         SurroundingRowsPayload {
             project_id: id,
             row_index: 0,
-            column: "note".to_string(),
+            column: note_id,
             mode: SurroundMode::Neighbors,
             count: 1,
         },
@@ -1480,7 +1561,7 @@ ts,note,secret
         SurroundingRowsPayload {
             project_id: id,
             row_index: 99,
-            column: "ts".to_string(),
+            column: ts_id,
             mode: SurroundMode::Window,
             count: 1,
         },
@@ -1512,6 +1593,7 @@ ts,EventID,host,user,proc,path,msg
                 path: path.to_string_lossy().to_string(),
                 description: None,
                 delimiter: None,
+                restore_annotations: None,
             },
         )
         .expect("failed to create project")
@@ -1520,7 +1602,8 @@ ts,EventID,host,user,proc,path,msg
     };
     let first = create(&first_csv);
     let second = create(&second_csv);
-    let condition = eq_condition("user", "alice");
+    let ids = common::column_ids(&store, first);
+    let condition = eq_condition(&common::id(&ids, "user"), "alice");
     let hits = ops::cross::search_projects(
         &store,
         CrossSearchPayload {
@@ -1587,7 +1670,7 @@ fn legacy_flags_json_defaults_tags_and_bookmark() {
 
 #[test]
 fn grouping_counts_match_the_query_path() {
-    let (root, store, id) = setup_project();
+    let (root, store, id, ids) = setup_project();
     let grouped = ops::group::group_tree(
         &store,
         GroupTreePayload {
@@ -1596,7 +1679,7 @@ fn grouping_counts_match_the_query_path() {
             columns: None,
             flag_filter: None,
             condition: None,
-            group_columns: vec!["EventID".to_string()],
+            group_columns: vec![common::id(&ids, "EventID")],
         },
     )
     .expect("grouping failed");

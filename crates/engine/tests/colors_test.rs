@@ -15,6 +15,8 @@ use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsR
 use trivium_engine::ops::rules::{color_rules, save_color_rules, SaveColorRulesPayload};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 // 12 rows: first 6 are alice, last 6 are bob. EventID varies per row.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
     let path = root.join("colors.csv");
@@ -35,7 +37,7 @@ fn write_fixture(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid) {
+fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
     let root = std::env::temp_dir().join(format!("trivium-colors-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -46,10 +48,12 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
-    (root, store, summary.meta.id)
+    let ids = common::column_ids(&store, summary.meta.id);
+    (root, store, summary.meta.id, ids)
 }
 
 fn condition(column: &str, op: Op, values: &[&str]) -> Node {
@@ -109,7 +113,7 @@ fn query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
     .expect("query failed")
 }
 
-fn sorted_query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
+fn sorted_query(store: &ProjectsStore, id: Uuid, event_id: &str) -> QueryRowsResponse {
     query_project_rows(
         store,
         QueryRowsPayload {
@@ -119,7 +123,7 @@ fn sorted_query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
                 search_columns: None,
                 flag_filter: None,
                 bookmarked_only: None,
-                sort_key: Some("EventID".to_string()),
+                sort_key: Some(event_id.to_string()),
                 sort_direction: Some("asc".to_string()),
                 condition: None,
                 ..Default::default()
@@ -131,24 +135,25 @@ fn sorted_query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
     .expect("sorted query failed")
 }
 
-fn event_ids(rows: &[trivium_engine::models::ProjectRow]) -> Vec<String> {
+fn event_ids(rows: &[trivium_engine::models::ProjectRow], event_id: &str) -> Vec<String> {
     rows.iter()
-        .map(|row| row.data["EventID"].to_string())
+        .map(|row| row.data[event_id].to_string())
         .collect()
 }
 
 #[test]
 fn color_rules_save_and_load_roundtrip() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
     let rules = vec![
         rule(
             "alice-red",
-            condition("user", Op::Contains, &["alice"]),
+            condition(&user_id, Op::Contains, &["alice"]),
             "#FF0000",
         ),
         rule(
             "bob-short",
-            condition("user", Op::Contains, &["bob"]),
+            condition(&user_id, Op::Contains, &["bob"]),
             "#FF5",
         ),
     ];
@@ -169,8 +174,10 @@ fn color_rules_save_and_load_roundtrip() {
 
 #[test]
 fn query_colors_matching_rows_and_keeps_order_and_counts() {
-    let (root, store, id) = setup();
-    let before = sorted_query(&store, id);
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
+    let event_id = common::id(&ids, "EventID");
+    let before = sorted_query(&store, id, &event_id);
     assert!(before.rows.iter().all(|row| row.color.is_none()));
 
     save(
@@ -178,14 +185,14 @@ fn query_colors_matching_rows_and_keeps_order_and_counts() {
         id,
         vec![rule(
             "alice-red",
-            condition("user", Op::Contains, &["alice"]),
+            condition(&user_id, Op::Contains, &["alice"]),
             "#ff0000",
         )],
     );
 
-    let after = sorted_query(&store, id);
+    let after = sorted_query(&store, id, &event_id);
     assert_eq!(after.total_filtered_rows, before.total_filtered_rows);
-    assert_eq!(event_ids(&after.rows), event_ids(&before.rows));
+    assert_eq!(event_ids(&after.rows, &event_id), event_ids(&before.rows, &event_id));
     assert_eq!(
         after
             .rows
@@ -200,7 +207,7 @@ fn query_colors_matching_rows_and_keeps_order_and_counts() {
     );
 
     for row in &after.rows {
-        let user = row.data["user"].as_str().unwrap_or_default();
+        let user = row.data[&user_id].as_str().unwrap_or_default();
         if user == "alice" {
             assert_eq!(row.color.as_deref(), Some("#ff0000"), "row {:?}", row.row_index);
         } else {
@@ -213,13 +220,14 @@ fn query_colors_matching_rows_and_keeps_order_and_counts() {
 
 #[test]
 fn update_flag_returns_matching_row_color() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
     save(
         &store,
         id,
         vec![rule(
             "alice-red",
-            condition("user", Op::Contains, &["alice"]),
+            condition(&user_id, Op::Contains, &["alice"]),
             "#ff0000",
         )],
     );
@@ -236,7 +244,7 @@ fn update_flag_returns_matching_row_color() {
         },
     )
     .expect("update flag failed");
-    assert_eq!(updated.data["user"], serde_json::json!("alice"));
+    assert_eq!(updated.data[&user_id], serde_json::json!("alice"));
     assert_eq!(updated.color.as_deref(), Some("#ff0000"));
 
     let bob = ops::flags::update_flag(
@@ -258,7 +266,8 @@ fn update_flag_returns_matching_row_color() {
 
 #[test]
 fn invalid_colors_and_too_many_rules_fail_and_missing_columns_are_ignored() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
 
     let invalid = save_color_rules(
         &store,
@@ -266,7 +275,7 @@ fn invalid_colors_and_too_many_rules_fail_and_missing_columns_are_ignored() {
             project_id: id,
             rules: vec![rule(
                 "bad",
-                condition("user", Op::Contains, &["alice"]),
+                condition(&user_id, Op::Contains, &["alice"]),
                 "#red",
             )],
         },
@@ -281,7 +290,7 @@ fn invalid_colors_and_too_many_rules_fail_and_missing_columns_are_ignored() {
         .map(|index| {
             rule(
                 &format!("rule-{index}"),
-                condition("user", Op::Contains, &["alice"]),
+                condition(&user_id, Op::Contains, &["alice"]),
                 "#ff0000",
             )
         })
@@ -317,13 +326,14 @@ fn invalid_colors_and_too_many_rules_fail_and_missing_columns_are_ignored() {
 
 #[test]
 fn clearing_rules_removes_colors_from_query_results() {
-    let (root, store, id) = setup();
+    let (root, store, id, ids) = setup();
+    let user_id = common::id(&ids, "user");
     save(
         &store,
         id,
         vec![rule(
             "alice-red",
-            condition("user", Op::Contains, &["alice"]),
+            condition(&user_id, Op::Contains, &["alice"]),
             "#ff0000",
         )],
     );

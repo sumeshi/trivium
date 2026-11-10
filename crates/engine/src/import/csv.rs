@@ -6,8 +6,8 @@ use std::path::Path;
 use polars::prelude::*;
 
 use crate::error::AppError;
-use crate::models::FlagEntry;
-use crate::value_utils::anyvalue_to_search_string;
+use crate::models::{ColumnMeta, FlagEntry, ImportedData};
+use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID};
 
 /// Maps a delimiter option string to a single-byte polars separator.
 /// An empty string represents polars' automatic detection.
@@ -36,6 +36,11 @@ pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> 
     }
 }
 
+/// Internal column id assigned to a source column by its position.
+fn column_id(position: usize) -> String {
+    format!("c{:06}", position + 1)
+}
+
 /// Decodes a UTF-16 payload (BOM already stripped) into UTF-8 bytes.
 fn utf16_bytes_to_utf8(payload: &[u8], big_endian: bool) -> Result<Vec<u8>, AppError> {
     if payload.len() % 2 != 0 {
@@ -60,150 +65,190 @@ fn utf16_bytes_to_utf8(payload: &[u8], big_endian: bool) -> Result<Vec<u8>, AppE
 }
 
 /// Detects UTF-16LE/BE BOMs and returns the payload decoded as UTF-8.
-/// Plain UTF-8 payloads (with or without a UTF-8 BOM) are returned unchanged.
+/// Plain UTF-8 payloads (with or without a UTF-8 BOM) are returned unchanged
+/// apart from dropping the UTF-8 BOM.
 fn decode_bom(bytes: Vec<u8>) -> Result<Vec<u8>, AppError> {
     if bytes.starts_with(&[0xFF, 0xFE]) {
         utf16_bytes_to_utf8(&bytes[2..], false)
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
         utf16_bytes_to_utf8(&bytes[2..], true)
+    } else if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        Ok(bytes[3..].to_vec())
     } else {
         Ok(bytes)
     }
 }
 
-/// Reads a CSV, lifts `trivium-*` columns into flag entries, and assigns `__rowid`.
+/// Reads a CSV and assigns one internal id per source column position.
+///
+/// The original cell strings are kept in the `__original` JSON column. The
+/// display frame is built by replacing the header row with the internal ids, so
+/// duplicate or empty headers cannot drop a column. `trivium-*` columns are only
+/// read as annotation data when `restore_annotations` is explicit; the columns
+/// themselves are always kept as ordinary data.
 pub fn load(
     path: &Path,
     delimiter: Option<u8>,
-) -> Result<(DataFrame, HashMap<usize, FlagEntry>), AppError> {
+    restore_annotations: bool,
+) -> Result<ImportedData, AppError> {
     let mut file = File::open(path)
         .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
     let mut raw = Vec::new();
     file.read_to_end(&mut raw)
         .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
     let bytes = decode_bom(raw)?;
-    let cursor = Cursor::new(bytes);
-    let parsed = match delimiter {
-        Some(separator) => CsvReadOptions::default()
-            .with_parse_options(CsvParseOptions::default().with_separator(separator))
-            .into_reader_with_file_handle(cursor)
-            .finish(),
-        None => CsvReader::new(cursor).finish(),
-    };
-    let mut df = parsed
-        .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
 
-    let imported_flags = take_trivium_columns(&mut df);
+    // `None` keeps the existing comma default for the parser. The polars reader
+    // previously performed automatic detection; the raw cell reader needs a
+    // concrete separator, so the same default is applied here.
+    let separator = delimiter.unwrap_or(b',');
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(separator)
+        .flexible(false)
+        .from_reader(Cursor::new(&bytes));
+    let headers = reader
+        .headers()
+        .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?
+        .clone();
+    let source_headers: Vec<String> = headers.iter().map(|header| header.to_string()).collect();
+    if source_headers.is_empty() {
+        return Err(AppError::Message(
+            "The CSV data has no columns.".into(),
+        ));
+    }
+
+    let mut records: Vec<csv::StringRecord> = Vec::new();
+    for record in reader.records() {
+        let record = record
+            .map_err(|e| AppError::Message(format!("Failed to parse the CSV data: {}", e)))?;
+        records.push(record);
+    }
+
+    let columns: Vec<ColumnMeta> = source_headers
+        .iter()
+        .enumerate()
+        .map(|(order, header)| ColumnMeta {
+            id: column_id(order),
+            label: if header.is_empty() {
+                format!("column {}", order + 1)
+            } else {
+                header.clone()
+            },
+            source: header.clone(),
+            order,
+        })
+        .collect();
+
+    // Rebuild a well-formed CSV with unique id headers and let polars infer
+    // types exactly as before. Original cells are written by the csv crate, so
+    // quoting, embedded newlines, and escaping survive the round trip.
+    let mut stitched: Vec<u8> = Vec::new();
+    {
+        let mut writer = csv::WriterBuilder::new().from_writer(&mut stitched);
+        let ids: Vec<&str> = columns.iter().map(|column| column.id.as_str()).collect();
+        writer
+            .write_record(&ids)
+            .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
+        for record in &records {
+            writer
+                .write_record(record)
+                .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
+        }
+        writer
+            .flush()
+            .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
+    }
+    let mut df = CsvReader::new(Cursor::new(stitched))
+        .finish()
+        .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
+    if df.height() != records.len() {
+        return Err(AppError::Message(
+            "The CSV row count changed while building the dataset.".into(),
+        ));
+    }
+
+    let originals: Vec<String> = records
+        .iter()
+        .map(|record| {
+            let cells: Vec<&str> = record.iter().collect();
+            serde_json::to_string(&cells)
+                .map_err(|_| AppError::Message("Failed to store the original CSV record.".into()))
+        })
+        .collect::<Result<_, _>>()?;
+    df.with_column(
+        Series::new(INTERNAL_ORIGINAL, originals),
+    )
+    .map_err(|_| AppError::Message("Failed to store the original CSV records.".into()))?;
+
     let row_ids: Vec<i64> = (0..df.height()).map(|idx| idx as i64).collect();
-    let row_id_series = Series::new("__rowid", row_ids);
+    let row_id_series = Series::new(INTERNAL_ROW_ID, row_ids);
     df.with_column(row_id_series)
         .map_err(|_| AppError::Message("Failed to add row ids to the dataset.".into()))?;
-    Ok((df, imported_flags))
+
+    let imported_flags = if restore_annotations {
+        extract_trivium_flags(&columns, &records)
+    } else {
+        HashMap::new()
+    };
+
+    Ok(ImportedData {
+        frame: df,
+        columns,
+        flags: imported_flags,
+    })
 }
 
-fn take_trivium_columns(df: &mut DataFrame) -> HashMap<usize, FlagEntry> {
+/// Lifts explicit `trivium-*` columns into flag entries. The columns stay in
+/// the frame; this only creates the annotation side channel.
+fn extract_trivium_flags(
+    columns: &[ColumnMeta],
+    records: &[csv::StringRecord],
+) -> HashMap<usize, FlagEntry> {
+    let find = |name: &str| {
+        columns
+            .iter()
+            .find(|column| column.source == name)
+            .map(|column| column.order)
+    };
+    let safe = find("trivium-safe");
+    let suspicious = find("trivium-suspicious");
+    let critical = find("trivium-critical");
+    let memo = find("trivium-memo");
+    if safe.is_none() && suspicious.is_none() && critical.is_none() && memo.is_none() {
+        return HashMap::new();
+    }
+
+    let flag_value = |record: &csv::StringRecord, index: Option<usize>| -> Option<String> {
+        index
+            .and_then(|column| record.get(column))
+            .map(str::to_string)
+            .filter(|text| !text.is_empty() && text != "0")
+    };
+
     let mut imported_flags: HashMap<usize, FlagEntry> = HashMap::new();
-    let has_safe = df.get_column_names().iter().any(|c| c == &"trivium-safe");
-    let has_suspicious = df
-        .get_column_names()
-        .iter()
-        .any(|c| c == &"trivium-suspicious");
-    let has_critical = df
-        .get_column_names()
-        .iter()
-        .any(|c| c == &"trivium-critical");
-    let has_memo = df.get_column_names().iter().any(|c| c == &"trivium-memo");
-    if !(has_safe || has_suspicious || has_critical || has_memo) {
-        return imported_flags;
-    }
-
-    let safe_col = if has_safe {
-        df.column("trivium-safe").ok()
-    } else {
-        None
-    };
-    let suspicious_col = if has_suspicious {
-        df.column("trivium-suspicious").ok()
-    } else {
-        None
-    };
-    let critical_col = if has_critical {
-        df.column("trivium-critical").ok()
-    } else {
-        None
-    };
-    let memo_col = if has_memo {
-        df.column("trivium-memo").ok()
-    } else {
-        None
-    };
-
-    let height = df.height();
-    for row_idx in 0..height {
-        let mut best_flag = String::new();
-        if let Some(series) = critical_col.as_ref() {
-            if let Ok(v) = series.get(row_idx) {
-                if let Some(text) = anyvalue_to_search_string(&v) {
-                    if text != "0" && !text.is_empty() {
-                        best_flag = "critical".to_string();
-                    }
-                }
-            }
+    for (row_idx, record) in records.iter().enumerate() {
+        let flag = flag_value(record, critical)
+            .map(|_| "critical".to_string())
+            .or_else(|| flag_value(record, suspicious).map(|_| "suspicious".to_string()))
+            .or_else(|| flag_value(record, safe).map(|_| "safe".to_string()))
+            .unwrap_or_default();
+        let memo_value = memo
+            .and_then(|column| record.get(column))
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string);
+        if flag.is_empty() && memo_value.is_none() {
+            continue;
         }
-        if best_flag.is_empty() {
-            if let Some(series) = suspicious_col.as_ref() {
-                if let Ok(v) = series.get(row_idx) {
-                    if let Some(text) = anyvalue_to_search_string(&v) {
-                        if text != "0" && !text.is_empty() {
-                            best_flag = "suspicious".to_string();
-                        }
-                    }
-                }
-            }
-        }
-        if best_flag.is_empty() {
-            if let Some(series) = safe_col.as_ref() {
-                if let Ok(v) = series.get(row_idx) {
-                    if let Some(text) = anyvalue_to_search_string(&v) {
-                        if text != "0" && !text.is_empty() {
-                            best_flag = "safe".to_string();
-                        }
-                    }
-                }
-            }
-        }
-        let memo_val = if let Some(series) = memo_col.as_ref() {
-            series
-                .get(row_idx)
-                .ok()
-                .and_then(|v| anyvalue_to_search_string(&v))
-        } else {
-            None
-        };
-        let flag_entry = FlagEntry {
-            flag: best_flag.clone(),
-            memo: memo_val
-                .map(|m| m.trim().to_string())
-                .filter(|m| !m.is_empty()),
-            tags: Vec::new(),
-            bookmarked: false,
-        };
-        if !flag_entry.flag.is_empty() || flag_entry.memo.is_some() {
-            imported_flags.insert(row_idx, flag_entry);
-        }
-    }
-
-    if let Ok(next) = df.drop("trivium-safe") {
-        *df = next;
-    }
-    if let Ok(next) = df.drop("trivium-suspicious") {
-        *df = next;
-    }
-    if let Ok(next) = df.drop("trivium-critical") {
-        *df = next;
-    }
-    if let Ok(next) = df.drop("trivium-memo") {
-        *df = next;
+        imported_flags.insert(
+            row_idx,
+            FlagEntry {
+                flag,
+                memo: memo_value,
+                tags: Vec::new(),
+                bookmarked: false,
+            },
+        );
     }
     imported_flags
 }

@@ -93,6 +93,7 @@ fn setup_dir() -> (PathBuf, PathBuf) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");

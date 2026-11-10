@@ -13,6 +13,8 @@ use trivium_engine::ops::{export, projects, rows};
 use trivium_engine::store::ProjectsStore;
 use trivium_engine::value_utils::anyvalue_to_search_string;
 
+mod common;
+
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("trivium-precision-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
@@ -43,10 +45,13 @@ fn sort_search_and_export_keep_i64_max_precision() {
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
     let id = summary.meta.id;
+    let ids = common::column_ids(&store, id);
+    let event_id = common::id(&ids, "eventid");
 
     let response = rows::query_project_rows(
         &store,
@@ -57,7 +62,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
                 search_columns: None,
                 flag_filter: None,
                 bookmarked_only: None,
-                sort_key: Some("eventid".to_string()),
+                sort_key: Some(event_id.clone()),
                 sort_direction: Some("asc".to_string()),
                 condition: None,
                 ..Default::default()
@@ -70,7 +75,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
     let sorted_values: Vec<String> = response
         .rows
         .iter()
-        .map(|row| row.data["eventid"].to_string())
+        .map(|row| row.data[&event_id].to_string())
         .collect();
     assert_eq!(
         sorted_values,

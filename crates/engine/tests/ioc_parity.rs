@@ -26,6 +26,8 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 // 10 rows: rows 0..4 are EventID 4624 (alice), rows 5..9 are 4625 (bob).
 // The IOC below matches every 4625 row.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
@@ -60,9 +62,11 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
+            restore_annotations: None,
         },
     )
     .expect("failed to create project");
+    let ids = common::column_ids(&store, summary.meta.id);
 
     // User flags: row 0 (no IOC match), row 5 "safe" (IOC match; user wins),
     // and row 6 memo-only (empty flag; must NOT block the IOC flag).
@@ -92,7 +96,7 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
             entries: vec![IocEntry {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
-                query: "eventid:4625".to_string(),
+                query: common::search(&ids, "EventID", "4625"),
             }],
         },
     )
