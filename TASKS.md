@@ -602,12 +602,32 @@ src-tauri/src/
   I5 スモーク 20 件 0 失敗、`npm run lint` 0 エラー。
   GUI の手動確認はローカルで webkit2gtk が使えないため未確認（§0 の制約）。
 
-### P3: キャッシュ無効化の明文化
+### P3: キャッシュ無効化の明文化 → 完了（`27b4be5`）
 
 - 前提: R5, I4
 - 手順: `searchable_cache` / `ioc_flag_cache` の無効条件（IOC 変更時・案件削除時・
   列構成は無関係であること）を `storage.rs` にコメント + テストで固定。
 - 完了条件: IOC を 1 件追加した際の再評価が増分のみ（I4 でIOC追加ケースの改善を記録）。
+- 実装メモ:
+  - `ioc/evaluate.rs` に内部型 `InternalTag` / `InternalOutcome` を追加し、全評価を
+    `evaluate_entries_internal` に切り出した。`evaluate_iocs` は公開型への写像のみ。
+    `IocCacheEntry` は署名・定義順正規化エントリ・内部 outcomes を保存する。
+  - `cached_ioc_outcomes` は完全一致 → 末尾追加の増分マージ → 全再評価の順。
+    `merge_outcomes` は flag を厳密な severity 上昇時のみ置換し、タグは severity 順の
+    挿入位置へ入れる（同順は既存が先）。`ioc_incremental_test.rs` 7 ケースで
+    増分結果 = `evaluate_iocs`（flag・タグ順序込み）を固定。
+  - `save_iocs` / `import_iocs` はキャッシュを先に消さない（署名と行数で判定）。
+    `calculate_ioc_applied_records` も `cached_ioc_outcomes` を使う。
+  - `SearchableCacheEntry` は列セット + 行数、`IocCacheEntry` は IOC 署名 + 行数を
+    キーとする無効化ルールを `storage.rs` に明記。旧形式キャッシュは
+    デシリアライズ失敗 → eprintln + 全再評価。
+  - bench の +1 エントリのタグを `ioc_extra` に変更（`prepare_ioc_entries` の
+    タグ順ソートで末尾に来るため、末尾追加ケースを計測する）。
+  - 計測（`cargo run --release -p trivium-engine --bin bench -- fixtures/bench-100k.csv
+    fixtures/bench-400k.csv fixtures/bench-2m.csv`）:
+    `ioc_1_more_save` 1.28s → 126.9ms（100k）、5.13s → 470.1ms（400k）、
+    25.1s → 2.624s（2M）。`ioc_1_more_query` 1.32s → 116.7ms（100k）、
+    5.31s → 402.1ms（400k）、27.1s → 1.965s（2M）。
 
 ### P4: ページ表示の IOC タグ再計算削減
 

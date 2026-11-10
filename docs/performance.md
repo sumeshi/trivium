@@ -35,10 +35,21 @@
 - before 比: 400k 122ms → 113ms、2M 700ms → 521ms（約 -26%）。100k は 39ms → 41ms で誤差範囲。
 - flag_update（400k）は 50ms で B3 の 100ms 以内条件を引き続き満たす。
 
+## 結果（P3 適用後: IOC 末尾追加の増分評価）
+
+`ioc_1_more_save` / `ioc_1_more_query` のみ測り直し（同一環境・同一 fixtures・1 実行）。
+コマンド: `cargo run --release -p trivium-engine --bin bench -- fixtures/bench-100k.csv fixtures/bench-400k.csv fixtures/bench-2m.csv`
+
+| 項目 | 100k | 400k | 2M |
+|---|---:|---:|---:|
+| ioc_1_more_save before → after | 1.28s → 126.9ms | 5.13s → 470.1ms | 25.1s → 2.624s |
+| ioc_1_more_query before → after | 1.32s → 116.7ms | 5.31s → 402.1ms | 27.1s → 1.965s |
+
 ## 観察（数値の良し悪しの判断はしない。P 層タスクの該当箇所のみ記す）
 
 - B3 の完了条件「40 万行案件でフラグ 1 件更新が 100ms 以内」: flag_update = 41ms で達成を計測で確認。
 - `search_A_cold` には searchable text の初回構築が含まれる。`*_warm` は検索キャッシュ利用時。
-- `ioc_100_*` / `ioc_1_more_*` は IOC 変更ごとに全行再評価される現経路の値（P3/P4 の before）。
+- `ioc_100_*` / `ioc_1_more_*` の I4 値は IOC 変更ごとに全行再評価していた時点の値
+  （P3/P4 の before）。P3 適用後の `ioc_1_more_*` は上節。
 - `sort_first` は文字列化キーの逐次変換を含む現経路の値（P1 の before）。
 - 100GB 級は非目標のため計測していない（§11）。
