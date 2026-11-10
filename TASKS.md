@@ -770,11 +770,15 @@ I1 → I3 → R0a → I2 → B1 → B3
     取込/出力の 5 項目を追記。既存の記述は削除・変更していない。
 - 検証: `npm run lint` → svelte-check 0 errors / 0 warnings（README 変更のため参考記録）。
 
-### Z3 全体チェック
+### Z3 全体チェック → 完了（実施日 2026-11-10、記録は docs/validation.md）
 
 - I5 スモーク + I4 ベンチの再実行、`scripts/check_rust_size.sh`、`cargo test`、
   `npm run lint`、C1 のアーティファクト確認を 1 回通しで実行し、
   結果を docs/validation.md に記録する。
+- 実装メモ: スモーク 20/0 失敗、全テスト 23 スイート 97 テスト 0 失敗、
+  サイズガード exit 0、svelte-check 0 エラー、ベンチ再実行（P1/P3 適用後の現行値）を
+  `docs/validation.md` に記録。C1 のアーティファクト確認と C2 のゲート赤化確認、
+  各タスクの GUI 手動確認は push 保留中のため未実施（validation.md に残確認事項として明記）。
 
 ## 14. IRFlow 比較（参照用。タスクは F 層に対応）
 
