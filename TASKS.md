@@ -755,9 +755,20 @@ I1 → I3 → R0a → I2 → B1 → B3
 - 検証: `cargo test -p trivium-engine` 97 passed、`npm run lint` 0 errors/0 warnings、
   `scripts/check_rust_size.sh` exit 0。
 
-### Z2 README 更新
+### Z2 README 更新 → 完了（`7da86f2`）
 
 - Search Syntax 節に条件エディタの追記、Build 節に `scripts/` の説明。
+- 実装メモ:
+  - Search Syntax に `### Structured Conditions` を追加。AND/OR グループのネスト、
+    11 演算子（`=`, `≠`, `>`, `<`, `≥`, `≤`, `contains`, `starts`, `ends`, `regex`, `in`）、
+    `in` のカンマ区切り、行単位の `Not`、数値/日時列の型付き入力、
+    検索バーとの AND 併存（D1(a)）を記載。テキスト検索が正規表現非対応である点も明記。
+  - Building from Source に `#### Development Scripts` を追加。`gen_fixture.py` の
+    引数（`--rows/--seed/--out/--variant`）と決定性、`check_rust_size.sh` の
+    500 行上限・CI 品質ゲートを実行例つきで記載。計測結果は `docs/performance.md` を参照。
+  - Key Features に条件エディタ、分析、一括注釈/整理、案件比較/レポート、
+    取込/出力の 5 項目を追記。既存の記述は削除・変更していない。
+- 検証: `npm run lint` → svelte-check 0 errors / 0 warnings（README 変更のため参考記録）。
 
 ### Z3 全体チェック
 
