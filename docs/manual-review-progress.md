@@ -141,3 +141,66 @@ serde distinguishes missing, null, and values (`annotation_patch_test.rs`).
   update remain for T13.
 
 Next card: T03.
+
+## T03 — QuerySpec search scope and count meanings
+
+Recorded: 2026-11-11.
+
+- `crates/engine/src/ops/query/mod.rs`: `QueryRowsPayload` now carries
+  `search_columns` (`searchColumns` in the IPC JSON) instead of `columns`.
+  `None` or an empty list means every data column, matching the old
+  `prepare_search(None)` behaviour. Unknown search columns still follow
+  `prepare_search`: they are ignored, not treated as a new error.
+- `QueryRowsResponse` now returns four distinct counts:
+  `total_rows` (whole project), `total_filtered_rows` (current result),
+  `annotated_total` (annotated rows in the whole project, including IOC-derived
+  final flags), and `annotated_filtered` (annotated rows in the result).
+  `total_flagged` was removed. `page::filtered_indices` still computes the
+  result-internal count; its local variable is now `annotated_filtered`.
+- `crates/engine/src/ops/cross.rs` maps its existing `columns` argument to the
+  renamed `search_columns` field.
+- `src/lib/types.ts`: added the shared `QuerySpec` type and moved
+  `FlagFilterValue` there. `src/lib/backend.ts`: `QueryProjectRowsArgs` extends
+  `QuerySpec` plus `projectId`/`offset`/`limit`, and sends `searchColumns`.
+  The response type follows the four Rust count fields.
+- `src/lib/components/project_view/state.ts`: added `searchColumns` (initial
+  `[]` = all columns) and `filteredFlaggedCount`; `flaggedCount` remains the
+  whole-project annotation count. `AppliedFilters.columns` became
+  `searchColumns`. Flag toggles update both counters.
+- `ProjectView.svelte`: page requests send `searchColumns` from the new store,
+  not visible columns. Hiding a column now only updates visibility and widths;
+  it no longer re-runs the query. Page responses set `flaggedCount` from
+  `annotated_total` and `filteredFlaggedCount` from `annotated_filtered`, so
+  `emitSummary` keeps reporting the whole-project count.
+- `FilterControls.svelte`: small scope label under the search input shows
+  `All columns` when the scope is empty, otherwise the scoped column names.
+  There is no control to choose search columns yet. `DataTable.svelte` shows
+  `flagged in results` from `filteredFlaggedCount`.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New regression suite | `cargo test -p trivium-engine --test query_counts_test` | 4 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+
+Regression coverage (`query_counts_test.rs`): 10 rows with 3 annotated and a
+search that matches 1 row returns `total_rows=10`,
+`total_filtered_rows=1`, `annotated_total=3`, `annotated_filtered=1`. Default
+scope, an explicit all-column list, and an empty list return the same result;
+restricting the scope to another column removes the match. The camel-case
+`searchColumns` IPC field parses.
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised: the scope label, column hiding, and the
+  result-count display were checked only by `npm run lint` and `npm run build`.
+- A search-column selection control is not part of this card; the store stays
+  at `[]` (all columns) unless code sets it.
+- Output columns, output/query row agreement, and request-generation handling
+  remain for T04 onward.
+
+Next card: T04.
