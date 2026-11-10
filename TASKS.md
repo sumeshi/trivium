@@ -7,10 +7,10 @@
 ## 0. 現在地（2026-11-09 確認済み）
 
 - ブランチ `main` のみ、`00a9c1a`、バージョン `0.1.4`。`develop` なし。CI は `build.yml`（Windows exe のみ）。
-- Tauri 1 + Polars 0.40 + Svelte 4 + sled。`docs/` なし。`scripts/` は `gen_fixture.py`(I1) / `check_rust_size.sh`(I3) を追加済み。
+- Tauri 2 + Polars 0.40 + Svelte 4 + sled。`docs/` なし。`scripts/` は `gen_fixture.py`(I1) / `check_rust_size.sh`(I3) を追加済み。
 - **テストが一切無い**: `#[cfg(test)]` 0 件、`src-tauri/tests/` 無し、package.json に Playwright/vitest なし。
 - サーバー実装（HTTP API）は存在しない。バイナリは Tauri デスクトップのみ。
-- **ローカル環境の制約**: webkit2gtk-4.0 / gtk+-3.0 の開発パッケージが無く sudo 不可。
+- **ローカル環境の制約**: webkit2gtk-4.1 / gtk+-3.0 / pango / cairo の開発パッケージが無く sudo 不可。
   ため `src-tauri`（Tauri アプリ）のビルドはローカルで検証できない（CI のみ）。
   このため純粋ロジックはワークスペースの `crates/engine`（クレート名 `trivium-engine`）へ分離し、
   `cargo test -p trivium-engine` で検証する（R0a）。Cargo.lock はコミットされていない。
@@ -107,6 +107,25 @@ src-tauri/src/
 - 推奨: しばらく Tauri 1 継続。deb は v1 の `tauri build --bundles deb` で生成可能。
   F 層・R 層のどのタスクも Tauri 2 を前提にしない。
 - 再判断の契機: HTTP API / Python SDK（X2）に着手するとき。
+- **→ 再判断済み（2026-11-10）: Tauri 2 へ移行**（`ff9fa0f`）。
+  契機: `libwebkit2gtk-4.0-37` が Kali / 現行 Debian（trixie 系）に存在せず、Tauri 1 系の deb が
+  起動できない実行時ブロッカーになったこと。移行はユーザー承認済み。
+  v1 に webkit2gtk-4.1 対応は無いため、v2 の plugin 方式（fs / dialog / opener）と
+  capabilities へ移行した。
+- 移行メモ（`ff9fa0f`、2026-11-10）:
+  - plugin-fs v2 に `createDir` は無く `mkdir`。`writeFile` は `Uint8Array` のみを受け取るため、
+    IOC CSV の書き出しは `writeTextFile` に変更した。
+  - `fs:default` はアプリ専用ディレクトリの read と mkdir のみで write を含まない。
+    `fs:scope` の `**` だけでは write コマンドは許可されないため、`fs:allow-write-text-file` を
+    capability に追加した。`fs:scope` の `**` は、dialog でユーザーが選んだ任意パス
+    （IOC の import/export、プリセット）に読み書きするための意図的な広 scope である。
+    デスクトップ用途で、パスはユーザー自身が dialog で選ぶ前提にしている。
+  - v1 の `tauri::api::path::app_local_data_dir` は v2 で廃止。`app.path().app_local_data_dir()`
+    （`tauri::Manager`）へ変更した。コマンドのシグネチャ変更は無し。
+  - `bundle.windows.webviewInstallMode` は v2 の config リファレンスに存在するため維持した
+    （2026-11-10 確認）。
+  - ローカルでは pango/cairo の pkg-config 欠落で `cargo check -p trivium-desktop` が止まる。
+    src-tauri の Rust コンパイルと deb 生成は CI（debian.yml）で確認する。
 
 ### D3: エンジン共有 API の公開面（Polars 継続 vs DuckDB 移行を含む）
 
@@ -669,7 +688,7 @@ src-tauri/src/
 
 ### C1: develop 用 Debian ワークフロー → 完了（`27dbef5` + 修正 `03e4045`/`6202ac3`/`f28c38a`、CI 確認 2026-11-10）
 
-- 前提: D2（推奨: Tauri 1 継続なら以下でよい）
+- 前提: D2（Tauri 2 へ移行済み）
 - 対象: 新規 `.github/workflows/debian.yml`
 - 手順:
   1. トリガ: `push: branches: [develop]` + `workflow_dispatch`
@@ -715,6 +734,13 @@ src-tauri/src/
     既知の軽微な問題: Actions の Node.js 20 非推奨警告（actions/* v4 対象。
     動作に影響なし、將来の actions 更新で解消）、deb バージョンが conf の
     `package.version: 0.1.0` と Cargo.toml `0.1.4` で不一致（別途判断）。
+  - **Tauri 2 移行に伴う更新（2026-11-10、`ff9fa0f`）**: runner を ubuntu-22.04 → 24.04、
+    Node 18 → 22、システム依存を libwebkit2gtk-4.0-dev → 4.1-dev に変更した。
+    v2 の Linux 前提条件（v2.tauri.app/start/prerequisites、2026-11-10 確認）に合わせて
+    libayatana-appindicator3-dev と librsvg2-dev を追加した。deb 出力パス
+    （`target/release/bundle/deb`）とアーティファクト設定は変更していない。
+    ビルドコマンドは `npm run tauri build -- --bundles deb` のまま。conf の
+    `bundle.targets: ["deb"]` と併用する。
 
 ### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は実動作で確認済み
 
