@@ -10,3 +10,5 @@ AGENTS.md
 *.csv
 Cargo.lock
 /target/
+.serena
+.tokensave
