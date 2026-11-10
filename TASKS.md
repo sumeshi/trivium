@@ -646,7 +646,7 @@ src-tauri/src/
 
 ## 9. C 層 — CI・配布
 
-### C1: develop 用 Debian ワークフロー
+### C1: develop 用 Debian ワークフロー → 実装済み（`27dbef5`）、CI 実行は未確認
 
 - 前提: D2（推奨: Tauri 1 継続なら以下でよい）
 - 対象: 新規 `.github/workflows/debian.yml`
@@ -660,13 +660,32 @@ src-tauri/src/
   6. `retention-days: 3`
 - 完了条件: develop への push でアーティファクトが 3 日保持で上がる（Actions の URL を完了報告に）。
 - 禁止: サーバー .deb（サーバー実装が存在しない。X2 まで保留）。100GB は問わない。
+- 実装メモ（2026-11-10）:
+  - 以前のセッションで同内容のワークフロー（`5febbbe`、deb バンドル用 icon 追加を含む）が
+    作成されていたが TASKS.md に完了記録がなく、かつ一度も push されていない
+    （develop に upstream 無し）ことを確認。本タスクで置き換えた。
+  - **カードからの逸脱 1 件**: `runs-on` を `ubuntu-24.04` → `ubuntu-22.04` に変更。
+    根拠: noble に `libwebkit2gtk-4.0-dev` は存在しない
+    （packages.ubuntu.com/noble で "Package not available in this suite" を確認）。
+    Tauri 1.5 + wry 0.24.12（Cargo.lock 確認済み）は webkit2gtk-4.0 でリンクするため、
+    D2（Tauri 1 継続）との整合から jammy を使用する。
+  - `rust-cache`（swatinem/rust-cache@v2、`src-tauri -> ../target`）は旧実装から復元。
+  - push 検証は未実施（ユーザー指示により push 保留）。push 後に Actions の結果で完了確認。
 
-### C2: 品質ゲートの組み込み
+### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は未確認
 
 - 前提: I3, I5
 - 手順: `build.yml` と `debian.yml` に `scripts/check_rust_size.sh`、`cargo test`、
   `npm run lint` をビルド前に追加。
 - 完了条件: ゲート失敗でワークフローが赤くなる（わざと 501 行ファイルで 1 回確認後、revert）。
+- 実装メモ（2026-11-10）:
+  - 両ワークフローのビルド前に「Quality gates」ステップを追加
+    （`bash scripts/check_rust_size.sh` + `cargo test -p trivium-engine` + `npm run lint`）。
+    build.yml（Windows ランナー）は `shell: bash` を明示。
+  - ゲート 3 コマンドはローカルで全通過を確認（`cargo test` 23 スイート 0 失敗、
+    svelte-check 0 エラー、サイズガード exit 0）。
+  - 「わざと失敗させて赤化確認 → revert」は CI 実行が必要なため未実施
+    （push 保留中）。push 後の確認事項。
 
 ## 10. X 層 — 保留（着手条件が明記されたものだけ）
 
