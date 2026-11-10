@@ -375,7 +375,9 @@ import type {
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: effectiveTotalRows = ($flagFilter !== 'all' || $bookmarkedOnly || ($search && $search.trim().length > 0) || $conditionPayload != null) ? $totalFilteredRows : $totalRows;
+  // Keep in sync with DataTable: the applied QuerySpec result is the only
+  // source for the active row count, including bookmark-only filtering.
+  $: effectiveTotalRows = $totalFilteredRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,

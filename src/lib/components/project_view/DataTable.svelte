@@ -14,8 +14,6 @@
     viewportHeight,
     scrollTop,
     tableWidth,
-    search,
-    flagFilter,
     ROW_HEIGHT,
     INDEX_COL_WIDTH,
     FLAG_COL_WIDTH,
@@ -37,7 +35,6 @@
     positionToRowIndex
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
-  import { conditionPayload } from '../../stores/condition';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
 
@@ -95,8 +92,8 @@
 
   $: visibleCount =
     Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
-  $: conditionFiltering = $conditionPayload != null;
-  $: effectiveTotalRows = ($flagFilter !== 'all' || ($search && $search.trim().length > 0) || conditionFiltering) ? $totalFilteredRows : $totalRows;
+  // The applied QuerySpec result is the only source for the table's row count.
+  $: effectiveTotalRows = $totalFilteredRows;
   $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
   $: startIndex = Math.min(
     maxStart,
@@ -105,6 +102,20 @@
   $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
   $: offsetY = startIndex * ROW_HEIGHT;
   $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
+  // A filter can shrink the result set while the viewport is near the old end.
+  // Pull both the store and the scroll element back inside the new range so the
+  // space below the last row is not left as a blank spacer. Wait until pending
+  // page requests settle: on project load the count is briefly 0 while the
+  // saved scroll offset is being restored, and clamping then would lose it.
+  $: {
+    const maxScroll = Math.max(0, totalHeight - ($viewportHeight || 0));
+    if ($pendingPages.size === 0 && $scrollTop > maxScroll) {
+      scrollTop.set(maxScroll);
+      if ($bodyScrollEl && $bodyScrollEl.scrollTop !== maxScroll) {
+        $bodyScrollEl.scrollTop = maxScroll;
+      }
+    }
+  }
   $: loadedRowCount = $rowsCache.size;
 
   const buildVirtualRows = (

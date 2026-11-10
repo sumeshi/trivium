@@ -112,6 +112,7 @@ export function invalidateViewRequests(): void {
   viewGeneration.update((value) => value + 1);
 }
 export const totalRows = writable(0);
+/** Rows matching the applied QuerySpec. Sole source for the virtual row count. */
 export const totalFilteredRows = writable(0);
 /** Annotated rows in the whole project. */
 export const flaggedCount = writable(0);
