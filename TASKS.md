@@ -480,7 +480,7 @@ src-tauri/src/
 
 ### 取込・精度・出力
 
-#### F22: 区切り文字指定
+#### F22: 区切り文字指定 → 完了（`dbb088b`）
 
 - 前提: R3
 - 手順: `create_project` の payload に `delimiter` を追加（既定は現状の自動）。
