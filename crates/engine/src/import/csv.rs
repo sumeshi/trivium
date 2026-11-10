@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{Cursor, Read};
 use std::path::Path;
 
 use polars::prelude::*;
@@ -35,19 +36,59 @@ pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> 
     }
 }
 
+/// Decodes a UTF-16 payload (BOM already stripped) into UTF-8 bytes.
+fn utf16_bytes_to_utf8(payload: &[u8], big_endian: bool) -> Result<Vec<u8>, AppError> {
+    if payload.len() % 2 != 0 {
+        return Err(AppError::Message(
+            "Invalid UTF-16 data: odd byte length.".into(),
+        ));
+    }
+    let units = payload.chunks_exact(2).map(|pair| {
+        if big_endian {
+            u16::from_be_bytes([pair[0], pair[1]])
+        } else {
+            u16::from_le_bytes([pair[0], pair[1]])
+        }
+    });
+    let mut text = String::with_capacity(payload.len());
+    for decoded in char::decode_utf16(units) {
+        text.push(decoded.map_err(|_| {
+            AppError::Message("Invalid UTF-16 data: unpaired surrogate.".into())
+        })?);
+    }
+    Ok(text.into_bytes())
+}
+
+/// Detects UTF-16LE/BE BOMs and returns the payload decoded as UTF-8.
+/// Plain UTF-8 payloads (with or without a UTF-8 BOM) are returned unchanged.
+fn decode_bom(bytes: Vec<u8>) -> Result<Vec<u8>, AppError> {
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        utf16_bytes_to_utf8(&bytes[2..], false)
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        utf16_bytes_to_utf8(&bytes[2..], true)
+    } else {
+        Ok(bytes)
+    }
+}
+
 /// Reads a CSV, lifts `trivium-*` columns into flag entries, and assigns `__rowid`.
 pub fn load(
     path: &Path,
     delimiter: Option<u8>,
 ) -> Result<(DataFrame, HashMap<usize, FlagEntry>), AppError> {
-    let file = File::open(path)
+    let mut file = File::open(path)
         .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw)
+        .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
+    let bytes = decode_bom(raw)?;
+    let cursor = Cursor::new(bytes);
     let parsed = match delimiter {
         Some(separator) => CsvReadOptions::default()
             .with_parse_options(CsvParseOptions::default().with_separator(separator))
-            .into_reader_with_file_handle(file)
+            .into_reader_with_file_handle(cursor)
             .finish(),
-        None => CsvReader::new(file).finish(),
+        None => CsvReader::new(cursor).finish(),
     };
     let mut df = parsed
         .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
