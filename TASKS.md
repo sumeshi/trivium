@@ -499,11 +499,18 @@ src-tauri/src/
   UTF-16LE/BE ファイルが ascii 版と列名・行数・全 7 列の代表値で一致することを検証
   （`import_test.rs`、タブ区切りとの組合せも含む 3 ケース追加）。
 
-#### F24: JSONL 対応
+#### F24: JSONL 対応 → 完了（`dae9950`）
 
 - 前提: R3
 - 手順: 拡張子 `.jsonl` または指定形式で 1 行 1 JSON を取込。列は全キーの和集合。
 - 完了条件: ネスト 1 段の JSONL が `a.b` 形式の列に展開される（I5）。
+- 実装メモ: 新規 `crates/engine/src/import/jsonl.rs`。`create_project` は拡張子
+  `.jsonl` で `jsonl::load` に振り分け（CSV 経路は不変）。ネストしたオブジェクトは
+  再帰的に `a.b` 形式へ平坦化し、列は全行のキー和集合（出現順。
+  `serde_json` に `preserve_order` feature を追加）。列型は全非 null 値が整数なら Int64、
+  数値なら Float64、真偽値なら Boolean、それ以外（配列・混在）は Utf8 文字列化。
+  空行は読飛ばし、オブジェクト以外の行・壊れた JSON は行番号付きでエラー。
+  テストは `jsonl_test.rs` 4 ケース平坦化・和集合+null・型維持・ops 経由の取込。
 
 #### F25: 原本 SHA-256 と対応の保持
 
