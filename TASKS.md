@@ -737,12 +737,32 @@ I1 → I3 → R0a → I2 → B1 → B3
 
 ## 13. 仕上げタスク（全列の後）
 
-- **Z1 死んだコードの削除**: R0〜R5・F17 の完了後、`grep` で旧経路
-  （`build_row_search_text` の単一行用途、`calculate_ioc_applied_records` の旧実装、
-  単一列の値別パネル等）を削除。削除理由をコミットメッセージに残す。
-- **Z2 README 更新**: Search Syntax 節に条件エディタの追記、Build 節に `scripts/` の説明。
-- **Z3 全体チェック**: I5 スモーク + I4 ベンチの再実行、`scripts/check_rust_size.sh`、
-  `cargo test`、`npm run lint`、C1 のアーティファクト確認を 1 回通しで実行し、
+### Z1 死んだコードの削除 → 完了（`48db6d7`）
+
+- 前提: R0〜R5・F17
+- 実装メモ: `crates/engine/src` の全 `pub fn` / `pub(crate) fn` / `pub const` / `pub struct` を
+  定義名で crates / src-tauri / src から grep し、参照 0 件のものだけを削除。
+  - 削除（engine）: `ops/util.rs::build_row_search_text`（単一行用の旧検索テキスト構築。
+    現行は `build_searchable_text` + `ensure_column_text_cache`）、
+    `value_utils.rs::value_to_search_string`（未使用の `serde_json::Value` 版）。
+  - 修正: `ioc/evaluate.rs` の doc に残っていた旧経路 `row_contains_query` の言及を
+    現行の「query rows / export / applied-record counts / initial page」に更新。
+- フロント: `src/lib` の export を総当たりし、未参照の `types::QueryRowsResponse`、
+  `project_view/state::ScheduledFilters`、`stores/condition::{resetConditions, treeFromNode}`
+  を削除。未使用の Svelte コンポーネント・TS モジュールは無し。
+- 保留: 無し。`calculate_ioc_applied_records` は `ops/iocs.rs` の save/import から呼ばれており、
+  旧実装の重複は R5 で解消済みのため削除対象外。
+- 検証: `cargo test -p trivium-engine` 97 passed、`npm run lint` 0 errors/0 warnings、
+  `scripts/check_rust_size.sh` exit 0。
+
+### Z2 README 更新
+
+- Search Syntax 節に条件エディタの追記、Build 節に `scripts/` の説明。
+
+### Z3 全体チェック
+
+- I5 スモーク + I4 ベンチの再実行、`scripts/check_rust_size.sh`、`cargo test`、
+  `npm run lint`、C1 のアーティファクト確認を 1 回通しで実行し、
   結果を docs/validation.md に記録する。
 
 ## 14. IRFlow 比較（参照用。タスクは F 層に対応）
