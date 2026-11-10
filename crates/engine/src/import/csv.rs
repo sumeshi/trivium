@@ -8,12 +8,48 @@ use crate::error::AppError;
 use crate::models::FlagEntry;
 use crate::value_utils::anyvalue_to_search_string;
 
+/// Maps a delimiter option string to a single-byte polars separator.
+/// An empty string represents polars' automatic detection.
+pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> {
+    let Some(text) = delimiter else {
+        return Ok(None);
+    };
+    if text.is_empty() {
+        return Ok(None);
+    }
+    match text {
+        "\t" => return Ok(Some(b'\t')),
+        "," => return Ok(Some(b',')),
+        ";" => return Ok(Some(b';')),
+        "|" => return Ok(Some(b'|')),
+        _ => {}
+    }
+    let bytes = text.as_bytes();
+    if bytes.len() == 1 && bytes[0].is_ascii() {
+        Ok(Some(bytes[0]))
+    } else {
+        Err(AppError::Message(format!(
+            "Invalid delimiter: {}.",
+            text
+        )))
+    }
+}
+
 /// Reads a CSV, lifts `trivium-*` columns into flag entries, and assigns `__rowid`.
-pub fn load(path: &Path) -> Result<(DataFrame, HashMap<usize, FlagEntry>), AppError> {
+pub fn load(
+    path: &Path,
+    delimiter: Option<u8>,
+) -> Result<(DataFrame, HashMap<usize, FlagEntry>), AppError> {
     let file = File::open(path)
         .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-    let mut df = CsvReader::new(file)
-        .finish()
+    let parsed = match delimiter {
+        Some(separator) => CsvReadOptions::default()
+            .with_parse_options(CsvParseOptions::default().with_separator(separator))
+            .into_reader_with_file_handle(file)
+            .finish(),
+        None => CsvReader::new(file).finish(),
+    };
+    let mut df = parsed
         .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
 
     let imported_flags = take_trivium_columns(&mut df);

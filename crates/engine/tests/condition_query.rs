@@ -40,6 +40,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .unwrap()

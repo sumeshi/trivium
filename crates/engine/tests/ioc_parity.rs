@@ -59,6 +59,7 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project");

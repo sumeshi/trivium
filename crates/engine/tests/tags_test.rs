@@ -49,6 +49,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project");
@@ -334,6 +335,7 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
         CreateProjectPayload {
             path: destination.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("reimport failed");

@@ -57,6 +57,7 @@ fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid) {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project");

@@ -87,6 +87,7 @@ fn setup_project() -> (PathBuf, ProjectsStore, uuid::Uuid) {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: Some("smoke".to_string()),
+            delimiter: None,
         },
     )
     .expect("failed to create project");
@@ -275,6 +276,7 @@ fn nanosecond_integer_is_not_rounded() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project")
@@ -375,6 +377,7 @@ fn column_stats_match_python_counts() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project")
@@ -484,6 +487,7 @@ fn duplicate_rows_keep_every_occurrence() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("create")
@@ -584,6 +588,7 @@ fn duplicate_rows_match_fixture_duplicates() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("create")
@@ -725,6 +730,7 @@ fn histogram_places_values_in_equal_width_buckets() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("create")
@@ -825,6 +831,7 @@ fn time_analysis_finds_fixture_gaps() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("create")
@@ -876,6 +883,7 @@ fn time_analysis_gap_range_matches_bounds() {
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("create")
@@ -1173,6 +1181,7 @@ fn export_and_reimport_roundtrip() {
         CreateProjectPayload {
             path: destination.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("reimport failed");
@@ -1239,6 +1248,7 @@ ts,note,secret
         CreateProjectPayload {
             path: csv.to_string_lossy().to_string(),
             description: Some("around".to_string()),
+            delimiter: None,
         },
     )
     .expect("failed to create project")
@@ -1351,6 +1361,7 @@ ts,EventID,host,user,proc,path,msg
             CreateProjectPayload {
                 path: path.to_string_lossy().to_string(),
                 description: None,
+                delimiter: None,
             },
         )
         .expect("failed to create project")

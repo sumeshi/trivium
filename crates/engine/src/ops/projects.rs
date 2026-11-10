@@ -28,6 +28,8 @@ const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
 pub struct CreateProjectPayload {
     pub path: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub delimiter: Option<String>,
 }
 
 /// Lists saved projects ordered by creation time (newest first).
@@ -52,7 +54,8 @@ pub fn create_project(
         return Err(AppError::Message("Selected file no longer exists.".into()).into());
     }
 
-    let (mut df, imported_flags) = csv::load(&source_path)?;
+    let (mut df, imported_flags) =
+        csv::load(&source_path, csv::build_delimiter(payload.delimiter.as_deref())?)?;
 
     let project_id = Uuid::new_v4();
     let project_dir = store.project_dir(&project_id);

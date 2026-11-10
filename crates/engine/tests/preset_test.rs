@@ -18,6 +18,7 @@ fn create_project(store: &ProjectsStore, path: &Path) -> Uuid {
         CreateProjectPayload {
             path: path.to_string_lossy().to_string(),
             description: None,
+            delimiter: None,
         },
     )
     .expect("failed to create project")
