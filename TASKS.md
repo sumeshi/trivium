@@ -667,7 +667,7 @@ src-tauri/src/
 
 ## 9. C 層 — CI・配布
 
-### C1: develop 用 Debian ワークフロー → 実装済み（`27dbef5`）、CI 実行は未確認
+### C1: develop 用 Debian ワークフロー → 完了（`27dbef5` + 修正 `03e4045`/`6202ac3`/`f28c38a`、CI 確認 2026-11-10）
 
 - 前提: D2（推奨: Tauri 1 継続なら以下でよい）
 - 対象: 新規 `.github/workflows/debian.yml`
@@ -709,6 +709,12 @@ src-tauri/src/
     bundler の `project_out_directory`）で確認済み。ワークフローのパス修正は正しい。
     なお main の conf も `active` 未設定のため、build.yml の Windows exe は
     歴史的報告とは異なり実は生成されていなかった可能性がある（main は旧 conf のまま未修正）。
+  - **CI 確認完了（4 回目の push、2026-11-10）**: ゲート通過 → `tauri build --bundles deb` →
+    `target/release/bundle/deb/` に deb 生成 → `trivium-deb` アーティファクト
+    （*.deb + SHA256SUMS、保持 3 日）が上がることを確認。完了条件を満たす。
+    既知の軽微な問題: Actions の Node.js 20 非推奨警告（actions/* v4 対象。
+    動作に影響なし、將来の actions 更新で解消）、deb バージョンが conf の
+    `package.version: 0.1.0` と Cargo.toml `0.1.4` で不一致（別途判断）。
 
 ### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は実動作で確認済み
 
