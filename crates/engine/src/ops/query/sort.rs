@@ -2,24 +2,64 @@ use polars::prelude::*;
 
 use crate::value_utils::anyvalue_to_search_string;
 
-/// Numeric sort keys. Integers compare exactly (F26); only mixed int/float
-/// comparisons go through `f64`, matching the previous behavior.
-enum NumericKey {
+/// Precomputed sort key for one row (P1). Comparison semantics are identical
+/// to the previous per-comparison conversion: integers compare exactly (F26),
+/// mixed int/float and number-vs-text comparisons go through `f64` with text
+/// ranked as +infinity, and nulls sort after numbers but before text.
+enum SortKey {
     Int(i64),
     Float(f64),
+    Text(String),
+    Missing,
 }
 
-fn parse_numeric(text: &str) -> Option<NumericKey> {
+fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
+    let normalized = series
+        .get(row_index)
+        .ok()
+        .and_then(|v| anyvalue_to_search_string(&v))
+        .map(|s| {
+            s.trim()
+                .replace(',', "")
+                .replace('\u{00A0}', "")
+                .to_lowercase()
+        });
+    let Some(text) = normalized else {
+        return SortKey::Missing;
+    };
     if let Ok(value) = text.parse::<i64>() {
-        return Some(NumericKey::Int(value));
+        return SortKey::Int(value);
     }
-    text.parse::<f64>().ok().map(NumericKey::Float)
+    if let Ok(value) = text.parse::<f64>() {
+        return SortKey::Float(value);
+    }
+    SortKey::Text(text)
 }
 
-fn numeric_as_f64(key: &NumericKey) -> f64 {
+fn numeric_rank(key: &SortKey) -> f64 {
     match key {
-        NumericKey::Int(value) => *value as f64,
-        NumericKey::Float(value) => *value,
+        SortKey::Int(value) => *value as f64,
+        SortKey::Float(value) => *value,
+        // Number-vs-text pairs previously ranked text as +infinity.
+        SortKey::Text(_) | SortKey::Missing => f64::INFINITY,
+    }
+}
+
+fn compare_keys(a: &SortKey, b: &SortKey) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a, b) {
+        (SortKey::Missing, SortKey::Missing) => Equal,
+        // Text path: null sorts before text.
+        (SortKey::Missing, SortKey::Text(_)) => Less,
+        (SortKey::Text(_), SortKey::Missing) => Greater,
+        // Numeric path: null sorts after every number (previous +infinity rule).
+        (SortKey::Missing, _) => Greater,
+        (_, SortKey::Missing) => Less,
+        (SortKey::Int(av), SortKey::Int(bv)) => av.cmp(bv),
+        (SortKey::Text(av), SortKey::Text(bv)) => av.cmp(bv),
+        _ => numeric_rank(a)
+            .partial_cmp(&numeric_rank(b))
+            .unwrap_or(Equal),
     }
 }
 
@@ -36,44 +76,15 @@ pub fn ordered_row_indices(
     let Ok(series) = df.column(sort_key) else {
         return ordered_indices;
     };
+
+    // P1: convert each row once into a sort key; comparisons no longer
+    // stringify and re-parse the cell value.
+    let keys: Vec<SortKey> = (0..df.height())
+        .map(|row_index| build_sort_key(series, row_index))
+        .collect();
+
     ordered_indices.sort_by(|a, b| {
-        let a_s = series
-            .get(*a)
-            .ok()
-            .and_then(|v| anyvalue_to_search_string(&v))
-            .map(|s| s.trim().replace(',', "").replace('\u{00A0}', ""));
-        let b_s = series
-            .get(*b)
-            .ok()
-            .and_then(|v| anyvalue_to_search_string(&v))
-            .map(|s| s.trim().replace(',', "").replace('\u{00A0}', ""));
-
-        let a_num = a_s.as_ref().and_then(|s| parse_numeric(s));
-        let b_num = b_s.as_ref().and_then(|s| parse_numeric(s));
-
-        if a_num.is_some() || b_num.is_some() {
-            let mut ord = match (&a_num, &b_num) {
-                (Some(NumericKey::Int(av)), Some(NumericKey::Int(bv))) => av.cmp(bv),
-                (Some(av), Some(bv)) => numeric_as_f64(av)
-                    .partial_cmp(&numeric_as_f64(bv))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                // Missing values sort as +infinity (after every number, ascending).
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            };
-            if sort_direction == Some("desc") {
-                ord = ord.reverse();
-            }
-            return ord;
-        }
-
-        let mut ord = match (&a_s, &b_s) {
-            (Some(a_str), Some(b_str)) => a_str.to_lowercase().cmp(&b_str.to_lowercase()),
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => std::cmp::Ordering::Equal,
-        };
+        let mut ord = compare_keys(&keys[*a], &keys[*b]);
         if sort_direction == Some("desc") {
             ord = ord.reverse();
         }
