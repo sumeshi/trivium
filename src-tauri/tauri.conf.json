@@ -1,7 +1,7 @@
 {
   "package": {
     "productName": "Trivium",
-    "version": "0.1.0"
+    "version": "0.1.4"
   },
   "build": {
     "beforeBuildCommand": "npm run build",

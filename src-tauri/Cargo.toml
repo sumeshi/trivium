@@ -2,6 +2,7 @@
 name = "trivium-desktop"
 version = "0.1.4"
 edition = "2021"
+authors = ["sumeshi <sum3sh1@protonmail.com>"]
 
 [dependencies]
 anyhow = "1"
