@@ -783,8 +783,17 @@ fn python_fixture_gaps(csv: &Path) -> serde_json::Value {
     let script = r#"
 import csv, json, sys
 from datetime import datetime
+
+def parse(value):
+    # Python < 3.11 rejects fractional seconds longer than 6 digits, and the
+    # fixture alternates 3-digit (ms) and 9-digit (ns) fractions.
+    if "." in value:
+        head, fraction = value.split(".", 1)
+        value = head + "." + fraction[:6]
+    return datetime.fromisoformat(value)
+
 with open(sys.argv[1], newline="") as handle:
-    times = [datetime.fromisoformat(row["ts"]) for row in csv.DictReader(handle)]
+    times = [parse(row["ts"]) for row in csv.DictReader(handle)]
 gaps = []
 sessions = 1 if times else 0
 for left, right in zip(times, times[1:]):

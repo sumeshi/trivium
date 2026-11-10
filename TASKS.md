@@ -182,6 +182,13 @@ src-tauri/src/
 
 ### I5: 往復スモークの自動化 → 完了（`a2fe91d`）
 
+- CI 追記（2026-11-10）: ubuntu-22.04 runner（Python 3.10）で
+  `time_analysis_finds_fixture_gaps` が失敗。テスト内の独立検証用 Python スニペットが
+  `datetime.fromisoformat` に 9 桁（ナノ秒）の小数秒を渡していたことが原因
+  （3.11+ のみ許容、手元の 3.14 では通過していた）。スニペットを小数秒 6 桁へ
+  丸めてからパースするよう修正し、Python 3.10 でも動作するようにした
+  （検証対象は 60 秒以上のギャップ検出のため丸めの影響なし）。
+
 - 対象: `crates/engine/tests/smoke.rs`
 - 実装メモ: fixtures は `*.csv` が gitignore 済みで CI の新規チェックアウトに存在しないため、
   `scripts/gen_fixture.py` ではなく**テスト内で決定的な CSV を inline 生成**した。
