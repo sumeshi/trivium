@@ -487,11 +487,17 @@ src-tauri/src/
   TSV・セミコロン・パイプを許容。
 - 完了条件: TSV fixtures で列数が CSV と一致（I5）。
 
-#### F23: UTF-16 対応
+#### F23: UTF-16 対応 → 完了（`9cff2f6`）
 
 - 前提: R3, I1(utf16 variant)
 - 手順: BOM 判定で UTF-16LE/BE を検出しデコードしてから取込。
 - 完了条件: utf16 fixtures の取込結果が ascii 版と同一（I5 で列数・行数・代表値一致）。
+- 実装メモ: `crates/engine/src/import/csv.rs` の `load` が全バイト読込後に BOM を判定する
+  （`FF FE` → LE、`FE FF` → BE。UTF-8 は無変更で polars に渡す）。UTF-16 は
+  `char::decode_utf16` でデコード（サロゲートペア対応、奇数長・単独サロゲートはエラー）。
+  判定ロジックは純粋関数に切り出し済みで、テストは inline 生成した
+  UTF-16LE/BE ファイルが ascii 版と列名・行数・全 7 列の代表値で一致することを検証
+  （`import_test.rs`、タブ区切りとの組合せも含む 3 ケース追加）。
 
 #### F24: JSONL 対応
 
