@@ -9,7 +9,7 @@ pub mod flags;
 pub mod iocs;
 pub mod preset;
 pub mod projects;
-mod query;
+pub(crate) mod query;
 pub mod report;
 pub mod rows;
 pub mod rules;

@@ -1162,6 +1162,12 @@ fn export_and_reimport_roundtrip() {
         ExportProjectPayload {
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
+            scope: None,
+            search: None,
+            condition: None,
+            columns: None,
+            sort_key: None,
+            sort_direction: None,
         },
     )
     .expect("export failed");

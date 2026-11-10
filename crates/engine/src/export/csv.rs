@@ -21,6 +21,21 @@ pub struct ExportProjectPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub destination: String,
+    /// `"all"` (default) exports every row; `"filtered"` exports rows matching
+    /// `search` and/or `condition`, evaluated by the same predicates as query.
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub condition: Option<crate::condition::Node>,
+    /// Output only these base columns (derived trivium columns are kept).
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "sortKey")]
+    pub sort_key: Option<String>,
+    #[serde(default, rename = "sortDirection")]
+    pub sort_direction: Option<String>,
 }
 
 /// Exports the project data with derived trivium columns to a CSV file.
@@ -37,17 +52,64 @@ pub fn export_project(
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-
-    let mut safe_flags: Vec<i32> = vec![0; df.height()];
-    let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
-    let mut critical_flags: Vec<i32> = vec![0; df.height()];
-    let mut memo_series: Vec<String> = vec![String::new(); df.height()];
-
+    // IOC evaluation runs on the full column set so queries targeting hidden
+    // columns keep matching even when the export restricts output columns.
     let ioc_outcomes = if iocs.is_empty() {
         Vec::new()
     } else {
         evaluate_iocs(&df, &iocs)
     };
+
+    // F27: restrict output columns first, then compute the row selection and
+    // ordering on the surviving columns. Flags are keyed by the original row
+    // positions, so the selection is applied after the trivium columns are built.
+    if let Some(columns) = &payload.columns {
+        let existing: Vec<String> = df
+            .get_column_names()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+        let selected: Vec<String> = columns
+            .iter()
+            .filter(|name| existing.contains(name))
+            .cloned()
+            .collect();
+        df = df
+            .select(&selected)
+            .map_err(|e| AppError::Message(format!("Failed to select columns: {}", e)))?;
+    }
+    let column_names: Vec<String> = df
+        .get_column_names()
+        .into_iter()
+        .filter(|name| name != &"__rowid")
+        .map(|name| name.to_string())
+        .collect();
+
+    let scope_filtered = payload.scope.as_deref() == Some("filtered");
+    let mask = if scope_filtered {
+        let state = crate::ops::query::prepare_search(
+            &df,
+            &project_dir,
+            payload.columns.as_deref(),
+            &column_names,
+            payload.search.as_deref(),
+            payload.condition.as_ref(),
+        );
+        crate::ops::query::persist_search_cache(&project_dir, &state);
+        state.mask
+    } else {
+        None
+    };
+    let ordered = crate::ops::query::ordered_row_indices(
+        &df,
+        payload.sort_key.as_deref(),
+        payload.sort_direction.as_deref(),
+    );
+
+    let mut safe_flags: Vec<i32> = vec![0; df.height()];
+    let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
+    let mut critical_flags: Vec<i32> = vec![0; df.height()];
+    let mut memo_series: Vec<String> = vec![String::new(); df.height()];
 
     for i in 0..df.height() {
         let outcome = ioc_outcomes.get(i).cloned().unwrap_or_default();
@@ -129,6 +191,18 @@ pub fn export_project(
         }
     }
     df = DataFrame::new(out_cols).map_err(|e| AppError::Other(e.into()))?;
+
+    // Apply the sorted order and (optionally) the filtered mask to the
+    // assembled frame so flag columns stay aligned with their rows.
+    let final_indices: Vec<IdxSize> = ordered
+        .into_iter()
+        .filter(|row_idx| mask.as_ref().map_or(true, |m| m[*row_idx]))
+        .map(|row_idx| row_idx as IdxSize)
+        .collect();
+    let index_column = IdxCa::from_vec("", final_indices);
+    df = df
+        .take(&index_column)
+        .map_err(|e| AppError::Message(format!("Failed to select export rows: {}", e)))?;
 
     let destination = PathBuf::from(payload.destination);
     if let Some(parent) = destination.parent() {
