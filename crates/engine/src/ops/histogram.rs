@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::analysis::histogram::{histogram_series, Histogram, DEFAULT_BUCKETS};
+use crate::analysis::histogram::{histogram_series_ranged, Histogram, DEFAULT_BUCKETS};
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
@@ -26,6 +26,14 @@ pub struct HistogramPayload {
     pub flag_filter: Option<String>,
     #[serde(default)]
     pub condition: Option<Node>,
+    #[serde(default)]
+    pub range: Option<HistogramRange>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HistogramRange {
+    pub min: String,
+    pub max: String,
 }
 
 fn default_buckets() -> u32 {
@@ -84,6 +92,10 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
     } else {
         payload.buckets as usize
     };
-    histogram_series(&payload.column, series, &filtered, bucket_count)
+    let range = payload
+        .range
+        .as_ref()
+        .map(|range| (range.min.as_str(), range.max.as_str()));
+    histogram_series_ranged(&payload.column, series, &filtered, bucket_count, range)
         .map_err(|message| AppError::Message(message))
 }

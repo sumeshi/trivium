@@ -263,6 +263,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             columns: None,
             flag_filter: None,
             condition: None,
+            range: None,
         },
     )
     .expect("histogram failed");

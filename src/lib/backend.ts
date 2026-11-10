@@ -106,6 +106,7 @@ export interface HistogramArgs {
   flagFilter?: FlagFilterValue;
   columns?: string[];
   condition?: ConditionNode | null;
+  range?: { min: string; max: string } | null;
 }
 
 export interface SurroundingRowsArgs {
@@ -254,6 +255,7 @@ class NativeBackend implements Backend {
         flagFilter: args.flagFilter ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
+        range: args.range ?? null,
       },
     });
   }

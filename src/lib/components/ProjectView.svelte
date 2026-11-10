@@ -7,6 +7,7 @@
   import MemoEditorDialog from './project_view/MemoEditorDialog.svelte';
   import ExpandedCellDialog from './project_view/ExpandedCellDialog.svelte';
   import FilterControls from './project_view/FilterControls.svelte';
+  import TimelinePanel from './project_view/TimelinePanel.svelte';
   import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
   import type { Backend } from '../backend';
   import './project-view.css';
@@ -879,6 +880,8 @@ import type {
 
 <section class="project-view">
   <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} on:refresh={() => dispatch('refresh')} />
+
+  <TimelinePanel />
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 

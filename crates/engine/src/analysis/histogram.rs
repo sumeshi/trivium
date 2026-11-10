@@ -18,6 +18,8 @@ pub struct Histogram {
     pub kind: String,
     pub buckets: Vec<HistogramBucket>,
     pub missing: u64,
+    #[serde(default)]
+    pub outside: u64,
 }
 
 /// Equal-width buckets over the filtered row indexes. Every present value lands in one bucket.
@@ -27,31 +29,105 @@ pub fn histogram_series(
     row_indices: &[usize],
     buckets: usize,
 ) -> Result<Histogram, String> {
+    histogram_series_ranged(column, series, row_indices, buckets, None)
+}
+
+/// Like [`histogram_series`], but confines the buckets to `[min, max]`.
+///
+/// `min`/`max` are parsed with the same rules used for the column values
+/// (integer text, finite floats, and the shared datetime formats). Values
+/// outside the window are counted in `outside` instead of a bucket.
+pub fn histogram_series_ranged(
+    column: &str,
+    series: &Series,
+    row_indices: &[usize],
+    buckets: usize,
+    range: Option<(&str, &str)>,
+) -> Result<Histogram, String> {
     let buckets = buckets.max(1);
     match series_kind(series) {
-        ColumnKind::Int => Ok(histogram_i128(
-            column,
-            ColumnKind::Int,
-            &points(series, row_indices, int_point),
-            buckets,
-            |value| value.to_string(),
-        )),
+        ColumnKind::Int => {
+            let points = points(series, row_indices, int_point);
+            match range {
+                Some((min, max)) => {
+                    let min = parse_int_bound(min)?;
+                    let max = parse_int_bound(max)?;
+                    histogram_i128_range(
+                        column,
+                        ColumnKind::Int,
+                        &points,
+                        buckets,
+                        min,
+                        max,
+                        |value| value.to_string(),
+                    )
+                }
+                None => Ok(histogram_i128(column, ColumnKind::Int, &points, buckets, |value| {
+                    value.to_string()
+                })),
+            }
+        }
         ColumnKind::Float => {
             let values: Vec<Option<f64>> = row_indices
                 .iter()
                 .map(|idx| float_point(series, *idx))
                 .collect();
-            Ok(histogram_f64(column, &values, buckets))
+            match range {
+                Some((min, max)) => {
+                    let min = parse_float_bound(min)?;
+                    let max = parse_float_bound(max)?;
+                    histogram_f64_range(column, &values, buckets, min, max)
+                }
+                None => Ok(histogram_f64(column, &values, buckets)),
+            }
         }
-        ColumnKind::Datetime => Ok(histogram_i128(
-            column,
-            ColumnKind::Datetime,
-            &points(series, row_indices, datetime_point),
-            buckets,
-            format_nanos,
-        )),
+        ColumnKind::Datetime => {
+            let points = points(series, row_indices, datetime_point);
+            match range {
+                Some((min, max)) => {
+                    let min = parse_datetime_bound(min)?;
+                    let max = parse_datetime_bound(max)?;
+                    histogram_i128_range(
+                        column,
+                        ColumnKind::Datetime,
+                        &points,
+                        buckets,
+                        min,
+                        max,
+                        format_nanos,
+                    )
+                }
+                None => Ok(histogram_i128(
+                    column,
+                    ColumnKind::Datetime,
+                    &points,
+                    buckets,
+                    format_nanos,
+                )),
+            }
+        }
         _ => Err("Column is not numeric or datetime.".into()),
     }
+}
+
+fn parse_int_bound(text: &str) -> Result<i128, String> {
+    text.trim()
+        .parse::<i128>()
+        .map_err(|_| format!("Invalid range bound: {text}"))
+}
+
+fn parse_float_bound(text: &str) -> Result<f64, String> {
+    let value = text
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| format!("Invalid range bound: {text}"))?;
+    finite(value).ok_or_else(|| format!("Invalid range bound: {text}"))
+}
+
+fn parse_datetime_bound(text: &str) -> Result<i128, String> {
+    parse_datetime_nanos(text.trim())
+        .map(i128::from)
+        .ok_or_else(|| format!("Invalid range bound: {text}"))
 }
 
 fn points(
@@ -91,7 +167,69 @@ fn histogram_i128(
         kind: kind.as_str().to_string(),
         buckets,
         missing,
+        outside: 0,
     }
+}
+
+fn histogram_i128_range(
+    column: &str,
+    kind: ColumnKind,
+    points: &[Option<i128>],
+    buckets: usize,
+    min: i128,
+    max: i128,
+    label: impl Fn(i128) -> String,
+) -> Result<Histogram, String> {
+    if min > max {
+        return Err("Invalid range: min is greater than max.".into());
+    }
+    let span = max
+        .checked_sub(min)
+        .ok_or_else(|| "Invalid range: span is too wide.".to_string())?;
+    let mut counts = vec![0u64; buckets];
+    let mut missing = 0u64;
+    let mut outside = 0u64;
+    for point in points {
+        let Some(value) = point else {
+            missing += 1;
+            continue;
+        };
+        if *value < min || *value > max {
+            outside += 1;
+            continue;
+        }
+        let index = if span == 0 {
+            0
+        } else {
+            let offset = value - min;
+            let scaled = offset
+                .checked_mul(buckets as i128)
+                .ok_or_else(|| "Invalid range: span is too wide.".to_string())?;
+            ((scaled / span) as usize).min(buckets - 1)
+        };
+        counts[index] += 1;
+    }
+    let edge = |index: usize| -> i128 {
+        if span == 0 {
+            return min;
+        }
+        span.checked_mul(index as i128)
+            .and_then(|delta| delta.checked_div(buckets as i128))
+            .and_then(|delta| min.checked_add(delta))
+            .unwrap_or(max)
+    };
+    let buckets_out = bucket_labels(&counts, buckets, |index| {
+        let start = edge(index);
+        let end = if index + 1 == buckets { max } else { edge(index + 1) };
+        (label(start), label(end))
+    });
+    Ok(Histogram {
+        column: column.to_string(),
+        kind: kind.as_str().to_string(),
+        buckets: buckets_out,
+        missing,
+        outside,
+    })
 }
 
 fn histogram_f64(column: &str, points: &[Option<f64>], buckets: usize) -> Histogram {
@@ -141,7 +279,67 @@ fn histogram_f64(column: &str, points: &[Option<f64>], buckets: usize) -> Histog
         kind: ColumnKind::Float.as_str().to_string(),
         buckets: buckets_out,
         missing,
+        outside: 0,
     }
+}
+
+fn histogram_f64_range(
+    column: &str,
+    points: &[Option<f64>],
+    buckets: usize,
+    min: f64,
+    max: f64,
+) -> Result<Histogram, String> {
+    if min > max {
+        return Err("Invalid range: min is greater than max.".into());
+    }
+    let span = max - min;
+    if !span.is_finite() {
+        return Err("Invalid range: span is too wide.".into());
+    }
+    let mut counts = vec![0u64; buckets];
+    let mut missing = 0u64;
+    let mut outside = 0u64;
+    for point in points {
+        let Some(value) = point else {
+            missing += 1;
+            continue;
+        };
+        if *value < min || *value > max {
+            outside += 1;
+            continue;
+        }
+        let index = if span == 0.0 {
+            0
+        } else {
+            let mut index = ((value - min) / span * buckets as f64) as usize;
+            if index >= buckets {
+                index = buckets - 1;
+            }
+            index
+        };
+        counts[index] += 1;
+    }
+    let buckets_out = bucket_labels(&counts, buckets, |index| {
+        let start = if span == 0.0 {
+            min
+        } else {
+            min + span * index as f64 / buckets as f64
+        };
+        let end = if span == 0.0 || index + 1 == buckets {
+            max
+        } else {
+            min + span * (index + 1) as f64 / buckets as f64
+        };
+        (start.to_string(), end.to_string())
+    });
+    Ok(Histogram {
+        column: column.to_string(),
+        kind: ColumnKind::Float.as_str().to_string(),
+        buckets: buckets_out,
+        missing,
+        outside,
+    })
 }
 
 fn counts_i128(points: &[Option<i128>], buckets: usize) -> (Vec<u64>, Option<(i128, i128)>, u64) {

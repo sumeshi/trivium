@@ -86,6 +86,7 @@ export interface Histogram {
   kind: ColumnKind;
   buckets: HistogramBucket[];
   missing: number;
+  outside: number;
 }
 
 export interface TimeSpan {

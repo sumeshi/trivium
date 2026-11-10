@@ -21,7 +21,7 @@ use trivium_engine::ops::rows::QueryRowsPayload;
 use trivium_engine::ops::cross::CrossSearchPayload;
 use trivium_engine::ops::dupes::{DupeMode, DupesPayload};
 use trivium_engine::ops::group::GroupTreePayload;
-use trivium_engine::ops::histogram::HistogramPayload;
+use trivium_engine::ops::histogram::{HistogramPayload, HistogramRange};
 use trivium_engine::ops::stats::ColumnStatsPayload;
 use trivium_engine::ops::time::TimeAnalysisPayload;
 use trivium_engine::store::ProjectsStore;
@@ -652,6 +652,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             columns: None,
             flag_filter: None,
             condition,
+            range: None,
         },
     )
     .expect("histogram");
@@ -685,6 +686,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             columns: None,
             flag_filter: None,
             condition: None,
+            range: None,
         },
     )
     .expect("search histogram");
@@ -712,6 +714,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             columns: None,
             flag_filter: None,
             condition: None,
+            range: None,
         },
     )
     .is_err());
@@ -746,6 +749,7 @@ fn histogram_places_values_in_equal_width_buckets() {
             columns: None,
             flag_filter: None,
             condition: None,
+            range: None,
         },
     )
     .expect("ints");
@@ -768,6 +772,7 @@ fn histogram_places_values_in_equal_width_buckets() {
             columns: None,
             flag_filter: None,
             condition: None,
+            range: None,
         },
     )
     .expect("floats");
@@ -775,6 +780,103 @@ fn histogram_places_values_in_equal_width_buckets() {
     assert_eq!(floats.buckets[0].count, 1);
     assert_eq!(floats.buckets[1].count, 2);
     assert_eq!(bucket_sum(&floats.buckets), 3);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn histogram_range_counts_outside_values() {
+    let (root, store, id) = setup_project();
+    let ints = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "EventID".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+            range: Some(HistogramRange {
+                min: "4624".to_string(),
+                max: "4625".to_string(),
+            }),
+        },
+    )
+    .expect("int range");
+    assert_eq!(ints.kind, "int");
+    assert_eq!(ints.missing, 0);
+    assert_eq!(ints.outside, 5);
+    assert_eq!(bucket_sum(&ints.buckets), 15);
+    assert_eq!(bucket_sum(&ints.buckets) + ints.outside + ints.missing, 20);
+
+    let times = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "ts".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+            range: Some(HistogramRange {
+                min: "2024-01-01T00:00:01".to_string(),
+                max: "2024-01-01T00:00:11".to_string(),
+            }),
+        },
+    )
+    .expect("datetime range");
+    assert_eq!(times.kind, "datetime");
+    assert_eq!(times.missing, 0);
+    assert_eq!(times.outside, 9);
+    assert_eq!(times.buckets.len(), 2);
+    assert_eq!(bucket_sum(&times.buckets), 11);
+    assert_eq!(bucket_sum(&times.buckets) + times.outside + times.missing, 20);
+    assert!(times.buckets[0].start.starts_with("2024-01-01T00:00:01"));
+    assert!(times.buckets[1].end.starts_with("2024-01-01T00:00:11"));
+
+    let json = format!(
+        r#"{{"projectId":"{id}","column":"EventID","buckets":2,"range":{{"min":"4624","max":"4625"}}}}"#
+    );
+    let parsed: HistogramPayload = serde_json::from_str(&json).expect("range payload");
+    assert_eq!(parsed.range.expect("range").min, "4624");
+
+    let invalid = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "ts".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+            range: Some(HistogramRange {
+                min: "not-a-date".to_string(),
+                max: "2024-01-01T00:00:11".to_string(),
+            }),
+        },
+    );
+    assert!(invalid.is_err());
+
+    let reversed = ops::histogram::histogram(
+        &store,
+        HistogramPayload {
+            project_id: id,
+            column: "EventID".to_string(),
+            buckets: 2,
+            search: None,
+            columns: None,
+            flag_filter: None,
+            condition: None,
+            range: Some(HistogramRange {
+                min: "4625".to_string(),
+                max: "4624".to_string(),
+            }),
+        },
+    );
+    assert!(reversed.is_err());
 
     let _ = fs::remove_dir_all(root);
 }
