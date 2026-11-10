@@ -571,12 +571,17 @@ src-tauri/src/
 
 ## 8. P 層 — 性能（I4 の before に対し after を出す。数値なしなら完了としない）
 
-### P1: ソートキーの事前計算
+### P1: ソートキーの事前計算 → 完了（`121e9b0`）
 
 - 前提: R2, I4
 - 対象: `commands/rows.rs:274-313`（ソート比較子。比較のたびに AnyValue→文字列→trim/replace→parse）
 - 手順: ソート前に `Vec<(usize, SortKey)>`（列を 1 回変換したキー）を作り、比較はキー同士にする。
 - 完了条件: I4 の 200 万行初回ソートが before から改善（数値を docs/performance.md に追記）。
+- 実装メモ: 対象は R2 後の配置 `crates/engine/src/ops/query/sort.rs`。
+  行ごとに `SortKey`（Int/Float/Text/Missing。Text は小文字化済み）を 1 回だけ構築し、
+  比較はキー同士。既存の比較セマンティクス（Int 同士は厳密比較、Int/Float 混在と
+  数値 vs テキストは f64 + テキスト=+inf、null は数値の後・テキストの前）を維持。
+  計測: 2M sort_first 700ms → 521ms、400k 122ms → 113ms（docs/performance.md 参照）。
 
 ### P2: 検索キャンセルと二重取得の削減（フロント）
 
