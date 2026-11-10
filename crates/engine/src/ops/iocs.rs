@@ -10,7 +10,6 @@ use crate::{
         save_ioc_entries, write_ioc_csv,
     },
     models::IocEntry,
-    storage::clear_ioc_flag_cache,
     store::ProjectsStore,
 };
 
@@ -44,13 +43,8 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
     let entries = prepare_ioc_entries(payload.entries);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
-    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear IOC cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
-
+    // No proactive cache clear: the IOC cache is keyed by the set signature
+    // and row count, and an append-only change merges incrementally.
     let ioc_applied_records =
         calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
     store
@@ -76,13 +70,8 @@ pub fn import_iocs(
     let entries = prepare_ioc_entries(read_ioc_csv(&source).map_err(AppError::from)?);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
-    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear IOC cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
-
+    // No proactive cache clear: the IOC cache is keyed by the set signature
+    // and row count, and an append-only change merges incrementally.
     let ioc_applied_records =
         calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
     store

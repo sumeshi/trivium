@@ -37,18 +37,41 @@ pub struct IocRowOutcome {
     pub tags: Vec<String>,
 }
 
-/// Stable signature of an IOC set, used to key the persisted cache.
-fn ioc_signature(iocs: &[IocEntry]) -> String {
-    let mut normalized: Vec<(String, String, String)> = iocs
-        .iter()
-        .map(|e| {
+/// Internal tag with the severity of the entry that produced it. Severity is
+/// kept alongside the token so an appended IOC set can be merged into cached
+/// outcomes in the same order a full evaluation would produce.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct InternalTag {
+    /// Normalized flag (`normalize_flag_value` result).
+    pub severity: String,
+    /// Rendered `[tag]` token.
+    pub token: String,
+}
+
+/// Internal per-row outcome stored in the IOC cache.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct InternalOutcome {
+    /// Normalized flag.
+    pub flag: String,
+    pub tags: Vec<InternalTag>,
+}
+
+/// Definition-order normalized entries: (flag, tag, query).
+fn normalized_in_order(iocs: &[IocEntry]) -> Vec<(String, String, String)> {
+    iocs.iter()
+        .map(|entry| {
             (
-                normalize_flag_value(&e.flag),
-                e.tag.trim().to_string(),
-                e.query.trim().to_string(),
+                normalize_flag_value(&entry.flag),
+                entry.tag.trim().to_string(),
+                entry.query.trim().to_string(),
             )
         })
-        .collect();
+        .collect()
+}
+
+/// Stable signature of an IOC set, used to key the persisted cache.
+fn ioc_signature(iocs: &[IocEntry]) -> String {
+    let mut normalized = normalized_in_order(iocs);
     normalized.sort();
     serde_json::to_string(&normalized).unwrap_or_default()
 }
@@ -58,8 +81,16 @@ fn ioc_signature(iocs: &[IocEntry]) -> String {
 /// Column-scoped IOC terms only materialize the text of the columns they
 /// reference; unscoped terms additionally build the all-column row text.
 pub fn evaluate_iocs(df: &DataFrame, iocs: &[IocEntry]) -> Vec<IocRowOutcome> {
+    evaluate_entries_internal(df, iocs)
+        .iter()
+        .map(to_public_outcome)
+        .collect()
+}
+
+/// Internal evaluation shared by the full path and the incremental path.
+fn evaluate_entries_internal(df: &DataFrame, iocs: &[IocEntry]) -> Vec<InternalOutcome> {
     let row_count = df.height();
-    let mut outcomes = vec![IocRowOutcome::default(); row_count];
+    let mut outcomes = vec![InternalOutcome::default(); row_count];
     if iocs.is_empty() || row_count == 0 {
         return outcomes;
     }
@@ -146,8 +177,11 @@ pub fn evaluate_iocs(df: &DataFrame, iocs: &[IocEntry]) -> Vec<IocRowOutcome> {
             }
             if !tag.is_empty() {
                 let token = format!("[{}]", tag);
-                if !outcomes[i].tags.contains(&token) {
-                    outcomes[i].tags.push(token);
+                if !outcomes[i].tags.iter().any(|t| t.token == token) {
+                    outcomes[i].tags.push(InternalTag {
+                        severity: severity.clone(),
+                        token,
+                    });
                 }
             }
         }
@@ -155,8 +189,56 @@ pub fn evaluate_iocs(df: &DataFrame, iocs: &[IocEntry]) -> Vec<IocRowOutcome> {
     outcomes
 }
 
+fn to_public_outcome(outcome: &InternalOutcome) -> IocRowOutcome {
+    IocRowOutcome {
+        flag: outcome.flag.clone(),
+        tags: outcome.tags.iter().map(|tag| tag.token.clone()).collect(),
+    }
+}
+
+/// Merges outcomes computed from a suffix of the IOC set into cached outcomes
+/// computed from the prefix.
+///
+/// This is exact — flag and tag order included — when the new IOC set is the
+/// cached set plus entries appended at the end: a full evaluation sorts
+/// stably by severity, so within one severity the cached (older, earlier in
+/// definition order) entries come first.
+fn merge_outcomes(
+    mut old: Vec<InternalOutcome>,
+    added: Vec<InternalOutcome>,
+) -> Vec<InternalOutcome> {
+    for (target, new) in old.iter_mut().zip(added.into_iter()) {
+        // Strictly greater only: on a tie the cached entry wins, matching the
+        // full evaluation's definition-order-first rule.
+        if severity_rank(&new.flag) > severity_rank(&target.flag) {
+            target.flag = new.flag;
+        }
+        for tag in new.tags {
+            let rank = severity_rank(&tag.severity);
+            if let Some(existing) = target.tags.iter().position(|t| t.token == tag.token) {
+                // The cached token appeared earlier in the full evaluation
+                // unless the appended entry has the higher severity.
+                if severity_rank(&target.tags[existing].severity) >= rank {
+                    continue;
+                }
+                target.tags.remove(existing);
+            }
+            let position = target
+                .tags
+                .iter()
+                .position(|t| severity_rank(&t.severity) < rank)
+                .unwrap_or(target.tags.len());
+            target.tags.insert(position, tag);
+        }
+    }
+    old
+}
+
 /// Returns cached IOC outcomes for the frame, rebuilding the cache when the
 /// row count or the IOC set changed.
+///
+/// When the new IOC set is the cached set plus appended entries, only the
+/// appended entries are evaluated and merged into the cached outcomes.
 ///
 /// The cache stores raw outcomes (no user-flag awareness), so user flag
 /// updates never invalidate it; only IOC definition changes do — and even
@@ -171,6 +253,7 @@ pub fn cached_ioc_outcomes(
     if iocs.is_empty() || row_count == 0 {
         return vec![IocRowOutcome::default(); row_count];
     }
+    let ordered = normalized_in_order(iocs);
     let signature = ioc_signature(iocs);
 
     let cached = match load_ioc_flag_cache(project_dir) {
@@ -183,20 +266,33 @@ pub fn cached_ioc_outcomes(
             None
         }
     };
-    let valid = cached
-        .as_ref()
-        .map(|entry| entry.signature == signature && entry.rows.len() == row_count)
-        .unwrap_or(false);
-    if valid {
-        return cached.expect("checked above").rows;
+
+    if let Some(cache) = cached.as_ref() {
+        if cache.signature == signature && cache.rows.len() == row_count {
+            return cache.rows.iter().map(to_public_outcome).collect();
+        }
+        let is_appended = cache.rows.len() == row_count
+            && ordered.len() > cache.entries.len()
+            && ordered[..cache.entries.len()] == cache.entries[..];
+        if is_appended {
+            let added = evaluate_entries_internal(df, &iocs[cache.entries.len()..]);
+            let merged = merge_outcomes(cache.rows.clone(), added);
+            if let Err(err) = save_ioc_flag_cache(project_dir, &signature, &ordered, &merged) {
+                eprintln!(
+                    "[cache] failed to persist IOC cache for {:?}: {:?}",
+                    project_dir, err
+                );
+            }
+            return merged.iter().map(to_public_outcome).collect();
+        }
     }
 
-    let outcomes = evaluate_iocs(df, iocs);
-    if let Err(err) = save_ioc_flag_cache(project_dir, &signature, &outcomes) {
+    let outcomes = evaluate_entries_internal(df, iocs);
+    if let Err(err) = save_ioc_flag_cache(project_dir, &signature, &ordered, &outcomes) {
         eprintln!(
             "[cache] failed to persist IOC cache for {:?}: {:?}",
             project_dir, err
         );
     }
-    outcomes
+    outcomes.iter().map(to_public_outcome).collect()
 }

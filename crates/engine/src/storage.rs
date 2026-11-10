@@ -17,7 +17,17 @@ use crate::{
 const SEARCHABLE_CACHE_KEY: &[u8] = b"searchable_cache";
 const IOC_FLAG_CACHE_KEY: &[u8] = b"ioc_flag_cache";
 
-/// Cached searchable text, keyed by the column set it was built from.
+/// Cached searchable text, keyed by the column set it was built from and the
+/// row count.
+///
+/// Invalidation rules (B4):
+/// - the key is the set of search-target columns plus the row count; a change
+///   to either rebuilds the cache
+/// - `set_hidden_columns` clears it
+/// - IOC changes are irrelevant: searchable text does not depend on IOCs
+/// - deleting a project removes `project_dir` (including `cache.db`), so no
+///   per-cache clear is needed
+///
 /// A cache written by an older version (a bare `Vec<String>`) fails to
 /// deserialize and is treated as absent, forcing a rebuild.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,14 +36,33 @@ pub struct SearchableCacheEntry {
     pub text: Vec<String>,
 }
 
-/// Cached IOC evaluation: the signature of the IOC set the rows were computed
-/// from, plus the raw per-row outcomes. User flags are deliberately not part
-/// of the cache, so flag updates never invalidate it. A cache written by an
-/// older version fails to deserialize and forces a rebuild.
+/// Cached IOC evaluation, keyed by the IOC set signature and the row count.
+///
+/// Invalidation rules:
+/// - the key is the signature of the normalized IOC set plus the row count;
+///   any IOC change rebuilds the cache (appending entries at the end merges
+///   incrementally instead of re-evaluating every row)
+/// - user flag updates never invalidate it: the cache stores raw evaluation
+///   results, independent of user flags
+/// - the column layout is irrelevant: every data column participates in IOC
+///   matching
+/// - deleting a project removes `project_dir` (including `cache.db`), so no
+///   per-cache clear is needed
+///
+/// `entries` holds the definition-order normalized entries so an appended
+/// IOC set can be recognized. A cache written by an older version (rows with
+/// `tags: Vec<String>` instead of `tags: Vec<InternalTag>`) fails to
+/// deserialize; `load_ioc_flag_cache` returns `Err`, and
+/// `cached_ioc_outcomes` logs it and falls back to a full re-evaluation,
+/// which rewrites the cache in the current format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IocCacheEntry {
+    /// Sorted normalized entries as JSON, for exact-match validation.
     pub signature: String,
-    pub rows: Vec<crate::ioc::IocRowOutcome>,
+    /// Definition-order normalized entries (flag, tag, query), for detecting
+    /// append-only IOC changes.
+    pub entries: Vec<(String, String, String)>,
+    pub(crate) rows: Vec<crate::ioc::evaluate::InternalOutcome>,
 }
 
 fn encode_row_key(row_index: usize) -> [u8; 8] {
@@ -310,14 +339,16 @@ pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<IocCacheEntry>> 
     }
 }
 
-pub fn save_ioc_flag_cache(
+pub(crate) fn save_ioc_flag_cache(
     project_dir: &Path,
     signature: &str,
-    rows: &[crate::ioc::IocRowOutcome],
+    entries: &[(String, String, String)],
+    rows: &[crate::ioc::evaluate::InternalOutcome],
 ) -> Result<()> {
     let db = open_cache_db(&cache_db_path(project_dir))?;
     let entry = IocCacheEntry {
         signature: signature.to_string(),
+        entries: entries.to_vec(),
         rows: rows.to_vec(),
     };
     let data = serde_json::to_vec(&entry).context("failed to serialize IOC flag cache")?;

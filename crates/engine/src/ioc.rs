@@ -125,8 +125,9 @@ pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
         return Ok(0);
     }
 
-    // An IOC flag applies only where the user has not set one.
-    let outcomes = evaluate_iocs(&df, &iocs);
+    // An IOC flag applies only where the user has not set one. Use the cached
+    // path so an appended IOC set only evaluates the appended entries.
+    let outcomes = cached_ioc_outcomes(project_dir, &df, &iocs);
     let mut count = 0;
     for (row_idx, outcome) in outcomes.iter().enumerate() {
         let user_flag = flags

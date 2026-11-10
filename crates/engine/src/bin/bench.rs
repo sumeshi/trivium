@@ -104,6 +104,8 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
 
     // save_iocs replaces the whole set, so the "+1" run rebuilds the same 100
     // entries plus one new query rather than mutating the saved list.
+    // `prepare_ioc_entries` sorts by tag, so the extra tag must sort after
+    // every `iocN` tag for the "+1" run to be a real appended IOC.
     let build_entries = |extra: bool| {
         let mut entries: Vec<trivium_engine::models::IocEntry> = (0..100)
             .map(|index| trivium_engine::models::IocEntry {
@@ -115,7 +117,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
         if extra {
             entries.push(trivium_engine::models::IocEntry {
                 flag: "suspicious".to_string(),
-                tag: "extra".to_string(),
+                tag: "ioc_extra".to_string(),
                 query: "user:frank".to_string(),
             });
         }
