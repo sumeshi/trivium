@@ -693,7 +693,7 @@ src-tauri/src/
   - `rust-cache`（swatinem/rust-cache@v2、`src-tauri -> ../target`）は旧実装から復元。
   - push 検証は未実施（ユーザー指示により push 保留）。push 後に Actions の結果で完了確認。
 
-### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は未確認
+### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は実動作で確認済み
 
 - 前提: I3, I5
 - 手順: `build.yml` と `debian.yml` に `scripts/check_rust_size.sh`、`cargo test`、
@@ -707,6 +707,9 @@ src-tauri/src/
     svelte-check 0 エラー、サイズガード exit 0）。
   - 「わざと失敗させて赤化確認 → revert」は CI 実行が必要なため未実施
     （push 保留中）。push 後の確認事項。
+- CI 確認（2026-11-10、develop push 後）: debian.yml の Quality gates ステップが
+  実行され、テスト失敗（I5 の Python 3.10 互換問題）でワークフローが赤くなった。
+  ゲート機構の動作を実障害で確認。赤化の直接原因の修正は `03e4045`。
 
 ## 10. X 層 — 保留（着手条件が明記されたものだけ）
 
