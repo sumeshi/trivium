@@ -49,14 +49,17 @@ jobs:
 
       - name: Generate SHA256SUMS
         run: |
-          cd src-tauri/target/release/bundle/deb
-          sha256sum *.deb > SHA256SUMS
+          # The Cargo workspace puts the target dir at the repo root (R0a),
+          # so bundles land in target/release/bundle/deb — not src-tauri/target.
+          deb_dir="target/release/bundle/deb"
+          ls "$deb_dir"
+          (cd "$deb_dir" && sha256sum *.deb > SHA256SUMS)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: trivium-deb
           path: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/deb/SHA256SUMS
+            target/release/bundle/deb/*.deb
+            target/release/bundle/deb/SHA256SUMS
           retention-days: 3

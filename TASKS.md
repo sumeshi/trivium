@@ -691,7 +691,14 @@ src-tauri/src/
     Tauri 1.5 + wry 0.24.12（Cargo.lock 確認済み）は webkit2gtk-4.0 でリンクするため、
     D2（Tauri 1 継続）との整合から jammy を使用する。
   - `rust-cache`（swatinem/rust-cache@v2、`src-tauri -> ../target`）は旧実装から復元。
-  - push 検証は未実施（ユーザー指示により push 保留）。push 後に Actions の結果で完了確認。
+  - **カードからの追記（パス修正、CI 1 回目の失敗で判明）**: ワークスペース分割（R0a）後、
+    cargo の target はリポジトリ直下 `target/` に配置されるため、deb バンドルは
+    `target/release/bundle/deb/` に生成される（`src-tauri/target/` は存在しない）。
+    SHA256SUMS・アーティファクトのパスを修正（`03e4045` 後の push で判明、修正は次コミット）。
+    `build.yml`（Windows exe）の `src-tauri/target/...` も同様に旧パスだが、
+    build.yml は main（ワークスペース化前の 0.1.4）のみトリガのため現状問題なし。
+  - push 検証: 1 回目は C2 ゲートで I5 の Python 3.10 互換問題が赤化（ゲート動作確認）、
+    2 回目は SHA256SUMS のパス誤りで失敗（ゲート・コンパイルは通過）。3 回目でアーティファクト確認予定。
 
 ### C2: 品質ゲートの組み込み → 実装済み（`12b3ef5`）、ゲート失敗時の赤化は実動作で確認済み
 
