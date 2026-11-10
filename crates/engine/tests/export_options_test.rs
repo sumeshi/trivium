@@ -93,7 +93,7 @@ fn filtered_scope_row_count_matches_query_total() {
         QueryRowsPayload {
             project_id: id,
             search: Some("max row".to_string()),
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             bookmarked_only: None,
             offset: None,

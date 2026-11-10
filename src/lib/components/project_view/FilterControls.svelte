@@ -4,6 +4,7 @@
     visibleColumns,
     hiddenColumns,
     search,
+    searchColumns,
     flagFilter,
     bookmarkedOnly,
     isExporting,
@@ -153,6 +154,9 @@
       bind:value={$search}
       type="search"
     />
+    <span class="condition-count" title="Search scope">
+      {$searchColumns.length === 0 ? 'All columns' : $searchColumns.join(', ')}
+    </span>
   </label>
   <div class="filter-columns">
     <div class="column-picker" bind:this={columnPickerEl}>

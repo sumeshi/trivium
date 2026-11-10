@@ -51,7 +51,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     let build_query = |search: Option<String>, sort: Option<String>| QueryRowsPayload {
         project_id: id,
         search,
-        columns: None,
+        search_columns: None,
         flag_filter: None,
         bookmarked_only: None,
         offset: None,

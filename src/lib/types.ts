@@ -26,6 +26,28 @@ export interface ProjectRow {
   color?: string | null;
 }
 
+export type FlagFilterValue =
+  | "all"
+  | "none"
+  | "priority"
+  | "safe"
+  | "suspicious"
+  | "critical";
+
+/**
+ * Shared query contract. `searchColumns` is the search scope, not the visible
+ * columns: an empty array means every data column.
+ */
+export type QuerySpec = {
+  search: string;
+  searchColumns: string[];
+  condition: ConditionNode | null;
+  flagFilter: FlagFilterValue;
+  bookmarkedOnly: boolean;
+  sortKey: string | null;
+  sortDirection: "asc" | "desc";
+};
+
 export interface IocEntry {
   id?: string;
   flag: FlagSymbol;

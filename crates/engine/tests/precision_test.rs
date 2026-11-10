@@ -53,7 +53,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             bookmarked_only: None,
             offset: None,
@@ -80,7 +80,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
         QueryRowsPayload {
             project_id: id,
             search: Some("9223372036854775807".to_string()),
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             bookmarked_only: None,
             offset: None,

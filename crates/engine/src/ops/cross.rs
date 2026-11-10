@@ -48,7 +48,7 @@ pub fn search_projects(
             QueryRowsPayload {
                 project_id,
                 search: payload.search.clone(),
-                columns: payload.columns.clone(),
+                search_columns: payload.columns.clone(),
                 flag_filter: payload.flag_filter.clone(),
                 bookmarked_only: None,
                 offset: payload.offset,

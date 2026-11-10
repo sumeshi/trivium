@@ -13,7 +13,7 @@ fn payload(id: Uuid, search: Option<String>, condition: Option<Node>) -> QueryRo
     QueryRowsPayload {
         project_id: id,
         search,
-        columns: None,
+        search_columns: None,
         flag_filter: None,
         offset: None,
         limit: None,

@@ -5,7 +5,7 @@
     pendingPages,
     totalRows,
     totalFilteredRows,
-    flaggedCount,
+    filteredFlaggedCount,
     visibleColumns,
     sortKey,
     sortDirection,
@@ -235,7 +235,7 @@
     <span>
       {$totalFilteredRows} / {$totalRows} rows
     </span>
-    <span>{$flaggedCount} flagged</span>
+    <span>{$filteredFlaggedCount} flagged in results</span>
   </div>
   {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">

@@ -22,14 +22,18 @@ use crate::{
 
 use super::util::{matched_rule_color, DEFAULT_PAGE_SIZE};
 
+/// QuerySpec fields (shared contract) plus project selection and paging.
+///
+/// `search_columns` is the search scope, not the visible columns. `None` or an
+/// empty list means every data column; hiding a column never narrows search.
 #[derive(Debug, Deserialize)]
 pub struct QueryRowsPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     #[serde(default)]
     pub search: Option<String>,
-    #[serde(default)]
-    pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
     #[serde(default, rename = "bookmarkedOnly")]
@@ -50,8 +54,13 @@ pub struct QueryRowsPayload {
 #[derive(Debug, Serialize)]
 pub struct QueryRowsResponse {
     pub rows: Vec<ProjectRow>,
-    pub total_flagged: usize,
+    /// Annotated rows in the whole project (user flags and IOC matches).
+    pub annotated_total: usize,
+    /// Annotated rows inside the current result set.
+    pub annotated_filtered: usize,
+    /// Rows in the whole project.
     pub total_rows: usize,
+    /// Rows matching the current QuerySpec.
     pub total_filtered_rows: usize,
     pub offset: usize,
 }
@@ -86,10 +95,15 @@ pub fn query_project_rows(
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
     let total_rows = df.height();
 
+    // An empty search scope is the same as "every data column".
+    let search_columns = payload
+        .search_columns
+        .as_deref()
+        .filter(|requested| !requested.is_empty());
     let search_state = search::prepare_search(
         &df,
         &project_dir,
-        payload.columns.as_deref(),
+        search_columns,
         &columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
@@ -104,7 +118,7 @@ pub fn query_project_rows(
         payload.sort_key.as_deref(),
         payload.sort_direction.as_deref(),
     );
-    let (filtered_indices, total_flagged) = page::filtered_indices(
+    let (filtered_indices, annotated_filtered) = page::filtered_indices(
         &ordered,
         &final_flag_vec,
         &bookmarked,
@@ -112,6 +126,10 @@ pub fn query_project_rows(
         payload.flag_filter.as_deref(),
         search_state.mask.as_deref(),
     );
+    let annotated_total = final_flag_vec
+        .iter()
+        .filter(|flag| !flag.trim().is_empty())
+        .count();
     let selected_indices: Vec<usize> = filtered_indices
         .iter()
         .skip(offset)
@@ -148,7 +166,8 @@ pub fn query_project_rows(
 
     Ok(QueryRowsResponse {
         rows,
-        total_flagged,
+        annotated_total,
+        annotated_filtered,
         total_rows,
         total_filtered_rows: filtered_indices.len(),
         offset,

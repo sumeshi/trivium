@@ -49,11 +49,11 @@ pub fn filtered_indices(
         }
         filtered_indices.push(idx);
     }
-    let total_flagged = filtered_indices
+    let annotated_filtered = filtered_indices
         .iter()
         .filter(|idx| !final_flag_vec[**idx].trim().is_empty())
         .count();
-    (filtered_indices, total_flagged)
+    (filtered_indices, annotated_filtered)
 }
 
 pub fn materialize_page(

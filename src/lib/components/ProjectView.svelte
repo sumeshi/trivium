@@ -29,6 +29,7 @@
     visibleColumns,
     hiddenColumns,
     search,
+    searchColumns,
     flagFilter,
     bookmarkedOnly,
     sortKey,
@@ -40,8 +41,8 @@
     loadedPages,
     totalRows,
     totalFilteredRows,
-    totalFlagged,
     flaggedCount,
+    filteredFlaggedCount,
     expandedCell,
     memoEditor,
     iocManagerOpen,
@@ -111,7 +112,7 @@ import type {
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastBookmarkedOnly: boolean | null = null;
-  let lastColumnsSignature: string | null = null;
+  let lastSearchColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
   let applyingHistory = false;
   let suppressScrollRecord = false;
@@ -121,7 +122,7 @@ import type {
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
-  let activeFilters: AppliedFilters = { search: '', flag: 'all', bookmarkedOnly: false, columns: [], condition: null };
+  let activeFilters: AppliedFilters = { search: '', flag: 'all', bookmarkedOnly: false, searchColumns: [], condition: null };
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
 
@@ -148,15 +149,15 @@ import type {
   };
 
   const buildFilterSignature = (filters: AppliedFilters) =>
-    `${filters.search}::${filters.flag}::${filters.bookmarkedOnly}::${filters.columns.join('|')}::${$sortKey ?? ''}::${$sortDirection}::${JSON.stringify(filters.condition)}`;
+    `${filters.search}::${filters.flag}::${filters.bookmarkedOnly}::${filters.searchColumns.join('|')}::${$sortKey ?? ''}::${$sortDirection}::${JSON.stringify(filters.condition)}`;
 
   const resetPaginationState = () => {
     rowsCache.set(new Map());
     pendingPages.set(new Set());
     loadedPages.set(new Set());
     totalRows.set(0);
-    totalFlagged.set(0);
     flaggedCount.set(0);
+    filteredFlaggedCount.set(0);
     positionToRowIndex.set(new Map());
   };
 
@@ -226,6 +227,7 @@ import type {
     lastConditionJson = JSON.stringify(get(conditionPayload));
     currentProjectId.set(detail.project.meta.id);
     hiddenColumns.set(hidden);
+    searchColumns.set([]);
     sortKey.set(saved?.sortKey ?? null);
     sortDirection.set(saved?.sortDirection ?? 'asc');
     iocDraft.set(detail.iocs.map((entry) => ({
@@ -235,12 +237,11 @@ import type {
       query: entry.query
     })));
     initializeColumnWidths();
-    const currentColumns = detail.columns.filter((column) => !hidden.has(column));
     const filters: AppliedFilters = {
       search: $search.trim(),
       flag: $flagFilter,
       bookmarkedOnly: $bookmarkedOnly,
-      columns: currentColumns,
+      searchColumns: [...$searchColumns],
       condition: get(conditionPayload),
     };
     lastHiddenColumnsRef.set([...(detail.hidden_columns ?? [])]);
@@ -254,14 +255,14 @@ import type {
       search: filters.search,
       flag: filters.flag,
       bookmarkedOnly: filters.bookmarkedOnly,
-      columns: [...filters.columns],
+      searchColumns: [...filters.searchColumns],
       condition: filters.condition,
     };
     lastAppliedFilters = buildFilterSignature(filters);
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
-    lastColumnsSignature = currentColumns.join('|');
+    lastSearchColumnsSignature = filters.searchColumns.join('|');
     filterRequestId = 0;
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
@@ -271,8 +272,7 @@ import type {
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
-    totalFlagged.set(detail.project.meta.flagged_records);
-    flaggedCount.set($totalFlagged);
+    flaggedCount.set(detail.project.meta.flagged_records);
     applyScrollOffset(saved?.offset ?? 0);
     if ($bodyScrollEl) {
       $bodyScrollEl.scrollLeft = 0;
@@ -297,21 +297,10 @@ import type {
     if (!initialized || projectChanged) {
       applyProjectDetail(projectDetail, true);
     } else if (hiddenChanged) {
+      // Visibility is presentation only: the search scope (and therefore the
+      // result set) must not change when a column is hidden.
       hiddenColumns.set(new Set(nextHiddenColumns));
       initializeColumnWidths();
-      const columns = getSearchableColumns();
-      const filters: AppliedFilters = {
-        search: $search.trim(),
-        flag: $flagFilter,
-        bookmarkedOnly: $bookmarkedOnly,
-        columns,
-        condition: get(conditionPayload),
-      };
-      lastSearchValue = filters.search;
-      lastFlagFilter = filters.flag;
-      lastBookmarkedOnly = filters.bookmarkedOnly;
-      lastColumnsSignature = columns.join('|');
-      void applyFilters(filters, false, true);
     }
     lastHiddenColumnsRef.set([...nextHiddenColumns]);
   }
@@ -327,14 +316,15 @@ import type {
     const searchValue = $search.trim();
     const flagValue = $flagFilter;
     const bookmarkedValue = $bookmarkedOnly;
-    const columns = getSearchableColumns();
-    const signature = columns.join('|');
+    const scopedColumns = [...$searchColumns];
+    const signature = scopedColumns.join('|');
     const conditionJson = JSON.stringify($conditionPayload);
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
     const bookmarkedChanged =
       lastBookmarkedOnly === null || bookmarkedValue !== lastBookmarkedOnly;
-    const columnsChanged = lastColumnsSignature === null || signature !== lastColumnsSignature;
+    const searchColumnsChanged =
+      lastSearchColumnsSignature === null || signature !== lastSearchColumnsSignature;
     const conditionChanged = conditionJson !== lastConditionJson;
     let resetScroll = flagChanged || bookmarkedChanged || conditionChanged;
     if (conditionChanged && applyingHistory) {
@@ -344,12 +334,12 @@ import type {
       recordAppliedCondition(rowOffset(), get(conditionTree), 0);
     }
 
-    if (searchChanged || flagChanged || bookmarkedChanged || columnsChanged || conditionChanged) {
-      scheduleFilterRefresh(searchValue, flagValue, columns, resetScroll);
+    if (searchChanged || flagChanged || bookmarkedChanged || searchColumnsChanged || conditionChanged) {
+      scheduleFilterRefresh(searchValue, flagValue, scopedColumns, resetScroll);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
       lastBookmarkedOnly = bookmarkedValue;
-      lastColumnsSignature = signature;
+      lastSearchColumnsSignature = signature;
       lastConditionJson = conditionJson;
     }
   }
@@ -419,13 +409,12 @@ import type {
     nextPending.add(normalizedPage);
     pendingPages.set(nextPending);
 
-    const flagFilterValue = filters.flag !== "all" ? filters.flag : undefined;
     const payload = {
       projectId: projectDetail.project.meta.id,
-      flagFilter: flagFilterValue,
-      bookmarkedOnly: filters.bookmarkedOnly ? true : undefined,
-      search: filters.search && filters.search.trim() ? filters.search.trim() : undefined,
-      columns: filters.columns && filters.columns.length > 0 ? filters.columns : undefined,
+      flagFilter: filters.flag,
+      bookmarkedOnly: filters.bookmarkedOnly,
+      search: filters.search.trim(),
+      searchColumns: filters.searchColumns,
       offset,
       limit,
       sortKey: $sortKey ?? null,
@@ -444,7 +433,9 @@ import type {
         }
         totalRows.set(response.total_rows);
         totalFilteredRows.set(response.total_filtered_rows);
-        flaggedCount.set(response.total_flagged);
+        // `flaggedCount` always means the whole project, never this page's slice.
+        flaggedCount.set(response.annotated_total);
+        filteredFlaggedCount.set(response.annotated_filtered);
         emitSummary();
         const normalizedRows = response.rows.map((row) => normalizeRow(row));
         rowsCache.update((cache) => {
@@ -486,7 +477,7 @@ import type {
       search: filters.search.trim(),
       flag: filters.flag,
       bookmarkedOnly: filters.bookmarkedOnly,
-      columns: [...filters.columns],
+      searchColumns: [...filters.searchColumns],
       condition: filters.condition,
     };
     const signature = buildFilterSignature(normalized);
@@ -497,7 +488,7 @@ import type {
       search: normalized.search,
       flag: normalized.flag,
       bookmarkedOnly: normalized.bookmarkedOnly,
-      columns: [...normalized.columns],
+      searchColumns: [...normalized.searchColumns],
       condition: normalized.condition,
     };
     lastAppliedFilters = signature;
@@ -661,20 +652,17 @@ import type {
     }
   };
 
-  const getSearchableColumns = () =>
-    projectDetail ? projectDetail.columns.filter((column) => !$hiddenColumns.has(column)) : [];
-
   const scheduleFilterRefresh = (
     searchValue: string,
     flagValue: FlagFilterValue,
-    columns: string[],
+    scopedColumns: string[],
     resetScroll: boolean
   ) => {
     pendingFilters = {
       search: searchValue,
       flag: flagValue,
       bookmarkedOnly: $bookmarkedOnly,
-      columns: [...columns],
+      searchColumns: [...scopedColumns],
       condition: get(conditionPayload),
       resetScroll,
     };
@@ -693,7 +681,7 @@ import type {
           search: scheduled.search,
           flag: scheduled.flag,
           bookmarkedOnly: scheduled.bookmarkedOnly,
-          columns: getSearchableColumns(),
+          searchColumns: scheduled.searchColumns,
           condition: scheduled.condition,
         },
         scheduled.resetScroll,
@@ -714,7 +702,7 @@ import type {
         search: $search.trim(),
         flag: $flagFilter,
         bookmarkedOnly: $bookmarkedOnly,
-        columns: getSearchableColumns(),
+        searchColumns: [...$searchColumns],
         condition: get(conditionPayload),
       },
       resetScroll,
@@ -822,7 +810,7 @@ import type {
         search: activeFilters.search,
         flag: activeFilters.flag,
         bookmarkedOnly: activeFilters.bookmarkedOnly,
-        columns: [...activeFilters.columns],
+        searchColumns: [...activeFilters.searchColumns],
         condition: activeFilters.condition,
       };
       void applyFilters(filters, false, true);

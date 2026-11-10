@@ -108,7 +108,7 @@ fn report_hit_rows_match_query() {
         QueryRowsPayload {
             project_id: id,
             search: Some("alice".to_string()),
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -126,7 +126,7 @@ fn report_hit_rows_match_query() {
         meta.hit_rows, query.total_filtered_rows,
         "report hit count must match the query path"
     );
-    assert_eq!(meta.flagged_in_matches, query.total_flagged);
+    assert_eq!(meta.flagged_in_matches, query.annotated_filtered);
     assert_eq!(meta.flagged_in_matches, 2);
 
     let html = fs::read_to_string(&destination).expect("report was not written");

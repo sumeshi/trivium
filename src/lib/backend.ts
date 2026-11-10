@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ColorRule,
   ConditionNode,
+  FlagFilterValue,
   IocEntry,
   BulkApplied,
   BulkCount,
@@ -10,11 +11,14 @@ import type {
   Histogram,
   LoadProjectResponse,
   PresetData,
+  QuerySpec,
   TimeAnalysis,
   SurroundingRows,
   ProjectRow,
   ProjectSummary,
 } from "./types";
+
+export type { FlagFilterValue } from "./types";
 
 export interface CreateProjectArgs {
   description?: string | null;
@@ -91,14 +95,6 @@ export interface ColorRulesResponse {
   rules: ColorRule[];
 }
 
-export type FlagFilterValue =
-  | "all"
-  | "none"
-  | "priority"
-  | "safe"
-  | "suspicious"
-  | "critical";
-
 export interface ColumnStatsArgs {
   projectId: string;
   column: string;
@@ -137,22 +133,16 @@ export interface TimeAnalysisArgs {
   condition?: ConditionNode | null;
 }
 
-export interface QueryProjectRowsArgs {
+export interface QueryProjectRowsArgs extends QuerySpec {
   projectId: string;
-  search?: string;
-  flagFilter?: FlagFilterValue;
-  bookmarkedOnly?: boolean;
-  columns?: string[];
   offset?: number;
   limit?: number;
-  sortKey?: string | null;
-  sortDirection?: "asc" | "desc";
-  condition?: ConditionNode | null;
 }
 
 export interface QueryProjectRowsResponse {
   rows: ProjectRow[];
-  total_flagged: number;
+  annotated_total: number;
+  annotated_filtered: number;
   total_rows: number;
   total_filtered_rows: number;
   offset: number;
@@ -323,15 +313,15 @@ class NativeBackend implements Backend {
     return invoke("query_project_rows", {
       payload: {
         projectId: args.projectId,
-        search: args.search ?? null,
-        flagFilter: args.flagFilter ?? null,
-        bookmarkedOnly: args.bookmarkedOnly ?? null,
-        columns: args.columns ?? null,
+        search: args.search,
+        searchColumns: args.searchColumns,
+        flagFilter: args.flagFilter,
+        bookmarkedOnly: args.bookmarkedOnly,
         offset: args.offset ?? null,
         limit: args.limit ?? null,
-        sortKey: args.sortKey ?? null,
-        sortDirection: args.sortDirection ?? null,
-        condition: args.condition ?? null,
+        sortKey: args.sortKey,
+        sortDirection: args.sortDirection,
+        condition: args.condition,
       },
     });
   }

@@ -100,7 +100,7 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -154,13 +154,13 @@ fn create_and_load_project() {
 fn search_scoping_and_operators() {
     let (root, store, id) = setup_project();
 
-    let base = |search: Option<String>, columns: Option<Vec<String>>| {
+    let base = |search: Option<String>, search_columns: Option<Vec<String>>| {
         ops::rows::query_project_rows(
             &store,
             QueryRowsPayload {
                 project_id: id,
                 search,
-                columns,
+                search_columns,
                 flag_filter: None,
                 offset: None,
                 limit: None,
@@ -182,7 +182,7 @@ fn search_scoping_and_operators() {
     let r = base(Some("user:alice".to_string()), None);
     assert_eq!(r.total_filtered_rows, 10);
 
-    // Column list restricts the searchable text (B1 behaviour): searching
+    // An explicit search scope restricts the searchable text: searching
     // "alice" while only EventID is searchable finds nothing.
     let r = base(
         Some("alice".to_string()),
@@ -238,7 +238,7 @@ fn nested_condition_matches_either_group() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -296,7 +296,7 @@ fn nanosecond_integer_is_not_rounded() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -631,7 +631,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -665,7 +665,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
         QueryRowsPayload {
             project_id: id,
             search: Some("WS01".to_string()),
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -1048,7 +1048,7 @@ fn time_analysis_gap_range_matches_bounds() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,
@@ -1072,7 +1072,7 @@ fn sort_and_pagination() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: Some(5),
@@ -1096,7 +1096,7 @@ fn sort_and_pagination() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: Some(5),
             limit: Some(5),
@@ -1131,7 +1131,7 @@ fn flag_update_and_flag_filter() {
     assert_eq!(updated.flag, "suspicious");
 
     let r = query(&store, id);
-    assert_eq!(r.total_flagged, 1);
+    assert_eq!(r.annotated_total, 1);
     assert_eq!(r.total_rows, 20);
 
     let r = ops::rows::query_project_rows(
@@ -1139,7 +1139,7 @@ fn flag_update_and_flag_filter() {
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: Some("suspicious".to_string()),
             offset: None,
             limit: None,
@@ -1209,7 +1209,7 @@ fn ioc_apply_and_query() {
     assert_eq!(meta.ioc_applied_records, 3);
 
     let r = query(&store, id);
-    assert_eq!(r.total_flagged, 5); // 2 user safe + 3 IOC critical
+    assert_eq!(r.annotated_total, 5); // 2 user safe + 3 IOC critical
 
     let flagged: Vec<&trivium_engine::models::ProjectRow> = r
         .rows
@@ -1510,7 +1510,7 @@ ts,EventID,host,user,proc,path,msg
             QueryRowsPayload {
                 project_id: hit.project_id,
                 search: None,
-                columns: None,
+                search_columns: None,
                 flag_filter: None,
                 offset: None,
                 limit: Some(1),

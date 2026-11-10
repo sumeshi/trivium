@@ -69,7 +69,8 @@ export type AppliedFilters = {
   search: string;
   flag: FlagFilterValue;
   bookmarkedOnly: boolean;
-  columns: string[];
+  /** Empty means every data column. Independent from visible columns. */
+  searchColumns: string[];
   condition: ConditionNode | null;
 };
 
@@ -82,6 +83,7 @@ export const hiddenColumns = writable(new Set<string>());
 export const columnsOpen = writable(false);
 
 export const search = writable("");
+export const searchColumns = writable<string[]>([]);
 export const flagFilter = writable<FlagFilterValue>("all");
 export const bookmarkedOnly = writable(false);
 
@@ -96,8 +98,10 @@ export const pendingPages = writable<Set<number>>(new Set());
 export const loadedPages = writable<Set<number>>(new Set());
 export const totalRows = writable(0);
 export const totalFilteredRows = writable(0);
-export const totalFlagged = writable(0);
+/** Annotated rows in the whole project. */
 export const flaggedCount = writable(0);
+/** Annotated rows inside the current result set. */
+export const filteredFlaggedCount = writable(0);
 // Maps display position (offset + i) to backend row_index to preserve backend ordering
 export const positionToRowIndex = writable<Map<number, number>>(new Map());
 
@@ -256,6 +260,7 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
 
   if (flaggedDelta !== 0) {
     flaggedCount.update((value) => Math.max(0, value + flaggedDelta));
+    filteredFlaggedCount.update((value) => Math.max(0, value + flaggedDelta));
   }
 
   // Backend update runs asynchronously (revert on error)
@@ -281,6 +286,7 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
 
     if (flaggedDelta !== 0) {
       flaggedCount.update((value) => Math.max(0, value - flaggedDelta));
+      filteredFlaggedCount.update((value) => Math.max(0, value - flaggedDelta));
     }
 
     // dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });

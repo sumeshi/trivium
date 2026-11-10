@@ -110,7 +110,7 @@ fn query(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> QueryRowsResp
         QueryRowsPayload {
             project_id: id,
             search: search.map(|value| value.to_string()),
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,

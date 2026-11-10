@@ -107,7 +107,7 @@ fn query_flags(store: &ProjectsStore, id: uuid::Uuid) -> Vec<(String, Option<Str
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             offset: None,
             limit: None,

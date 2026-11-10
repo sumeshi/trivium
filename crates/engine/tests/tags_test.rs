@@ -66,7 +66,7 @@ fn query(
         QueryRowsPayload {
             project_id: id,
             search: None,
-            columns: None,
+            search_columns: None,
             flag_filter: None,
             bookmarked_only,
             offset: None,
