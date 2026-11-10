@@ -1,0 +1,5 @@
+[
+  {"id": 1, "big": 9223372036854775807, "nullv": null, "empty": "", "arr": [1,2,3], "a.b": "literal-dot", "a": {"b": "nested-b"}},
+  {"id": 2, "big": 9007199254740993, "only_later": "second-only"},
+  {"id": 3, "big": -9223372036854775808, "empty_obj": {}}
+]
