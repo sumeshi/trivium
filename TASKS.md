@@ -562,12 +562,23 @@ src-tauri/src/
 
 ### 拡張
 
-#### F28: skin の分離（色・記号の外挿）
+#### F28: skin の分離（色・記号の外挿） → 実装済み（`fd3d42d`）、GUI 操作は未確認
 
 - 前提: F20
 - 手順: フラグ色・記号・条件色のパレットを 1 つの TS モジュールに集約し、
   テーマ（既存 light/dark）と条件色が同じ規則で引けるようにする。
 - 完了条件: `npm run lint` + 手動確認 1 回（テーマ切替で条件色も追従）。
+- 実装メモ: `src/lib/skin.ts` に `FLAG_HINTS`・`CONDITION_COLORS`（dark/light 8 色）・
+  `resolveConditionColor`・`displayRowColor` を集約。`state.ts` の `FLAG_OPTIONS` /
+  `FLAG_FILTER_OPTIONS` は `FLAG_HINTS` を参照。`app.css` の両テーマに `--rule-<name>`
+  を追加（値は `skin.ts` と同期）。`ColorRulesPanel.svelte` はデフォルト色をパレット先頭の
+  hex に変更し、パレットスウォッチを追加（表示は `var(--rule-<name>)`、クリック時は
+  現在テーマの hex を保存）。`DataTable.svelte` の行背景は `displayRowColor` 経由で
+  `$theme` を参照するため、テーマ切替で CSS 変数が切り替わり条件色も追従する。
+  `colors.json` の保存値は従来どおり hex（engine は不変）。
+- 検証: `npm run lint`（0 errors / 0 warnings）、`cargo test -p trivium-engine`（全緑）、
+  `scripts/check_rust_size.sh`（exit 0）、`npm run build` 成功。
+- GUI はローカルで起動できないため、テーマ切替による実画面の追従は未確認。
 
 ## 8. P 層 — 性能（I4 の before に対し after を出す。数値なしなら完了としない）
 
