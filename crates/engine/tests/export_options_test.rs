@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
+use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::QueryRowsPayload;
 use trivium_engine::ops::{projects, rows};
@@ -164,6 +165,98 @@ fn columns_option_limits_output_columns() {
         ],
         "only the requested column plus derived trivium columns must remain"
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn input_flag_and_memo_columns_survive_export_with_annotations() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let path = root.join("annotated.csv");
+    let text = "flag,memo,msg\n\
+                safe,original memo one,first message\n\
+                review,original memo two,second message\n\
+                hold,original memo three,third message\n";
+    fs::write(&path, text).expect("failed to write fixture");
+
+    let summary = projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: path.to_string_lossy().to_string(),
+            description: None,
+            delimiter: None,
+        },
+    )
+    .expect("failed to create project");
+    let id = summary.meta.id;
+
+    update_flag(
+        &store,
+        UpdateFlagPayload {
+            project_id: id,
+            row_index: 0,
+            flag: "safe".to_string(),
+            memo: Some("investigated".to_string()),
+            tags: Some(vec!["alpha".to_string()]),
+            bookmarked: None,
+        },
+    )
+    .expect("failed to annotate row");
+
+    let exported = run_export(
+        &store,
+        &root,
+        ExportProjectPayload {
+            project_id: id,
+            destination: String::new(),
+            scope: None,
+            search: None,
+            condition: None,
+            columns: None,
+            sort_key: None,
+            sort_direction: None,
+        },
+    );
+    let lines: Vec<&str> = exported.lines().collect();
+    assert_eq!(
+        lines[0].split(',').collect::<Vec<_>>(),
+        vec![
+            "trivium-safe",
+            "trivium-suspicious",
+            "trivium-critical",
+            "trivium-memo",
+            "flag",
+            "memo",
+            "msg"
+        ],
+        "input flag/memo columns must coexist with the trivium annotation columns"
+    );
+
+    let first: Vec<&str> = lines[1].split(',').collect();
+    assert_eq!(
+        first,
+        vec![
+            "1",
+            "0",
+            "0",
+            "investigated [alpha]",
+            "safe",
+            "original memo one",
+            "first message"
+        ],
+        "annotation and the original flag/memo/msg values must both be present"
+    );
+
+    let second: Vec<&str> = lines[2].split(',').collect();
+    assert_eq!(second[4], "review", "unannotated input flag must be kept");
+    assert_eq!(second[5], "original memo two", "unannotated input memo must be kept");
+    assert_eq!(second[6], "second message");
+
+    let third: Vec<&str> = lines[3].split(',').collect();
+    assert_eq!(third[4], "hold");
+    assert_eq!(third[5], "original memo three");
+    assert_eq!(third[6], "third message");
 
     let _ = fs::remove_dir_all(root);
 }

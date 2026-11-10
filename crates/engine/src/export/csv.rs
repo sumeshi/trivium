@@ -170,13 +170,14 @@ pub fn export_project(
         memo_series[i] = final_memo;
     }
 
+    // Only the internal row id is removed here. `flag` and `memo` used to be
+    // internal annotation columns, but input CSVs may legitimately have
+    // columns with those names, so dropping them unconditionally erased user
+    // data. Annotation metadata now lives in `flags.json` and is exported as
+    // the `trivium-*` columns below; any input `flag`/`memo` columns are
+    // ordinary data and must be kept. Internal metadata is identified by its
+    // own reserved names, not by these legacy column names.
     if let Ok(next) = df.drop("__rowid") {
-        df = next;
-    }
-    if let Ok(next) = df.drop("flag") {
-        df = next;
-    }
-    if let Ok(next) = df.drop("memo") {
         df = next;
     }
 
