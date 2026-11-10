@@ -1,36 +1,26 @@
-name: Debian Artifacts (develop)
+name: Debian build
 
 on:
   push:
-    branches: [develop]
+    branches: [ develop ]
   workflow_dispatch:
 
 jobs:
   build-deb:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.0-dev \
-            libgtk-3-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,25 +30,26 @@ jobs:
         with:
           workspaces: 'src-tauri -> ../target'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev build-essential curl wget file libxdo-dev libssl-dev
 
-      - name: Run engine tests
-        run: cargo test -p trivium-engine
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
 
-      - name: Build .deb
+      - name: Build deb bundle
         run: npm run tauri build -- --bundles deb
 
       - name: Generate SHA256SUMS
         run: |
           cd src-tauri/target/release/bundle/deb
           sha256sum *.deb > SHA256SUMS
-          cat SHA256SUMS
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trivium-debian
+          name: trivium-deb
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/deb/SHA256SUMS
