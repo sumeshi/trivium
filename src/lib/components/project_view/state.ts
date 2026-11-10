@@ -125,8 +125,48 @@ export const expandedCell = writable<{
   value: string;
   row: CachedRow;
 } | null>(null);
-export const memoEditor = writable<{ row: CachedRow } | null>(null);
+export type MemoEditorTarget = {
+  projectId: string;
+  rowIndex: number;
+  /** Row snapshot taken when editing started, used as the rollback baseline. */
+  row: CachedRow;
+};
+export const memoEditor = writable<MemoEditorTarget | null>(null);
 export const iocManagerOpen = writable(false);
+
+/**
+ * Monotonic per-row request sequence shared by flag updates and memo saves.
+ * Only the latest request for a row may roll its optimistic change back.
+ */
+const annotationRequestSeq = new Map<number, number>();
+
+export function nextAnnotationRequest(rowIndex: number): number {
+  const next = (annotationRequestSeq.get(rowIndex) ?? 0) + 1;
+  annotationRequestSeq.set(rowIndex, next);
+  return next;
+}
+
+export function isLatestAnnotationRequest(
+  rowIndex: number,
+  requestSeq: number
+): boolean {
+  return annotationRequestSeq.get(rowIndex) === requestSeq;
+}
+
+export function updateCachedRow(
+  rowIndex: number,
+  updater: (row: CachedRow) => CachedRow
+): CachedRow | null {
+  const existing = get(rowsCache).get(rowIndex);
+  if (!existing) return null;
+  const updated = updater(existing);
+  rowsCache.update((cache) => {
+    const nextCache = new Map(cache);
+    nextCache.set(rowIndex, updated);
+    return nextCache;
+  });
+  return updated;
+}
 
 export const viewportHeight = writable(0);
 export const scrollTop = writable(0);
@@ -256,60 +296,76 @@ export const toggleSort = (column: string) => {
 };
 
 export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
-  const currentFlag = normalizeFlag(row.flag);
+  const rowIndex = row.row_index;
+  // Read the latest optimistic row so rapid clicks toggle from what the table
+  // currently shows instead of a stale click-time snapshot.
+  const currentRow = get(rowsCache).get(rowIndex) ?? row;
+  const currentFlag = normalizeFlag(currentRow.flag);
   const nextFlag = currentFlag === flag ? "" : flag;
   const previousHadFlag = Boolean(currentFlag);
   const nextHasFlag = Boolean(nextFlag);
   const flaggedDelta = (nextHasFlag ? 1 : 0) - (previousHadFlag ? 1 : 0);
+  const requestSeq = nextAnnotationRequest(rowIndex);
+  let requestProjectId: string | null = null;
 
   // Optimistic update: Update UI immediately
-  const optimisticRow = {
-    ...row,
-    flag: nextFlag,
-  };
-  rowsCache.update((cache) => {
-    const newCache = new Map(cache);
-    newCache.set(row.row_index, optimisticRow);
-    return newCache;
-  });
+  updateCachedRow(rowIndex, (cached) => ({ ...cached, flag: nextFlag }));
 
   if (flaggedDelta !== 0) {
     flaggedCount.update((value) => Math.max(0, value + flaggedDelta));
     filteredFlaggedCount.update((value) => Math.max(0, value + flaggedDelta));
   }
 
-  // Backend update runs asynchronously (revert on error)
   try {
     const backendInstance = get(backend);
     const projectDetailInstance = get(projectDetail);
     if (!backendInstance || !projectDetailInstance) {
       throw new Error("Backend or project detail not available");
     }
-    await backendInstance.updateFlag({
-      projectId: projectDetailInstance.project.meta.id,
-      rowIndex: row.row_index, // Still send row_index to backend
+    requestProjectId = projectDetailInstance.project.meta.id;
+    const updated = await backendInstance.updateFlag({
+      projectId: requestProjectId,
+      rowIndex,
       flag: nextFlag ?? "",
     });
+
+    // The project may have changed while the request was in flight. Never
+    // apply this row id to another project's cache.
+    if (get(projectDetail)?.project.meta.id !== requestProjectId) return;
+
+    // A stale success must not overwrite a newer optimistic change.
+    if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
+      updateCachedRow(rowIndex, (cached) => ({
+        ...cached,
+        flag: mapStoredFlag(updated.flag),
+      }));
+    }
   } catch (error) {
     console.error(error);
-    // Revert to original state on error
-    rowsCache.update((cache) => {
-      const newCache = new Map(cache);
-      newCache.set(row.row_index, row);
-      return newCache;
-    });
+    // A request from a project that is no longer displayed has nothing to
+    // roll back on screen.
+    if (
+      requestProjectId &&
+      get(projectDetail)?.project.meta.id !== requestProjectId
+    ) {
+      return;
+    }
+    // Roll back only this request, and only while it is still the newest one.
+    if (!isLatestAnnotationRequest(rowIndex, requestSeq)) return;
+
+    updateCachedRow(rowIndex, (cached) => ({ ...cached, flag: currentFlag }));
 
     if (flaggedDelta !== 0) {
       flaggedCount.update((value) => Math.max(0, value - flaggedDelta));
-      filteredFlaggedCount.update((value) => Math.max(0, value - flaggedDelta));
+      filteredFlaggedCount.update((value) =>
+        Math.max(0, value - flaggedDelta)
+      );
     }
-
-    // dispatch('notify', { message: 'Failed to update flag.', tone: 'error' });
   }
 };
 
-export const editMemo = (row: CachedRow) => {
-  memoEditor.set({ row });
+export const editMemo = (row: CachedRow, projectId: string) => {
+  memoEditor.set({ projectId, rowIndex: row.row_index, row });
 };
 
 export const openCell = (column: string, value: string, row: CachedRow) => {

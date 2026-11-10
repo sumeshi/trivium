@@ -1,8 +1,15 @@
 <script lang="ts">
-  import { createEventDispatcher, tick } from 'svelte';
-  import { memoEditor, backend, projectDetail, sanitizeMemoInput, rowsCache, normalizeRow } from './state';
+  import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import type { CachedRow } from './state';
+  import {
+    memoEditor,
+    backend,
+    sanitizeMemoInput,
+    nextAnnotationRequest,
+    isLatestAnnotationRequest,
+    updateCachedRow,
+    currentProjectId,
+  } from './state';
 
   const dispatch = createEventDispatcher();
 
@@ -48,48 +55,80 @@
   };
 
   const saveMemo = async () => {
-    if (!$memoEditor || memoSaving || !$projectDetail || !$backend) return;
+    const editor = get(memoEditor);
+    if (!editor || memoSaving) return;
+    const backendInstance = get(backend);
+    if (!backendInstance) {
+      memoError = 'Backend is not available.';
+      return;
+    }
+
     addTags();
     const sanitized = sanitizeMemoInput(memoDraft).trim();
     const tags = [...tagList];
     const bookmarked = bookmarkDraft;
+    const rowIndex = editor.rowIndex;
+    const requestSeq = nextAnnotationRequest(rowIndex);
     memoSaving = true;
     memoError = null;
 
-    const currentRowsCache = get(rowsCache);
-    const rowToUpdate = currentRowsCache.get($memoEditor.row.row_index);
-
-    if (!rowToUpdate) {
-      console.error("Row not found in cache for memo update.");
-      return;
-    }
-
-    const updatedRow: CachedRow = {
-      ...rowToUpdate,
+    // The row may no longer be cached. Saving still uses the captured
+    // project id and original row id, and display updates are skipped.
+    updateCachedRow(rowIndex, (cached) => ({
+      ...cached,
       memo: sanitized,
       tags,
       bookmarked,
-      displayCache: { ...rowToUpdate.displayCache, memo: sanitized },
-    };
-
-    const newCache = new Map(currentRowsCache); // Create a new Map based on current cache
-    newCache.set($memoEditor.row.row_index, updatedRow); // Update the specific entry using row_index
-    rowsCache.set(newCache); // Set the entire store with the new Map
+      displayCache: { ...cached.displayCache, memo: sanitized },
+    }));
 
     try {
-      await $backend.updateFlag({
-        projectId: $projectDetail.project.meta.id,
-        rowIndex: $memoEditor.row.row_index,
+      const updated = await backendInstance.updateFlag({
+        projectId: editor.projectId,
+        rowIndex,
         memo: sanitized.length ? sanitized : null,
         tags,
-        bookmarked
+        bookmarked,
       });
 
+      // The project may have changed while the request was in flight. Never
+      // apply this row id to another project's cache or dialog state.
+      if (get(currentProjectId) !== editor.projectId) return;
+
+      // A stale success must not overwrite a newer optimistic change.
+      if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
+        updateCachedRow(rowIndex, (cached) => {
+          const memo = sanitizeMemoInput(updated.memo ?? '');
+          return {
+            ...cached,
+            memo,
+            tags: updated.tags ?? [],
+            bookmarked: updated.bookmarked,
+            displayCache: { ...cached.displayCache, memo },
+          };
+        });
+      }
+
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });
-      closeMemoEditor();
+      if (get(memoEditor) === editor) {
+        closeMemoEditor();
+      }
     } catch (error) {
       console.error('saveMemo: Backend updateFlag failed:', error);
-      memoError = 'Failed to update memo.';
+      if (get(currentProjectId) !== editor.projectId) return;
+      // Only the latest request for this row may roll its fields back. The
+      // draft stays in the dialog so the user can retry.
+      if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
+        const baseline = editor.row;
+        updateCachedRow(rowIndex, (cached) => ({
+          ...cached,
+          memo: baseline.memo,
+          tags: [...(baseline.tags ?? [])],
+          bookmarked: baseline.bookmarked ?? false,
+          displayCache: { ...cached.displayCache, memo: baseline.memo },
+        }));
+        memoError = 'Failed to update memo.';
+      }
       dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
     } finally {
       memoSaving = false;
@@ -103,29 +142,36 @@
   };
 
   const handleMemoBackdropKey = (event: KeyboardEvent) => {
-    if (!memoSaving && event.key === 'Escape') {
-      event.preventDefault();
+    if (event.key !== 'Escape') return;
+    // Keep the dialog (and the draft) open while a save is in flight; the
+    // window-level Escape handler must not close it either.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!memoSaving) {
       closeMemoEditor();
     }
   };
 
-  memoEditor.subscribe(async (editor) => {
-    if (editor) {
-      memoDraft = editor.row.memo ?? '';
-      tagList = [...(editor.row.tags ?? [])];
-      tagDraft = '';
-      bookmarkDraft = editor.row.bookmarked ?? false;
-      memoError = null;
-      memoSaving = false;
-      await tick();
-      if (textareaEl) {
-        textareaEl.focus();
-        // Place caret at end
-        const length = textareaEl.value.length;
-        textareaEl.setSelectionRange(length, length);
-      }
+  const stopMemoEditorSubscription = memoEditor.subscribe(async (editor) => {
+    if (!editor) return;
+    memoDraft = editor.row.memo ?? '';
+    tagList = [...(editor.row.tags ?? [])];
+    tagDraft = '';
+    bookmarkDraft = editor.row.bookmarked ?? false;
+    memoError = null;
+    memoSaving = false;
+    await tick();
+    // The dialog may have been closed or retargeted while tick was pending.
+    if (get(memoEditor) !== editor) return;
+    if (textareaEl) {
+      textareaEl.focus();
+      // Place caret at end
+      const length = textareaEl.value.length;
+      textareaEl.setSelectionRange(length, length);
     }
   });
+
+  onDestroy(stopMemoEditorSubscription);
 </script>
 
 {#if $memoEditor}
@@ -135,7 +181,7 @@
     class="cell-dialog-backdrop"
     role="dialog"
     aria-modal="true"
-    aria-label={`Edit memo for row ${$memoEditor.row.row_index + 1}`}
+    aria-label={`Edit memo for row ${$memoEditor.rowIndex + 1}`}
     on:click={handleMemoBackdropClick}
     tabindex="-1"
     on:keydown={handleMemoBackdropKey}

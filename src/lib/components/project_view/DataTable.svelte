@@ -319,7 +319,10 @@
                 </div>
                 <button
                   class="cell memo-button sticky sticky-memo"
-                  on:click={() => item.row && _editMemo(item.row)}
+                  on:click={() =>
+                    item.row &&
+                    $projectDetail &&
+                    _editMemo(item.row, $projectDetail.project.meta.id)}
                   title={
                     item.row
                       ? item.row.memo && item.row.memo.trim().length
