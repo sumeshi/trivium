@@ -927,3 +927,102 @@ Regression coverage (`crates/engine/tests/bulk_test.rs`, 5 new tests):
   missing persistence feature.
 
 Next card: T15.
+
+## T15 — background jobs and cancellation plumbing
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/jobs.rs` (new): a Tauri-independent job registry.
+  `try_begin_job(kind, project_id)` returns a `JobGuard` that removes its entry
+  on drop; `request_cancel(id)` returns `false` for an unknown or finished ID;
+  `is_cancelled`, `active_jobs`, and `cancelled_error` ("Cancelled.") complete
+  the API. Heavy jobs are capped at `MAX_CONCURRENT_JOBS = 2`; a third request
+  fails with `Too many long-running operations. Wait for one to finish.`
+  Job IDs are monotonic and act as the generation, so a late cancel of an old
+  ID cannot select a newer job.
+- The same module has `JobInfo { id, kind, projectId }`, `JobProgress { id,
+  kind, done, total, message }`, `JobContext`, and `ThrottledProgress`.
+  `JobContext::none()` keeps the previous engine API behaviour;
+  `JobContext::with_job` checks cancellation and forwards progress.
+  `ThrottledProgress` emits the first value and then at most one per
+  `PROGRESS_INTERVAL = 200 ms`; its clock is injectable for tests.
+- `crates/engine/src/ops/projects.rs`,
+  `crates/engine/src/ops/query/mod.rs`, and
+  `crates/engine/src/export/csv.rs`: added `create_project_with_job`,
+  `query_project_rows_with_job`, and `export_project_with_job`. The existing
+  functions delegate with `JobContext::none()`, so direct engine callers and
+  all existing tests keep their behaviour.
+- Cancellation checkpoints are stage boundaries only: before and after the
+  source import; around the data read and target resolution for queries;
+  before the CSV write and after it for exports. The large CSV/JSON parsers,
+  search evaluation, and CSV writer still run as single library calls. They
+  are not interruptible yet; T16/T17 add import batch cancellation, T18 adds
+  search batch cancellation, and T23 adds destination-preserving output
+  cancellation.
+- `crates/engine/src/store.rs`: `ProjectsStore` now keeps its metadata and
+  revision maps in `Arc`s and derives `Clone`, so a background worker owns a
+  cheap handle instead of the Tauri state guard.
+- `src-tauri/src/commands/job.rs` (new): `run_job` creates the guard, emits
+  `trivium:job-started`, moves a `JobContext` with an event-forwarding
+  `ProgressFn` into `tauri::async_runtime::spawn_blocking`, and returns the
+  engine result. `cancel_job(jobId)` and `active_jobs()` are new commands.
+  `create_project`, `query_project_rows`, and `export_project` are now async
+  commands that clone the store and run through `run_job`; no long operation
+  holds `State`. `commands/mod.rs` re-exports the new commands and `main.rs`
+  registers them with bare identifiers.
+- Completion, failure, and cancellation are distinguished at the command
+  boundary: `Ok` is completion, `Err` with the text `Cancelled.` is a cancel,
+  and any other `Err` is a failure. `trivium:job-progress` is throttled by the
+  engine helper before it reaches the event emitter.
+- `src/lib/types.ts`: added `JobKind`, `JobInfo`, and `JobProgress`.
+  `src/lib/backend.ts`: added `cancelJob(jobId)`, `activeJobs()`, and
+  `listenToJobEvents` (subscribes to both job events and returns one unlisten
+  function). No UI subscribes yet; that stays in T18/T23.
+
+Regression coverage (`crates/engine/tests/jobs_test.rs`, 7 tests):
+- Two jobs run, a third is rejected, releasing one slot admits one more.
+- A cancel reaches only the requested ID; an unknown ID is rejected.
+- Cancelling a finished ID returns `false` and does not touch a new job.
+- `ThrottledProgress` emits at 0, 200, and 400 ms on an injected clock and
+  suppresses the reports at 100, 199, and 399 ms.
+- `JobContext::none()` never cancels; a real context reports progress, then
+  returns `Cancelled.` after `request_cancel`.
+- A cancelled query and a cancelled import fail before reading project data or
+  the selected path.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New job tests | `cargo test -p trivium-engine --test jobs_test` | 7 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | 161 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- `src-tauri` was not compiled in this environment. `cargo check -p
+  trivium-desktop` stops while building `gdk-sys` because `gdk-3.0.pc` is
+  missing (GTK/WebKit development libraries are unavailable). The new command
+  signatures, `Emitter`/`spawn_blocking` usage, re-exports, and
+  `generate_handler!` entries were checked by source inspection only. The
+  Linux CI job remains the native compile check.
+- Window responsiveness and real cancellation were not exercised in the
+  native app. The event delivery, `spawn_blocking` hand-off, and command return
+  values are covered by code review, not by a running Tauri window.
+- Existing full-library calls are not immediately interruptible. A cancel is
+  observed at the next stage boundary; import batch interruption is T16/T17,
+  search interruption is T18, and output preservation is T23.
+- Import jobs start with `projectId = null` because the engine creates the
+  project ID during the import.
+- If a cancel is requested during the final CSV write, the export observes it
+  after the write and returns `Cancelled.` while the destination may already
+  exist. Safe temporary-file output is deferred to T23.
+- Progress is reported only at the stage boundaries above, so a single long
+  library call may produce no intermediate progress even though the throttle
+  is 200 ms. The throttle itself is unit-tested with an injected clock.
+
+Next card: T16.
