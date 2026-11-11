@@ -75,6 +75,62 @@ pub struct ProjectSummary {
     pub meta: ProjectMeta,
 }
 
+/// Current on-disk version of the per-project view state.
+pub const VIEW_STATE_VERSION: u32 = 1;
+
+/// Rebuildable view settings for one project.
+///
+/// This file is independent from annotations: a missing, broken, or newer
+/// view state must never prevent the evidence or annotations from loading.
+/// `condition` keeps the frontend editor tree as-is; the engine does not
+/// interpret it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ViewState {
+    pub version: u32,
+    #[serde(default)]
+    pub search: String,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Vec<String>,
+    #[serde(default)]
+    pub condition: Option<Value>,
+    #[serde(default, rename = "flagFilter")]
+    pub flag_filter: String,
+    #[serde(default, rename = "bookmarkedOnly")]
+    pub bookmarked_only: bool,
+    #[serde(default, rename = "sortKey")]
+    pub sort_key: Option<String>,
+    #[serde(default = "default_sort_direction", rename = "sortDirection")]
+    pub sort_direction: String,
+    #[serde(default, rename = "hiddenColumns")]
+    pub hidden_columns: Vec<String>,
+    #[serde(default, rename = "columnWidths")]
+    pub column_widths: HashMap<String, f64>,
+    #[serde(default, rename = "logicalRow")]
+    pub logical_row: usize,
+}
+
+fn default_sort_direction() -> String {
+    "asc".to_string()
+}
+
+impl Default for ViewState {
+    fn default() -> Self {
+        Self {
+            version: VIEW_STATE_VERSION,
+            search: String::new(),
+            search_columns: Vec::new(),
+            condition: None,
+            flag_filter: "all".to_string(),
+            bookmarked_only: false,
+            sort_key: None,
+            sort_direction: default_sort_direction(),
+            hidden_columns: Vec::new(),
+            column_widths: HashMap::new(),
+            logical_row: 0,
+        }
+    }
+}
+
 /// One cell as the frontend should read it.
 ///
 /// For list responses `text` is a preview truncated to a fixed number of

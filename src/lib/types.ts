@@ -137,6 +137,26 @@ export interface LoadProjectResponse {
   initial_rows: ProjectRow[];
 }
 
+/**
+ * Rebuildable view settings stored per project by the engine. This is
+ * independent from annotations: the UI can fall back to defaults when it is
+ * missing or unreadable without hiding evidence or saved annotations.
+ */
+export interface ViewState {
+  version: number;
+  search: string;
+  searchColumns: string[];
+  /** EditorGroup JSON; the engine stores it without interpreting it. */
+  condition: Record<string, unknown> | null;
+  flagFilter: FlagFilterValue;
+  bookmarkedOnly: boolean;
+  sortKey: string | null;
+  sortDirection: "asc" | "desc";
+  hiddenColumns: string[];
+  columnWidths: Record<string, number>;
+  logicalRow: number;
+}
+
 export interface ValueCount {
   value: string;
   count: number;

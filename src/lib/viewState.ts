@@ -1,4 +1,6 @@
 import type { EditorGroup, EditorNode } from "./stores/condition";
+import type { FlagFilterValue } from "./types";
+import { savedViewFromUnknown } from "./viewStateMapping";
 
 export interface HistoryEntry {
   condition: EditorGroup;
@@ -12,29 +14,21 @@ export interface History {
 
 export interface SavedView {
   condition: EditorGroup;
+  search: string;
+  searchColumns: string[];
+  flagFilter: FlagFilterValue;
+  bookmarkedOnly: boolean;
   hiddenColumns: string[];
   sortKey: string | null;
   sortDirection: "asc" | "desc";
+  /** Persisted widths keyed by data column id. Rebuilt when absent. */
+  columnWidths: Record<string, number>;
   offset: number;
   /** Result-relative row at the top of the viewport. Preferred over `offset`. */
   logicalRow?: number;
 }
 
 const HISTORY_LIMIT = 50;
-
-const COMPARE_OPS = new Set([
-  "eq",
-  "ne",
-  "gt",
-  "lt",
-  "ge",
-  "le",
-  "contains",
-  "startsWith",
-  "endsWith",
-  "regex",
-  "in",
-]);
 
 export function cloneTree(tree: EditorGroup): EditorGroup {
   return JSON.parse(JSON.stringify(tree)) as EditorGroup;
@@ -101,37 +95,6 @@ export function goForward(history: History): History | null {
   return { entries: history.entries, index: history.index + 1 };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isNode(value: unknown): boolean {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    return false;
-  }
-  if (value.type === "condition") {
-    return (
-      typeof value.id === "string" &&
-      typeof value.column === "string" &&
-      typeof value.op === "string" &&
-      COMPARE_OPS.has(value.op) &&
-      typeof value.value === "string" &&
-      typeof value.negated === "boolean" &&
-      (value.exact === undefined || typeof value.exact === "boolean")
-    );
-  }
-  if (value.type === "group") {
-    return (
-      typeof value.id === "string" &&
-      (value.kind === "and" || value.kind === "or") &&
-      typeof value.collapsed === "boolean" &&
-      Array.isArray(value.children) &&
-      value.children.every((child) => isNode(child))
-    );
-  }
-  return false;
-}
-
 export function parseSavedView(text: string, columns: readonly string[]): SavedView | null {
   let parsed: unknown;
   try {
@@ -139,30 +102,5 @@ export function parseSavedView(text: string, columns: readonly string[]): SavedV
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || !isNode(parsed.condition) || (parsed.condition as { type?: string }).type !== "group") {
-    return null;
-  }
-  const known = new Set(columns);
-  const hiddenColumns = Array.isArray(parsed.hiddenColumns)
-    ? parsed.hiddenColumns.filter((name): name is string => typeof name === "string" && known.has(name))
-    : [];
-  const sortKey = typeof parsed.sortKey === "string" && known.has(parsed.sortKey) ? parsed.sortKey : null;
-  const sortDirection = parsed.sortDirection === "desc" ? "desc" : "asc";
-  const offset = typeof parsed.offset === "number" && Number.isInteger(parsed.offset) && parsed.offset >= 0
-    ? parsed.offset
-    : 0;
-  // `offset` used to store the row at the top of the viewport. Treat it as the
-  // legacy logical row when `logicalRow` is absent so old saves still restore.
-  const logicalRow =
-    typeof parsed.logicalRow === "number" && Number.isInteger(parsed.logicalRow) && parsed.logicalRow >= 0
-      ? parsed.logicalRow
-      : offset;
-  return {
-    condition: parsed.condition as EditorGroup,
-    hiddenColumns,
-    sortKey,
-    sortDirection,
-    offset,
-    logicalRow,
-  };
+  return savedViewFromUnknown(parsed, columns);
 }

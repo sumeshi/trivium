@@ -22,6 +22,7 @@ import type {
   ProjectRow,
   ProjectSummary,
   FlagEntry,
+  ViewState,
 } from "./types";
 
 export type { FlagFilterValue } from "./types";
@@ -64,6 +65,15 @@ export interface UpdateFlagResult {
 export interface HiddenColumnsArgs {
   projectId: string;
   hiddenColumns: string[];
+}
+
+export interface LoadViewStateArgs {
+  projectId: string;
+}
+
+export interface SaveViewStateArgs {
+  projectId: string;
+  state: ViewState;
 }
 
 export type ExportScope = "all" | "filtered" | "selected";
@@ -263,6 +273,9 @@ export interface Backend {
   saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse>;
   updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
+  /** Rebuildable per-project view state; null when the project has none yet. */
+  loadViewState(args: LoadViewStateArgs): Promise<ViewState | null>;
+  saveViewState(args: SaveViewStateArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<ExportResult>;
   /** Requests cancellation of one running job; `false` means it already ended. */
   cancelJob(jobId: number): Promise<boolean>;
@@ -553,6 +566,21 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         hidden_columns: args.hiddenColumns,
+      },
+    });
+  }
+
+  loadViewState(args: LoadViewStateArgs): Promise<ViewState | null> {
+    return invoke("load_view_state", {
+      request: { projectId: args.projectId },
+    });
+  }
+
+  saveViewState(args: SaveViewStateArgs): Promise<void> {
+    return invoke("save_view_state", {
+      payload: {
+        projectId: args.projectId,
+        state: args.state,
       },
     });
   }

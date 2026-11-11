@@ -9,11 +9,13 @@
   import ExportDialog from './project_view/ExportDialog.svelte';
   import FilterControls from './project_view/FilterControls.svelte';
   import TimelinePanel from './project_view/TimelinePanel.svelte';
-  import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
+  import type { IocEntry, LoadProjectResponse, ProjectRow, ViewState } from '../types';
   import type { Backend } from '../backend';
   import './project-view.css';
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
+  import type { SavedView } from '../viewState';
+  import { savedViewToViewState, viewStateToSavedView } from '../viewStateMapping';
   import {
     goBack,
     goForward,
@@ -22,7 +24,6 @@
     recordAppliedCondition,
     rememberOffset,
     resetHistory,
-    saveProjectView,
     setHistoryProject,
   } from '../stores/viewHistory';
   import {
@@ -139,6 +140,7 @@ import type {
   let pendingScrollRow: number | null = null;
   let gotoRowInput = '';
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  let applyingProjectId: string | null = null;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
 
@@ -183,7 +185,7 @@ import type {
     filteredFlaggedCount.set(0);
   };
 
-  const initializeColumnWidths = () => {
+  const initializeColumnWidths = (savedWidths?: Record<string, number>) => {
     if (!projectDetail) {
       columnWidths = new Map();
       return;
@@ -191,6 +193,11 @@ import type {
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
       // Widths use the display label, while the column key stays the internal id.
+      const saved = savedWidths?.[column];
+      if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) {
+        next.set(column, Math.min(Math.max(saved, MIN_DATA_WIDTH), MAX_DATA_WIDTH));
+        continue;
+      }
       const label = $columnLabels.get(column) ?? column;
       const headerChars = Math.min(label.length, WIDTH_LIMIT_CHARS);
       const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
@@ -210,19 +217,47 @@ import type {
       get(totalFilteredRows)
     );
 
-  const flushPersist = (projectId: string | null) => {
+  const buildViewState = (): ViewState => {
+    const logicalRow = rowOffset();
+    return {
+      version: 1,
+      search: get(search),
+      searchColumns: [...get(searchColumns)],
+      condition: cloneTree(get(conditionTree)) as unknown as Record<string, unknown>,
+      flagFilter: get(flagFilter),
+      bookmarkedOnly: get(bookmarkedOnly),
+      sortKey: get(sortKey),
+      sortDirection: get(sortDirection),
+      hiddenColumns: Array.from(get(hiddenColumns)),
+      columnWidths: Object.fromEntries(columnWidths),
+      logicalRow,
+    };
+  };
+
+  /**
+   * Writes the current project's view state to the engine. The snapshot is
+   * taken synchronously, so a project switch that resets the stores cannot
+   * change what is being saved for the previous project.
+   */
+  const flushPersist = async (
+    projectId: string | null,
+    notifyOnError = true
+  ): Promise<void> => {
     if (!projectId) {
       return;
     }
-    const logicalRow = rowOffset();
-    saveProjectView(projectId, {
-      condition: get(conditionTree),
-      hiddenColumns: Array.from(get(hiddenColumns)),
-      sortKey: get(sortKey),
-      sortDirection: get(sortDirection),
-      offset: logicalRow,
-      logicalRow,
-    });
+    const state = buildViewState();
+    try {
+      await backend.saveViewState({ projectId, state });
+    } catch (error) {
+      console.error('[view] failed to save view state:', error);
+      if (notifyOnError) {
+        dispatch('notify', {
+          message: 'Failed to save view settings. Evidence and annotations are unchanged.',
+          tone: 'error',
+        });
+      }
+    }
   };
 
   const schedulePersist = () => {
@@ -231,7 +266,7 @@ import type {
     }
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      flushPersist(get(currentProjectId));
+      void flushPersist(get(currentProjectId));
     }, 250);
   };
 
@@ -278,24 +313,109 @@ import type {
 
   const jumpToLastRow = () => scrollToRow(Math.max(0, get(totalFilteredRows) - 1));
 
-  const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
+  const applyProjectDetail = async (detail: LoadProjectResponse, _resetScroll: boolean) => {
     // Any response from the previous project or screen must be ignored from here on.
     invalidateViewRequests();
+    const generation = get(viewGeneration);
+    const projectId = detail.project.meta.id;
     const previousId = get(currentProjectId);
-    if (previousId && previousId !== detail.project.meta.id) {
-      flushPersist(previousId);
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
     }
-    const saved = loadProjectView(detail.project.meta.id, detail.columns);
-    const savedRow = saved?.logicalRow ?? saved?.offset ?? 0;
-    const hidden = new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? []));
-    conditionTree.set(
-      saved ? cloneTree(saved.condition) : { type: 'group', id: 'root', kind: 'and', collapsed: false, children: [] }
-    );
-    lastConditionJson = JSON.stringify(get(conditionPayload));
-    currentProjectId.set(detail.project.meta.id);
-    setHistoryProject(detail.project.meta.id);
-    hiddenColumns.set(hidden);
+    // Save the old project before its stores are replaced for the new one.
+    if (previousId && previousId !== projectId) {
+      await flushPersist(previousId);
+    }
+    if (generation !== get(viewGeneration)) {
+      if (applyingProjectId === projectId) {
+        applyingProjectId = null;
+      }
+      return;
+    }
+
+    initialized = false;
+    applyingProjectId = projectId;
+    currentProjectId.set(projectId);
+    setHistoryProject(projectId);
+
+    // Start from this project's defaults. Another project's global store values
+    // must not be visible while the engine view state is being read.
+    const emptyTree = {
+      type: 'group' as const,
+      id: 'root',
+      kind: 'and' as const,
+      collapsed: false,
+      children: []
+    };
+    search.set('');
     searchColumns.set([]);
+    flagFilter.set('all');
+    bookmarkedOnly.set(false);
+    sortKey.set(null);
+    sortDirection.set('asc');
+    conditionTree.set(emptyTree);
+    hiddenColumns.set(new Set(detail.hidden_columns ?? []));
+    initializeColumnWidths();
+
+    let engineState: ViewState | null = null;
+    let loadFailed = false;
+    try {
+      engineState = await backend.loadViewState({ projectId });
+    } catch (error) {
+      console.error('[view] failed to load view state:', error);
+      loadFailed = true;
+    }
+    if (generation !== get(viewGeneration) || get(currentProjectId) !== projectId) {
+      if (applyingProjectId === projectId) {
+        applyingProjectId = null;
+      }
+      return;
+    }
+
+    let saved: SavedView | null = null;
+    if (engineState) {
+      saved = viewStateToSavedView(engineState, detail.columns);
+      if (!saved) {
+        // Do not replace an unreadable condition tree with an empty filter
+        // without telling the user.
+        dispatch('notify', {
+          message: 'Saved view settings could not be restored. Showing the default view.',
+          tone: 'error',
+        });
+      }
+    } else {
+      // Legacy projects stored their view in localStorage. Migrate it once the
+      // engine write succeeds; later loads read the engine file.
+      const legacy = loadProjectView(projectId, detail.columns);
+      if (legacy) {
+        saved = legacy;
+        void backend
+          .saveViewState({ projectId, state: savedViewToViewState(legacy) })
+          .catch((error) => {
+            console.error('[view] failed to migrate legacy view state:', error);
+            dispatch('notify', {
+              message: 'Failed to migrate saved view settings. Evidence and annotations are unchanged.',
+              tone: 'error',
+            });
+          });
+      }
+    }
+    if (loadFailed) {
+      dispatch('notify', {
+        message: 'Failed to read saved view settings. Evidence and annotations are unchanged.',
+        tone: 'error',
+      });
+    }
+
+    const savedRow = saved?.logicalRow ?? saved?.offset ?? 0;
+    conditionTree.set(saved ? cloneTree(saved.condition) : emptyTree);
+    lastConditionJson = JSON.stringify(get(conditionPayload));
+    search.set(saved?.search ?? '');
+    searchColumns.set(saved ? [...saved.searchColumns] : []);
+    flagFilter.set(saved?.flagFilter ?? 'all');
+    bookmarkedOnly.set(saved?.bookmarkedOnly ?? false);
+    hiddenColumns.set(new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? [])));
     sortKey.set(saved?.sortKey ?? null);
     sortDirection.set(saved?.sortDirection ?? 'asc');
     iocDraft.set(detail.iocs.map((entry) => ({
@@ -304,7 +424,7 @@ import type {
       tag: entry.tag,
       query: entry.query
     })));
-    initializeColumnWidths();
+    initializeColumnWidths(saved?.columnWidths);
     const filters: AppliedFilters = {
       search: $search.trim(),
       flag: $flagFilter,
@@ -327,7 +447,7 @@ import type {
       condition: filters.condition,
     };
     lastAppliedFilters = buildFilterSignature(filters);
-    syncSelectionScope(detail.project.meta.id, lastAppliedFilters);
+    syncSelectionScope(projectId, lastAppliedFilters);
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
@@ -360,6 +480,7 @@ import type {
       $headerScrollEl.scrollLeft = 0;
     }
     initialized = true;
+    applyingProjectId = null;
     // Always request first page to ensure flags and memos are reflected after project reload
     // Wait for the first page to load before marking as ready to render
     requestPage(0, true).catch((error) => {
@@ -368,13 +489,19 @@ import type {
   };
 
   $: if (projectDetail) {
-    const projectChanged = projectDetail.project.meta.id !== $currentProjectId;
+    const projectId = projectDetail.project.meta.id;
+    const projectChanged = projectId !== $currentProjectId;
     const nextHiddenColumns = projectDetail.hidden_columns ?? [];
     const hiddenChanged =
       $lastHiddenColumnsRef === null ||
       !areStringsEqual(nextHiddenColumns, $lastHiddenColumnsRef);
     if (!initialized || projectChanged) {
-      applyProjectDetail(projectDetail, true);
+      // A pending async load owns the stores until it finishes; a second call
+      // would reset the values that load is about to apply.
+      if (applyingProjectId !== projectId) {
+        applyingProjectId = projectId;
+        void applyProjectDetail(projectDetail, true);
+      }
     } else if (hiddenChanged) {
       // Visibility is presentation only: the search scope (and therefore the
       // result set) must not change when a column is hidden.
@@ -428,9 +555,14 @@ import type {
 
   $: persistedView = initialized && projectDetail
     ? {
+        search: $search,
+        searchColumns: [...$searchColumns],
+        flagFilter: $flagFilter,
+        bookmarkedOnly: $bookmarkedOnly,
         hidden: Array.from($hiddenColumns),
         sortKey: $sortKey,
         sortDirection: $sortDirection,
+        columnWidths,
         offset: rowOffset(),
         logicalRow: rowOffset(),
         tree: $conditionTree,
@@ -1004,7 +1136,7 @@ import type {
       clearTimeout(persistTimer);
       persistTimer = null;
     }
-    flushPersist(get(currentProjectId));
+    void flushPersist(get(currentProjectId), false);
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;

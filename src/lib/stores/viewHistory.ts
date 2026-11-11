@@ -93,6 +93,16 @@ export function goForward(): void {
   });
 }
 
+/**
+ * Legacy localStorage view storage.
+ *
+ * New saves go to the engine (`saveViewState`), which keeps view state per
+ * project and writes it atomically. This reader remains only to migrate a
+ * project created before the engine view state existed; once it is read, the
+ * caller writes the same view to the engine and later loads use the engine.
+ *
+ * @deprecated Use `Backend.loadViewState`.
+ */
 export function loadProjectView(projectId: string, columns: readonly string[]): SavedView | null {
   try {
     const text = localStorage.getItem(STORAGE_PREFIX + projectId);
@@ -105,6 +115,10 @@ export function loadProjectView(projectId: string, columns: readonly string[]): 
   }
 }
 
+/**
+ * @deprecated Use `Backend.saveViewState`; this is only for the migration path
+ * when a legacy save must be mirrored.
+ */
 export function saveProjectView(projectId: string, view: SavedView): void {
   try {
     localStorage.setItem(STORAGE_PREFIX + projectId, JSON.stringify(view));

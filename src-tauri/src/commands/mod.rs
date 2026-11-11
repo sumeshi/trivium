@@ -17,6 +17,7 @@ mod rules;
 mod stats;
 mod surround;
 mod time;
+mod view;
 
 // Public command functions, re-exported for `generate_handler!` in main.rs
 // (which uses bare identifiers). The hidden `__cmd__*` / `__tauri_command_name_*`
@@ -43,3 +44,4 @@ pub use rules::{color_rules, save_color_rules};
 pub use stats::column_stats;
 pub use surround::surrounding_rows;
 pub use time::time_analysis;
+pub use view::{load_view_state, save_view_state};

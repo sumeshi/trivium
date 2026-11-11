@@ -54,7 +54,9 @@ fn main() {
             save_color_rules,
             color_rules,
             save_preset,
-            load_preset
+            load_preset,
+            load_view_state,
+            save_view_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
