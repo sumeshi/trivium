@@ -90,6 +90,12 @@ import type {
     VirtualRow,
     AppliedFilters
   } from './project_view/state';
+  import {
+    clampRow,
+    logicalRowAt,
+    maxScrollTop,
+    scrollTopForRow
+  } from '../virtualScroll';
 
   export let projectDetail: LoadProjectResponse;
   export let backend: Backend;
@@ -124,6 +130,8 @@ import type {
   let applyingHistory = false;
   let suppressScrollRecord = false;
   let appliedRestoreNonce = 0;
+  let pendingScrollRow: number | null = null;
+  let gotoRowInput = '';
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
@@ -187,18 +195,26 @@ import type {
     columnWidths = next;
   };
 
-  const rowOffset = () => Math.max(0, Math.floor(get(scrollTop) / ROW_HEIGHT));
+  // View state and history store a result-relative logical row, never a raw
+  // physical pixel offset.
+  const rowOffset = () =>
+    clampRow(
+      logicalRowAt(get(scrollTop), get(totalFilteredRows), get(viewportHeight)),
+      get(totalFilteredRows)
+    );
 
   const flushPersist = (projectId: string | null) => {
     if (!projectId) {
       return;
     }
+    const logicalRow = rowOffset();
     saveProjectView(projectId, {
       condition: get(conditionTree),
       hiddenColumns: Array.from(get(hiddenColumns)),
       sortKey: get(sortKey),
       sortDirection: get(sortDirection),
-      offset: rowOffset(),
+      offset: logicalRow,
+      logicalRow,
     });
   };
 
@@ -212,8 +228,10 @@ import type {
     }, 250);
   };
 
-  const applyScrollOffset = (offset: number) => {
-    const px = Math.max(0, offset) * ROW_HEIGHT;
+  const applyScrollOffset = (offset: number, totalOverride?: number) => {
+    const total = totalOverride ?? get(totalFilteredRows);
+    const row = clampRow(offset, total);
+    const px = scrollTopForRow(row, total, get(viewportHeight));
     suppressScrollRecord = true;
     scrollTop.set(px);
     if ($bodyScrollEl) {
@@ -221,6 +239,37 @@ import type {
     }
     suppressScrollRecord = false;
   };
+
+  const scrollToRow = (row: number) => {
+    if (!initialized) {
+      return;
+    }
+    const total = get(totalFilteredRows);
+    if (total <= 0) {
+      return;
+    }
+    const target = clampRow(row, total);
+    pendingScrollRow = null;
+    applyScrollOffset(target, total);
+    rememberOffset(target);
+    void requestPage(Math.floor(target / PAGE_SIZE));
+  };
+
+  const jumpToEnteredRow = () => {
+    if (gotoRowInput.trim() === '') {
+      return;
+    }
+    const parsed = Number(gotoRowInput);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    // The input is 1-based; the result rows are 0-based.
+    scrollToRow(Math.floor(parsed) - 1);
+  };
+
+  const jumpToFirstRow = () => scrollToRow(0);
+
+  const jumpToLastRow = () => scrollToRow(Math.max(0, get(totalFilteredRows) - 1));
 
   const applyProjectDetail = (detail: LoadProjectResponse, resetScroll: boolean) => {
     // Any response from the previous project or screen must be ignored from here on.
@@ -230,6 +279,7 @@ import type {
       flushPersist(previousId);
     }
     const saved = loadProjectView(detail.project.meta.id, detail.columns);
+    const savedRow = saved?.logicalRow ?? saved?.offset ?? 0;
     const hidden = new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? []));
     conditionTree.set(
       saved ? cloneTree(saved.condition) : { type: 'group', id: 'root', kind: 'and', collapsed: false, children: [] }
@@ -283,14 +333,18 @@ import type {
     iocManagerOpen.set(false);
     iocError = null;
     isSavingIocs = false;
-    resetHistory(get(conditionTree), saved?.offset ?? 0);
+    resetHistory(get(conditionTree), savedRow);
 
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
     totalFilteredRows.set(0);
     flaggedCount.set(detail.project.meta.flagged_records);
-    applyScrollOffset(saved?.offset ?? 0);
+    // The saved logical row is authoritative; the pixel offset derived from the
+    // project total is only an estimate until the first page returns the
+    // filtered count.
+    pendingScrollRow = savedRow;
+    applyScrollOffset(savedRow, detail.project.meta.total_records);
     if ($bodyScrollEl) {
       $bodyScrollEl.scrollLeft = 0;
     }
@@ -369,7 +423,8 @@ import type {
         hidden: Array.from($hiddenColumns),
         sortKey: $sortKey,
         sortDirection: $sortDirection,
-        offset: $scrollTop,
+        offset: rowOffset(),
+        logicalRow: rowOffset(),
         tree: $conditionTree,
       }
     : null;
@@ -377,21 +432,24 @@ import type {
     schedulePersist();
   }
 
-  $: visibleCount =
-    Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
+  $: viewportRows = Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT);
+  $: visibleCount = viewportRows + BUFFER * 2;
   // Keep in sync with DataTable: the applied QuerySpec result is the only
   // source for the active row count, including bookmark-only filtering.
   $: effectiveTotalRows = $totalFilteredRows;
-  $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
+  $: maxStart = Math.max(0, effectiveTotalRows - viewportRows);
+  $: anchorRow = logicalRowAt(
+    $scrollTop,
+    effectiveTotalRows,
+    $viewportHeight
+  );
   $: startIndex = Math.min(
     maxStart,
-    Math.max(0, Math.floor($scrollTop / ROW_HEIGHT) - BUFFER)
+    Math.max(0, anchorRow - BUFFER)
   );
   $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
   $: ensureRangeLoaded(startIndex, endIndex);
-  $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
-  $: if ($bodyScrollEl && totalHeight >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
+  $: if ($bodyScrollEl && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
     suppressScrollRecord = true;
     $bodyScrollEl.scrollTop = $scrollTop;
     suppressScrollRecord = false;
@@ -474,6 +532,14 @@ import type {
         }
         totalRows.set(response.total_rows);
         totalFilteredRows.set(response.total_filtered_rows);
+        // The saved logical row was recorded against the result set, so apply
+        // it once the real filtered count is known (it may have shrunk).
+        if (pendingScrollRow !== null) {
+          const row = clampRow(pendingScrollRow, response.total_filtered_rows);
+          pendingScrollRow = null;
+          applyScrollOffset(row, response.total_filtered_rows);
+          rememberOffset(row);
+        }
         // `flaggedCount` always means the whole project, never this page's slice.
         flaggedCount.set(response.annotated_total);
         filteredFlaggedCount.set(response.annotated_filtered);
@@ -532,6 +598,7 @@ import type {
     };
     lastAppliedFilters = signature;
     filterRequestId += 1;
+    pendingScrollRow = null;
     resetPaginationState();
     if (resetScroll) {
       scrollTop.set(0);
@@ -545,7 +612,11 @@ import type {
     }
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
-    const targetRow = resetScroll ? 0 : Math.max(0, Math.floor($scrollTop / ROW_HEIGHT));
+    // Page selection uses the same logical mapping as the table and the
+    // persisted position, not a raw pixel offset.
+    const targetRow = resetScroll
+      ? 0
+      : logicalRowAt($scrollTop, effectiveTotalRows, $viewportHeight);
     return requestPage(Math.floor(targetRow / PAGE_SIZE), true);
   };
 
@@ -632,7 +703,9 @@ import type {
       return;
     }
     scrollTop.set(target.scrollTop);
-    rememberOffset(Math.max(0, Math.floor(target.scrollTop / ROW_HEIGHT)));
+    rememberOffset(
+      logicalRowAt(target.scrollTop, get(totalFilteredRows), get(viewportHeight))
+    );
     if (isSyncingBodyScroll) {
       isSyncingBodyScroll = false;
       return;
@@ -909,6 +982,52 @@ import type {
 
 <section class="project-view">
   <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} on:refresh={() => dispatch('refresh')} />
+
+  <div class="row-jump" role="group" aria-label="Go to result row">
+    <label class="row-jump-field">
+      <span>Row</span>
+      <input
+        type="number"
+        min="1"
+        max={Math.max(1, $totalFilteredRows)}
+        step="1"
+        placeholder={`1–${$totalFilteredRows}`}
+        bind:value={gotoRowInput}
+        disabled={$totalFilteredRows === 0}
+        on:keydown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            jumpToEnteredRow();
+          }
+        }}
+      />
+    </label>
+    <button
+      type="button"
+      class="ghost"
+      on:click={jumpToEnteredRow}
+      disabled={$totalFilteredRows === 0}
+    >
+      Go
+    </button>
+    <button
+      type="button"
+      class="ghost"
+      on:click={jumpToFirstRow}
+      disabled={$totalFilteredRows === 0}
+    >
+      First
+    </button>
+    <button
+      type="button"
+      class="ghost"
+      on:click={jumpToLastRow}
+      disabled={$totalFilteredRows === 0}
+    >
+      Last
+    </button>
+    <span class="row-jump-range">of {$totalFilteredRows}</span>
+  </div>
 
   <TimelinePanel />
 

@@ -40,6 +40,12 @@
   import type { CachedRow, VirtualRow } from './state';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
+  import {
+    logicalRowAt,
+    maxScrollTop,
+    physicalHeight,
+    scrollTopForRow
+  } from '../../virtualScroll';
 
   const _toggleSort = toggleSort;
   const _setFlag = setFlag;
@@ -93,25 +99,37 @@
     document.documentElement.style.setProperty('--sticky-data', `${INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH}px`);
   }
 
-  $: visibleCount =
-    Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT) + BUFFER * 2;
+  $: viewportRows = Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT);
+  $: visibleCount = viewportRows + BUFFER * 2;
   // The applied QuerySpec result is the only source for the table's row count.
   $: effectiveTotalRows = $totalFilteredRows;
-  $: maxStart = Math.max(0, effectiveTotalRows - visibleCount);
+  // Leave enough rows to fill the viewport; the scroll offset alone cannot
+  // position the final row inside a compressed scroll range.
+  $: maxStart = Math.max(0, effectiveTotalRows - viewportRows);
+  // The physical scroll position is mapped to a logical row in one place so
+  // the displayed start and the page offsets use the same result position.
+  $: anchorRow = logicalRowAt(
+    $scrollTop,
+    effectiveTotalRows,
+    $viewportHeight
+  );
   $: startIndex = Math.min(
     maxStart,
-    Math.max(0, Math.floor($scrollTop / ROW_HEIGHT) - BUFFER)
+    Math.max(0, anchorRow - BUFFER)
   );
   $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
-  $: offsetY = startIndex * ROW_HEIGHT;
-  $: totalHeight = effectiveTotalRows * ROW_HEIGHT;
+  // Rows keep the fixed ROW_HEIGHT; only the spacer height is scaled.
+  $: offsetY =
+    scrollTopForRow(startIndex, effectiveTotalRows, $viewportHeight) - $scrollTop;
+  $: totalHeight = physicalHeight(effectiveTotalRows);
   // A filter can shrink the result set while the viewport is near the old end.
-  // Pull both the store and the scroll element back inside the new range so the
-  // space below the last row is not left as a blank spacer. Wait until pending
-  // page requests settle: on project load the count is briefly 0 while the
-  // saved scroll offset is being restored, and clamping then would lose it.
+  // Pull both the store and the scroll element back inside the new physical
+  // range so the space below the last row is not left as a blank spacer. Wait
+  // until pending page requests settle: on project load the count is briefly 0
+  // while the saved scroll offset is being restored, and clamping then would
+  // lose it.
   $: {
-    const maxScroll = Math.max(0, totalHeight - ($viewportHeight || 0));
+    const maxScroll = maxScrollTop(effectiveTotalRows, $viewportHeight);
     if ($pendingPages.size === 0 && $scrollTop > maxScroll) {
       scrollTop.set(maxScroll);
       if ($bodyScrollEl && $bodyScrollEl.scrollTop !== maxScroll) {

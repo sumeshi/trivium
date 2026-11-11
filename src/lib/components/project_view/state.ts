@@ -11,6 +11,7 @@ import type {
 import { buildCellCaches } from "../../ipcValues";
 import { estimatePageBytes, selectEvictions } from "../../pageCache";
 import { FLAG_HINTS } from "../../skin";
+import { ROW_HEIGHT, logicalRowAt } from "../../virtualScroll";
 
 export const FLAG_OPTIONS = [
   { value: "safe", label: "Safe", hint: FLAG_HINTS.safe, tone: "safe" },
@@ -45,7 +46,7 @@ export const FLAG_FILTER_OPTIONS: Array<{
   { value: "none", label: "Unflagged", hint: "–" },
 ];
 
-export const ROW_HEIGHT = 56;
+export { ROW_HEIGHT };
 export const BUFFER = 8;
 export const INDEX_COL_WIDTH = 80;
 export const FLAG_COL_WIDTH = 130;
@@ -234,7 +235,11 @@ let pageAccessClock = 0;
 
 /** Page containing the first row currently at the top of the viewport. */
 export function currentVisiblePage(): number {
-  const firstRow = Math.floor(Math.max(0, get(scrollTop)) / ROW_HEIGHT);
+  const firstRow = logicalRowAt(
+    get(scrollTop),
+    get(totalFilteredRows),
+    get(viewportHeight)
+  );
   return Math.floor(firstRow / PAGE_SIZE);
 }
 

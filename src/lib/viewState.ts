@@ -16,6 +16,8 @@ export interface SavedView {
   sortKey: string | null;
   sortDirection: "asc" | "desc";
   offset: number;
+  /** Result-relative row at the top of the viewport. Preferred over `offset`. */
+  logicalRow?: number;
 }
 
 const HISTORY_LIMIT = 50;
@@ -149,11 +151,18 @@ export function parseSavedView(text: string, columns: readonly string[]): SavedV
   const offset = typeof parsed.offset === "number" && Number.isInteger(parsed.offset) && parsed.offset >= 0
     ? parsed.offset
     : 0;
+  // `offset` used to store the row at the top of the viewport. Treat it as the
+  // legacy logical row when `logicalRow` is absent so old saves still restore.
+  const logicalRow =
+    typeof parsed.logicalRow === "number" && Number.isInteger(parsed.logicalRow) && parsed.logicalRow >= 0
+      ? parsed.logicalRow
+      : offset;
   return {
     condition: parsed.condition as EditorGroup,
     hiddenColumns,
     sortKey,
     sortDirection,
     offset,
+    logicalRow,
   };
 }

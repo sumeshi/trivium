@@ -41,6 +41,53 @@
   width: 100%;
 }
 
+.row-jump {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.row-jump-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.row-jump-field input {
+  width: 9rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+
+.row-jump-field input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.row-jump .ghost {
+  padding: 8px 14px;
+}
+
+.row-jump-range {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .filter-flag,
 .filter-search,
 .filter-columns,
