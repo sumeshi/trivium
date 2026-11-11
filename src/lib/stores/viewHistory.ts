@@ -48,6 +48,16 @@ export function resetHistory(tree: EditorGroup, offset: number): void {
   publish();
 }
 
+export function snapshotHistory(): History {
+  return structuredClone(history);
+}
+
+export function restoreHistory(snapshot: History): void {
+  history = structuredClone(snapshot);
+  historyRestore.set(null);
+  publish();
+}
+
 export function recordAppliedCondition(
   previousOffset: number,
   tree: EditorGroup,

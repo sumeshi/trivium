@@ -19,6 +19,8 @@
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
   import type { SavedView } from '../viewState';
+  import { saveWorkspaceView, waitForWorkspaceSave } from '../workspaceSession';
+  import type { WorkspaceSession } from '../workspaceSession';
   import {
     savedViewToViewState,
     viewStateToSavedView,
@@ -32,6 +34,8 @@
     recordAppliedCondition,
     rememberOffset,
     resetHistory,
+    snapshotHistory,
+    restoreHistory,
     setHistoryProject,
   } from '../stores/viewHistory';
   import {
@@ -48,6 +52,7 @@
     sortDirection,
     isExporting,
     rowsCache,
+    positionToRowIndex,
     pendingPages,
     loadedPages,
     largePages,
@@ -107,11 +112,13 @@ import type {
 
   export let projectDetail: LoadProjectResponse;
   export let backend: Backend;
+  export let session: WorkspaceSession | null = null;
+  export let onSessionSnapshot: (session: WorkspaceSession) => void = () => {};
 
   const dispatch = createEventDispatcher<{
     refresh: void;
     notify: { message: string; tone: 'success' | 'error' };
-    summary: { flagged: number; iocApplied: number; hiddenColumns: string[] };
+    summary: { projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] };
   }>();
 
   let iocError: string | null = null;
@@ -131,6 +138,7 @@ import type {
   let applyingHistory = false;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
+  let pendingScrollLeft: number | null = null;
   let gotoRowInput: number | undefined;
   let locatingRow = false;
   let rowLookupSequence = 0;
@@ -209,10 +217,12 @@ import type {
 
   const resetPaginationState = () => {
     rowsCache.set(new Map());
+    positionToRowIndex.set(new Map());
     pendingPages.set(new Set());
     loadedPages.set(new Set());
     resetPageCache();
-    totalRows.set(0);
+    // Source row count is project metadata, independent of a loading/erroring query.
+    totalRows.set(projectDetail.project.meta.total_records);
     flaggedCount.set(0);
     filteredFlaggedCount.set(0);
   };
@@ -250,7 +260,7 @@ import type {
     );
 
   const buildViewState = (): ViewState => {
-    const logicalRow = rowOffset();
+    const logicalRow = pendingScrollRow ?? rowOffset();
     return {
       version: 1,
       search: get(search),
@@ -266,6 +276,20 @@ import type {
     };
   };
 
+  /** Capture controls before any shared stores can be replaced by another tab. */
+  export function snapshotSession(): WorkspaceSession | null {
+    if (!initialized || destroyed || get(currentProjectId) !== projectDetail.project.meta.id) return null;
+    return {
+      projectId: projectDetail.project.meta.id,
+      view: buildViewState(),
+      selectedRowIds: [...get(selectedRowIds)],
+      selectionSignature: lastAppliedFilters,
+      history: snapshotHistory(),
+      scrollLeft: pendingScrollLeft ?? get(bodyScrollEl)?.scrollLeft ?? 0,
+      writable: viewStateWritable,
+    };
+  }
+
   /**
    * Writes the current project's view state to the engine. The snapshot is
    * taken synchronously, so a project switch that resets the stores cannot
@@ -275,12 +299,12 @@ import type {
     projectId: string | null,
     notifyOnError = true
   ): Promise<void> => {
-    if (!projectId || !viewStateWritable) {
+    if (!projectId || !viewStateWritable || !initialized || projectId !== projectDetail.project.meta.id) {
       return;
     }
     const state = buildViewState();
     try {
-      await backend.saveViewState({ projectId, state });
+      await saveWorkspaceView(backend, projectId, state);
     } catch (error) {
       console.error('[view] failed to save view state:', error);
       if (notifyOnError) {
@@ -408,14 +432,9 @@ import type {
     invalidateViewRequests();
     const generation = get(viewGeneration);
     const projectId = detail.project.meta.id;
-    const previousId = get(currentProjectId);
     if (persistTimer) {
       clearTimeout(persistTimer);
       persistTimer = null;
-    }
-    // Save the old project before its stores are replaced for the new one.
-    if (previousId && previousId !== projectId) {
-      await flushPersist(previousId);
     }
     if (generation !== get(viewGeneration)) {
       if (applyingProjectId === projectId) {
@@ -429,7 +448,8 @@ import type {
     cancelActiveQueryJobs();
     initialized = false;
     applyingProjectId = projectId;
-    viewStateWritable = true;
+    const tabSession = session?.projectId === projectId ? session : null;
+    viewStateWritable = tabSession?.writable ?? true;
     currentProjectId.set(projectId);
     setHistoryProject(projectId);
 
@@ -462,13 +482,22 @@ import type {
     let engineState: ViewState | null = null;
     let loadFailed = false;
     let viewStateStatus: "ok" | "missing" | "unreadable" | "newer" = "missing";
-    try {
-      const loaded = await backend.loadViewState({ projectId });
-      engineState = loaded.state;
-      viewStateStatus = loaded.status;
-    } catch (error) {
-      console.error('[view] failed to load view state:', error);
-      loadFailed = true;
+    if (tabSession) {
+      engineState = tabSession.view;
+      viewStateStatus = 'ok';
+    } else {
+      try {
+        // Closing and immediately reopening a tab must await its old instance's
+        // final write. Session restores bypass disk and can switch immediately.
+        await waitForWorkspaceSave(projectId);
+        if (destroyed || generation !== get(viewGeneration)) return;
+        const loaded = await backend.loadViewState({ projectId });
+        engineState = loaded.state;
+        viewStateStatus = loaded.status;
+      } catch (error) {
+        console.error('[view] failed to load view state:', error);
+        loadFailed = true;
+      }
     }
     if (generation !== get(viewGeneration) || get(currentProjectId) !== projectId) {
       if (applyingProjectId === projectId) {
@@ -503,8 +532,7 @@ import type {
       const legacy = loadProjectView(projectId, detail.columns);
       if (legacy) {
         saved = legacy;
-        void backend
-          .saveViewState({ projectId, state: savedViewToViewState(legacy) })
+        void saveWorkspaceView(backend, projectId, savedViewToViewState(legacy))
           .catch((error) => {
             console.error('[view] failed to migrate legacy view state:', error);
             dispatch('notify', {
@@ -567,6 +595,9 @@ import type {
     });
     lastAppliedFilters = buildFilterSignature(filters);
     syncSelectionScope(projectId, lastAppliedFilters);
+    if (tabSession?.selectionSignature === lastAppliedFilters) {
+      selectedRowIds.set(new Set(tabSession.selectedRowIds));
+    }
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
@@ -580,7 +611,8 @@ import type {
     iocManagerOpen.set(false);
     iocError = null;
     isSavingIocs = false;
-    resetHistory(get(conditionTree), savedRow);
+    if (tabSession) restoreHistory(tabSession.history);
+    else resetHistory(get(conditionTree), savedRow);
 
     // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
@@ -592,6 +624,7 @@ import type {
     // project total is only an estimate until the first page returns the
     // filtered count.
     pendingScrollRow = savedRow;
+    pendingScrollLeft = tabSession?.scrollLeft ?? 0;
     applyScrollOffset(savedRow, detail.project.meta.total_records);
     if ($bodyScrollEl) {
       $bodyScrollEl.scrollLeft = 0;
@@ -807,6 +840,11 @@ import type {
             applyScrollOffset(row, response.total_filtered_rows);
             rememberOffset(row);
           }
+          if (pendingScrollLeft !== null && $bodyScrollEl) {
+            $bodyScrollEl.scrollLeft = pendingScrollLeft;
+            if ($headerScrollEl) $headerScrollEl.scrollLeft = $bodyScrollEl.scrollLeft;
+            pendingScrollLeft = null;
+          }
           // `flaggedCount` always means the whole project, never this page's slice.
           flaggedCount.set(response.annotated_total);
           filteredFlaggedCount.set(response.annotated_filtered);
@@ -838,6 +876,11 @@ import type {
       }
     } catch (error) {
       console.error(error);
+      if (isCurrentRequest()) {
+        if (get(appliedResultLoading)) totalFilteredRows.set(0);
+        appliedResultLoading.set(false);
+        dispatch('notify', { message: errorMessage(error, 'Failed to load rows.'), tone: 'error' });
+      }
     } finally {
       releasePageSlot();
       // A stale first-page request must not clear the loading state of the
@@ -1146,6 +1189,10 @@ import type {
   });
 
   onDestroy(() => {
+    const snapshot = snapshotSession();
+    if (snapshot) onSessionSnapshot(snapshot);
+    // Snapshot and queue the save before another keyed view resets global stores.
+    void flushPersist(projectDetail.project.meta.id, false);
     destroyed = true;
     unlistenJobEvents?.();
     unlistenJobEvents = null;
@@ -1156,7 +1203,15 @@ import type {
       clearTimeout(persistTimer);
       persistTimer = null;
     }
-    void flushPersist(get(currentProjectId), false);
+    rowsCache.set(new Map());
+    positionToRowIndex.set(new Map());
+    pendingPages.set(new Set());
+    loadedPages.set(new Set());
+    resetPageCache();
+    selectedRowIds.set(new Set());
+    expandedCell.set(null);
+    memoEditor.set(null);
+    projectDetailStore.set(null);
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
@@ -1164,6 +1219,7 @@ import type {
   });
 
   const emitSummary = () => {
+    if (destroyed || !initialized) return;
     const hidden = Array.from($hiddenColumns);
     const hiddenKey = hidden.join('|');
     if (lastSummaryFlagged === $flaggedCount && lastSummaryHiddenKey === hiddenKey) {
@@ -1172,6 +1228,7 @@ import type {
     lastSummaryFlagged = $flaggedCount;
     lastSummaryHiddenKey = hiddenKey;
     dispatch('summary', { 
+      projectId: projectDetail.project.meta.id,
       flagged: $flaggedCount, 
       iocApplied: projectDetail?.project.meta.ioc_applied_records ?? 0,
       hiddenColumns: hidden 

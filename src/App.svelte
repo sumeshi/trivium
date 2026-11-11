@@ -6,11 +6,14 @@
   import Sidebar from './lib/components/app/Sidebar.svelte';
   import Header from './lib/components/app/Header.svelte';
   import ProjectView from './lib/components/ProjectView.svelte';
+  import ProjectTabs from './lib/components/app/ProjectTabs.svelte';
   import Toast from './lib/components/app/Toast.svelte';
   import { showToast } from './lib/utils/toast';
   import { initTheme } from './lib/theme';
   import { createProjectController } from './lib/stores/projects';
   import { errorMessage } from './lib/errors';
+  import { copyWorkspaceSession } from './lib/workspaceSession';
+  import type { WorkspaceSession } from './lib/workspaceSession';
 
   const backend: Backend = createBackend();
   const projectController = createProjectController(backend);
@@ -18,6 +21,26 @@
   const canCreateProject = projectController.canCreateProject;
 
   let sidebarOpen = true;
+  let activeView: ProjectView | null = null;
+  const sessions = new Map<string, WorkspaceSession>();
+  $: openProjects = $projectState.openProjectIds.flatMap((id) => {
+    const project = $projectState.projects.find((item) => item.meta.id === id);
+    return project ? [project] : [];
+  });
+  $: for (const id of sessions.keys()) {
+    if (!$projectState.openProjectIds.includes(id)) sessions.delete(id);
+  }
+
+  const retainSession = (session: WorkspaceSession) => {
+    if ($projectState.openProjectIds.includes(session.projectId)) {
+      sessions.set(session.projectId, copyWorkspaceSession(session));
+    }
+  };
+
+  const captureActive = () => {
+    const session = activeView?.snapshotSession();
+    if (session) retainSession(session);
+  };
 
   const handleNotify = (event: CustomEvent<{ message: string; tone: 'success' | 'error' }>) => {
     showToast(event.detail.message, event.detail.tone);
@@ -48,6 +71,7 @@
 
   const createProject = async () => {
     try {
+      captureActive();
       const summary = await projectController.createProject();
       showToast(`Imported ${summary.meta.name}`);
       sidebarOpen = false;
@@ -65,7 +89,9 @@
       return;
     }
     try {
+      captureActive();
       await projectController.deleteProject(projectId);
+      sessions.delete(projectId);
       showToast('Project deleted.');
     } catch (error) {
       console.error(error);
@@ -75,6 +101,7 @@
 
   const handleRefreshRequest = async () => {
     try {
+      captureActive();
       await projectController.refreshSelected();
     } catch (error) {
       console.error(error);
@@ -84,6 +111,7 @@
 
   const handleSelectProject = async (projectId: string) => {
     try {
+      captureActive();
       await projectController.selectProject(projectId);
       sidebarOpen = false;
     } catch (error) {
@@ -92,7 +120,17 @@
     }
   };
 
-  const handleSummaryUpdate = (event: CustomEvent<{ flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
+  const handleCloseTab = async (projectId: string) => {
+    captureActive();
+    sessions.delete(projectId);
+    try {
+      await projectController.closeProject(projectId);
+    } catch (error) {
+      showToast(errorMessage(error, 'Failed to load the next project.'), 'error');
+    }
+  };
+
+  const handleSummaryUpdate = (event: CustomEvent<{ projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
     projectController.updateSummary(event.detail);
   };
 
@@ -107,6 +145,7 @@
 
 <div class="app-shell">
   <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
+  <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId} on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)} />
 
   {#if sidebarOpen}
     <Sidebar
@@ -141,15 +180,20 @@
           Loading project…
         </div>
       {:else if $projectState.projectDetail}
-        <div class="flex-1 min-h-0">
+        {#key $projectState.selectedProjectId}
+        <div class="flex-1 min-h-0" id={`project-panel-${$projectState.selectedProjectId}`} role="tabpanel" aria-labelledby={`project-tab-${$projectState.selectedProjectId}`}>
           <ProjectView
+            bind:this={activeView}
             {backend}
             projectDetail={$projectState.projectDetail}
+            session={sessions.get($projectState.selectedProjectId) ?? null}
+            onSessionSnapshot={retainSession}
             on:refresh={handleRefreshRequest}
             on:summary={handleSummaryUpdate}
             on:notify={handleNotify}
           />
         </div>
+        {/key}
       {/if}
     {:else}
       <div class="empty-workspace">
