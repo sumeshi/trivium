@@ -69,6 +69,7 @@
     iocManagerOpen,
     viewportHeight,
     scrollTop,
+    scrollLeft,
     bodyScrollEl,
     headerScrollEl,
     iocDraft,
@@ -282,15 +283,17 @@ import type {
   };
 
   /** Capture controls before any shared stores can be replaced by another tab. */
-  export function snapshotSession(): WorkspaceSession | null {
+  export function snapshotSession(captureDOM = true): WorkspaceSession | null {
     if (!initialized || destroyed || get(currentProjectId) !== projectDetail.project.meta.id) return null;
+    const viewport = get(bodyScrollEl);
+    if (captureDOM && viewport?.isConnected) scrollLeft.set(viewport.scrollLeft);
     return {
       projectId: projectDetail.project.meta.id,
       view: buildViewState(),
       selectedRowIds: [...get(selectedRowIds)],
       selectionSignature: lastAppliedFilters,
       history: snapshotHistory(),
-      scrollLeft: pendingScrollLeft ?? get(bodyScrollEl)?.scrollLeft ?? 0,
+      scrollLeft: pendingScrollLeft ?? get(scrollLeft),
       writable: viewStateWritable,
     };
   }
@@ -654,6 +657,7 @@ import type {
     // filtered count.
     pendingScrollRow = savedRow;
     pendingScrollLeft = tabSession?.scrollLeft ?? 0;
+    scrollLeft.set(pendingScrollLeft);
     applyScrollOffset(savedRow, detail.project.meta.total_records);
     if ($bodyScrollEl) {
       $bodyScrollEl.scrollLeft = 0;
@@ -879,6 +883,7 @@ import type {
             }
             if (savedLeft !== null && $bodyScrollEl) {
               $bodyScrollEl.scrollLeft = savedLeft;
+              scrollLeft.set($bodyScrollEl.scrollLeft);
               if ($headerScrollEl) $headerScrollEl.scrollLeft = $bodyScrollEl.scrollLeft;
             }
           }
@@ -975,6 +980,7 @@ import type {
     resetPaginationState();
     if (resetScroll) {
       scrollTop.set(0);
+      scrollLeft.set(0);
       if ($bodyScrollEl) {
         $bodyScrollEl.scrollTop = 0;
         $bodyScrollEl.scrollLeft = 0;
@@ -1227,7 +1233,8 @@ import type {
 
   onDestroy(() => {
     if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
-    const snapshot = snapshotSession();
+    // Child bindings may already have detached/reset their DOM by teardown.
+    const snapshot = snapshotSession(false);
     if (snapshot) onSessionSnapshot(snapshot);
     // Snapshot and queue the save before another keyed view resets global stores.
     void flushPersist(projectDetail.project.meta.id, false);

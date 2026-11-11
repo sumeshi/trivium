@@ -13,6 +13,7 @@
     headerScrollEl,
     viewportHeight,
     scrollTop,
+    scrollLeft,
     tableWidth,
     ROW_HEIGHT,
     PAGE_SIZE,
@@ -83,6 +84,7 @@
   let virtualRows: VirtualRow[] = [];
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
+  let horizontalScrollEl: HTMLDivElement | null = null;
   let selectAllEl: HTMLInputElement | null = null;
 
   const resolveColumnWidth = (column: string) => {
@@ -106,6 +108,10 @@
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
+  $: horizontalMaximum = Math.max(0, effectiveTableWidth - $tableWidth);
+  $: if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== $scrollLeft) {
+    horizontalScrollEl.scrollLeft = $scrollLeft;
+  }
   $: gridTemplate = [
     `${SELECT_COL_WIDTH}px`,
     `${INDEX_COL_WIDTH}px`,
@@ -218,6 +224,7 @@
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
+    if (!target.isConnected) return;
     scrollTop.set(target.scrollTop);
     rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
     syncHeader(target.scrollLeft);
@@ -226,9 +233,34 @@
   // The body owns horizontal position. Feeding delayed header scroll events
   // back into it can undo a newer wheel gesture or a tab's restored position.
   const syncHeader = (left: number) => {
+    scrollLeft.set(left);
     if ($headerScrollEl && $headerScrollEl.scrollLeft !== left) {
       $headerScrollEl.scrollLeft = left;
     }
+    if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== left) {
+      horizontalScrollEl.scrollLeft = left;
+    }
+  };
+
+  const handleHorizontalScroll = (event: Event) => {
+    const target = event.currentTarget as HTMLDivElement;
+    if (!$bodyScrollEl || !target.isConnected) return;
+    $bodyScrollEl.scrollLeft = target.scrollLeft;
+    syncHeader($bodyScrollEl.scrollLeft);
+  };
+
+  const handleHorizontalKey = (event: KeyboardEvent) => {
+    if (!$bodyScrollEl) return;
+    const previous = $bodyScrollEl.scrollLeft;
+    const next = event.key === 'ArrowLeft' ? previous - ROW_HEIGHT
+      : event.key === 'ArrowRight' ? previous + ROW_HEIGHT
+      : event.key === 'PageUp' ? previous - $bodyScrollEl.clientWidth
+      : event.key === 'PageDown' ? previous + $bodyScrollEl.clientWidth
+      : event.key === 'Home' ? 0 : event.key === 'End' ? horizontalMaximum : null;
+    if (next === null) return;
+    event.preventDefault();
+    $bodyScrollEl.scrollLeft = next;
+    syncHeader($bodyScrollEl.scrollLeft);
   };
 
   const focusColumn = (index: number) => {
@@ -246,18 +278,18 @@
 
   const forwardWheel = (event: WheelEvent) => {
     if (!$bodyScrollEl) return;
-    if (event.currentTarget === $bodyScrollEl) {
-      return;
-    }
+    const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+    const deltaY = event.shiftKey && !event.deltaX ? 0 : event.deltaY;
+    if (event.currentTarget === $bodyScrollEl && !deltaX) return;
     let handled = false;
-    if (event.deltaY !== 0) {
+    if (deltaY !== 0) {
       const previousTop = $bodyScrollEl.scrollTop;
-      $bodyScrollEl.scrollTop += event.deltaY;
+      $bodyScrollEl.scrollTop += deltaY;
       handled = handled || $bodyScrollEl.scrollTop !== previousTop;
     }
-    if (event.deltaX !== 0) {
+    if (deltaX !== 0) {
       const previousLeft = $bodyScrollEl.scrollLeft;
-      $bodyScrollEl.scrollLeft += event.deltaX;
+      $bodyScrollEl.scrollLeft += deltaX;
       handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
       syncHeader($bodyScrollEl.scrollLeft);
     }
@@ -357,8 +389,10 @@
       </div>
       <div
         class="virtual-viewport"
+        id="project-table-viewport"
         bind:this={$bodyScrollEl}
         bind:clientHeight={$viewportHeight}
+        bind:clientWidth={$tableWidth}
         on:scroll={handleScroll}
         on:wheel={forwardWheel}
       >
@@ -502,6 +536,26 @@
           </div>
         </div>
       </div>
+      {#if $tableWidth > 0 && horizontalMaximum > 1}
+        <div
+          class="table-horizontal-scroll"
+          bind:this={horizontalScrollEl}
+          style={`width: ${$tableWidth}px;`}
+          role="scrollbar"
+          aria-label="Scroll table horizontally"
+          aria-controls="project-table-viewport"
+          aria-orientation="horizontal"
+          aria-valuemin="0"
+          aria-valuemax={horizontalMaximum}
+          aria-valuenow={Math.round($scrollLeft)}
+          title="Scroll table horizontally (Shift+wheel or arrow keys)"
+          tabindex="0"
+          on:scroll={handleHorizontalScroll}
+          on:keydown={handleHorizontalKey}
+        >
+          <div style={`width: ${effectiveTableWidth}px; height: 1px;`} aria-hidden="true"></div>
+        </div>
+      {/if}
     </div>
   {/if}
 </section>

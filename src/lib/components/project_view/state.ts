@@ -307,6 +307,7 @@ export function updateCachedRow(
 
 export const viewportHeight = writable(0);
 export const scrollTop = writable(0);
+export const scrollLeft = writable(0);
 export const tableWidth = writable(0);
 export const bodyScrollEl = writable<HTMLDivElement | null>(null);
 export const headerScrollEl = writable<HTMLDivElement | null>(null);

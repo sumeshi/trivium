@@ -629,10 +629,26 @@ button.primary:disabled {
 .virtual-viewport {
   flex: 1 1 auto;
   overflow-y: auto;
-  overflow-x: auto;
+  /* Put horizontal controls outside the rows: WebKitGTK's native scrollbar
+     hit area otherwise intercepts the last row's flag and memo buttons. */
+  overflow-x: hidden;
   border-radius: 0 0 var(--radius) var(--radius);
   position: relative;
   width: 100%;
+}
+
+.table-horizontal-scroll {
+  flex: 0 0 14px;
+  height: 14px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface-weak);
+}
+
+.table-horizontal-scroll:focus-visible {
+  outline: 1px solid var(--accent-border);
+  outline-offset: -1px;
 }
 
 .virtual-spacer {
