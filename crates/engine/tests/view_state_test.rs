@@ -62,7 +62,15 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid) {
 }
 
 fn load(store: &ProjectsStore, project_id: Uuid) -> Option<ViewState> {
-    load_view_state(store, ViewStateRequest { project_id }).expect("failed to load view state")
+    load_view_state(store, ViewStateRequest { project_id })
+        .expect("failed to load view state")
+        .state
+}
+
+fn load_status(store: &ProjectsStore, project_id: Uuid) -> String {
+    load_view_state(store, ViewStateRequest { project_id })
+        .expect("failed to load view state")
+        .status
 }
 
 fn save(store: &ProjectsStore, project_id: Uuid, state: &ViewState) {
@@ -145,6 +153,7 @@ fn broken_view_state_does_not_block_project_or_annotations() {
     .expect("failed to corrupt view state");
 
     assert!(load(&store, id).is_none());
+    assert_eq!(load_status(&store, id), "unreadable");
     let loaded = projects::load_project(&store, ProjectRequest { project_id: id })
         .expect("a broken view state must not block loading the project");
     assert_eq!(loaded.project.meta.total_records, 6);
@@ -168,6 +177,20 @@ fn newer_view_state_is_ignored_and_not_overwritten() {
     fs::write(&path, &content).expect("failed to write future view state");
 
     assert!(load(&store, id).is_none());
+    assert_eq!(load_status(&store, id), "newer");
+    // A save from an old frontend must not replace the newer file either.
+    let error = save_view_state(
+        &store,
+        SaveViewStatePayload {
+            project_id: id,
+            state: sample_state(),
+        },
+    )
+    .expect_err("an older version must not overwrite a newer view state");
+    assert!(
+        error.to_string().contains("newer version"),
+        "unexpected error: {error}"
+    );
     let after = fs::read(&path).expect("future view state should remain");
     assert_eq!(after, content);
     let _ = fs::remove_dir_all(root);

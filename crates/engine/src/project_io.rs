@@ -24,7 +24,7 @@ pub const INTERNAL_ORIGINAL: &str = "__original";
 /// number or the 1-based JSON array element. Kept so an import error or a
 /// later review can point back to the original record even when blank lines or
 /// embedded newlines make the row id differ from the source location.
-pub const INTERNAL_SOURCE_RECORD: &str = "__source_record";
+pub const INTERNAL_SOURCE_RECORD: &str = "__trivium_source_record";
 
 /// Internal columns are never part of the data column list, search scope,
 /// output columns, or analysis inputs.
@@ -234,7 +234,7 @@ pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {
 /// [`write_batch`](Self::write_batch) call as its own row group and only
 /// writes the footer on [`finish`](Self::finish). The schema is fixed from the
 /// CSV header so every batch has the same columns: the imported data columns,
-/// then `__original`, `__rowid`, and `__source_record`.
+/// then `__original`, `__rowid`, and `__trivium_source_record`.
 pub struct BatchDataWriter {
     inner: BatchedWriter<BufWriter<File>>,
 }

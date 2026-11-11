@@ -244,8 +244,8 @@ fn metadata_write_failure_does_not_report_the_annotation_as_unsaved() {
     );
     assert_eq!(
         store.find(&id).expect("project").flagged_records,
-        1,
-        "the in-memory count must still reflect the committed annotation"
+        0,
+        "a failed metadata write must not commit the derived count in memory"
     );
 
     let _ = fs::remove_dir_all(root);

@@ -350,6 +350,11 @@ fn hidden_column_condition_and_search_match_without_returning_the_column() {
             );
         }
     }
+    // Inspect the actual page JSON: `data` is no longer serialized, and the
+    // hidden column must be absent from the cells map too.
+    let ipc = serde_json::to_value(&all_rows).expect("page response must serialize");
+    assert!(ipc["rows"][0].get("data").is_none());
+    assert!(ipc["rows"][0]["cells"].get(&comma).is_none());
 
     let _ = fs::remove_dir_all(root);
 }

@@ -222,14 +222,27 @@ fn resolve_export_rows(
                 )));
             }
             let selected: HashSet<usize> = requested.iter().copied().collect();
-            // The QuerySpec result is the base order. Selected ids outside the
-            // current result are dropped rather than falling back to another
-            // scope.
-            Ok(resolve_target(df, &payload.spec, all_columns, flags, job)?
-                .filtered
-                .into_iter()
-                .filter(|idx| selected.contains(idx))
-                .collect())
+            // The QuerySpec result is the base order. Refuse a selection that
+            // is no longer inside that result instead of silently writing a
+            // smaller file while the dialog still shows the selected count.
+            let result: Vec<usize> =
+                resolve_target(df, &payload.spec, all_columns, flags, job)?
+                    .filtered
+                    .into_iter()
+                    .filter(|idx| selected.contains(idx))
+                    .collect();
+            let outside: Vec<usize> = selected
+                .iter()
+                .copied()
+                .filter(|idx| !result.contains(idx))
+                .collect();
+            if !outside.is_empty() {
+                return Err(AppError::Message(format!(
+                    "Selected rows are no longer in the current result: {:?}. Select again.",
+                    outside
+                )));
+            }
+            Ok(result)
         }
         other => Err(AppError::Message(format!(
             "Unknown export scope: {}.",

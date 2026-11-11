@@ -2,12 +2,23 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::{ViewState, VIEW_STATE_VERSION};
 use crate::store::ProjectsStore;
+
+/// Result of reading a project's view state.
+///
+/// `status` distinguishes a genuinely missing file (`missing`) from a file the
+/// frontend must not overwrite (`unreadable` or `newer`). The caller can show
+/// defaults without immediately replacing the original file.
+#[derive(Debug, Serialize)]
+pub struct ViewStateLoad {
+    pub state: Option<ViewState>,
+    pub status: String,
+}
 
 const VIEW_STATE_FILE: &str = "view_state.json";
 
@@ -36,14 +47,19 @@ fn view_state_path(store: &ProjectsStore, project_id: &Uuid) -> PathBuf {
 pub fn load_view_state(
     store: &ProjectsStore,
     request: ViewStateRequest,
-) -> Result<Option<ViewState>, AppError> {
+) -> Result<ViewStateLoad, AppError> {
     if store.find(&request.project_id).is_none() {
         return Err(AppError::Message("Project not found.".into()));
     }
     let path = view_state_path(store, &request.project_id);
     let data = match fs::read(&path) {
         Ok(data) => data,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ViewStateLoad {
+                state: None,
+                status: "missing".to_string(),
+            })
+        }
         Err(err) => {
             return Err(AppError::from(
                 anyhow::Error::new(err).context(format!("failed to read view state {:?}", path)),
@@ -58,7 +74,10 @@ pub fn load_view_state(
                 "[view] ignoring unreadable view state for {:?}: {:?}",
                 path, err
             );
-            return Ok(None);
+            return Ok(ViewStateLoad {
+                state: None,
+                status: "unreadable".to_string(),
+            });
         }
     };
 
@@ -67,10 +86,16 @@ pub fn load_view_state(
             "[view] ignoring newer view state version {} (supported {}) for {:?}",
             state.version, VIEW_STATE_VERSION, path
         );
-        return Ok(None);
+        return Ok(ViewStateLoad {
+            state: None,
+            status: "newer".to_string(),
+        });
     }
 
-    Ok(Some(state))
+    Ok(ViewStateLoad {
+        state: Some(state),
+        status: "ok".to_string(),
+    })
 }
 
 /// Writes the view state through a sibling temporary file.
@@ -86,6 +111,28 @@ pub fn save_view_state(
     }
 
     let path = view_state_path(store, &payload.project_id);
+    if path.exists() {
+        let existing = fs::read(&path).map_err(|err| {
+            AppError::from(
+                anyhow::Error::new(err)
+                    .context(format!("failed to read existing view state {:?}", path)),
+            )
+        })?;
+        match serde_json::from_slice::<ViewState>(&existing) {
+            Ok(state) if state.version > VIEW_STATE_VERSION => {
+                return Err(AppError::Message(format!(
+                    "Existing view state uses a newer version ({}); not overwriting.",
+                    state.version
+                )));
+            }
+            Ok(_) => {}
+            Err(_) => {
+                return Err(AppError::Message(
+                    "Existing view state is unreadable; not overwriting.".into(),
+                ));
+            }
+        }
+    }
     let parent = path
         .parent()
         .ok_or_else(|| AppError::Message("Project directory missing.".into()))?;

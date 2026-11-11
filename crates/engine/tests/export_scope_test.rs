@@ -137,6 +137,38 @@ fn selected_scope_uses_query_order_and_drops_duplicates() {
 }
 
 #[test]
+fn selected_scope_rejects_rows_outside_the_applied_result() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let id = create(&store, &root);
+    let ids = common::column_ids(&store, id);
+    let id_column = common::id(&ids, "id");
+    let destination = root.join("outside.csv");
+
+    let error = export_project(
+        &store,
+        ExportProjectPayload {
+            project_id: id,
+            destination: destination.to_string_lossy().to_string(),
+            scope: Some("selected".to_string()),
+            spec: search_spec(id_column),
+            columns: None,
+            // Row 1 is "beta" and is not in the "alpha" result.
+            row_indices: Some(vec![0, 1]),
+            include_annotations: None,
+        },
+    )
+    .expect_err("a selection outside the applied result must fail");
+    assert!(
+        error.to_string().contains("no longer in the current result"),
+        "unexpected error: {error}"
+    );
+    assert!(!destination.exists(), "no partial export may be written");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn empty_selection_is_an_error_and_never_falls_back() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");

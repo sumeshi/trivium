@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -63,10 +63,7 @@ impl ProjectsStore {
 
         // Save migrated data
         if needs_save {
-            let data = serde_json::to_vec_pretty(&projects)
-                .with_context(|| format!("failed to serialize metadata to {:?}", meta_path))?;
-            fs::write(&meta_path, data)
-                .with_context(|| format!("failed to write metadata file {:?}", meta_path))?;
+            write_metadata_atomic(&meta_path, &projects)?;
         }
 
         Ok(Self {
@@ -93,28 +90,34 @@ impl ProjectsStore {
         Ok(())
     }
 
-    pub fn update_hidden_columns(&self, id: &Uuid, hidden_columns: Vec<String>) -> Result<()> {
+    /// Applies one metadata change only after the replacement file is written.
+    /// A failed write leaves both the file and the in-memory list unchanged.
+    fn update_meta(
+        &self,
+        id: &Uuid,
+        update: impl FnOnce(&mut ProjectMeta),
+    ) -> Result<()> {
         let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.hidden_columns = hidden_columns;
-        }
-        self.persist_locked(&guard)
+        let mut next = guard.clone();
+        let Some(meta) = next.iter_mut().find(|meta| &meta.id == id) else {
+            return Ok(());
+        };
+        update(meta);
+        self.persist_locked(&next)?;
+        *guard = next;
+        Ok(())
+    }
+
+    pub fn update_hidden_columns(&self, id: &Uuid, hidden_columns: Vec<String>) -> Result<()> {
+        self.update_meta(id, |meta| meta.hidden_columns = hidden_columns)
     }
 
     pub fn update_flagged_records(&self, id: &Uuid, flagged_records: usize) -> Result<()> {
-        let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.flagged_records = flagged_records;
-        }
-        self.persist_locked(&guard)
+        self.update_meta(id, |meta| meta.flagged_records = flagged_records)
     }
 
     pub fn update_ioc_applied_records(&self, id: &Uuid, count: usize) -> Result<()> {
-        let mut guard = self.inner.lock();
-        if let Some(meta) = guard.iter_mut().find(|meta| &meta.id == id) {
-            meta.ioc_applied_records = count;
-        }
-        self.persist_locked(&guard)
+        self.update_meta(id, |meta| meta.ioc_applied_records = count)
     }
 
     /// Returns the next annotation revision for a project.
@@ -143,12 +146,12 @@ impl ProjectsStore {
 
     pub fn remove(&self, id: &Uuid) -> Result<()> {
         let mut guard = self.inner.lock();
-        guard.retain(|meta| &meta.id != id);
-        let result = self.persist_locked(&guard);
-        if result.is_ok() {
-            self.revisions.lock().remove(id);
-        }
-        result
+        let mut next = guard.clone();
+        next.retain(|meta| &meta.id != id);
+        self.persist_locked(&next)?;
+        *guard = next;
+        self.revisions.lock().remove(id);
+        Ok(())
     }
 
     pub fn find(&self, id: &Uuid) -> Option<ProjectMeta> {
@@ -175,25 +178,27 @@ impl ProjectsStore {
     }
 
     fn persist_locked(&self, guard: &[ProjectMeta]) -> Result<()> {
-        let data = serde_json::to_vec_pretty(guard)?;
-        // Replace the project list atomically: a failed write must not leave a
-        // truncated metadata file that loses the existing projects on restart.
-        let temp_path = self
-            .meta_path
-            .with_extension(format!("json.tmp.{}", std::process::id()));
-        let result = fs::write(&temp_path, data)
-            .with_context(|| format!("failed to write metadata file {:?}", temp_path))
-            .and_then(|_| {
-                fs::rename(&temp_path, &self.meta_path).with_context(|| {
-                    format!(
-                        "failed to replace metadata file {:?} with {:?}",
-                        self.meta_path, temp_path
-                    )
-                })
-            });
-        if result.is_err() {
-            let _ = fs::remove_file(&temp_path);
-        }
-        result
+        write_metadata_atomic(&self.meta_path, guard)
     }
+}
+
+/// Replaces the project list atomically. A failed write must not leave a
+/// truncated metadata file that loses the existing projects on restart.
+fn write_metadata_atomic(meta_path: &Path, projects: &[ProjectMeta]) -> Result<()> {
+    let data = serde_json::to_vec_pretty(projects)?;
+    let temp_path = meta_path.with_extension(format!("json.tmp.{}", std::process::id()));
+    let result = fs::write(&temp_path, data)
+        .with_context(|| format!("failed to write metadata file {:?}", temp_path))
+        .and_then(|_| {
+            fs::rename(&temp_path, meta_path).with_context(|| {
+                format!(
+                    "failed to replace metadata file {:?} with {:?}",
+                    meta_path, temp_path
+                )
+            })
+        });
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }

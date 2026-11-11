@@ -120,7 +120,7 @@ fn successful_import_records_source_metadata_and_zero_based_row_ids() {
         "a successful import must remove its staging directory"
     );
 
-    // `__rowid` stays zero-based and contiguous; `__source_record` points at
+    // `__rowid` stays zero-based and contiguous; `__trivium_source_record` points at
     // the physical source line (header is line 1, first data record line 2).
     let df = read_project_dataframe(&project_dir.join("data.parquet"))
         .expect("failed to read project data");
@@ -132,7 +132,7 @@ fn successful_import_records_source_metadata_and_zero_based_row_ids() {
         .collect();
     assert_eq!(row_ids, vec![0, 1, 2]);
     let source_records: Vec<i64> = (0..df.height())
-        .map(|index| match df.column("__source_record").expect("__source_record").get(index) {
+        .map(|index| match df.column("__trivium_source_record").expect("__trivium_source_record").get(index) {
             Ok(AnyValue::Int64(value)) => value,
             other => panic!("unexpected source record value: {:?}", other),
         })
@@ -183,6 +183,36 @@ fn metadata_write_failure_keeps_the_existing_registry_intact() {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("projects.json.tmp."))),
         "a failed metadata write must remove its temporary file"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_metadata_update_does_not_change_in_memory_state() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let path = write_file(&root, "events.csv", "id,msg\n1,first\n");
+    let summary = create_project(&store, payload(&path)).expect("create failed");
+
+    let original_permissions = fs::metadata(&root).expect("root metadata").permissions();
+    let mut read_only = original_permissions.clone();
+    read_only.set_mode(0o555);
+    fs::set_permissions(&root, read_only).expect("make root read-only");
+    let result = store.update_hidden_columns(&summary.meta.id, vec!["c000001".to_string()]);
+    fs::set_permissions(&root, original_permissions).expect("restore root permissions");
+
+    result.expect_err("metadata update must fail while the registry is read-only");
+    assert!(
+        store
+            .find(&summary.meta.id)
+            .expect("project")
+            .hidden_columns
+            .is_empty(),
+        "a failed write must not commit the change in memory"
     );
 
     let _ = fs::remove_dir_all(root);

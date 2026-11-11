@@ -458,6 +458,7 @@ fn column_stats_match_python_counts() {
                 project_id: id,
                 column: column.clone(),
                 rare_max: 1,
+                spec: QuerySpec::default(),
             },
         )
         .expect("stats");
@@ -480,6 +481,7 @@ fn column_stats_match_python_counts() {
             project_id: id,
             column: user_id,
             rare_max: 1,
+            spec: QuerySpec::default(),
         },
     )
     .expect("user stats");
@@ -495,6 +497,7 @@ fn column_stats_match_python_counts() {
             project_id: id,
             column: event_id,
             rare_max: 1,
+            spec: QuerySpec::default(),
         },
     )
     .expect("event stats");
@@ -506,6 +509,7 @@ fn column_stats_match_python_counts() {
             project_id: id,
             column: token_id,
             rare_max: 1,
+            spec: QuerySpec::default(),
         },
     )
     .expect("token stats");
@@ -525,6 +529,7 @@ fn column_stats_match_python_counts() {
             project_id: id,
             column: "nope".to_string(),
             rare_max: 1,
+            spec: QuerySpec::default(),
         },
     )
     .is_err());
@@ -534,6 +539,7 @@ fn column_stats_match_python_counts() {
             project_id: id,
             column: "__rowid".to_string(),
             rare_max: 1,
+            spec: QuerySpec::default(),
         },
     )
     .is_err());
@@ -729,6 +735,8 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             buckets: 4,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition,
             range: None,
@@ -766,6 +774,8 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             buckets: 4,
             search: Some("WS01".to_string()),
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: None,
@@ -794,6 +804,8 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             buckets: 4,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: None,
@@ -833,6 +845,8 @@ fn histogram_places_values_in_equal_width_buckets() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: None,
@@ -856,6 +870,8 @@ fn histogram_places_values_in_equal_width_buckets() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: None,
@@ -883,6 +899,8 @@ fn histogram_range_counts_outside_values() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: Some(HistogramRange {
@@ -906,6 +924,8 @@ fn histogram_range_counts_outside_values() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: Some(HistogramRange {
@@ -938,6 +958,8 @@ fn histogram_range_counts_outside_values() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: Some(HistogramRange {
@@ -956,6 +978,8 @@ fn histogram_range_counts_outside_values() {
             buckets: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             range: Some(HistogramRange {
@@ -1050,6 +1074,8 @@ fn time_analysis_finds_fixture_gaps() {
             burst_min: 10,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
         },
@@ -1105,6 +1131,8 @@ fn time_analysis_gap_range_matches_bounds() {
             burst_min: 2,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
         },

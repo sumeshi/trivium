@@ -26,10 +26,16 @@ pub struct TimeAnalysisPayload {
     pub burst_min: u64,
     #[serde(default)]
     pub search: Option<String>,
+    /// Deprecated visible-column field kept for old callers. New callers send
+    /// `searchColumns`; `searchColumns` wins when both are present.
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
+    #[serde(default, rename = "bookmarkedOnly")]
+    pub bookmarked_only: Option<bool>,
     #[serde(default)]
     pub condition: Option<Node>,
 }
@@ -71,9 +77,13 @@ pub fn time_analysis(
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;
+    let search_scope = payload
+        .search_columns
+        .as_deref()
+        .or(payload.columns.as_deref());
     let search_state = prepare_search(
         &df,
-        payload.columns.as_deref(),
+        search_scope,
         &columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
@@ -89,7 +99,7 @@ pub fn time_analysis(
         &ordered,
         &final_flag_vec,
         &bookmarked,
-        None,
+        payload.bookmarked_only,
         payload.flag_filter.as_deref(),
         search_state.mask.as_deref(),
     );
