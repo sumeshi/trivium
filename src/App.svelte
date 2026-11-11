@@ -134,7 +134,7 @@
     />
   {/if}
 
-  <main class="relative z-0 flex w-full flex-col px-4 pt-24 pb-4 sm:px-6" style="height: 100vh; overflow: hidden;">
+  <main class="app-main">
     {#if $projectState.selectedProjectId}
       {#if $projectState.isLoadingDetail}
         <div class="flex flex-1 items-center justify-center text-muted">
@@ -152,11 +152,9 @@
         </div>
       {/if}
     {:else}
-      <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted">
-        <h2 class="text-xl font-semibold heading-text">Select a project</h2>
-        <p class="max-w-sm text-sm">
-          Pick a project from the menu or import a new CSV or JSON file to get started.
-        </p>
+      <div class="empty-workspace">
+        <h2>Select a project</h2>
+        <p>Open the project menu or import a CSV, JSON, or JSONL file to begin.</p>
       </div>
     {/if}
   </main>

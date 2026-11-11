@@ -98,7 +98,7 @@
 </script>
 
 <section class="filters">
-  <div class="filter-flag">
+  <div class="filter-row">
     <div class="flag-picker" bind:this={flagPickerEl}>
       <button
         type="button"
@@ -112,6 +112,9 @@
           <span class="flag-hint">{getFlagFilterDetails($flagFilter).hint}</span>
         {/if}
         <span class="flag-label">{getFlagFilterDetails($flagFilter).label}</span>
+        <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
       </button>
       {#if flagMenuOpen}
         <div class="flag-menu" role="listbox">
@@ -129,53 +132,64 @@
               {/if}
               <span>{option.label}</span>
               {#if $flagFilter === option.value}
-                <span class="flag-dot" aria-hidden="true">●</span>
+                <span class="flag-check" aria-hidden="true">✓</span>
               {/if}
             </button>
           {/each}
         </div>
       {/if}
     </div>
-  </div>
-  <div class="filter-bookmark">
+
     <button
       type="button"
-      class="ghost bookmark-toggle"
+      class="tool-button bookmark-toggle"
       class:active={$bookmarkedOnly}
       aria-pressed={$bookmarkedOnly}
       title="Show bookmarked rows only"
       on:click={() => bookmarkedOnly.update((value) => !value)}
     >
-      ★ Bookmark only
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
+      </svg>
+      <span class="tool-label">Bookmarked</span>
     </button>
-  </div>
-  <label class="filter-search">
-    <input
-      placeholder="Enter search text"
-      bind:value={$search}
-      type="search"
-    />
-    <span class="condition-count" title="Search scope">
-      {$searchColumns.length === 0
-        ? 'All columns'
-        : $searchColumns.map((column) => $columnLabels.get(column) ?? column).join(', ')}
-    </span>
-  </label>
-  <div class="filter-columns">
+
+    <label class="search-field">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
+      <input placeholder="Search rows" bind:value={$search} type="search" />
+      <span class="scope-chip" title="Search scope">
+        {$searchColumns.length === 0
+          ? 'All columns'
+          : $searchColumns.map((column) => $columnLabels.get(column) ?? column).join(', ')}
+      </span>
+    </label>
+
     <div class="column-picker" bind:this={columnPickerEl}>
       <button
         type="button"
-        class="column-trigger"
+        class="tool-button"
         on:click={() => {
           flagMenuOpen = false;
           columnsOpen = !columnsOpen;
         }}
         aria-expanded={columnsOpen}
       >
-        Columns ({$visibleColumns.length}/{$projectDetail?.columns.length ?? 0})
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16m6-16v16" />
+        </svg>
+        <span class="tool-label">Columns</span>
+        <span class="count-chip">{$visibleColumns.length}/{$projectDetail?.columns.length ?? 0}</span>
       </button>
       {#if columnsOpen}
         <div class="column-panel">
+          <div class="column-panel-head">
+            <span>Visible columns</span>
+            <button type="button" class="column-close" on:click={() => (columnsOpen = false)}>Done</button>
+          </div>
           <ul>
             {#each $projectDetail?.columns ?? [] as column}
               <li>
@@ -189,47 +203,49 @@
               </li>
             {/each}
           </ul>
-          <button type="button" class="close-panel" on:click={() => (columnsOpen = false)}>
-            Done
-          </button>
         </div>
       {/if}
     </div>
-  </div>
-  <div class="filter-export">
-    <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
-      {$isExporting ? 'Exporting…' : 'Export CSV'}
+
+    <button class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4v11m0 0 4-4m-4 4-4-4M4 20h16" />
+      </svg>
+      <span class="tool-label">{$isExporting ? 'Exporting…' : 'Export'}</span>
     </button>
   </div>
-  <details class="filter-advanced">
-    <summary>Conditions</summary>
-    <ConditionEditor />
-  </details>
-  <details class="filter-advanced" bind:open={statsOpen}>
-    <summary>Column stats</summary>
-    <StatsPanel open={statsOpen} />
-  </details>
-  <details class="filter-advanced" bind:open={timeOpen}>
-    <summary>Time analysis</summary>
-    <TimePanel open={timeOpen} />
-  </details>
-  <details class="filter-advanced">
-    <summary>Presets</summary>
-    <PresetControls />
-  </details>
-  <details class="filter-advanced">
-    <summary>Bulk annotation</summary>
-    <BulkControls on:refresh />
-  </details>
-  <details class="filter-advanced">
-    <summary>IOC rules (legacy)</summary>
-    <div class="filter-ioc">
-      <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
-      <button type="button" class="ghost" on:click={() => {
-        dispatch('iocManagerOpen');
-      }}>
-        IOC Rules
-      </button>
-    </div>
-  </details>
+
+  <div class="advanced-row">
+    <details class="filter-advanced">
+      <summary>Conditions</summary>
+      <ConditionEditor />
+    </details>
+    <details class="filter-advanced" bind:open={statsOpen}>
+      <summary>Column stats</summary>
+      <StatsPanel open={statsOpen} />
+    </details>
+    <details class="filter-advanced" bind:open={timeOpen}>
+      <summary>Time analysis</summary>
+      <TimePanel open={timeOpen} />
+    </details>
+    <details class="filter-advanced">
+      <summary>Presets</summary>
+      <PresetControls />
+    </details>
+    <details class="filter-advanced">
+      <summary>Bulk annotation</summary>
+      <BulkControls on:refresh />
+    </details>
+    <details class="filter-advanced">
+      <summary>IOC rules (legacy)</summary>
+      <div class="filter-ioc">
+        <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
+        <button type="button" class="ghost" on:click={() => {
+          dispatch('iocManagerOpen');
+        }}>
+          IOC Rules
+        </button>
+      </div>
+    </details>
+  </div>
 </section>

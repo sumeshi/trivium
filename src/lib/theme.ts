@@ -7,7 +7,14 @@ export type Theme = "light" | "dark";
 const THEME_KEY = "trivium:theme";
 const THEME_FILE = "theme.json";
 
-export const theme = writable<Theme>("dark");
+function systemTheme(): Theme {
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return "light";
+}
+
+export const theme = writable<Theme>(systemTheme());
 
 function applyThemeAttr(next: Theme) {
   const root = document.documentElement;
@@ -39,7 +46,7 @@ export async function initTheme() {
     }
   }
 
-  const next = loaded ?? "dark";
+  const next = loaded ?? systemTheme();
   applyThemeAttr(next);
   theme.set(next);
 }

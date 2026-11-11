@@ -327,16 +327,25 @@
 </script>
 
 <section class="table-wrapper">
-  <div class="meta">
-    <span>
-      {$totalFilteredRows} / {$totalRows} rows
-    </span>
-    <span>{$filteredFlaggedCount} flagged in results</span>
-    <span>{$selectedCount} selected</span>
+  <div class="table-meta">
+    <div class="table-meta-left">
+      <strong>{$totalFilteredRows.toLocaleString()}</strong>
+      <span>of {$totalRows.toLocaleString()} rows</span>
+      {#if $selectedCount > 0}
+        <span class="meta-dot">·</span>
+        <span><strong>{$selectedCount}</strong> selected</span>
+      {/if}
+    </div>
+    <span class="table-meta-right">{$filteredFlaggedCount} flagged in results</span>
   </div>
   {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">
-      No rows match your filters.
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
+      <p>No rows match your filters.</p>
+      <span>Adjust the search or clear a filter to see more rows.</span>
     </div>
   {:else}
     <div class="table-scroll">
@@ -440,6 +449,8 @@
                             class:flag-safe={option.value === 'safe'}
                             class:flag-suspicious={option.value === 'suspicious'}
                             class:flag-critical={option.value === 'critical'}
+                            title={option.label}
+                            aria-label={option.label}
                             on:click={() => item.row && _setFlag(item.row, option.value)}
                           >
                             {option.hint}
@@ -466,8 +477,10 @@
                     disabled={!item.row}
                   >
                     {#if item.row && item.row.memo && item.row.memo.trim().length}
+                      <span class="memo-icon" aria-hidden="true">✎</span>
                       <span class="memo-text">{item.row.memo}</span>
                     {:else if item.row}
+                      <span class="memo-icon muted" aria-hidden="true">✎</span>
                       <span class="memo-placeholder">Add memo</span>
                     {:else}
                       <span class="memo-placeholder">Loading…</span>

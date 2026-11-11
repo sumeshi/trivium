@@ -5,33 +5,42 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Dark theme: muted, elegant */
-    --bg: #181b24;
-    --fg: #e3e7f2;
-    --muted: #99a2bf;
-    --surface: #202534;
-    --surface-weak: #262b3c;
-    --surface-soft: color-mix(in srgb, var(--surface) 75%, transparent);
-    --surface-strong: #1b202d;
-    --overlay: rgba(19, 22, 31, 0.92);
-    --border: #3a4257;
-    --hover: color-mix(in srgb, var(--accent) 16%, transparent);
+    --bg: #0b0d10;
+    --fg: #e8eaed;
+    --muted: #8c95a3;
+    --surface: #12151a;
+    --surface-weak: #171b21;
+    --surface-soft: #15191f;
+    --surface-strong: #1d222a;
+    --overlay: rgba(11, 13, 16, 0.84);
+    --border: #252b34;
+    --border-strong: #35404c;
+    --hover: color-mix(in srgb, var(--fg) 6%, transparent);
     --heading: var(--fg);
-    --accent: #6c83ff;
-    --accent-contrast: #101321;
-    --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
-    --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
-    --positive: #66d19e;
-    --positive-soft: color-mix(in srgb, var(--positive) 20%, transparent);
-    --warning: #e8c27c;
-    --warning-soft: color-mix(in srgb, var(--warning) 20%, transparent);
-    --danger: #e38383;
-    --danger-soft: color-mix(in srgb, var(--danger) 20%, transparent);
-    --flag-selected-text: #ffffff;
-    --flag-safe-text: var(--fg);
-    --flag-suspicious-text: var(--fg);
-    --flag-critical-text: #ffffff;
-    /* 条件色パレット。値は src/lib/skin.ts と同期 */
+    --accent: #8ab8b0;
+    --accent-contrast: #0a1412;
+    --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+    --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
+    --positive: #6bc4a2;
+    --positive-soft: color-mix(in srgb, var(--positive) 16%, transparent);
+    --warning: #dfb36d;
+    --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
+    --danger: #df7f7f;
+    --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
+    --flag-selected-text: #08110f;
+    --flag-safe-text: var(--positive);
+    --flag-suspicious-text: var(--warning);
+    --flag-critical-text: var(--danger);
+    --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      Roboto, "Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Kaku Gothic ProN",
+      "Hiragino Sans", "Microsoft YaHei", Arial, sans-serif;
+    --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "Roboto Mono",
+      Consolas, "Liberation Mono", monospace;
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
+    --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.42);
     --rule-red: #4a2b2f;
     --rule-orange: #4a3323;
     --rule-amber: #463d20;
@@ -40,113 +49,38 @@
     --rule-blue: #26364f;
     --rule-purple: #362c4a;
     --rule-pink: #472a3b;
-    --shadow-strong: 0 22px 48px rgba(10, 12, 18, 0.65);
-    --shadow-soft: 0 12px 24px rgba(12, 16, 24, 0.42);
   }
 
-  /* Prefer Windows JP fonts; fall back to system fonts */
-
-  html,
-  body {
-    @apply min-h-screen antialiased;
-    background-color: var(--bg);
-    color: var(--fg);
-  }
-
-  /* Smooth theme transitions */
-  .app-shell,
-  .bg-trivium-surface,
-  .bg-overlay,
-  header,
-  .heading-text,
-  .text-muted,
-  button,
-  input,
-  textarea,
-  select {
-    transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
-  }
-
-  body {
-    @apply font-sans;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-      "Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
-      "Microsoft YaHei", Arial,
-      "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-  }
-
-  #app {
-    @apply min-h-screen;
-  }
-
-  /* Map common Tailwind utility classes to theme vars */
-  .bg-slate-950 { background-color: var(--bg) !important; }
-  .text-slate-100 { color: var(--fg) !important; }
-  .text-slate-300 { color: color-mix(in oklab, var(--fg) 72%, var(--bg)) !important; }
-  .text-slate-400 { color: var(--muted) !important; }
-  .text-white { color: #ffffff !important; }
-  .text-black { color: #000000 !important; }
-  .text-muted { color: var(--muted) !important; }
-  .heading-text { color: var(--heading) !important; }
-  .border-white\/10 { border-color: var(--border) !important; }
-  .bg-white\/5 { background-color: var(--surface-weak) !important; }
-  .bg-white\/10 { background-color: var(--surface-soft) !important; }
-  .hover\:bg-white\/10:hover { background-color: var(--hover) !important; }
-  .hover\:text-slate-100:hover { color: var(--fg) !important; }
-  .border-indigo-400\/60 { border-color: var(--accent-border) !important; }
-  .focus\:ring-indigo-400\/40:focus { box-shadow: 0 0 0 2px var(--accent-soft); }
-  .bg-emerald-500 { background-color: var(--positive) !important; color: var(--accent-contrast) !important; }
-  .hover\:bg-emerald-400:hover { background-color: color-mix(in srgb, var(--positive) 70%, #ffffff 30%) !important; }
-  .bg-indigo-500 { background-color: var(--accent) !important; color: var(--accent-contrast) !important; }
-  .hover\:bg-indigo-400:hover { background-color: color-mix(in srgb, var(--accent) 75%, #ffffff 25%) !important; }
-  header { background-color: var(--overlay) !important; border-color: var(--border) !important; color: var(--fg); }
-  .bg-trivium-surface { background-color: var(--surface) !important; color: var(--fg); }
-  .bg-overlay { background-color: var(--overlay) !important; }
-
-  h1, h2, h3, h4, h5, h6 {
-    color: var(--heading);
-  }
-
-  input::placeholder,
-  textarea::placeholder {
-    color: color-mix(in srgb, var(--muted) 65%, transparent);
-  }
-
-  .placeholder\:text-slate-500::placeholder {
-    color: color-mix(in srgb, var(--muted) 65%, transparent);
-  }
-
-  /* Light theme: override variables only */
-  [data-theme='light'] { color-scheme: light; }
-  [data-theme='light'] {
-    --bg: #f7f9fb;
-    --fg: #1e2937;
-    --muted: #5b6473;
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg: #f4f3ef;
+    --fg: #1b1f24;
+    --muted: #6c737d;
     --surface: #ffffff;
-    --surface-weak: #eef2f6;
-    --surface-soft: color-mix(in srgb, var(--surface) 85%, var(--bg) 15%);
-    --surface-strong: #e7ebf1;
-    --overlay: rgba(255, 255, 255, 0.92);
-    --border: #d6dbe3;
-    --hover: color-mix(in srgb, var(--accent) 12%, transparent);
-    --heading: #1e2937;
-    --accent: #2563eb;
+    --surface-weak: #eeece6;
+    --surface-soft: #f8f7f3;
+    --surface-strong: #e7e4dc;
+    --overlay: rgba(244, 243, 239, 0.88);
+    --border: #dedbd3;
+    --border-strong: #c8c4ba;
+    --hover: color-mix(in srgb, var(--fg) 5%, transparent);
+    --heading: var(--fg);
+    --accent: #2d6a62;
     --accent-contrast: #ffffff;
-    --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-    --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
-    --positive: #15803d;
-    --positive-soft: color-mix(in srgb, var(--positive) 16%, transparent);
-    --warning: #d97706;
-    --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
-    --danger: #dc2626;
-    --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+    --accent-border: color-mix(in srgb, var(--accent) 34%, transparent);
+    --positive: #2f7d5c;
+    --positive-soft: color-mix(in srgb, var(--positive) 12%, transparent);
+    --warning: #a66c2c;
+    --warning-soft: color-mix(in srgb, var(--warning) 12%, transparent);
+    --danger: #b94e4e;
+    --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
     --flag-selected-text: #ffffff;
-    --shadow-strong: 0 22px 48px rgba(31, 41, 55, 0.12);
-    --shadow-soft: 0 12px 24px rgba(31, 41, 55, 0.08);
-    --flag-safe-text: #092712;
-    --flag-suspicious-text: #3d2203;
-    --flag-critical-text: #3f0505;
-    /* 条件色パレット。値は src/lib/skin.ts と同期 */
+    --flag-safe-text: var(--positive);
+    --flag-suspicious-text: var(--warning);
+    --flag-critical-text: var(--danger);
+    --shadow-soft: 0 8px 24px rgba(31, 41, 55, 0.07);
+    --shadow-strong: 0 18px 48px rgba(31, 41, 55, 0.14);
     --rule-red: #fbe4e4;
     --rule-orange: #fbe9db;
     --rule-amber: #faf1d5;
@@ -155,5 +89,137 @@
     --rule-blue: #e3ecfb;
     --rule-purple: #ece6fb;
     --rule-pink: #fbe4ef;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    background-color: var(--bg);
+    color: var(--fg);
+    @apply antialiased;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  #app {
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .app-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px 20px;
+  }
+
+  .empty-workspace {
+    margin: auto;
+    max-width: 380px;
+    text-align: center;
+    color: var(--muted);
+  }
+
+  .empty-workspace h2 {
+    margin: 0 0 6px;
+    color: var(--fg);
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .empty-workspace p {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .text-muted {
+    color: var(--muted) !important;
+  }
+
+  .heading-text {
+    color: var(--fg) !important;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono) !important;
+  }
+
+  .toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 300;
+    max-width: min(420px, calc(100vw - 40px));
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow-strong);
+    font-size: 13px;
+  }
+
+  .toast.error {
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+    color: var(--danger);
+  }
+
+  .toast.success {
+    border-color: color-mix(in srgb, var(--positive) 45%, transparent);
+    color: var(--positive);
+  }
+
+  @media (max-width: 720px) {
+    .app-main {
+      padding: 10px 12px 12px;
+    }
   }
 }

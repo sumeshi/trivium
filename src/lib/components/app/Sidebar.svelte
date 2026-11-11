@@ -3,7 +3,6 @@
   import { fade, fly } from 'svelte/transition';
   import dayjs from 'dayjs';
   import type { ProjectSummary } from '../../types';
-  import { theme, toggleTheme } from '../../theme';
 
   const dispatch = createEventDispatcher();
 
@@ -17,7 +16,7 @@
   export let canCreateProject: boolean;
 
   const truncateText = (text: string, length: number) => {
-    return text.length > length ? text.slice(0, length) + '...' + text.slice(text.length - 6) : text;
+    return text.length > length ? `${text.slice(0, length)}…` : text;
   };
 
   const handleDescriptionInput = (event: Event) => {
@@ -32,158 +31,148 @@
 </script>
 
 <div
-  class="fixed inset-x-0 bottom-0 top-[64px] z-[60] flex items-stretch justify-start bg-overlay backdrop-blur-sm"
-  in:fade={{ duration: 120 }}
-  out:fade={{ duration: 120 }}
+  class="drawer-backdrop"
+  transition:fade={{ duration: 120 }}
 >
   <button
     type="button"
-    class="absolute inset-0 cursor-pointer"
+    class="drawer-scrim"
     aria-label="Close workspace menu"
     on:click={() => dispatch('close')}
-    on:keydown={(event) => {
-      if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        dispatch('close');
-      }
-    }}
   ></button>
   <aside
-    class="relative z-10 h-full w-full max-w-sm transform overflow-y-auto border-r border-white/10 bg-trivium-surface p-6 shadow-2xl transition-transform duration-150 sm:w-96"
+    class="workspace-drawer"
     role="dialog"
     aria-modal="true"
-    in:fly={{ x: -48, duration: 180 }}
-    out:fly={{ x: -48, duration: 150 }}
+    transition:fly={{ x: -24, duration: 160 }}
   >
-    <div class="flex items-start justify-between">
+    <header class="drawer-header">
       <div>
-        <h2 class="text-lg font-semibold heading-text">Workspace</h2>
-        <p class="text-sm text-muted">Manage imports and projects</p>
+        <p class="eyebrow">Workspace</p>
+        <h2>Projects</h2>
       </div>
       <button
         type="button"
-        class="rounded-md border border-white/10 p-2 text-muted transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-        on:click={() => toggleTheme()}
-        aria-label="Toggle theme"
-        title="Toggle theme"
+        class="icon-button"
+        on:click={() => dispatch('close')}
+        aria-label="Close workspace menu"
       >
-        {#if $theme === 'dark'}
-          <!-- Sun icon for light mode target -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="4"/>
-            <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.364-7.364-1.414 1.414M8.05 16.95l-1.414 1.414m12.728 0-1.414-1.414M8.05 7.05 6.636 5.636"/>
-          </svg>
-        {:else}
-          <!-- Moon icon for dark mode target -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-          </svg>
-        {/if}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
       </button>
-    </div>
+    </header>
 
-    <section class="mt-6 space-y-4">
-      <div class="space-y-3">
-        <button
-          class="w-full rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
-          on:click={() => dispatch('pickCsv')}
-        >
-          Import CSV / JSON / JSONL File
-        </button>
-        {#if pendingFileName}
-          <p class="truncate text-xs text-muted">{pendingFileName}</p>
-        {/if}
-        <div class="space-y-2">
+    <section class="import-panel">
+      <button class="button primary full" on:click={() => dispatch('pickCsv')}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 16V4m0 0L7 9m5-5 5 5M4 20h16" />
+        </svg>
+        Import log file
+      </button>
+      {#if pendingFileName}
+        <div class="pending-file" title={pendingFileName}>
+          <span class="pending-dot"></span>
+          <span>{pendingFileName}</span>
+        </div>
+      {/if}
+
+      <div class="field-grid">
+        <label class="field">
+          <span>Description</span>
           <input
             type="text"
-            id="project-description"
-            placeholder="Enter project description [Optional]"
+            placeholder="Optional"
             value={pendingDescription}
             on:input={handleDescriptionInput}
-            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
+        </label>
+        <label class="field">
+          <span>CSV delimiter</span>
           <select
-            id="project-delimiter"
             aria-label="CSV delimiter"
             value={pendingDelimiter}
             on:change={handleDelimiterChange}
-            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           >
-            <option value="">Comma (default)</option>
+            <option value="">Comma</option>
             <option value=",">Comma ,</option>
             <option value={'\t'}>Tab</option>
             <option value=";">Semicolon ;</option>
             <option value="|">Pipe |</option>
           </select>
-        </div>
-        <button
-          class="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 disabled:cursor-not-allowed disabled:bg-emerald-500/30 disabled:text-emerald-900"
-          disabled={!canCreateProject || creating}
-          on:click={() => dispatch('createProject')}
-        >
-          {creating ? 'Importing…' : 'Create Project'}
-        </button>
+        </label>
       </div>
+
+      <button
+        class="button accent full"
+        disabled={!canCreateProject || creating}
+        on:click={() => dispatch('createProject')}
+      >
+        {creating ? 'Importing…' : 'Create project'}
+      </button>
     </section>
 
-    <section class="mt-8 space-y-3">
-      <div class="flex items-center justify-between">
-        <h2 class="text-md font-semibold heading-text">Projects</h2>
+    <section class="project-section">
+      <div class="section-head">
+        <h3>Recent</h3>
         <button
-          class="rounded-md border border-white/10 p-2 text-xs text-muted transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+          class="icon-button"
           on:click={() => dispatch('loadProjects')}
           aria-label="Refresh projects"
+          title="Refresh projects"
         >
-          ↻
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7" />
+          </svg>
         </button>
       </div>
 
       {#if isLoadingProjects}
-        <p class="text-xs text-muted">Loading projects…</p>
+        <p class="empty-list">Loading projects…</p>
       {:else if projects.length === 0}
-        <p class="text-xs text-muted">No projects yet. Import a CSV, JSON, or JSONL file to get started.</p>
+        <div class="empty-list">
+          <p>No projects yet.</p>
+          <p>Import a CSV, JSON, or JSONL file to begin.</p>
+        </div>
       {:else}
-        <ul class="space-y-3">
+        <ul class="project-list">
           {#each projects as project}
-            <li>
-              <div class="flex items-stretch gap-2">
-                <button
-                  type="button"
-                  class={`flex-1 rounded-lg border border-transparent bg-white/5 px-4 py-3 text-left transition hover:border-white/20 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-400/60 ${
-                    project.meta.id === selectedProjectId
-                      ? 'border-indigo-400/70 bg-indigo-500/20 shadow-lg shadow-indigo-500/10'
-                      : ''
-                  }`}
-                  on:click={() => dispatch('selectProject', project.meta.id)}
-                >
-                  <div class="flex items-center justify-end gap-3">
-                    <span class="whitespace-nowrap text-xs text-muted">
-                      {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
-                    </span>
-                  </div>
-                  <div class="flex items-center justify-between gap-3 mt-1">
-                    <span class="truncate text-sm font-semibold heading-text">{truncateText(project.meta.name, 16)}</span>
-                  </div>
-                  <hr class="border-white/10 my-2">
-                  {#if project.meta.description}
-                    <p class="mt-2 text-xs text-muted">{truncateText(project.meta.description, 20)}</p>
-                  {/if}
-                  <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted mt-2">
-                    <span>{project.meta.total_records} rows</span>
-                    <span>{project.meta.flagged_records + project.meta.ioc_applied_records} flagged</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  class="shrink-0 rounded-md border border-rose-500/60 px-3 py-2 text-[0.7rem] font-semibold text-rose-200 transition hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
-                  on:click={(event) => {
-                    event.stopPropagation();
-                    dispatch('deleteProject', project.meta.id);
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
+            <li class="project-row">
+              <button
+                type="button"
+                class="project-card"
+                class:selected={project.meta.id === selectedProjectId}
+                on:click={() => dispatch('selectProject', project.meta.id)}
+              >
+                <div class="project-top">
+                  <span class="project-name">{truncateText(project.meta.name, 34)}</span>
+                  <span class="project-date">
+                    {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
+                  </span>
+                </div>
+                {#if project.meta.description}
+                  <p class="project-desc">{truncateText(project.meta.description, 70)}</p>
+                {/if}
+                <div class="project-stats">
+                  <span>{project.meta.total_records.toLocaleString()} rows</span>
+                  <span class="stat-dot">·</span>
+                  <span>{project.meta.flagged_records + project.meta.ioc_applied_records} flagged</span>
+                </div>
+              </button>
+              <button
+                type="button"
+                class="delete-button"
+                on:click={(event) => {
+                  event.stopPropagation();
+                  dispatch('deleteProject', project.meta.id);
+                }}
+                aria-label={`Delete ${project.meta.name}`}
+                title="Delete project"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+                </svg>
+              </button>
             </li>
           {/each}
         </ul>
@@ -191,3 +180,321 @@
     </section>
   </aside>
 </div>
+
+<style>
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+    backdrop-filter: blur(3px);
+  }
+
+  .drawer-scrim {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .workspace-drawer {
+    position: relative;
+    z-index: 1;
+    width: min(400px, 92vw);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 22px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-strong);
+  }
+
+  .drawer-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .eyebrow {
+    margin: 0 0 2px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .drawer-header h2 {
+    margin: 0;
+    color: var(--fg);
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .icon-button:hover {
+    background: var(--surface-weak);
+    border-color: var(--border);
+    color: var(--fg);
+  }
+
+  .import-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-weak);
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .button.full {
+    width: 100%;
+  }
+
+  .button.primary {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .button.primary:hover {
+    filter: brightness(1.06);
+  }
+
+  .button.accent {
+    background: var(--surface);
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+
+  .button.accent:hover:not(:disabled) {
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
+  }
+
+  .button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .pending-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .pending-file span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pending-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 6px;
+    border-radius: 50%;
+    background: var(--positive);
+  }
+
+  .field-grid {
+    display: grid;
+    gap: 8px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .field input,
+  .field select {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 12.5px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    outline: none;
+  }
+
+  .field input:focus,
+  .field select:focus {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .project-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .section-head h3 {
+    margin: 0;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .empty-list {
+    margin: 0;
+    padding: 18px 2px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .empty-list p {
+    margin: 0 0 4px;
+  }
+
+  .project-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .project-row {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .project-card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 11px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface);
+    text-align: left;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .project-card:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-weak);
+  }
+
+  .project-card.selected {
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
+  }
+
+  .project-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .project-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .project-date {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+  }
+
+  .project-desc {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .project-stats {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  .stat-dot {
+    color: var(--border-strong);
+  }
+
+  .delete-button {
+    flex: 0 0 30px;
+    width: 30px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .delete-button:hover {
+    border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+</style>
