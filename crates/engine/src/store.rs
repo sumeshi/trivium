@@ -89,6 +89,11 @@ impl ProjectsStore {
             write_metadata_atomic(&meta_path, &projects)?;
         }
 
+        // Annotation revisions are process-local and restart at zero with a
+        // new store. Drop any previous query-result cache so a reopened
+        // project cannot hit a result keyed by the old revision.
+        crate::ops::query::clear_result_cache();
+
         Ok(Self {
             root_dir,
             meta_path,
