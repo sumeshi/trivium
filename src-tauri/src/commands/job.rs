@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 pub const JOB_STARTED_EVENT: &str = "trivium:job-started";
 pub const JOB_PROGRESS_EVENT: &str = "trivium:job-progress";
+pub const JOB_FINISHED_EVENT: &str = "trivium:job-finished";
 
 /// Creates a job guard on the async side, then runs `work` on the blocking
 /// pool. The store handle is owned by the closure, so no Tauri state guard is
@@ -22,7 +23,8 @@ where
     F: FnOnce(JobContext) -> Result<T, AppError> + Send + 'static,
 {
     let guard = jobs::try_begin_job(kind, project_id).map_err(String::from)?;
-    let _ = app.emit(JOB_STARTED_EVENT, guard.info());
+    let info = guard.info();
+    let _ = app.emit(JOB_STARTED_EVENT, info.clone());
 
     let progress_app = app.clone();
     let emit: ProgressFn = Arc::new(move |progress| {
@@ -30,10 +32,13 @@ where
     });
     let context = JobContext::with_job(guard, Some(emit));
 
-    match tauri::async_runtime::spawn_blocking(move || work(context)).await {
+    let result = match tauri::async_runtime::spawn_blocking(move || work(context)).await {
         Ok(result) => result.map_err(String::from),
         Err(error) => Err(format!("Background task failed: {}", error)),
-    }
+    };
+    // The frontend uses this to drop finished ids from its cancellation set.
+    let _ = app.emit(JOB_FINISHED_EVENT, info);
+    result
 }
 
 /// Requests cancellation of one background job. Returns `false` when the ID is

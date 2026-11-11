@@ -11,6 +11,8 @@
   import TimelinePanel from './project_view/TimelinePanel.svelte';
   import type { IocEntry, LoadProjectResponse, ProjectRow, ViewState } from '../types';
   import type { Backend } from '../backend';
+  import { listenToJobEvents } from '../backend';
+  import { isCurrentQueryJob, isJobLimitError } from '../jobTracking';
   import './project-view.css';
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
@@ -155,6 +157,45 @@ import type {
   let releaseBodySyncFrame: number | null = null;
   let isSyncingHeaderScroll = false;
   let isSyncingBodyScroll = false;
+
+  // Query jobs are tracked by the job-started/finished events so a new applied
+  // filter can cancel the previous search at its next batch boundary.
+  let activeQueryJobs = new Set<number>();
+  let unlistenJobEvents: (() => void) | null = null;
+  let destroyed = false;
+
+  // Keep at most two page queries in flight, matching the engine job limit.
+  // Prefetch can otherwise ask for three pages and the third is rejected.
+  const PAGE_QUERY_LIMIT = 2;
+  let pageQuerySlots = PAGE_QUERY_LIMIT;
+  const pageQueryWaiters: Array<() => void> = [];
+
+  const acquirePageSlot = async () => {
+    if (pageQuerySlots > 0) {
+      pageQuerySlots -= 1;
+      return;
+    }
+    await new Promise<void>((resolve) => pageQueryWaiters.push(resolve));
+  };
+
+  const releasePageSlot = () => {
+    const next = pageQueryWaiters.shift();
+    if (next) {
+      next();
+    } else {
+      pageQuerySlots += 1;
+    }
+  };
+
+  const cancelActiveQueryJobs = () => {
+    const ids = Array.from(activeQueryJobs);
+    activeQueryJobs.clear();
+    for (const id of ids) {
+      void backend.cancelJob(id).catch((error) => {
+        console.error('[jobs] failed to cancel query job', id, error);
+      });
+    }
+  };
 
   projectDetailStore.set(projectDetail);
   backendStore.set(backend);
@@ -335,6 +376,9 @@ import type {
       return;
     }
 
+    // Requests from the previous project or screen must not keep the job
+    // slots while this project loads.
+    cancelActiveQueryJobs();
     initialized = false;
     applyingProjectId = projectId;
     currentProjectId.set(projectId);
@@ -621,8 +665,11 @@ import type {
     }
   };
 
-  const requestPage = (pageIndex: number, force = false): Promise<void> => {
-    if (!projectDetail) return Promise.resolve();
+  const requestPage = async (
+    pageIndex: number,
+    force = false
+  ): Promise<void> => {
+    if (!projectDetail) return;
     const normalizedPage = Math.max(0, pageIndex);
     const requestProjectId = projectDetail.project.meta.id;
     const requestGeneration = get(viewGeneration);
@@ -638,10 +685,10 @@ import type {
       requestProjectId === get(currentProjectId);
 
     if (!force && $loadedPages.has(normalizedPage)) {
-      return Promise.resolve();
+      return;
     }
     if (!force && $pendingPages.has(pendingKey)) {
-      return Promise.resolve();
+      return;
     }
     const offset = normalizedPage * PAGE_SIZE;
     const limit = PAGE_SIZE;
@@ -665,50 +712,73 @@ import type {
       condition: filters.condition,
     };
 
-    return backend
-      .queryProjectRows(payload)
-      .then((response) => {
-        if (!isCurrentRequest()) {
-          return;
-        }
-        totalRows.set(response.total_rows);
-        totalFilteredRows.set(response.total_filtered_rows);
-        // The saved logical row was recorded against the result set, so apply
-        // it once the real filtered count is known (it may have shrunk).
-        if (pendingScrollRow !== null) {
-          const row = clampRow(pendingScrollRow, response.total_filtered_rows);
-          pendingScrollRow = null;
-          applyScrollOffset(row, response.total_filtered_rows);
-          rememberOffset(row);
-        }
-        // `flaggedCount` always means the whole project, never this page's slice.
-        flaggedCount.set(response.annotated_total);
-        filteredFlaggedCount.set(response.annotated_filtered);
-        emitSummary();
-        const normalizedRows = response.rows.map((row) => normalizeRow(row));
-        // Adds the page and evicts the least recently used pages in one place
-        // so rows, positions and loadedPages stay consistent.
-        registerLoadedPage(
-          Math.floor(response.offset / PAGE_SIZE),
-          response.offset,
-          normalizedRows
-        );
-      })
-      .catch((error) => {
-        console.error(error);
-      })
-      .finally(() => {
-        // Remove only this request's pending key; a stale request must not
-        // clear the pending state of a newer generation.
-        pendingPages.update((pending) => {
-          if (!pending.has(pendingKey)) {
-            return pending;
+    // The engine permits two concurrent heavy jobs. Prefetching three pages
+    // used to make the third fail and leave the page permanently unloaded.
+    // Queue extra page requests locally instead.
+    await acquirePageSlot();
+    try {
+      if (!isCurrentRequest()) {
+        return;
+      }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await backend.queryProjectRows(payload);
+          if (!isCurrentRequest()) {
+            return;
           }
-          const next = new Set(pending);
-          next.delete(pendingKey);
-          return next;
-        });
+          totalRows.set(response.total_rows);
+          totalFilteredRows.set(response.total_filtered_rows);
+          // The saved logical row was recorded against the result set, so apply
+          // it once the real filtered count is known (it may have shrunk).
+          if (pendingScrollRow !== null) {
+            const row = clampRow(pendingScrollRow, response.total_filtered_rows);
+            pendingScrollRow = null;
+            applyScrollOffset(row, response.total_filtered_rows);
+            rememberOffset(row);
+          }
+          // `flaggedCount` always means the whole project, never this page's slice.
+          flaggedCount.set(response.annotated_total);
+          filteredFlaggedCount.set(response.annotated_filtered);
+          emitSummary();
+          const normalizedRows = response.rows.map((row) => normalizeRow(row));
+          // Adds the page and evicts the least recently used pages in one place
+          // so rows, positions and loadedPages stay consistent.
+          registerLoadedPage(
+            Math.floor(response.offset / PAGE_SIZE),
+            response.offset,
+            normalizedRows
+          );
+          return;
+        } catch (error) {
+          // Import/export may hold the engine slots even when this page slot is
+          // free. Retry a bounded number of times instead of dropping the page.
+          if (attempt < 2 && isJobLimitError(error)) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 250 * (attempt + 1))
+            );
+            if (!isCurrentRequest()) {
+              return;
+            }
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      releasePageSlot();
+      // Remove only this request's pending key; a stale request must not
+      // clear the pending state of a newer generation.
+      pendingPages.update((pending) => {
+        if (!pending.has(pendingKey)) {
+          return pending;
+        }
+        const next = new Set(pending);
+        next.delete(pendingKey);
+        return next;
       });
+    }
   };
 
   const applyFilters = (
@@ -730,6 +800,9 @@ import type {
     if (!force && signature === lastAppliedFilters) {
       return Promise.resolve();
     }
+    // A new applied query supersedes the previous search. Cancel it before
+    // queueing pages for the new result.
+    cancelActiveQueryJobs();
     activeFilters = {
       search: normalized.search,
       flag: normalized.flag,
@@ -1119,6 +1192,28 @@ import type {
     document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
     document.addEventListener('sortChanged', handleSortChanged as EventListener);
+
+    void listenToJobEvents({
+      onStarted: (job) => {
+        if (isCurrentQueryJob(job, get(currentProjectId))) {
+          activeQueryJobs.add(job.id);
+        }
+      },
+      onFinished: (job) => {
+        activeQueryJobs.delete(job.id);
+      },
+    })
+      .then((unlisten) => {
+        if (destroyed) {
+          unlisten();
+        } else {
+          unlistenJobEvents = unlisten;
+        }
+      })
+      .catch((error) => {
+        console.error('[jobs] failed to subscribe to job events', error);
+      });
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
@@ -1131,6 +1226,10 @@ import type {
   });
 
   onDestroy(() => {
+    destroyed = true;
+    unlistenJobEvents?.();
+    unlistenJobEvents = null;
+    cancelActiveQueryJobs();
     // Invalidate in-flight page requests from this screen instance.
     invalidateViewRequests();
     if (persistTimer) {

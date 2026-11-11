@@ -621,15 +621,18 @@ class NativeBackend implements Backend {
 
 export const JOB_STARTED_EVENT = "trivium:job-started";
 export const JOB_PROGRESS_EVENT = "trivium:job-progress";
+export const JOB_FINISHED_EVENT = "trivium:job-finished";
 
 export interface JobEventHandlers {
   onStarted?: (job: JobInfo) => void;
   onProgress?: (progress: JobProgress) => void;
+  onFinished?: (job: JobInfo) => void;
 }
 
 /**
  * Subscribes to background-job events and returns one unlisten function for
- * both listeners. UI wiring is deferred to T18/T23.
+ * all listeners. ProjectView uses this to cancel the previous query when a new
+ * one is applied and to drop finished job ids.
  */
 export async function listenToJobEvents(
   handlers: JobEventHandlers
@@ -638,17 +641,24 @@ export async function listenToJobEvents(
     JOB_STARTED_EVENT,
     (event) => handlers.onStarted?.(event.payload)
   );
+  let unlistenProgress: (() => void) | null = null;
   try {
-    const unlistenProgress = await listen<JobProgress>(
+    unlistenProgress = await listen<JobProgress>(
       JOB_PROGRESS_EVENT,
       (event) => handlers.onProgress?.(event.payload)
     );
+    const unlistenFinished = await listen<JobInfo>(
+      JOB_FINISHED_EVENT,
+      (event) => handlers.onFinished?.(event.payload)
+    );
     return () => {
       unlistenStarted();
-      unlistenProgress();
+      unlistenProgress?.();
+      unlistenFinished();
     };
   } catch (error) {
     unlistenStarted();
+    unlistenProgress?.();
     throw error;
   }
 }
