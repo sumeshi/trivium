@@ -223,3 +223,22 @@ export interface BulkCount {
 export interface BulkApplied {
   updated: number;
 }
+
+export type JobKind = "import" | "query" | "export";
+
+/** A background job reported by the desktop backend. */
+export interface JobInfo {
+  /** Monotonic process-local id; also the job generation. */
+  id: number;
+  kind: JobKind;
+  projectId: string | null;
+}
+
+/** A throttled background-job progress value. */
+export interface JobProgress {
+  id: number;
+  kind: JobKind;
+  done: number;
+  total: number | null;
+  message: string | null;
+}

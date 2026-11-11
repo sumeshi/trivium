@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ColorRule,
   ConditionNode,
@@ -9,6 +11,8 @@ import type {
   ColumnStats,
   GroupTreeResponse,
   Histogram,
+  JobInfo,
+  JobProgress,
   LoadProjectResponse,
   PresetData,
   QuerySpec,
@@ -224,6 +228,10 @@ export interface Backend {
   updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
+  /** Requests cancellation of one running job; `false` means it already ended. */
+  cancelJob(jobId: number): Promise<boolean>;
+  /** Lists running background jobs. */
+  activeJobs(): Promise<JobInfo[]>;
 }
 
 /**
@@ -518,6 +526,48 @@ class NativeBackend implements Backend {
         columns: args.columns ?? null,
       },
     });
+  }
+
+  cancelJob(jobId: number): Promise<boolean> {
+    return invoke("cancel_job", { jobId });
+  }
+
+  activeJobs(): Promise<JobInfo[]> {
+    return invoke("active_jobs");
+  }
+}
+
+export const JOB_STARTED_EVENT = "trivium:job-started";
+export const JOB_PROGRESS_EVENT = "trivium:job-progress";
+
+export interface JobEventHandlers {
+  onStarted?: (job: JobInfo) => void;
+  onProgress?: (progress: JobProgress) => void;
+}
+
+/**
+ * Subscribes to background-job events and returns one unlisten function for
+ * both listeners. UI wiring is deferred to T18/T23.
+ */
+export async function listenToJobEvents(
+  handlers: JobEventHandlers
+): Promise<UnlistenFn> {
+  const unlistenStarted = await listen<JobInfo>(
+    JOB_STARTED_EVENT,
+    (event) => handlers.onStarted?.(event.payload)
+  );
+  try {
+    const unlistenProgress = await listen<JobProgress>(
+      JOB_PROGRESS_EVENT,
+      (event) => handlers.onProgress?.(event.payload)
+    );
+    return () => {
+      unlistenStarted();
+      unlistenProgress();
+    };
+  } catch (error) {
+    unlistenStarted();
+    throw error;
   }
 }
 

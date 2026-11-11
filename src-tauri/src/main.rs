@@ -30,6 +30,8 @@ fn main() {
             delete_project,
             load_project,
             query_project_rows,
+            cancel_job,
+            active_jobs,
             save_iocs,
             import_iocs,
             export_iocs,

@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{Context, Result};
@@ -11,13 +14,17 @@ use uuid::Uuid;
 
 use crate::{models::ProjectMeta, storage::load_flags};
 
+/// Cloneable handle to the shared project store. Cloning is cheap and shares
+/// the in-memory metadata and revision counters, so a background worker can
+/// own a copy without holding the Tauri state guard for the whole operation.
+#[derive(Clone)]
 pub struct ProjectsStore {
     root_dir: PathBuf,
     meta_path: PathBuf,
-    inner: Mutex<Vec<ProjectMeta>>,
+    inner: Arc<Mutex<Vec<ProjectMeta>>>,
     /// Process-local annotation revisions. Durable state is the annotation DB;
     /// this counter only lets the frontend discard stale responses.
-    revisions: Mutex<HashMap<Uuid, AtomicU64>>,
+    revisions: Arc<Mutex<HashMap<Uuid, AtomicU64>>>,
 }
 
 impl ProjectsStore {
@@ -65,8 +72,8 @@ impl ProjectsStore {
         Ok(Self {
             root_dir,
             meta_path,
-            inner: Mutex::new(projects),
-            revisions: Mutex::new(HashMap::new()),
+            inner: Arc::new(Mutex::new(projects)),
+            revisions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 

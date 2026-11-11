@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     error::AppError,
     ioc::{cached_ioc_outcomes, load_ioc_entries},
+    jobs::JobContext,
     models::ProjectRow,
     project_io::{read_project_dataframe, ProjectColumns},
     storage::{load_color_rules, load_flags},
@@ -62,6 +63,19 @@ pub fn query_project_rows(
     store: &ProjectsStore,
     payload: QueryRowsPayload,
 ) -> Result<QueryRowsResponse, AppError> {
+    query_project_rows_with_job(store, payload, &JobContext::none())
+}
+
+/// [`query_project_rows`] with cancellation checkpoints and progress reporting.
+///
+/// The search and sort stages are single library calls in T15, so cancellation
+/// is checked around them. Batch-level interruption is added by T18.
+pub fn query_project_rows_with_job(
+    store: &ProjectsStore,
+    payload: QueryRowsPayload,
+    job: &JobContext,
+) -> Result<QueryRowsResponse, AppError> {
+    job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
@@ -71,7 +85,9 @@ pub fn query_project_rows(
         return Err(AppError::Message("Project data file missing.".into()).into());
     }
 
+    job.report_progress(0, Some(3), Some("Reading project data".into()));
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
+    job.check_cancelled()?;
     let columns = data_columns(&df);
     let project_columns = ProjectColumns::from_meta(&meta, &df);
 
@@ -84,6 +100,7 @@ pub fn query_project_rows(
     let total_rows = df.height();
 
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    job.report_progress(1, Some(3), Some("Evaluating query".into()));
     let target = resolve_target(
         &df,
         &project_dir,
@@ -92,6 +109,7 @@ pub fn query_project_rows(
         &flags,
         &ioc_outcomes,
     )?;
+    job.check_cancelled()?;
     let selected_indices: Vec<usize> = target
         .filtered
         .iter()
@@ -99,6 +117,7 @@ pub fn query_project_rows(
         .take(limit)
         .copied()
         .collect();
+    job.report_progress(2, Some(3), Some("Building page".into()));
     let mut rows = page::materialize_page(
         &df,
         &selected_indices,
@@ -124,6 +143,8 @@ pub fn query_project_rows(
     for row in &mut rows {
         row.color = matched_rule_color(&row.data, &color_rules)?;
     }
+
+    job.report_progress(3, Some(3), Some("Rows ready".into()));
 
     Ok(QueryRowsResponse {
         rows,

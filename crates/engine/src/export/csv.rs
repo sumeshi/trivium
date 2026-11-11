@@ -11,6 +11,7 @@ use crate::{
     error::AppError,
     flags::normalize_flag_value,
     ioc::{cached_ioc_outcomes, load_ioc_entries},
+    jobs::JobContext,
     ops::query::{data_columns, ordered_row_indices, resolve_target},
     project_io::{
         read_project_dataframe, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
@@ -41,12 +42,28 @@ pub fn export_project(
     store: &ProjectsStore,
     payload: ExportProjectPayload,
 ) -> Result<(), AppError> {
+    export_project_with_job(store, payload, &JobContext::none())
+}
+
+/// [`export_project`] with cancellation checkpoints and progress reporting.
+///
+/// The destination is not yet written through a temporary file, so a cancel
+/// during the CSV write is only observed after the write; preserving the
+/// destination belongs to T23.
+pub fn export_project_with_job(
+    store: &ProjectsStore,
+    payload: ExportProjectPayload,
+    job: &JobContext,
+) -> Result<(), AppError> {
+    job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
+    job.report_progress(0, Some(3), Some("Reading project data".into()));
     let mut df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
+    job.check_cancelled()?;
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -56,6 +73,7 @@ pub fn export_project(
     let project_columns = ProjectColumns::from_meta(&meta, &df);
     let all_columns = data_columns(&df);
 
+    job.report_progress(1, Some(3), Some("Resolving export rows".into()));
     // Resolve rows and order before touching output columns. The search scope
     // is `spec.search_columns`, never the output column list.
     let final_indices: Vec<IdxSize> = if payload.scope.as_deref() == Some("filtered") {
@@ -81,6 +99,7 @@ pub fn export_project(
         .map(|row_idx| row_idx as IdxSize)
         .collect()
     };
+    job.check_cancelled()?;
 
     let mut safe_flags: Vec<i32> = vec![0; df.height()];
     let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
@@ -188,6 +207,8 @@ pub fn export_project(
         .map_err(|e| AppError::Message(format!("Failed to select export rows: {}", e)))?;
 
     let destination = PathBuf::from(payload.destination);
+    job.report_progress(2, Some(3), Some("Writing CSV".into()));
+    job.check_cancelled()?;
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create export dir {:?}", parent))
@@ -229,5 +250,10 @@ pub fn export_project(
         .finish(&mut df_out)
         .context("failed to write export CSV")
         .map_err(AppError::from)?;
+
+    // A cancel during the write is only observed here. The destination may
+    // already be complete; T23 adds a temporary file and atomic replacement.
+    job.check_cancelled()?;
+    job.report_progress(3, Some(3), Some("Export complete".into()));
     Ok(())
 }

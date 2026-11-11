@@ -14,6 +14,7 @@ use crate::{
     import::json,
     import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
+    jobs::JobContext,
     models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe, ProjectColumns},
     storage::{
@@ -157,6 +158,19 @@ pub fn create_project(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
 ) -> Result<ProjectSummary, AppError> {
+    create_project_with_job(store, payload, &JobContext::none())
+}
+
+/// [`create_project`] with cancellation checkpoints and progress reporting.
+///
+/// Cancellation is checked at the stage boundaries only. The CSV/JSON parsers
+/// still run to completion once called; they are made interruptible by T16/T17.
+pub fn create_project_with_job(
+    store: &ProjectsStore,
+    payload: CreateProjectPayload,
+    job: &JobContext,
+) -> Result<ProjectSummary, AppError> {
+    job.check_cancelled()?;
     let source_path = PathBuf::from(&payload.path);
     if !source_path.exists() {
         return Err(AppError::Message("Selected file no longer exists.".into()).into());
@@ -178,10 +192,13 @@ pub fn create_project(
 
     let project_id = Uuid::new_v4();
     let mut staging = StagingDir::create(store.staging_dir(&project_id))?;
+    job.report_progress(0, Some(4), Some("Copying source".into()));
     let copied = copy_source_and_hash(&source_path, &staging.path().join(STAGED_SOURCE_FILE))?;
+    job.check_cancelled()?;
 
     // Parse the copied snapshot, not the source path, so the hash recorded in
     // metadata always covers the bytes that were actually imported.
+    job.report_progress(1, Some(4), Some("Importing data".into()));
     let imported = match source_format {
         "json" => json::load(&copied.path)?,
         "jsonl" | "ndjson" => jsonl::load(&copied.path)?,
@@ -193,6 +210,7 @@ pub fn create_project(
     };
     let mut df = imported.frame;
     let imported_flags = imported.flags;
+    job.check_cancelled()?;
 
     let metadata = ProjectMeta {
         id: project_id,
@@ -233,6 +251,11 @@ pub fn create_project(
     // completed staging directory is renamed into place.
     fs::remove_file(&copied.path)
         .map_err(|e| AppError::Message(format!("Failed to remove temporary import file: {}", e)))?;
+
+    // Last cancellation point before the project becomes visible. A cancel
+    // after this line is not observed; the import completes and is registered.
+    job.report_progress(3, Some(4), Some("Creating project".into()));
+    job.check_cancelled()?;
 
     let project_dir = store.project_dir(&project_id);
     if project_dir.exists() {

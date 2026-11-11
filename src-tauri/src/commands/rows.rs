@@ -1,14 +1,24 @@
 use tauri::State;
 
+use crate::commands::job::run_job;
 use crate::state::AppState;
+use trivium_engine::jobs::JobKind;
 use trivium_engine::ops;
 use trivium_engine::ops::rows::{QueryRowsPayload, QueryRowsResponse};
 
 /// Streams project rows with filtering, sorting, IOC application, and pagination.
+///
+/// Search and sort run on the blocking pool so the window stays responsive.
 #[tauri::command]
-pub fn query_project_rows(
-    state: State<AppState>,
+pub async fn query_project_rows(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
     payload: QueryRowsPayload,
 ) -> Result<QueryRowsResponse, String> {
-    ops::rows::query_project_rows(&state.projects, payload).map_err(String::from)
+    let store = state.projects.clone();
+    let project_id = Some(payload.project_id);
+    run_job(app, JobKind::Query, project_id, move |job| {
+        ops::rows::query_project_rows_with_job(&store, payload, &job)
+    })
+    .await
 }

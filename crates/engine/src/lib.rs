@@ -6,6 +6,7 @@ pub mod export;
 pub mod flags;
 pub mod import;
 pub mod ioc;
+pub mod jobs;
 pub mod models;
 pub mod ops;
 pub mod project_io;
