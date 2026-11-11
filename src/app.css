@@ -51,7 +51,8 @@
     --rule-pink: #472a3b;
   }
 
-  [data-theme="light"] {
+  [data-theme="light"],
+  [data-theme="paper"] {
     color-scheme: light;
     --bg: #f4f3ef;
     --fg: #1b1f24;
@@ -89,6 +90,38 @@
     --rule-blue: #e3ecfb;
     --rule-purple: #ece6fb;
     --rule-pink: #fbe4ef;
+  }
+
+  /* Extra themes change surfaces and accents. Semantic flag colours retain
+     the corresponding Light/Dark values above. */
+  [data-theme="paper"] {
+    --bg: #efebe1;
+    --fg: #302e29;
+    --muted: #706b61;
+    --surface: #fcfaf3;
+    --surface-weak: #ede8db;
+    --surface-soft: #f6f2e8;
+    --surface-strong: #e5dfd0;
+    --overlay: rgba(239, 235, 225, 0.9);
+    --border: #d9d1c0;
+    --border-strong: #bfb49f;
+    --accent: #526d56;
+    --accent-contrast: #ffffff;
+  }
+
+  [data-theme="midnight"] {
+    --bg: #0c1420;
+    --fg: #e2e9f3;
+    --muted: #93a2b8;
+    --surface: #111c2b;
+    --surface-weak: #172438;
+    --surface-soft: #142133;
+    --surface-strong: #1d2e45;
+    --overlay: rgba(12, 20, 32, 0.9);
+    --border: #293b51;
+    --border-strong: #3d526b;
+    --accent: #9cb9dc;
+    --accent-contrast: #0c1724;
   }
 
   html,
@@ -159,7 +192,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 16px 20px 20px;
+    padding: 6px 12px 10px;
   }
 
   .empty-workspace {
@@ -219,7 +252,7 @@
 
   @media (max-width: 720px) {
     .app-main {
-      padding: 10px 12px 12px;
+      padding: 4px 8px 8px;
     }
   }
 }

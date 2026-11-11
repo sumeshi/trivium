@@ -1,4 +1,5 @@
 import type { Theme } from "./theme";
+import { isLightTheme } from "./themeModel.ts";
 import type { FlagSymbol } from "./types";
 
 // フラグ記号（記号の単一ソース）
@@ -37,7 +38,7 @@ export function resolveConditionColor(
   if (!entry) {
     return null;
   }
-  return current === "light" ? entry.light : entry.dark;
+  return isLightTheme(current) ? entry.light : entry.dark;
 }
 
 // 保存済み hex（dark/light のどちらで保存されたか不明）を UI 表示用の

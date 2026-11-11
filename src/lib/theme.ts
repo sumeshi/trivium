@@ -1,11 +1,16 @@
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
+import { isLightTheme, parseTheme } from "./themeModel.ts";
+import type { Theme } from "./themeModel";
 
-export type Theme = "light" | "dark";
+export { THEME_OPTIONS } from "./themeModel";
+export type { Theme } from "./themeModel";
 
 const THEME_KEY = "trivium:theme";
 const THEME_FILE = "theme.json";
+let themeRevision = 0;
+let pendingWrite = Promise.resolve();
 
 function systemTheme(): Theme {
   if (typeof window !== "undefined" && window.matchMedia) {
@@ -22,12 +27,10 @@ function applyThemeAttr(next: Theme) {
 }
 
 export async function initTheme() {
+  const revision = ++themeRevision;
   let loaded: Theme | null = null;
   try {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === "light" || stored === "dark") {
-      loaded = stored;
-    }
+    loaded = parseTheme(localStorage.getItem(THEME_KEY));
   } catch (_err) {
     // ignore
   }
@@ -38,37 +41,42 @@ export async function initTheme() {
       const path = await join(base, THEME_FILE);
       const text = await readTextFile(path);
       const data = JSON.parse(text) as { theme?: string };
-      if (data && (data.theme === "light" || data.theme === "dark")) {
-        loaded = data.theme;
-      }
+      loaded = parseTheme(data?.theme);
     } catch (_err) {
       // ignore (first run or not available)
     }
   }
 
+  // A theme chosen while the file was loading takes precedence over that read.
+  if (revision !== themeRevision) return;
   const next = loaded ?? systemTheme();
   applyThemeAttr(next);
   theme.set(next);
 }
 
-async function persistTheme(next: Theme) {
+function persistTheme(next: Theme): Promise<void> {
   try {
     localStorage.setItem(THEME_KEY, next);
   } catch (_err) {
     // ignore
   }
-  try {
-    const base = await appLocalDataDir();
-    // ensure dir exists (no-op if already exists)
-    await mkdir(base, { recursive: true });
-    const path = await join(base, THEME_FILE);
-    await writeTextFile(path, JSON.stringify({ theme: next }, null, 2));
-  } catch (_err) {
-    // ignore if filesystem not available
-  }
+  // Serialize writes so rapid changes cannot leave an older choice on disk.
+  pendingWrite = pendingWrite.then(async () => {
+    try {
+      const base = await appLocalDataDir();
+      await mkdir(base, { recursive: true });
+      const path = await join(base, THEME_FILE);
+      await writeTextFile(path, JSON.stringify({ theme: next }, null, 2));
+    } catch (_err) {
+      // localStorage remains available when filesystem access is unavailable.
+    }
+  });
+  return pendingWrite;
 }
 
 export async function setTheme(next: Theme) {
+  if (!parseTheme(next)) return;
+  themeRevision += 1;
   applyThemeAttr(next);
   theme.set(next);
   await persistTheme(next);
@@ -80,6 +88,6 @@ export async function toggleTheme() {
     current = t;
     return t;
   });
-  const next: Theme = current === "dark" ? "light" : "dark";
+  const next: Theme = isLightTheme(current) ? "dark" : "light";
   await setTheme(next);
 }
