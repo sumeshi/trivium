@@ -851,3 +851,79 @@ Regression coverage (`crates/engine/tests/annotation_update_test.rs`, 5 tests):
   store is recreated.
 
 Next card: T14.
+
+## T14 — bulk annotation and undo are saved as one operation
+
+Recorded: 2026-11-11. Code commit `947bdff`.
+
+Changes:
+- `crates/engine/src/storage.rs`: added
+  `apply_flag_batch(path, changes)`. `None` removes a row's entry and `Some`
+  inserts the serialized entry, both queued in one `sled::Batch`. The batch is
+  committed with a single `apply_batch` and one flush instead of opening and
+  flushing per row. `upsert_flag` and `remove_flag` remain for single-row
+  callers.
+- `crates/engine/src/ops/bulk.rs`: `bulk_update` still resolves and fixes the
+  target before writing, then computes every row's next entry in memory and
+  writes the whole target with `apply_flag_batch`. The target is not
+  re-resolved while writing, so a flag-filtered bulk cannot grow or shrink
+  mid-operation. The preview token check is unchanged.
+- The flagged count is no longer a full `count_flagged` scan. The previous and
+  applied entries give the per-row flag transitions, which are applied to the
+  project's existing count. The same difference calculation is used by undo.
+- Undo state is now `Mutex<HashMap<Uuid, BulkUndo>>`, one level per project.
+  `BulkUndo` keeps both `previous` and `applied` entries plus the revision
+  issued by the operation. A conflict only affects the project it belongs to.
+- `bulk_undo` validates every target row with `load_flag` against `applied`
+  before writing. On a mismatch it returns
+  `Annotation changed since the bulk operation; undo would overwrite it.`,
+  writes nothing, and keeps the undo entry for a later retry. Only after a
+  successful `apply_flag_batch(previous)` is the entry removed, and it is
+  removed only when its revision still matches (another bulk may have replaced
+  it).
+- `crates/engine/src/store.rs`: no new API is needed; the revision issued by
+  `next_revision` is stored inside `BulkUndo` so a restored entry is removed
+  only if it is still the latest one for that project.
+- Annotation writes no longer fail because the project-list count could not be
+  persisted. After a successful batch, a failed `update_flagged_records` logs
+  `[bulk] annotations were saved but the flagged count ... could not be
+  persisted` and the operation still succeeds; the annotation DB is the source
+  of truth and the count is recomputable.
+
+Regression coverage (`crates/engine/tests/bulk_test.rs`, 5 new tests):
+- Clearing the flag on a project with memo, tags, and bookmark entries, then
+  undoing, restores all four fields exactly and returns the count to 2.
+- A bulk on project A and a bulk on project B keep separate undo entries;
+  undoing A leaves B annotated, and B's undo still succeeds afterwards.
+- A single-row update after a bulk makes undo report the conflict without
+  writing; a second undo reports the same conflict, proving the entry remains.
+- A filtered bulk changes the flagged count by the same amount as a full
+  recalculation from the annotation DB, and undo returns both to the
+  pre-bulk value.
+- A stale preview token fails before the batch and leaves every annotation
+  unchanged.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Bulk suite | `cargo test -p trivium-engine --test bulk_test` | 10 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- The GUI was not operated and the native Tauri app was not built in this
+  environment; real clicks on bulk annotate/undo are deferred to T26.
+- Mid-batch I/O failure was not injected. The single `apply_batch` makes a
+  half-written target unlikely by design, and the test covers the pre-batch
+  failure (stale token), but sled's own atomicity was not fault-injected
+  because doing so reliably would require an artificial failure hook.
+- Undo is one level per project in process memory and does not survive a
+  restart. This matches the card's per-project requirement; it is not a
+  missing persistence feature.
+
+Next card: T15.
