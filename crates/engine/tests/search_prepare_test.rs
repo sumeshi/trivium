@@ -183,6 +183,9 @@ fn unconditional_display_builds_no_full_text_cache() {
 
 #[test]
 fn unknown_columns_and_invalid_regex_fail_before_evaluation() {
+    // This test compiles an invalid regex, so it must not increment the
+    // process-wide regex counter while the compile-count test is observing it.
+    let _guard = HOOK_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::create(&hundred_rows());
 
     let unknown_condition = fixture
