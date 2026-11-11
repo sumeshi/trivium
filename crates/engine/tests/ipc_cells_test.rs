@@ -79,9 +79,9 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     fs::write(
         &jsonl,
         concat!(
-            "{\"big\": 9007199254740993, \"nullv\": null, \"empty\": \"\", \"flag\": true, \"arr\": [1,2,3]}\n",
-            "{\"big\": 18446744073709551615, \"nullv\": null, \"empty\": \"\", \"flag\": false, \"arr\": [4], \"missing\": \"present\"}\n",
-            "{\"big\": -9223372036854775808, \"nullv\": null, \"empty\": \"\", \"flag\": true, \"arr\": []}\n",
+            "{\"big\": 9007199254740993, \"nullv\": null, \"empty\": \"\", \"flag\": true, \"arr\": [1,2,3], \"num\": 123, \"textnum\": \"123\", \"mixed\": 123, \"obj\": {\"x\": 1}}\n",
+            "{\"big\": 18446744073709551615, \"nullv\": null, \"empty\": \"\", \"flag\": false, \"arr\": [4], \"missing\": \"present\", \"num\": 123, \"textnum\": \"123\", \"mixed\": \"123\", \"obj\": {\"x\": 2}}\n",
+            "{\"big\": -9223372036854775808, \"nullv\": null, \"empty\": \"\", \"flag\": true, \"arr\": [], \"num\": 123, \"textnum\": \"123\", \"mixed\": null, \"obj\": {\"x\": 3}}\n",
         ),
     )
     .expect("write jsonl");
@@ -95,6 +95,13 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
             .unwrap_or_else(|| panic!("missing column {}", source));
         response["rows"][row]["cells"][column].clone()
     };
+
+    // The compatibility `ProjectRow.data` map is in-process only; a page must
+    // carry the previews in `cells`, not a second full copy of every value.
+    assert!(
+        response["rows"][0].get("data").is_none(),
+        "page rows must not serialize the full compatibility data map"
+    );
 
     assert_eq!(cell(0, "/big"), cell_json(Some("9007199254740993"), "int"));
     assert_eq!(
@@ -118,9 +125,19 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
 
     assert_eq!(cell(0, "/nullv"), cell_json(None, "null"));
     assert_eq!(cell(0, "/empty"), cell_json(Some(""), "string"));
-    assert_eq!(cell(0, "/flag"), cell_json(Some("true"), "string"));
-    assert_eq!(cell(1, "/flag"), cell_json(Some("false"), "string"));
-    assert_eq!(cell(0, "/arr"), cell_json(Some("[1,2,3]"), "string"));
+    assert_eq!(cell(0, "/flag"), cell_json(Some("true"), "bool"));
+    assert_eq!(cell(1, "/flag"), cell_json(Some("false"), "bool"));
+    assert_eq!(cell(0, "/arr"), cell_json(Some("[1,2,3]"), "array"));
+    assert_eq!(cell(0, "/obj/x"), cell_json(Some("1"), "int"));
+    // A JSON number and a JSON string with the same spelling keep distinct
+    // kinds; the exact text is the same in both cases.
+    assert_eq!(cell(0, "/num"), cell_json(Some("123"), "int"));
+    assert_eq!(cell(0, "/textnum"), cell_json(Some("123"), "string"));
+    // A mixed column must keep the type of each record, not one inferred type
+    // for the whole column.
+    assert_eq!(cell(0, "/mixed"), cell_json(Some("123"), "int"));
+    assert_eq!(cell(1, "/mixed"), cell_json(Some("123"), "string"));
+    assert_eq!(cell(2, "/mixed"), cell_json(None, "null"));
 
     // An absent JSON key is "missing", not null and not an empty string.
     assert_eq!(cell(0, "/missing"), cell_json(None, "missing"));

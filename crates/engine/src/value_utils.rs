@@ -134,9 +134,9 @@ impl CellColumns {
     }
 }
 
-/// Maps a column kind to the cell kind the frontend receives. Datetimes keep
-/// their display text, so the cell kind is "string"; booleans are stored as
-/// `true`/`false` text and therefore also arrive as "string".
+/// Maps a column kind to the cell kind used when no source record is available
+/// (legacy projects). Datetimes keep their display text, so the cell kind is
+/// "string".
 pub fn cell_kind_name(kind: ColumnKind) -> &'static str {
     match kind {
         ColumnKind::Int => "int",
@@ -157,6 +157,12 @@ pub fn build_cell(
 }
 
 /// Builds one cell with the full source text and no truncation.
+///
+/// A JSON source record carries the per-cell JSON type. Reading it here keeps
+/// `"123"` (string) distinct from `123` (number), preserves booleans, and
+/// keeps arrays/objects in one cell. CSV originals are arrays of strings, and
+/// legacy projects have no `__original`, so those fall back to the Polars
+/// value's own type.
 pub fn build_full_cell(
     value: &AnyValue,
     column_kind: ColumnKind,
@@ -167,9 +173,11 @@ pub fn build_full_cell(
     match text {
         Some(text) => {
             let length = text.chars().count();
+            let kind = original_json_kind(original, source)
+                .unwrap_or_else(|| anyvalue_kind(value, column_kind));
             Cell {
                 text: Some(text),
-                kind: cell_kind_name(column_kind).to_string(),
+                kind: kind.to_string(),
                 truncated: false,
                 length: Some(length),
             }
@@ -180,6 +188,41 @@ pub fn build_full_cell(
             truncated: false,
             length: None,
         },
+    }
+}
+
+/// Returns the JSON type for a key present in a JSON source record.
+fn original_json_kind(original: Option<&Value>, source: &str) -> Option<&'static str> {
+    let Some(Value::Object(_)) = original else {
+        return None;
+    };
+    match original?.pointer(source)? {
+        Value::Null => Some("null"),
+        Value::Bool(_) => Some("bool"),
+        Value::Number(number) if number.is_i64() || number.is_u64() => Some("int"),
+        Value::Number(_) => Some("float"),
+        Value::String(_) => Some("string"),
+        Value::Array(_) => Some("array"),
+        Value::Object(_) => Some("object"),
+    }
+}
+
+/// Maps a Polars value to a cell kind when no JSON source type is available.
+fn anyvalue_kind(value: &AnyValue, column_kind: ColumnKind) -> &'static str {
+    match value {
+        AnyValue::Boolean(_) => "bool",
+        AnyValue::Int8(_)
+        | AnyValue::Int16(_)
+        | AnyValue::Int32(_)
+        | AnyValue::Int64(_)
+        | AnyValue::UInt8(_)
+        | AnyValue::UInt16(_)
+        | AnyValue::UInt32(_)
+        | AnyValue::UInt64(_) => "int",
+        AnyValue::Float32(_) | AnyValue::Float64(_) => "float",
+        AnyValue::String(_) | AnyValue::StringOwned(_) => cell_kind_name(ColumnKind::String),
+        AnyValue::List(_) => "array",
+        _ => cell_kind_name(column_kind),
     }
 }
 

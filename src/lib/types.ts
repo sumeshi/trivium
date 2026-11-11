@@ -38,6 +38,8 @@ export type CellKind =
   | "int"
   | "float"
   | "bool"
+  | "array"
+  | "object"
   | "null"
   | "missing";
 
