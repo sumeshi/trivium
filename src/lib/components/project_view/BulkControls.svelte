@@ -3,6 +3,7 @@
   import type { AnnotationPatch, BulkAnnotateArgs } from "../../backend";
   import {
     appliedFilters,
+    appliedResultLoading,
     backend,
     projectDetail,
     selectedCount,
@@ -33,6 +34,7 @@
   $: allRowCount = $projectDetail?.project.meta.total_records ?? 0;
   // A zero-row selection is not a request for the filtered or all scope.
   $: selectedTargetEmpty = target === "selection" && $selectedCount === 0;
+  $: filteredResultLoading = target === "filtered" && $appliedResultLoading;
   $: canApplyTag = tagInput.trim().length > 0 && !selectedTargetEmpty;
 
   const buildArgs = (patch: AnnotationPatch): BulkAnnotateArgs => ({
@@ -104,7 +106,7 @@
    */
   const runTag = async (operation: "add" | "remove") => {
     const tag = tagInput.trim();
-    if (!$backend || !projectId || busy || !tag || selectedTargetEmpty) {
+    if (!$backend || !projectId || busy || !tag || selectedTargetEmpty || filteredResultLoading) {
       return;
     }
     busy = true;
@@ -145,7 +147,9 @@
       <option value="selection" disabled={$selectedCount === 0}>
         Selected ({$selectedCount})
       </option>
-      <option value="filtered">Current results ({$totalFilteredRows})</option>
+      <option value="filtered">
+        Current results ({filteredResultLoading ? '…' : $totalFilteredRows})
+      </option>
       <option value="all">All rows ({allRowCount})</option>
     </select>
     <select bind:value={flag} aria-label="Bulk flag">
@@ -161,7 +165,7 @@
       type="button"
       class="ghost"
       on:click={() => void run("preview")}
-      disabled={busy || selectedTargetEmpty}
+      disabled={busy || selectedTargetEmpty || filteredResultLoading}
     >
       Preview
     </button>
@@ -169,7 +173,7 @@
       type="button"
       class="primary"
       on:click={() => void run("apply")}
-      disabled={busy || selectedTargetEmpty}
+      disabled={busy || selectedTargetEmpty || filteredResultLoading}
     >
       Apply
     </button>
@@ -189,7 +193,7 @@
       type="button"
       class="ghost"
       on:click={() => void runTag("add")}
-      disabled={busy || !canApplyTag}
+      disabled={busy || !canApplyTag || filteredResultLoading}
       title="Preview and add this tag to the target rows"
     >
       Add tag
@@ -198,7 +202,7 @@
       type="button"
       class="ghost"
       on:click={() => void runTag("remove")}
-      disabled={busy || !canApplyTag}
+      disabled={busy || !canApplyTag || filteredResultLoading}
       title="Preview and remove this tag from the target rows"
     >
       Remove tag

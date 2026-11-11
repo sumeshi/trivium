@@ -52,6 +52,7 @@
     largePages,
     totalRows,
     totalFilteredRows,
+    appliedResultLoading,
     flaggedCount,
     filteredFlaggedCount,
     expandedCell,
@@ -551,6 +552,7 @@ import type {
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
     totalFilteredRows.set(0);
+    appliedResultLoading.set(true);
     flaggedCount.set(detail.project.meta.flagged_records);
     // The saved logical row is authoritative; the pixel offset derived from the
     // project total is only an estimate until the first page returns the
@@ -781,6 +783,7 @@ import type {
           // `flaggedCount` always means the whole project, never this page's slice.
           flaggedCount.set(response.annotated_total);
           filteredFlaggedCount.set(response.annotated_filtered);
+          appliedResultLoading.set(false);
           emitSummary();
           const normalizedRows = response.rows.map((row) => normalizeRow(row));
           // Adds the page and evicts the least recently used pages in one place
@@ -810,6 +813,11 @@ import type {
       console.error(error);
     } finally {
       releasePageSlot();
+      // A stale first-page request must not clear the loading state of the
+      // newer result.
+      if (normalizedPage === 0 && isCurrentRequest()) {
+        appliedResultLoading.set(false);
+      }
       // Remove only this request's pending key; a stale request must not
       // clear the pending state of a newer generation.
       pendingPages.update((pending) => {
@@ -859,6 +867,7 @@ import type {
       searchColumns: [...activeFilters.searchColumns],
       condition: activeFilters.condition,
     });
+    appliedResultLoading.set(true);
     lastAppliedFilters = signature;
     syncSelectionScope(projectDetail.project.meta.id, signature);
     filterRequestId += 1;

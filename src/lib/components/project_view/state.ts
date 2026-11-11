@@ -201,6 +201,8 @@ export function invalidateViewRequests(): void {
 export const totalRows = writable(0);
 /** Rows matching the applied QuerySpec. Sole source for the virtual row count. */
 export const totalFilteredRows = writable(0);
+/** True while the first page of a newly applied result is loading. */
+export const appliedResultLoading = writable(false);
 /** Annotated rows in the whole project. */
 export const flaggedCount = writable(0);
 /** Annotated rows inside the current result set. */
