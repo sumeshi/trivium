@@ -225,7 +225,14 @@ fn annotation_filters_miss_after_an_annotation_update() {
 fn memo_and_flag_updates_keep_a_data_only_result_cached() {
     let _guard = cache_test_guard();
     let (root, store, id) = setup_project();
-    let spec = QuerySpec::default();
+    let ids = common::column_ids(&store, id);
+    // T20a reads an unconditional page without resolving ids, so this T19
+    // regression uses a sorted data-only spec to exercise the cache.
+    let spec = QuerySpec {
+        sort_key: Some(common::id(&ids, "id")),
+        sort_direction: Some("asc".to_string()),
+        ..Default::default()
+    };
 
     let first = query(&store, id, spec.clone(), 0, PAGE);
     assert_eq!(first.annotated_total, 0);
@@ -297,8 +304,19 @@ fn cache_keeps_two_results_and_evicts_the_oldest() {
 fn deleting_a_project_drops_its_cached_results() {
     let _guard = cache_test_guard();
     let (root, store, id) = setup_project();
+    let ids = common::column_ids(&store, id);
 
-    query(&store, id, QuerySpec::default(), 0, PAGE);
+    query(
+        &store,
+        id,
+        QuerySpec {
+            sort_key: Some(common::id(&ids, "id")),
+            sort_direction: Some("asc".to_string()),
+            ..Default::default()
+        },
+        0,
+        PAGE,
+    );
     assert_eq!(result_cache_stats().entries, 1);
 
     ops::projects::delete_project(&store, ProjectRequest { project_id: id })

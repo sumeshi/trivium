@@ -234,6 +234,53 @@ fn merge_outcomes(
     old
 }
 
+/// Returns the full project-wide outcomes from the persisted IOC cache.
+///
+/// This is the page path's alternative to [`cached_ioc_outcomes`] when the
+/// caller does not need a `DataFrame` (and must not read one). `None` means
+/// the cache is absent or does not match the current IOC set and row count;
+/// the caller keeps the existing evaluation path in that case.
+pub fn cached_ioc_outcomes_without_frame(
+    project_dir: &Path,
+    iocs: &[IocEntry],
+    row_count: usize,
+) -> Option<Vec<IocRowOutcome>> {
+    if iocs.is_empty() {
+        return Some(vec![IocRowOutcome::default(); row_count]);
+    }
+    let cache = load_ioc_flag_cache(project_dir).ok().flatten()?;
+    if cache.signature != ioc_signature(iocs) || cache.rows.len() != row_count {
+        return None;
+    }
+    Some(cache.rows.iter().map(to_public_outcome).collect())
+}
+
+/// Returns cached IOC outcomes for the requested page rows only.
+///
+/// This avoids converting the whole project's cached outcomes for every page.
+/// `None` has the same meaning as in [`cached_ioc_outcomes_without_frame`].
+pub fn cached_ioc_page_outcomes(
+    project_dir: &Path,
+    iocs: &[IocEntry],
+    row_count: usize,
+    row_indices: &[usize],
+) -> Option<HashMap<usize, IocRowOutcome>> {
+    if iocs.is_empty() {
+        return Some(HashMap::new());
+    }
+    let cache = load_ioc_flag_cache(project_dir).ok().flatten()?;
+    if cache.signature != ioc_signature(iocs) || cache.rows.len() != row_count {
+        return None;
+    }
+    let mut outcomes = HashMap::with_capacity(row_indices.len());
+    for &row_index in row_indices {
+        if let Some(outcome) = cache.rows.get(row_index) {
+            outcomes.insert(row_index, to_public_outcome(outcome));
+        }
+    }
+    Some(outcomes)
+}
+
 /// Returns cached IOC outcomes for the frame, rebuilding the cache when the
 /// row count or the IOC set changed.
 ///

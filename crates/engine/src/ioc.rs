@@ -10,7 +10,10 @@ use crate::project_io::read_project_dataframe;
 use crate::storage::load_flags;
 
 pub mod evaluate;
-pub use evaluate::{cached_ioc_outcomes, evaluate_iocs, IocRowOutcome};
+pub use evaluate::{
+    cached_ioc_outcomes, cached_ioc_outcomes_without_frame, cached_ioc_page_outcomes,
+    evaluate_iocs, IocRowOutcome,
+};
 
 /// Applies frame-level IOC outcomes to materialized page rows.
 ///

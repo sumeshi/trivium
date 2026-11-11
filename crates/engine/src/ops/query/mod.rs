@@ -1,12 +1,12 @@
 mod ioc;
 mod page;
+mod page_read;
 mod result_cache;
 mod search;
 mod sort;
 mod target;
 
 use std::collections::HashMap;
-use std::path::Path;
 
 pub(crate) use ioc::final_flags;
 pub(crate) use page::{filtered_indices, materialize_page};
@@ -24,15 +24,24 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    ioc::{cached_ioc_outcomes, load_ioc_entries},
+    ioc::load_ioc_entries,
     jobs::JobContext,
-    models::{FlagEntry, IocEntry, ProjectRow},
-    project_io::{read_project_dataframe, ProjectColumns},
-    storage::{load_color_rules, load_flag, load_flags},
+    models::{ColumnMeta, ProjectRow},
+    project_io::{
+        is_internal_column, read_page_dataframe, read_page_rows_dataframe, read_project_columns,
+        read_project_row_count, read_project_schema_columns, ProjectColumns, INTERNAL_ORIGINAL,
+        INTERNAL_ROW_ID,
+    },
+    storage::load_flags,
     store::ProjectsStore,
 };
 
-use super::util::{matched_rule_color, DEFAULT_PAGE_SIZE};
+use self::page_read::{
+    apply_page_colors, collect_node_columns, count_annotated_rows, ioc_signature,
+    is_unconditional_page, load_full_ioc_outcomes, load_page_color_rules, load_page_flags,
+    load_page_ioc_outcomes, outcome_map, page_flag_map, resolution_projection,
+};
+use super::util::DEFAULT_PAGE_SIZE;
 
 /// QuerySpec fields (shared contract) plus project selection and paging.
 ///
@@ -92,18 +101,118 @@ pub fn query_project_rows_with_job(
         return Err(AppError::Message("Project data file missing.".into()).into());
     }
 
-    job.report_progress(0, Some(3), Some("Reading project data".into()));
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    job.check_cancelled()?;
-    let columns = data_columns(&df);
-    let project_columns = ProjectColumns::from_meta(&meta, &df);
+    job.report_progress(0, Some(3), Some("Reading project metadata".into()));
+    let schema_columns = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
+    let total_rows = read_project_row_count(&parquet_path).map_err(AppError::from)?;
+    let columns: Vec<String> = schema_columns
+        .iter()
+        .filter(|name| !is_internal_column(name))
+        .cloned()
+        .collect();
+    let has_row_id = schema_columns.iter().any(|name| name == INTERNAL_ROW_ID);
+    let has_original = schema_columns.iter().any(|name| name == INTERNAL_ORIGINAL);
+    let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema_columns);
+    // Hidden columns are presentation-only. The page captures the visible
+    // columns, then `__original` (for missing/null cell kinds) and `__rowid`
+    // (to keep a non-empty projection when every data column is hidden).
+    let visible_columns: Vec<ColumnMeta> = project_columns
+        .columns()
+        .iter()
+        .filter(|column| schema_columns.iter().any(|name| name == &column.id))
+        .filter(|column| {
+            !meta
+                .hidden_columns
+                .iter()
+                .any(|hidden| hidden == &column.id)
+        })
+        .cloned()
+        .collect();
 
     let flags_path = project_dir.join("flags.json");
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let color_rules = load_page_color_rules(&project_dir);
+    let mut page_projection: Vec<String> = visible_columns
+        .iter()
+        .map(|column| column.id.clone())
+        .collect();
+    if has_original {
+        page_projection.push(INTERNAL_ORIGINAL.to_string());
+    }
+    // Color rules may read a hidden column. Add only rule columns that are not
+    // already part of the visible projection; they are evaluated separately
+    // and never become row data or cells.
+    for rule in &color_rules {
+        collect_node_columns(&rule.condition, &mut |column| {
+            if columns.iter().any(|name| name.as_str() == column)
+                && !page_projection.iter().any(|known| known.as_str() == column)
+            {
+                page_projection.push(column.to_string());
+            }
+        });
+    }
+    if has_row_id {
+        page_projection.push(INTERNAL_ROW_ID.to_string());
+    }
 
     let offset = payload.offset.unwrap_or(0);
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
-    let total_rows = df.height();
+    let apply_ioc_tags = !iocs.is_empty();
+
+    // An unconditional, unsorted table has a known order: original row ids.
+    // It needs neither search/sort resolution nor a full frame read.
+    if is_unconditional_page(&payload.spec) {
+        job.report_progress(1, Some(3), Some("Reading page".into()));
+        let start = offset.min(total_rows);
+        let end = start.saturating_add(limit).min(total_rows);
+        let row_ids: Vec<usize> = (start..end).collect();
+        let page_df = read_page_dataframe(&parquet_path, &page_projection, start, limit)
+            .map_err(AppError::from)?;
+
+        let (annotated_total, page_flags, page_ioc_outcomes) = if iocs.is_empty() {
+            (
+                meta.flagged_records,
+                load_page_flags(&flags_path, &row_ids)?,
+                HashMap::new(),
+            )
+        } else {
+            // IOC counts include IOC flags, so the project count from
+            // `ProjectMeta` (user flags only) is not enough. The persisted IOC
+            // cache lets this avoid reading the frame; a missing cache falls
+            // back to a projected full-data read.
+            let ioc_outcomes =
+                load_full_ioc_outcomes(&project_dir, &parquet_path, &iocs, total_rows, &columns)?;
+            let flags = load_flags(&flags_path).map_err(AppError::from)?;
+            let annotated_total = count_annotated_rows(total_rows, &flags, &ioc_outcomes);
+            let page_flags = page_flag_map(&flags, &row_ids);
+            (
+                annotated_total,
+                page_flags,
+                outcome_map(&ioc_outcomes, &row_ids),
+            )
+        };
+
+        job.check_cancelled()?;
+        job.report_progress(2, Some(3), Some("Building page".into()));
+        let mut rows = page::materialize_page_rows(
+            &page_df,
+            &row_ids,
+            &visible_columns,
+            &page_flags,
+            &page_ioc_outcomes,
+            apply_ioc_tags,
+        )?;
+        apply_page_colors(&mut rows, &page_df, &color_rules)?;
+
+        job.report_progress(3, Some(3), Some("Rows ready".into()));
+        return Ok(QueryRowsResponse {
+            rows,
+            annotated_total,
+            annotated_filtered: annotated_total,
+            total_rows,
+            total_filtered_rows: total_rows,
+            offset,
+        });
+    }
 
     // The annotation revision is part of the key only when the resolved ids
     // depend on annotations. IOC definitions also feed flag-filter results, so
@@ -117,37 +226,42 @@ pub fn query_project_rows_with_job(
     } else {
         None
     };
-    let cache_key = result_cache::query_cache_key(
-        meta.id,
-        &payload.spec,
-        &parquet_path,
-        annotation_token,
-    );
+    let cache_key =
+        result_cache::query_cache_key(meta.id, &payload.spec, &parquet_path, annotation_token);
 
     if let Some(cached) = cache_key.as_ref().and_then(result_cache::cache_lookup) {
         job.report_progress(1, Some(3), Some("Reusing query result".into()));
-        let selected_indices: Vec<usize> = cached
+        let row_ids: Vec<usize> = cached
             .ids
             .iter()
             .skip(offset)
             .take(limit)
             .copied()
             .collect();
+        let page_df = read_page_rows_dataframe(&parquet_path, &page_projection, &row_ids)
+            .map_err(AppError::from)?;
         // Only the page's annotations are read on a hit; no project-wide flag
         // or bookmark vector is rebuilt.
-        let page_flags = load_page_flags(&flags_path, &selected_indices)?;
-        let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+        let page_flags = load_page_flags(&flags_path, &row_ids)?;
+        let page_ioc_outcomes = load_page_ioc_outcomes(
+            &project_dir,
+            &parquet_path,
+            &iocs,
+            total_rows,
+            &columns,
+            &row_ids,
+        )?;
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
-        let mut rows = page::materialize_page(
-            &df,
-            &selected_indices,
-            project_columns.columns(),
+        let mut rows = page::materialize_page_rows(
+            &page_df,
+            &row_ids,
+            &visible_columns,
             &page_flags,
-            &ioc_outcomes,
-            !iocs.is_empty(),
+            &page_ioc_outcomes,
+            apply_ioc_tags,
         )?;
-        apply_colors(&mut rows, &project_dir)?;
+        apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
         // Without IOC definitions the project's flagged count is exactly the
         // number of annotated rows, and `update_flag` keeps it current. With
@@ -181,10 +295,16 @@ pub fn query_project_rows_with_job(
     }
 
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
+    let ioc_outcomes =
+        load_full_ioc_outcomes(&project_dir, &parquet_path, &iocs, total_rows, &columns)?;
     job.report_progress(1, Some(3), Some("Evaluating query".into()));
+    // Resolution reads only the search scope, condition columns, sort key,
+    // and `__rowid`. Display columns are read again for the page, not here.
+    let resolve_projection = resolution_projection(&payload.spec, &columns, has_row_id);
+    let resolve_df =
+        read_project_columns(&parquet_path, &resolve_projection).map_err(AppError::from)?;
     let target = resolve_target(
-        &df,
+        &resolve_df,
         &payload.spec,
         &columns,
         &flags,
@@ -205,22 +325,25 @@ pub fn query_project_rows_with_job(
         result_cache::cache_store(key, cached);
     }
 
-    let selected_indices: Vec<usize> = filtered_ids
+    let row_ids: Vec<usize> = filtered_ids
         .iter()
         .skip(offset)
         .take(limit)
         .copied()
         .collect();
     job.report_progress(2, Some(3), Some("Building page".into()));
-    let mut rows = page::materialize_page(
-        &df,
-        &selected_indices,
-        project_columns.columns(),
+    let page_df = read_page_rows_dataframe(&parquet_path, &page_projection, &row_ids)
+        .map_err(AppError::from)?;
+    let page_ioc_outcomes = outcome_map(&ioc_outcomes, &row_ids);
+    let mut rows = page::materialize_page_rows(
+        &page_df,
+        &row_ids,
+        &visible_columns,
         &flags,
-        &ioc_outcomes,
-        !iocs.is_empty(),
+        &page_ioc_outcomes,
+        apply_ioc_tags,
     )?;
-    apply_colors(&mut rows, &project_dir)?;
+    apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
     job.report_progress(3, Some(3), Some("Rows ready".into()));
 
@@ -232,40 +355,4 @@ pub fn query_project_rows_with_job(
         total_filtered_rows: filtered_ids.len(),
         offset,
     })
-}
-
-fn load_page_flags(
-    flags_path: &Path,
-    row_indices: &[usize],
-) -> Result<HashMap<usize, FlagEntry>, AppError> {
-    let mut flags = HashMap::with_capacity(row_indices.len());
-    for &row_index in row_indices {
-        if let Some(entry) = load_flag(flags_path, row_index).map_err(AppError::from)? {
-            flags.insert(row_index, entry);
-        }
-    }
-    Ok(flags)
-}
-
-fn apply_colors(rows: &mut [ProjectRow], project_dir: &Path) -> Result<(), AppError> {
-    // Colors are decorative: a missing or malformed colors.json must never
-    // fail a query, so fall back to "no rules" instead of propagating.
-    let color_rules = match load_color_rules(project_dir) {
-        Ok(rules) => rules.unwrap_or_default(),
-        Err(err) => {
-            eprintln!(
-                "[colors] failed to load color rules for {:?}: {:?}",
-                project_dir, err
-            );
-            Vec::new()
-        }
-    };
-    for row in rows.iter_mut() {
-        row.color = matched_rule_color(&row.data, &color_rules)?;
-    }
-    Ok(())
-}
-
-fn ioc_signature(iocs: &[IocEntry]) -> String {
-    serde_json::to_string(iocs).unwrap_or_default()
 }
