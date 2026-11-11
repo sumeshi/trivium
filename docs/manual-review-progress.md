@@ -1850,3 +1850,113 @@ Recorded: 2026-11-11.
 - `src-tauri` was not rebuilt; no Tauri command signature changed.
 
 Next card: T23.
+
+
+## T23 — connect export scopes and write atomically
+
+Recorded: 2026-11-11.
+
+### Change
+
+- **Export contract.** `ExportProjectPayload` now carries `scope`
+  (`all` | `filtered` | `selected`, default `filtered`), `rowIndices`,
+  `columns`, and `includeAnnotations` (default `true`). `selected` requires a
+  non-empty `rowIndices`; empty or missing ids fail with no fallback to all
+  rows. Ids are deduplicated, ids outside the project fail, and ids outside the
+  applied QuerySpec result are dropped. The export always keeps the QuerySpec
+  result order, so row ids, counts, and order match the table.
+- **Result.** `export_project` returns `ExportResult { rows, columns,
+  warnings }`. The Tauri command and `backend.ts` return the same shape. The UI
+  reports the written row count and any column-alias warning on success.
+- **Annotation columns.** `includeAnnotations=true` adds
+  `trivium-safe`, `trivium-suspicious`, `trivium-critical`, `trivium-memo`,
+  `trivium-tags`, and `trivium-bookmarked`. User tags are written only to
+  `trivium-tags` and are no longer appended to the memo as `[tag]` tokens.
+  `trivium-bookmarked` is `1`/`0`. IOC tags keep the existing display rule and
+  are still appended to `trivium-memo` as `[tag]` tokens.
+  `includeAnnotations=false` writes data columns only.
+- **Split module.** Annotation planning/building moved to
+  `crates/engine/src/export/annotations.rs` so `export/csv.rs` stays under the
+  500-line guard. The split is only the T23 annotation code.
+- **Column collisions.** If an output data column already uses a derived
+  label, the derived column is written as `<name>_2` (then `_3`, ...). The
+  source data keeps its label and values. `ExportResult.warnings` names the
+  alias; no correspondence object is added to the CSV.
+- **Tags separator.** `trivium-tags` is a `;`-separated list. A tag containing
+  `;` is split on re-import; the format has no escaping for this case.
+- **Atomic write.** The CSV is written to `<destination>.tmp.<pid>` in the
+  destination directory in 10,000-row batches with a cancellation checkpoint
+  between batches. The destination is replaced by `fs::rename` only after the
+  flush and a final cancellation check. A failure or cancellation removes the
+  temporary file and leaves the existing destination untouched.
+- **Evidence identity.** `ProjectMeta.source_path` stores the canonical
+  absolute path of the imported evidence file. Export canonicalizes the
+  destination (including a not-yet-existing file under an existing directory)
+  and rejects a match with `Choose a different file name: the destination is
+  the source evidence file.`
+- **UI.** `FilterControls` still owns the Export CSV button, but it now opens
+  `ExportDialog.svelte`. The dialog defaults to `Current results (N)`, offers
+  `All rows (N)` and `Selected rows (N)`, disables the selection option at zero,
+  and lets the user choose all data columns or visible columns plus whether to
+  include annotations. Opening the dialog freezes the applied QuerySpec,
+  selection ids, counts, and visible columns; editing the search box behind it
+  cannot change the target. Selected ids are sent only for the selected scope.
+- **Re-import.** With `restore_annotations=true`, `trivium-tags` (split on `;`)
+  and `trivium-bookmarked` (`1`/`0`) restore tags and the bookmark in addition
+  to the existing flag/memo columns. Export then re-import round-trips tags,
+  memo, and bookmark.
+
+### Tests
+
+New `crates/engine/tests/export_scope_test.rs` (9 tests):
+
+- Selected export uses QuerySpec order and drops duplicates.
+- Empty or missing selection fails and writes no file.
+- Filtered export matches the query row ids, order, and count.
+- `includeAnnotations=false` omits all `trivium-*` columns; `true` writes
+  independent tags/bookmark columns and keeps user tags out of the memo.
+- A source column named `trivium-tags` keeps its value while the derived
+  column is exported as `trivium-tags_2` and reported in warnings.
+- A destination equal to the source evidence file fails without modifying it.
+- Finalization failure over a directory keeps the existing destination and
+  leaves no temporary file.
+- A pre-cancelled `JobContext` leaves the existing destination unchanged and
+  leaves no temporary file.
+- Export then restore round-trips flag, memo, tags, and bookmark.
+
+Existing export/import tests were updated for the independent tags/bookmark
+columns and derived-column aliases (`export_options_test`, `import_ids_test`,
+`storage_v2_test`, `tags_test`). `smoke`, `ioc_parity`, `precision`,
+`target_parity`, and `value_preservation` only gained the two new payload
+fields.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed (9 new export-scope tests) |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 23 passed, 0 failed |
+| Native Tauri check | `cargo check -p trivium-desktop` | not run to completion: environment lacks `gdk-pixbuf-2.0` and other GTK pkg-config inputs |
+
+### Unverified / constraints
+
+- The native GUI/WebView was not exercised. Opening the dialog, the scope and
+  column choices, the save dialog, the success/warning notification, and the
+  selected-row export are covered by static checks and engine tests only; the
+  real-app one-cycle flow remains T26.
+- A real mid-write cancellation (after the temporary file exists) was not
+  triggered. The cancellation test cancels before the export starts, and the
+  batch-boundary check is covered by code inspection only; real cancellation
+  remains T26/T27.
+- `fs::rename` replacement is verified on Linux. Native Windows replacement
+  behavior was not tested.
+- The Tauri command signature changed (`export_project` returns
+  `ExportResult`), but the native desktop crate was not rebuilt because this
+  environment lacks the GTK/WebKit development packages.
+- Display-setting persistence, automatic IOC removal, and other T24+ work were
+  not started.
+
+Next card: T24.
