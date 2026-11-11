@@ -79,7 +79,7 @@ pub fn group_tree(
     let group_series: Vec<Option<&Series>> =
         resolved.iter().map(|name| df.column(name).ok()).collect();
 
-    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
     let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload

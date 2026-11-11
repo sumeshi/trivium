@@ -59,8 +59,7 @@ pub fn update_flag(
         return Err(AppError::Message("Row index out of range.".into()));
     }
 
-    let project_dir = store.project_dir(&payload.project_id);
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = store.flags_path(&payload.project_id);
     let existing = load_flag(&flags_path, payload.row_index).map_err(AppError::from)?;
     let was_flagged = existing
         .as_ref()

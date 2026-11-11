@@ -221,6 +221,12 @@ impl ProjectsStore {
         self.root_dir.join("projects").join(id.to_string())
     }
 
+    /// Path handed to the annotation storage functions. The `.db` sibling is
+    /// derived from it by `storage::flags_db_path`.
+    pub fn flags_path(&self, id: &Uuid) -> PathBuf {
+        self.project_dir(id).join("flags.json")
+    }
+
     /// Root of the per-import staging area. Completed projects are renamed
     /// into `projects/` from here, so a failed import leaves no project dir.
     pub fn staging_root(&self) -> PathBuf {

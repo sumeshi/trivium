@@ -410,7 +410,7 @@ pub fn load_project(
     let project_columns = ProjectColumns::from_meta(&meta, &df);
     let columns = project_columns.ids();
 
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = store.flags_path(&meta.id);
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
     let metrics_path = project_dir.join(COLUMN_METRICS_FILE);

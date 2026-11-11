@@ -232,11 +232,11 @@ pub fn bulk_update(
     store: &ProjectsStore,
     payload: BulkAnnotatePayload,
 ) -> Result<BulkApplied, AppError> {
-    let (project_dir, df) = load_frame(store, &payload.project_id)?;
+    let (_, df) = load_frame(store, &payload.project_id)?;
     let Some(meta) = store.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()));
     };
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = store.flags_path(&payload.project_id);
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
     let (target, annotated_filtered) =

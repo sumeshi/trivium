@@ -96,7 +96,7 @@ pub fn surrounding_rows(
                 .collect()
         }
     };
-    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
     let rows = materialize_page(
         &df,
         &selected,

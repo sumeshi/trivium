@@ -60,7 +60,7 @@ pub fn duplicate_rows(
         series.push(found);
     }
     let project_columns = ProjectColumns::from_meta(&meta, &df);
-    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
     let indices = matching_row_indices(&series, payload.mode == DupeMode::Duplicates);
     Ok(DupesResponse {
         rows: materialize_rows(&df, project_columns.columns(), indices.into_iter(), &flags),

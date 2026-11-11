@@ -132,7 +132,7 @@ pub fn query_project_rows_with_job(
         .cloned()
         .collect();
 
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = store.flags_path(&meta.id);
     let color_rules = load_page_color_rules(&project_dir);
     let mut page_projection: Vec<String> = visible_columns
         .iter()

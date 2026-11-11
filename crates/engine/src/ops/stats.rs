@@ -46,7 +46,7 @@ pub fn column_stats(
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     let columns = data_columns(&df, meta.storage_version);
-    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
     let target = resolve_target(&df, &payload.spec, &columns, &flags, &JobContext::none())?;
     let take_idx = UInt32Chunked::from_iter_values(
         "take_idx",

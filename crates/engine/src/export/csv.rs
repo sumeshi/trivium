@@ -96,7 +96,7 @@ pub fn export_project_with_job(
     job.report_progress(0, Some(3), Some("Reading project data".into()));
     let mut df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     job.check_cancelled()?;
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = store.flags_path(&meta.id);
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let project_columns = ProjectColumns::from_meta(&meta, &df);
     let all_columns = data_columns(&df, meta.storage_version);

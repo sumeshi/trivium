@@ -64,7 +64,7 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;
-    let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
+    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
     let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
