@@ -285,6 +285,14 @@ pub fn save_column_metrics(path: &Path, metrics: &HashMap<String, usize>) -> Res
     fs::write(path, data).with_context(|| format!("failed to write column metrics file {:?}", path))
 }
 
+/// Number of leading rows used for the initial column-width estimate.
+///
+/// The estimate only feeds the first table layout. Scanning every cell made
+/// this cost proportional to the whole project, so the estimate deliberately
+/// stops after this sample. A wider value later in the data does not enlarge a
+/// column until it is recomputed with a different rule.
+pub const COLUMN_WIDTH_SAMPLE_ROWS: usize = 1_000;
+
 pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
     let columns: Vec<String> = df
         .get_column_names()
@@ -301,7 +309,7 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
         .collect();
     for column in &columns {
         if let Ok(series) = df.column(column) {
-            for value in series.iter() {
+            for value in series.iter().take(COLUMN_WIDTH_SAMPLE_ROWS) {
                 let json_value = anyvalue_to_json(&value);
                 let display_len = value_display_length(&json_value);
                 if let Some(entry) = column_max_chars.get_mut(column) {

@@ -4,10 +4,10 @@
 //! a [`JobGuard`] on the async side, move a [`JobContext`] into a blocking
 //! worker, and forward [`JobProgress`] values to the frontend.
 //!
-//! Cancellation is cooperative. T15 places `check_cancelled` calls before and
-//! after the heavy library calls in import, query, and export. The large
-//! in-library loops (CSV/JSON import, search batches, export writing) are not
-//! interruptible yet; those checkpoints belong to T16–T18/T23.
+//! Cancellation is cooperative. `check_cancelled` calls surround the heavy
+//! library calls, and CSV import checks every batch boundary. JSON/JSONL
+//! import, search batches, and export writing are still single calls; those
+//! checkpoints belong to T17/T18/T23.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

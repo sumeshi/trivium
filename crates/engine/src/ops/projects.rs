@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -15,8 +16,10 @@ use crate::{
     import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     jobs::JobContext,
-    models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
-    project_io::{read_project_dataframe, write_project_dataframe, ProjectColumns},
+    models::{ColumnMeta, FlagEntry, LoadProjectResponse, ProjectMeta, ProjectSummary},
+    project_io::{
+        read_project_dataframe, write_project_dataframe, BatchDataWriter, ProjectColumns,
+    },
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, close_flags_db, compute_column_max_chars,
         load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
@@ -73,6 +76,16 @@ struct CopiedSource {
     path: PathBuf,
     sha256: String,
     size: u64,
+}
+
+/// Result of parsing one source file into the staging Parquet file. CSV also
+/// records the leading-sample width estimate so `load_project` does not scan
+/// the full frame again.
+struct ImportedSource {
+    columns: Vec<ColumnMeta>,
+    total_records: usize,
+    flags: HashMap<usize, FlagEntry>,
+    column_max_chars: Option<HashMap<String, usize>>,
 }
 
 /// Copies the source into the staging directory while hashing the same bytes
@@ -163,8 +176,8 @@ pub fn create_project(
 
 /// [`create_project`] with cancellation checkpoints and progress reporting.
 ///
-/// Cancellation is checked at the stage boundaries only. The CSV/JSON parsers
-/// still run to completion once called; they are made interruptible by T16/T17.
+/// CSV import checks cancellation at every batch boundary. JSON/JSONL still run
+/// as a single library call; T17 makes them interruptible.
 pub fn create_project_with_job(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
@@ -199,17 +212,57 @@ pub fn create_project_with_job(
     // Parse the copied snapshot, not the source path, so the hash recorded in
     // metadata always covers the bytes that were actually imported.
     job.report_progress(1, Some(4), Some("Importing data".into()));
+    let parquet_path = staging.path().join("data.parquet");
     let imported = match source_format {
-        "json" => json::load(&copied.path)?,
-        "jsonl" | "ndjson" => jsonl::load(&copied.path)?,
-        _ => csv::load(
-            &copied.path,
-            csv::build_delimiter(payload.delimiter.as_deref())?,
-            restore_annotations,
-        )?,
+        "json" => {
+            let imported = json::load(&copied.path)?;
+            let mut df = imported.frame;
+            let total_records = df.height();
+            write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
+            ImportedSource {
+                columns: imported.columns,
+                total_records,
+                flags: imported.flags,
+                column_max_chars: None,
+            }
+        }
+        "jsonl" | "ndjson" => {
+            let imported = jsonl::load(&copied.path)?;
+            let mut df = imported.frame;
+            let total_records = df.height();
+            write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
+            ImportedSource {
+                columns: imported.columns,
+                total_records,
+                flags: imported.flags,
+                column_max_chars: None,
+            }
+        }
+        _ => {
+            // CSV is parsed in bounded batches and written one row group at a
+            // time. Neither the source bytes nor all records stay in memory.
+            let mut importer = csv::CsvImporter::open(
+                &copied.path,
+                csv::build_delimiter(payload.delimiter.as_deref())?,
+                csv::BatchLimits::default(),
+            )?
+            .with_annotations(restore_annotations);
+            let columns = importer.columns().to_vec();
+            let mut writer =
+                BatchDataWriter::create(&parquet_path, &columns).map_err(AppError::from)?;
+            while let Some(batch) = importer.next_batch(job)? {
+                writer.write_batch(&batch).map_err(AppError::from)?;
+            }
+            writer.finish().map_err(AppError::from)?;
+            let summary = importer.into_summary();
+            ImportedSource {
+                columns: summary.columns,
+                total_records: summary.rows,
+                flags: summary.flags,
+                column_max_chars: Some(summary.column_max_chars),
+            }
+        }
     };
-    let mut df = imported.frame;
-    let imported_flags = imported.flags;
     job.check_cancelled()?;
 
     let metadata = ProjectMeta {
@@ -220,8 +273,9 @@ pub fn create_project_with_job(
             .unwrap_or_else(|| "Imported Project".to_string()),
         description: payload.description.clone(),
         created_at: Utc::now(),
-        total_records: df.height(),
-        flagged_records: imported_flags
+        total_records: imported.total_records,
+        flagged_records: imported
+            .flags
             .values()
             .filter(|entry| !entry.flag.trim().is_empty())
             .count(),
@@ -239,12 +293,14 @@ pub fn create_project_with_job(
         columns: imported.columns,
     };
 
-    let parquet_path = staging.path().join("data.parquet");
-    write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
+    if let Some(column_max_chars) = &imported.column_max_chars {
+        save_column_metrics(&staging.path().join(COLUMN_METRICS_FILE), column_max_chars)
+            .map_err(AppError::from)?;
+    }
 
     let flags_path = staging.path().join("flags.json");
-    if !imported_flags.is_empty() {
-        save_flags(&flags_path, &imported_flags).map_err(AppError::from)?;
+    if !imported.flags.is_empty() {
+        save_flags(&flags_path, &imported.flags).map_err(AppError::from)?;
     }
 
     // The copied input is not part of the project. Remove it before the

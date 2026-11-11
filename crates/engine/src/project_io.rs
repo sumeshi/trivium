@@ -1,9 +1,13 @@
 use std::fs::File;
+use std::io::BufWriter;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
-use polars::prelude::{AnyValue, DataFrame, ParquetReader, ParquetWriter, SerReader};
+use polars::io::parquet::write::BatchedWriter;
+use polars::prelude::{
+    AnyValue, DataFrame, DataType, Field, ParquetReader, ParquetWriter, Schema, SerReader,
+};
 use serde_json::Value;
 
 use crate::models::{ColumnMeta, ProjectMeta};
@@ -49,6 +53,50 @@ pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {
     let writer = ParquetWriter::new(file);
     writer.finish(df).context("failed to write parquet file")?;
     Ok(())
+}
+
+/// Writes project Parquet one bounded batch at a time.
+///
+/// polars 0.40 exposes [`ParquetWriter::batched`], which writes every
+/// [`write_batch`](Self::write_batch) call as its own row group and only
+/// writes the footer on [`finish`](Self::finish). The schema is fixed from the
+/// CSV header so every batch has the same columns: the imported data columns,
+/// then `__original`, then `__rowid`.
+pub struct BatchDataWriter {
+    inner: BatchedWriter<BufWriter<File>>,
+}
+
+impl BatchDataWriter {
+    pub fn create(path: &Path, columns: &[ColumnMeta]) -> Result<Self> {
+        let fields: Vec<Field> = columns
+            .iter()
+            .map(|column| Field::new(&column.id, DataType::String))
+            .chain([
+                Field::new(INTERNAL_ORIGINAL, DataType::String),
+                Field::new(INTERNAL_ROW_ID, DataType::Int64),
+            ])
+            .collect();
+        let schema: Schema = fields.into_iter().collect();
+        let file = File::create(path)
+            .with_context(|| format!("failed to create parquet file {:?}", path))?;
+        let inner = ParquetWriter::new(BufWriter::new(file))
+            .batched(&schema)
+            .context("failed to create parquet writer")?;
+        Ok(Self { inner })
+    }
+
+    pub fn write_batch(&mut self, df: &DataFrame) -> Result<()> {
+        self.inner
+            .write_batch(df)
+            .context("failed to write parquet batch")
+    }
+
+    pub fn finish(self) -> Result<()> {
+        self.inner
+            .finish()
+            .context("failed to finish parquet file")?;
+        Ok(())
+    }
 }
 
 /// Thin id/label/source mapping for a project's data columns.
