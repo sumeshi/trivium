@@ -88,7 +88,7 @@
           class="w-full rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
           on:click={() => dispatch('pickCsv')}
         >
-          Import CSV File
+          Import CSV / JSON File
         </button>
         {#if pendingFileName}
           <p class="truncate text-xs text-muted">{pendingFileName}</p>
@@ -141,7 +141,7 @@
       {#if isLoadingProjects}
         <p class="text-xs text-muted">Loading projects…</p>
       {:else if projects.length === 0}
-        <p class="text-xs text-muted">No projects yet. Import a CSV to get started.</p>
+        <p class="text-xs text-muted">No projects yet. Import a CSV or JSON file to get started.</p>
       {:else}
         <ul class="space-y-3">
           {#each projects as project}

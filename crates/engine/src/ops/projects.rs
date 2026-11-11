@@ -10,6 +10,7 @@ use crate::{
     analysis::infer_column_kinds,
     error::AppError,
     import::csv,
+    import::json,
     import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
@@ -64,7 +65,8 @@ fn source_sha256(path: &std::path::Path) -> Result<String, AppError> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// Creates a new project from a CSV or JSONL file and persists metadata plus optional flags.
+/// Creates a new project from a CSV, JSON, JSONL, or NDJSON file and persists
+/// metadata plus optional flags.
 pub fn create_project(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
@@ -75,14 +77,20 @@ pub fn create_project(
     }
 
     let restore_annotations = payload.restore_annotations.unwrap_or(false);
-    let imported = if source_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-        jsonl::load(&source_path)?
-    } else {
-        csv::load(
+    // The extension decides the parser; a malformed JSON/JSONL file must fail
+    // instead of falling back to the CSV reader.
+    let extension = source_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    let imported = match extension.as_deref() {
+        Some("json") => json::load(&source_path)?,
+        Some("jsonl") | Some("ndjson") => jsonl::load(&source_path)?,
+        _ => csv::load(
             &source_path,
             csv::build_delimiter(payload.delimiter.as_deref())?,
             restore_annotations,
-        )?
+        )?,
     };
     let mut df = imported.frame;
     let imported_flags = imported.flags;

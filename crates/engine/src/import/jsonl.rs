@@ -36,10 +36,7 @@ fn pointer_label(pointer: &str) -> String {
 pub fn load(path: &Path) -> Result<ImportedData, AppError> {
     let file = File::open(path)
         .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-    let mut records: Vec<Value> = Vec::new();
-    let mut flattened_rows: Vec<Vec<(String, Value)>> = Vec::new();
-    let mut column_order: Vec<String> = Vec::new();
-    let mut seen_columns: HashMap<String, usize> = HashMap::new();
+    let mut records: Vec<(usize, Value)> = Vec::new();
 
     for (line_no, line) in BufReader::new(file).lines().enumerate() {
         let line =
@@ -57,14 +54,40 @@ pub fn load(path: &Path) -> Result<ImportedData, AppError> {
                 line_no + 1
             )));
         }
+        // Keep the physical line number (empty lines included) for errors.
+        records.push((line_no + 1, value));
+    }
+
+    build_import(&records, "JSONL")
+}
+
+/// Shared record-to-frame conversion for JSON objects (JSON arrays and JSONL).
+///
+/// `records` pairs each record with its source number (array element or
+/// physical line) so failures can point at the input. Column union, JSON
+/// Pointer paths, exact value text, and `__original` follow the JSONL rules.
+pub(crate) fn build_import(
+    records: &[(usize, Value)],
+    source_format: &str,
+) -> Result<ImportedData, AppError> {
+    let mut flattened_rows: Vec<Vec<(String, Value)>> = Vec::new();
+    let mut column_order: Vec<String> = Vec::new();
+    let mut seen_columns: HashMap<String, usize> = HashMap::new();
+
+    for (record_no, value) in records {
+        if !value.is_object() {
+            return Err(AppError::Message(format!(
+                "{} record {} is not a JSON object.",
+                source_format, record_no
+            )));
+        }
         let mut flattened: Vec<(String, Value)> = Vec::new();
-        flatten_object(&value, "", &mut flattened);
+        flatten_object(value, "", &mut flattened);
         for (pointer, _) in &flattened {
             if seen_columns.insert(pointer.clone(), 0).is_none() {
                 column_order.push(pointer.clone());
             }
         }
-        records.push(value);
         flattened_rows.push(flattened);
     }
 
@@ -99,15 +122,17 @@ pub fn load(path: &Path) -> Result<ImportedData, AppError> {
         series.push(Series::new(INTERNAL_ROW_ID, row_ids));
     }
 
-    let mut df = DataFrame::new(series)
-        .map_err(|_| AppError::Message("Failed to build the dataset.".into()))?;
+    let mut df = DataFrame::new(series).map_err(|_| {
+        AppError::Message(format!("Failed to build the {} dataset.", source_format))
+    })?;
     if df.height() != row_count {
-        return Err(AppError::Message(
-            "The JSONL record count changed while building the dataset.".into(),
-        ));
+        return Err(AppError::Message(format!(
+            "The {} record count changed while building the dataset.",
+            source_format
+        )));
     }
 
-    let originals: Vec<String> = records.iter().map(Value::to_string).collect();
+    let originals: Vec<String> = records.iter().map(|(_, value)| value.to_string()).collect();
     df.with_column(Series::new(INTERNAL_ORIGINAL, originals))
         .map_err(|_| AppError::Message("Failed to store the original JSON records.".into()))?;
 

@@ -26,7 +26,7 @@
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+        filters: [{ name: 'CSV or JSON Files', extensions: ['csv', 'json', 'jsonl', 'ndjson'] }]
       });
       if (!selected || Array.isArray(selected)) {
         return;
@@ -45,7 +45,7 @@
       sidebarOpen = false;
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : 'Failed to import CSV.';
+      const message = error instanceof Error ? error.message : 'Failed to import file.';
       showToast(message, 'error');
     }
   };
@@ -146,7 +146,7 @@
       <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted">
         <h2 class="text-xl font-semibold heading-text">Select a project</h2>
         <p class="max-w-sm text-sm">
-          Pick a project from the menu or import a new CSV to get started.
+          Pick a project from the menu or import a new CSV or JSON file to get started.
         </p>
       </div>
     {/if}
