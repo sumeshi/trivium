@@ -1026,3 +1026,86 @@ Regression coverage (`crates/engine/tests/jobs_test.rs`, 7 tests):
   is 200 ms. The throttle itself is unit-tested with an injected clock.
 
 Next card: T16.
+
+## T16 — CSV import uses fixed-size batches
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/import/csv.rs`: removed the `fs::read` path and the
+  whole-file UTF-8 conversion. `CsvImporter` opens the staged file, lets the
+  `csv` crate resolve quotes, embedded newlines, and escaping, and returns one
+  bounded `DataFrame` per `next_batch` call. The data columns and `__original`
+  are the only accumulated representation; the input bytes and a decoded copy
+  of the whole file no longer coexist with the finished frame.
+- The same file computes the leading-sample width estimate while reading and
+  accumulates `trivium-*` annotation columns without a second pass over all
+  records. `csv::load` remains as a convenience wrapper for direct callers and
+  tests; production import uses the stream and writes each batch.
+- `crates/engine/src/import/utf16.rs` (new): streaming UTF-16LE/BE to UTF-8
+  adapter. It reads 16-bit units incrementally, so odd bytes, surrogate pairs,
+  and CSV records may cross read-buffer boundaries. A lone surrogate or a
+  trailing odd byte is an error, not a replacement character.
+- Batch boundaries use both limits: 50,000 rows (`DEFAULT_BATCH_ROWS`) and an
+  approximate 8 MiB of cell text plus `__original` JSON
+  (`DEFAULT_BATCH_BYTES`). The byte count is explicitly an estimate. A single
+  record larger than the limit still forms one batch, so memory is not
+  constant for a single huge record.
+- `crates/engine/src/project_io.rs`: added `BatchDataWriter`, built on polars
+  0.40's `ParquetWriter::batched(schema)` and `BatchedWriter::write_batch`.
+  Every `write_batch` call writes its own row group and `finish` writes the
+  footer. The schema is fixed from the CSV header (data columns as Utf8, then
+  `__original`, then `__rowid`). The existing Parquet + metadata save format is
+  unchanged.
+- `crates/engine/src/ops/projects.rs`: the CSV branch streams importer batches
+  into `BatchDataWriter` and writes `column_max_chars.json` into staging from
+  the sampled estimate, so `load_project` does not rescan the frame. JSON and
+  JSONL still use the existing load-then-write path (T17).
+- `crates/engine/src/storage.rs`: `compute_column_max_chars` now scans at most
+  `COLUMN_WIDTH_SAMPLE_ROWS = 1_000` leading rows. This is the legacy-project
+  fallback as well; the initial table layout only needs the sample. The saved
+  file format and the meaning of `load_project` are unchanged.
+- Cancellation is checked at every CSV batch boundary. A cancel requested from
+  the previous batch's progress callback is observed before the next batch is
+  read, and the T12 staging guard removes the partial directory.
+- `crates/engine/src/jobs.rs`: comments now distinguish the CSV batch
+  checkpoints from the JSON/search/export calls still deferred to T17/T18/T23.
+
+Regression coverage (`crates/engine/tests/import_streaming_test.rs`, 7 tests):
+- Quoted commas, doubled quotes, and cell-internal newlines with a 4-byte read
+  buffer and one-row batches keep the exact values and row count.
+- UTF-16LE and UTF-16BE with a 3-byte read buffer match the ASCII import for
+  columns, row count, and representative values, including a surrogate-pair
+  emoji and an embedded newline.
+- A generated 100,000-row CSV imports through the staged path, `load_project`
+  reports 100,000 rows, and the Parquet file has at least two row groups.
+- Cancelling between batches returns `Cancelled.`.
+- A cancelled `create_project_with_job` leaves no registered project and no
+  staging directory.
+- The import width estimate adopts the sample maximum (42) and ignores a
+  500-character value after the sample.
+- The legacy `compute_column_max_chars` fallback also ignores values after the
+  sample.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New streaming tests | `cargo test -p trivium-engine --test import_streaming_test` | 7 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | 168 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- Peak RSS was not measured in this card. T27 records it. The whole-file byte
+  and UTF-8 buffers are gone by construction, but a single oversized record
+  still grows its batch and the Parquet encoder.
+- The native GUI was not exercised. Import through the Tauri command, progress
+  delivery, and cancel from the UI remain code-review checks.
+- JSON and JSONL still load all records before writing (T17). Search batches
+  (T18) and destination-preserving output cancellation (T23) are unchanged.
+
+Next card: T17.
