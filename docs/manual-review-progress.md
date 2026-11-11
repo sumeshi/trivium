@@ -1761,3 +1761,92 @@ Recorded: 2026-11-11.
   part of this card.
 
 Next card: T22.
+
+
+## T22 — keep row selection by stable original row ids
+
+Recorded: 2026-11-11.
+
+### Change
+
+- **Selection state.** `project_view/state.ts` adds `selectedRowIds` (a
+  `Set<number>` of original row ids) and derived `selectedCount`. The store
+  never copies row objects, so page-cache eviction and virtual-row replacement
+  cannot change the selected rows. `toggleRowSelection`, `selectVisibleRows`,
+  `clearSelection` and `syncSelectionScope` are the only mutators. The pure
+  set/scope/header logic lives in `src/lib/selection.ts`.
+- **Clear conditions.** `ProjectView.svelte` calls `syncSelectionScope` from
+  `applyProjectDetail` and from `applyFilters` with the applied QuerySpec
+  signature (`search`, `searchColumns`, `condition`, `flagFilter`,
+  `bookmarkedOnly`, `sortKey`, `sortDirection`). A different project, filter,
+  search scope, condition or sort clears the selection; page moves and page
+  eviction do not.
+- **Table.** `DataTable.svelte` adds a checkbox column before `#`. Each row
+  checkbox reads and writes `item.row.row_index`. The header checkbox covers
+  only the currently rendered virtual rows and shows the indeterminate state
+  when some of them are selected. The table status line shows the selected
+  count. Sticky offsets and the large-page notice grid column were shifted for
+  the new column.
+- **Bulk target.** `BulkControls.svelte` offers `Selected (N)`,
+  `Current results (N)` and `All rows (N)` using `$selectedCount`,
+  `$totalFilteredRows` and `$totalRows`. Selected sends
+  `rowIndices: Array.from($selectedRowIds)`; current results sends the applied
+  QuerySpec and uses the backend `filtered` target; all rows uses `all`. A zero
+  selection disables the selection option and both Preview/Apply/tag buttons;
+  it never falls back to filtered or all.
+- **Tags.** `AnnotationPatch` gains `add_tags` and `remove_tags` (serde
+  default). `apply_annotation_patch` applies replacement `tags` first, appends
+  `add_tags` without duplicates, then removes `remove_tags`; the function is
+  shared by the single-row and bulk paths, and the bulk UI sends the
+  one-direction add/remove patches. `BulkControls.svelte` has a tag input with
+  separate `Add tag` and `Remove tag` actions. Each action previews and applies
+  only its one-direction patch (`add_tags` or `remove_tags`); it never replaces
+  the tag list and never toggles mixed rows. Existing flag/memo bulk actions are
+  unchanged.
+
+### Tests
+
+`src/lib/selection.test.ts` (new, 4 tests):
+
+- Toggle adds/removes only the addressed original row id.
+- Selecting visible rows preserves selections outside the viewport, and
+  clearing visible rows leaves the rest.
+- Same project/spec keeps the selection; a changed spec or project clears it;
+  the first scope clears it.
+- Header state is `none`, `some` or `all` for rendered rows; off-screen
+  selections do not make it look `all`.
+
+`crates/engine/tests/annotation_tags_test.rs` (new, 5 tests):
+
+- `add_tags` keeps existing tags and does not add duplicates.
+- `remove_tags` removes only the named tags.
+- Replacement + add + remove apply in the documented order.
+- The IPC shape deserializes `add_tags` / `remove_tags`.
+- A selection bulk update over row ids 0, 2 and 5 (page-spanning ids) updates
+  exactly those rows and leaves row 1 alone; a second remove pass touches only
+  the selected ids. The engine addresses original row ids, so this is
+  independent of the UI page cache.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| UI tests | `npm run test:ui` | 23 passed, 0 failed (4 new; existing ipcValues/pageCache/virtualScroll tests pass) |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed (5 new annotation-tags tests) |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+### Unverified / deferred
+
+- The native GUI/WebView was not exercised. Selecting three rows across pages,
+  the header indeterminate state, checking the three-row bulk annotation, and
+  confirming the labels/counts are covered by static checks and pure tests
+  only; real-app confirmation is T26.
+- Page-cache eviction while a selection exists is covered by the store design
+  (ids only) and the engine id test, not by a GUI interaction.
+- Output scope UI (T23), output streams and display-setting persistence (T24)
+  were not started.
+- `src-tauri` was not rebuilt; no Tauri command signature changed.
+
+Next card: T23.
