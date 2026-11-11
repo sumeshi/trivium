@@ -1710,6 +1710,8 @@ fn grouping_counts_match_the_query_path() {
             project_id: id,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             group_columns: vec![common::id(&ids, "EventID")],

@@ -270,6 +270,8 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             project_id: id,
             search: None,
             columns: None,
+            search_columns: None,
+            bookmarked_only: None,
             flag_filter: None,
             condition: None,
             group_columns: vec![event_id.clone()],

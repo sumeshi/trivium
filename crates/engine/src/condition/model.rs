@@ -50,3 +50,24 @@ pub enum Node {
     Condition(Condition),
     Group(Group),
 }
+
+impl Node {
+    /// Visits every column referenced by this tree in traversal order.
+    pub fn visit_columns<'a>(&'a self, visit: &mut impl FnMut(&'a str)) {
+        match self {
+            Self::Condition(condition) => visit(condition.column.as_str()),
+            Self::Group(group) => {
+                for child in &group.children {
+                    child.visit_columns(visit);
+                }
+            }
+        }
+    }
+
+    /// Column names referenced by this tree, in traversal order.
+    pub fn columns(&self) -> Vec<&str> {
+        let mut columns = Vec::new();
+        self.visit_columns(&mut |column| columns.push(column));
+        columns
+    }
+}

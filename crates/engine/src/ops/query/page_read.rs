@@ -120,14 +120,7 @@ pub(super) fn resolution_projection(
 }
 
 pub(super) fn collect_node_columns(node: &Node, visit: &mut impl FnMut(&str)) {
-    match node {
-        Node::Condition(condition) => visit(condition.column.as_str()),
-        Node::Group(group) => {
-            for child in &group.children {
-                collect_node_columns(child, visit);
-            }
-        }
-    }
+    node.visit_columns(visit);
 }
 
 pub(super) fn load_page_color_rules(project_dir: &Path) -> Vec<ColorRule> {

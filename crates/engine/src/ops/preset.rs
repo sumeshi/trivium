@@ -68,20 +68,7 @@ pub struct PresetData {
 
 /// Collects every column referenced by a condition tree, in traversal order.
 pub fn extract_columns(node: &Node) -> Vec<String> {
-    let mut columns = Vec::new();
-    collect_columns(node, &mut columns);
-    columns
-}
-
-fn collect_columns(node: &Node, columns: &mut Vec<String>) {
-    match node {
-        Node::Condition(condition) => columns.push(condition.column.clone()),
-        Node::Group(group) => {
-            for child in &group.children {
-                collect_columns(child, columns);
-            }
-        }
-    }
+    node.columns().into_iter().map(str::to_string).collect()
 }
 
 /// Writes the current view as a portable preset file.

@@ -11,7 +11,7 @@ use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
-use super::query::{data_columns, filtered_indices, prepare_search, user_flags};
+use super::query::{data_columns, resolve_target, QuerySpec};
 use super::util::resolve_columns;
 
 #[derive(Debug, Deserialize)]
@@ -20,10 +20,15 @@ pub struct GroupTreePayload {
     pub project_id: Uuid,
     #[serde(default)]
     pub search: Option<String>,
+    /// Deprecated visible-column field kept for old callers.
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
+    #[serde(default, rename = "bookmarkedOnly")]
+    pub bookmarked_only: Option<bool>,
     #[serde(default)]
     pub condition: Option<crate::condition::Node>,
     #[serde(rename = "groupColumns")]
@@ -74,28 +79,20 @@ pub fn group_tree(
     let group_series: Vec<Option<&Series>> =
         resolved.iter().map(|name| df.column(name).ok()).collect();
 
-    let search_state = prepare_search(
-        &df,
-        payload.columns.as_deref(),
-        &columns,
-        payload.search.as_deref(),
-        payload.condition.as_ref(),
-        &JobContext::none(),
-    )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let final_flag_vec = user_flags(df.height(), &flags);
-    let bookmarked: Vec<bool> = (0..df.height())
-        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
-        .collect();
-    let ordered: Vec<usize> = (0..df.height()).collect();
-    let (filtered, _) = filtered_indices(
-        &ordered,
-        &final_flag_vec,
-        &bookmarked,
-        None,
-        payload.flag_filter.as_deref(),
-        search_state.mask.as_deref(),
-    );
+    let spec = QuerySpec {
+        search: payload.search.clone(),
+        search_columns: payload
+            .search_columns
+            .clone()
+            .or_else(|| payload.columns.clone()),
+        condition: payload.condition.clone(),
+        flag_filter: payload.flag_filter.clone(),
+        bookmarked_only: payload.bookmarked_only,
+        sort_key: None,
+        sort_direction: None,
+    };
+    let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
     let total = filtered.len();
 
     let mut root = GroupNodePartial::default();
