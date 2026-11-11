@@ -138,7 +138,7 @@ fn report_hit_rows_match_query() {
         "report hit count must match the query path"
     );
     assert_eq!(meta.flagged_in_matches, query.annotated_filtered);
-    assert_eq!(meta.flagged_in_matches, 2);
+    assert_eq!(meta.flagged_in_matches, 1);
 
     let html = fs::read_to_string(&destination).expect("report was not written");
     let hit_meta = format!(
@@ -181,7 +181,9 @@ fn report_escapes_memos_and_omits_script_tags() {
         !html.contains("<script"),
         "raw <script must never appear in the report"
     );
-    assert!(html.contains("IOC applied rows: 3"), "project meta is missing");
+    // The report shows user annotations only; saving the legacy IOC did not
+    // recalculate the stored applied-record count.
+    assert!(html.contains("IOC applied rows: 0"), "project meta is missing");
 
     let _ = fs::remove_dir_all(root);
 }

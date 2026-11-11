@@ -13,7 +13,7 @@ use crate::{
     error::AppError,
     import::csv,
     import::jsonl,
-    ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
+    ioc::load_ioc_entries,
     jobs::JobContext,
     models::{ColumnMeta, FlagEntry, LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{
@@ -392,7 +392,10 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
     Ok(())
 }
 
-/// Loads project metadata, initial rows, IOC entries, and column metrics.
+/// Loads project metadata, initial rows, legacy IOC definitions, and column metrics.
+///
+/// The IOC definitions are returned for the legacy rules UI. They are not
+/// evaluated here and do not change row flags or memos.
 pub fn load_project(
     store: &ProjectsStore,
     request: ProjectRequest,
@@ -431,7 +434,6 @@ pub fn load_project(
     }
 
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
 
     // Like query coloring, a broken colors.json must not block project loading.
     let color_rules = match load_color_rules(&project_dir) {
@@ -446,9 +448,7 @@ pub fn load_project(
     };
 
     let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
-    let mut initial_rows =
-        materialize_rows(&df, project_columns.columns(), 0..page_limit, &flags);
-    apply_ioc_outcomes_to_rows(&mut initial_rows, &ioc_outcomes);
+    let initial_rows = materialize_rows(&df, project_columns.columns(), 0..page_limit, &flags);
 
     println!(
         "[debug] load_project id={} total_rows={} initial_rows={}",

@@ -139,6 +139,7 @@ import type {
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
   let gotoRowInput = '';
+  let timelineOpen = false;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let applyingProjectId: string | null = null;
   let lastSummaryFlagged = -1;
@@ -1216,9 +1217,9 @@ import type {
     <span class="row-jump-range">of {$totalFilteredRows}</span>
   </div>
 
-  <details class="filter-advanced">
+  <details class="filter-advanced" bind:open={timelineOpen}>
     <summary>Timeline</summary>
-    <TimelinePanel />
+    <TimelinePanel open={timelineOpen} />
   </details>
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />

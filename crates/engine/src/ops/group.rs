@@ -5,14 +5,13 @@ use uuid::Uuid;
 
 use crate::analysis::group::{add_row, finalize, GroupNode, GroupNodePartial, GroupTreeRow};
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::jobs::JobContext;
 use crate::project_io::read_project_dataframe;
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
-use super::query::{data_columns, filtered_indices, final_flags, prepare_search};
+use super::query::{data_columns, filtered_indices, prepare_search, user_flags};
 use super::util::resolve_columns;
 
 #[derive(Debug, Deserialize)]
@@ -84,9 +83,7 @@ pub fn group_tree(
         &JobContext::none(),
     )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+    let final_flag_vec = user_flags(df.height(), &flags);
     let bookmarked: Vec<bool> = (0..df.height())
         .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
         .collect();

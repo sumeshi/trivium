@@ -3,8 +3,11 @@
   import type { Backend } from "../../backend";
   import type { ColumnStats, ConditionNode, Histogram } from "../../types";
   import { conditionPayload, filterByValue } from "../../stores/condition";
+  import { shouldRequestPanel } from "../../panelRequest";
   import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
+
+  export let open = false;
 
   let column = "";
   let rareMax: number | null = 1;
@@ -102,11 +105,17 @@
     }
   };
 
-  $: if ($backend && projectId && column) {
+  $: if (!open) {
+    // Ignore any response that was already in flight.
+    request += 1;
+    histogramRequest += 1;
+  }
+
+  $: if ($backend && shouldRequestPanel({ open, projectId, column })) {
     void loadStats($backend, projectId, column, rareMax);
   }
 
-  $: if ($backend && projectId && column && numeric) {
+  $: if ($backend && shouldRequestPanel({ open, projectId, column }) && numeric) {
     void loadHistogram(
       $backend,
       projectId,

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use polars::prelude::{DataFrame, NamedFrom, Series};
 
-use crate::{flags::normalize_flag_value, ioc::IocRowOutcome, models::FlagEntry};
+use crate::{flags::normalize_flag_value, models::FlagEntry};
 
 /// Derived annotation columns in export order.
 pub(crate) const ANNOTATION_COLUMNS: [&str; 6] = [
@@ -73,13 +73,11 @@ pub(crate) struct AnnotationSeries {
     bookmarked: Vec<i32>,
 }
 
-/// Builds the independent annotation columns. IOC tags are still appended to
-/// the memo as `[tag]` tokens (the existing display rule); user tags are only
-/// written to `trivium-tags` so they are never stored as memo text.
+/// Builds the independent annotation columns from user annotations only.
+/// Tags stay in `trivium-tags` and are never stored as memo text.
 pub(crate) fn build_annotations(
     df: &DataFrame,
     flags: &HashMap<usize, FlagEntry>,
-    ioc_outcomes: &[IocRowOutcome],
 ) -> AnnotationSeries {
     let mut safe = vec![0; df.height()];
     let mut suspicious = vec![0; df.height()];
@@ -89,30 +87,16 @@ pub(crate) fn build_annotations(
     let mut bookmarked = vec![0; df.height()];
 
     for i in 0..df.height() {
-        let outcome = ioc_outcomes.get(i).cloned().unwrap_or_default();
         let user_flag = flags
             .get(&i)
             .map(|entry| normalize_flag_value(entry.flag.trim()))
             .unwrap_or_default();
-        let final_flag = if user_flag.is_empty() {
-            outcome.flag
-        } else {
-            user_flag
-        };
-        let mut final_memo = flags
+        let final_memo = flags
             .get(&i)
             .and_then(|entry| entry.memo.clone())
             .unwrap_or_default();
-        for tag in outcome.tags {
-            if !final_memo.contains(&tag) {
-                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
-                    final_memo.push(' ');
-                }
-                final_memo.push_str(&tag);
-            }
-        }
 
-        match final_flag.as_str() {
+        match user_flag.as_str() {
             "safe" => safe[i] = 1,
             "suspicious" => suspicious[i] = 1,
             "critical" => critical[i] = 1,

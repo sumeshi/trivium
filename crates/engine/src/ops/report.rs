@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 use crate::analysis::stats::{summarize_series, ColumnStats};
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::jobs::JobContext;
 use crate::models::{FlagEntry, ProjectMeta, ProjectRow};
 use crate::project_io::{read_project_dataframe, ProjectColumns};
@@ -17,8 +16,8 @@ use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
 use super::query::{
-    data_columns, filtered_indices, final_flags, materialize_page, ordered_row_indices,
-    prepare_search,
+    data_columns, filtered_indices, materialize_page, ordered_row_indices, prepare_search,
+    user_flags,
 };
 use super::util::resolve_columns;
 
@@ -65,7 +64,6 @@ pub fn build_report(
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     let all_columns = data_columns(&df);
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
 
     let display_columns = match payload.columns.as_deref() {
         Some(requested) => resolve_columns(&df, requested, "display columns")?,
@@ -80,8 +78,7 @@ pub fn build_report(
         payload.condition.as_ref(),
         &JobContext::none(),
     )?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+    let final_flag_vec = user_flags(df.height(), &flags);
     let bookmarked: Vec<bool> = (0..df.height())
         .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
         .collect();
@@ -117,8 +114,8 @@ pub fn build_report(
         &annotated_indices,
         &display_meta,
         &flags,
-        &ioc_outcomes,
-        !iocs.is_empty(),
+        &[],
+        false,
     )?;
 
     let stats: Vec<ColumnStats> = display_columns

@@ -9,16 +9,13 @@ use uuid::Uuid;
 
 use crate::annotation::{apply_annotation_patch, AnnotationPatch};
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome};
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::project_io::read_project_dataframe;
 use crate::storage::{apply_flag_batch, load_flag, load_flags};
 use crate::store::ProjectsStore;
 
-use super::query::{
-    data_columns, final_flags, resolve_target, spec_token_json, QuerySpec,
-};
+use super::query::{data_columns, resolve_target, spec_token_json, user_flags, QuerySpec};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BulkAnnotatePayload {
@@ -142,25 +139,17 @@ fn resolve_bulk_target(
     df: &DataFrame,
     payload: &BulkAnnotatePayload,
     flags: &std::collections::HashMap<usize, FlagEntry>,
-    ioc_outcomes: &[IocRowOutcome],
 ) -> Result<(Vec<usize>, usize), AppError> {
     match payload.target.as_str() {
         "all" => {
             let row_ids: Vec<usize> = (0..df.height()).collect();
-            let final_flag_vec = final_flags(df.height(), flags, ioc_outcomes);
+            let final_flag_vec = user_flags(df.height(), flags);
             let annotated = annotated_count(&final_flag_vec, &row_ids);
             Ok((row_ids, annotated))
         }
         "filtered" => {
             let columns = data_columns(df);
-            let target = resolve_target(
-                df,
-                &payload.spec,
-                &columns,
-                flags,
-                ioc_outcomes,
-                &JobContext::none(),
-            )?;
+            let target = resolve_target(df, &payload.spec, &columns, flags, &JobContext::none())?;
             Ok((target.filtered, target.annotated_filtered))
         }
         "selection" => {
@@ -173,7 +162,7 @@ fn resolve_bulk_target(
                     out_of_range
                 )));
             }
-            let final_flag_vec = final_flags(df.height(), flags, ioc_outcomes);
+            let final_flag_vec = user_flags(df.height(), flags);
             let annotated = annotated_count(&final_flag_vec, &indices);
             Ok((indices, annotated))
         }
@@ -208,10 +197,7 @@ fn resolve_and_token(
     payload: &BulkAnnotatePayload,
 ) -> Result<(Vec<usize>, String), AppError> {
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(project_dir, df, &iocs);
-    let (row_ids, annotated_filtered) =
-        resolve_bulk_target(df, payload, &flags, &ioc_outcomes)?;
+    let (row_ids, annotated_filtered) = resolve_bulk_target(df, payload, &flags)?;
     let token = target_token(&payload.spec, &row_ids, annotated_filtered);
     Ok((row_ids, token))
 }
@@ -241,10 +227,7 @@ pub fn bulk_update(
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let (target, annotated_filtered) =
-        resolve_bulk_target(&df, &payload, &flags, &ioc_outcomes)?;
+    let (target, annotated_filtered) = resolve_bulk_target(&df, &payload, &flags)?;
     let current_token = target_token(&payload.spec, &target, annotated_filtered);
 
     // A missing token is the same failure as a stale one: the caller did not
@@ -277,8 +260,8 @@ pub fn bulk_update(
 
     apply_flag_batch(&flags_path, &changes).map_err(AppError::from)?;
 
-    // The IOC outcome cache is independent of user flags (R5), so a bulk
-    // update never invalidates it.
+    // User annotations and the flagged count are independent of the legacy
+    // IOC definitions, so a bulk update never touches IOC state.
     let flagged_records = count_after(meta.flagged_records, &previous, &changes);
     if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
         warn_count_failure(&payload.project_id, err);

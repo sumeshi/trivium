@@ -5,10 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    ioc::{
-        calculate_ioc_applied_records, load_ioc_entries, prepare_ioc_entries, read_ioc_csv,
-        save_ioc_entries, write_ioc_csv,
-    },
+    ioc::{load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_ioc_entries, write_ioc_csv},
     models::IocEntry,
     store::ProjectsStore,
 };
@@ -34,7 +31,10 @@ pub struct ExportIocsPayload {
     pub destination: String,
 }
 
-/// Normalizes and persists IOC definitions, updating cached counts.
+/// Normalizes and persists IOC definitions.
+///
+/// Definitions are kept as legacy settings. Saving them does not re-evaluate
+/// rows or change `ioc_applied_records`; the existing stored count is kept.
 pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), AppError> {
     let Some(meta) = store.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()).into());
@@ -43,18 +43,10 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
     let entries = prepare_ioc_entries(payload.entries);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
-    // No proactive cache clear: the IOC cache is keyed by the set signature
-    // and row count, and an append-only change merges incrementally.
-    let ioc_applied_records =
-        calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
-    store
-        .update_ioc_applied_records(&payload.project_id, ioc_applied_records)
-        .map_err(AppError::from)?;
-
     Ok(())
 }
 
-/// Imports IOC rules from a CSV, replacing the current set.
+/// Imports IOC rules from a CSV, replacing the current legacy set.
 pub fn import_iocs(
     store: &ProjectsStore,
     payload: ImportIocsPayload,
@@ -69,14 +61,6 @@ pub fn import_iocs(
     }
     let entries = prepare_ioc_entries(read_ioc_csv(&source).map_err(AppError::from)?);
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
-
-    // No proactive cache clear: the IOC cache is keyed by the set signature
-    // and row count, and an append-only change merges incrementally.
-    let ioc_applied_records =
-        calculate_ioc_applied_records(&project_dir).map_err(AppError::from)?;
-    store
-        .update_ioc_applied_records(&payload.project_id, ioc_applied_records)
-        .map_err(AppError::from)?;
 
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     Ok(final_entries)

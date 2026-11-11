@@ -8,7 +8,7 @@ mod target;
 
 use std::collections::HashMap;
 
-pub(crate) use ioc::final_flags;
+pub(crate) use ioc::user_flags;
 pub(crate) use page::{filtered_indices, materialize_page};
 pub(crate) use result_cache::cache_remove_project;
 pub use result_cache::{clear_result_cache, result_cache_stats, ResultCacheStats};
@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    ioc::load_ioc_entries,
     jobs::JobContext,
     models::{ColumnMeta, ProjectRow},
     project_io::{
@@ -37,9 +36,8 @@ use crate::{
 };
 
 use self::page_read::{
-    apply_page_colors, collect_node_columns, count_annotated_rows, ioc_signature,
-    is_unconditional_page, load_full_ioc_outcomes, load_page_color_rules, load_page_flags,
-    load_page_ioc_outcomes, outcome_map, page_flag_map, resolution_projection,
+    apply_page_colors, collect_node_columns, is_unconditional_page, load_page_color_rules,
+    load_page_flags, resolution_projection,
 };
 use super::util::DEFAULT_PAGE_SIZE;
 
@@ -63,7 +61,7 @@ pub struct QueryRowsPayload {
 #[derive(Debug, Serialize)]
 pub struct QueryRowsResponse {
     pub rows: Vec<ProjectRow>,
-    /// Annotated rows in the whole project (user flags and IOC matches).
+    /// Annotated rows in the whole project (user flags only).
     pub annotated_total: usize,
     /// Annotated rows inside the current result set.
     pub annotated_filtered: usize,
@@ -74,7 +72,7 @@ pub struct QueryRowsResponse {
     pub offset: usize,
 }
 
-/// Streams project rows with filtering, sorting, IOC application, and pagination.
+/// Streams project rows with filtering, sorting, user annotations, and pagination.
 pub fn query_project_rows(
     store: &ProjectsStore,
     payload: QueryRowsPayload,
@@ -129,7 +127,6 @@ pub fn query_project_rows_with_job(
         .collect();
 
     let flags_path = project_dir.join("flags.json");
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let color_rules = load_page_color_rules(&project_dir);
     let mut page_projection: Vec<String> = visible_columns
         .iter()
@@ -156,7 +153,6 @@ pub fn query_project_rows_with_job(
 
     let offset = payload.offset.unwrap_or(0);
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
-    let apply_ioc_tags = !iocs.is_empty();
 
     // An unconditional, unsorted table has a known order: original row ids.
     // It needs neither search/sort resolution nor a full frame read.
@@ -168,28 +164,10 @@ pub fn query_project_rows_with_job(
         let page_df = read_page_dataframe(&parquet_path, &page_projection, start, limit)
             .map_err(AppError::from)?;
 
-        let (annotated_total, page_flags, page_ioc_outcomes) = if iocs.is_empty() {
-            (
-                meta.flagged_records,
-                load_page_flags(&flags_path, &row_ids)?,
-                HashMap::new(),
-            )
-        } else {
-            // IOC counts include IOC flags, so the project count from
-            // `ProjectMeta` (user flags only) is not enough. The persisted IOC
-            // cache lets this avoid reading the frame; a missing cache falls
-            // back to a projected full-data read.
-            let ioc_outcomes =
-                load_full_ioc_outcomes(&project_dir, &parquet_path, &iocs, total_rows, &columns)?;
-            let flags = load_flags(&flags_path).map_err(AppError::from)?;
-            let annotated_total = count_annotated_rows(total_rows, &flags, &ioc_outcomes);
-            let page_flags = page_flag_map(&flags, &row_ids);
-            (
-                annotated_total,
-                page_flags,
-                outcome_map(&ioc_outcomes, &row_ids),
-            )
-        };
+        let (annotated_total, page_flags) = (
+            meta.flagged_records,
+            load_page_flags(&flags_path, &row_ids)?,
+        );
 
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
@@ -198,8 +176,8 @@ pub fn query_project_rows_with_job(
             &row_ids,
             &visible_columns,
             &page_flags,
-            &page_ioc_outcomes,
-            apply_ioc_tags,
+            &HashMap::new(),
+            false,
         )?;
         apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
@@ -215,14 +193,9 @@ pub fn query_project_rows_with_job(
     }
 
     // The annotation revision is part of the key only when the resolved ids
-    // depend on annotations. IOC definitions also feed flag-filter results, so
-    // their signature joins the annotation token when it is present.
+    // depend on annotations.
     let annotation_token = if result_cache::spec_depends_on_annotations(&payload.spec) {
-        Some(format!(
-            "{}|{}",
-            store.current_revision(&meta.id),
-            ioc_signature(&iocs)
-        ))
+        Some(store.current_revision(&meta.id).to_string())
     } else {
         None
     };
@@ -243,14 +216,6 @@ pub fn query_project_rows_with_job(
         // Only the page's annotations are read on a hit; no project-wide flag
         // or bookmark vector is rebuilt.
         let page_flags = load_page_flags(&flags_path, &row_ids)?;
-        let page_ioc_outcomes = load_page_ioc_outcomes(
-            &project_dir,
-            &parquet_path,
-            &iocs,
-            total_rows,
-            &columns,
-            &row_ids,
-        )?;
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
         let mut rows = page::materialize_page_rows(
@@ -258,20 +223,14 @@ pub fn query_project_rows_with_job(
             &row_ids,
             &visible_columns,
             &page_flags,
-            &page_ioc_outcomes,
-            apply_ioc_tags,
+            &HashMap::new(),
+            false,
         )?;
         apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
-        // Without IOC definitions the project's flagged count is exactly the
-        // number of annotated rows, and `update_flag` keeps it current. With
-        // IOCs, the cached count from the miss is retained (see the T19 notes
-        // in docs/manual-review-progress.md).
-        let annotated_total = if iocs.is_empty() {
-            meta.flagged_records
-        } else {
-            cached.annotated_total
-        };
+        // `update_flag`, `update_annotation`, and bulk updates keep the
+        // project's flagged count current.
+        let annotated_total = meta.flagged_records;
         // A result that contains every row has the same annotated count as the
         // project. This keeps the common unfiltered table consistent with
         // `annotated_total` after a flag update; a filtered data-only result
@@ -295,22 +254,13 @@ pub fn query_project_rows_with_job(
     }
 
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
-    let ioc_outcomes =
-        load_full_ioc_outcomes(&project_dir, &parquet_path, &iocs, total_rows, &columns)?;
     job.report_progress(1, Some(3), Some("Evaluating query".into()));
     // Resolution reads only the search scope, condition columns, sort key,
     // and `__rowid`. Display columns are read again for the page, not here.
     let resolve_projection = resolution_projection(&payload.spec, &columns, has_row_id);
     let resolve_df =
         read_project_columns(&parquet_path, &resolve_projection).map_err(AppError::from)?;
-    let target = resolve_target(
-        &resolve_df,
-        &payload.spec,
-        &columns,
-        &flags,
-        &ioc_outcomes,
-        job,
-    )?;
+    let target = resolve_target(&resolve_df, &payload.spec, &columns, &flags, job)?;
     job.check_cancelled()?;
 
     let cached = result_cache::CachedResult::new(
@@ -334,14 +284,13 @@ pub fn query_project_rows_with_job(
     job.report_progress(2, Some(3), Some("Building page".into()));
     let page_df = read_page_rows_dataframe(&parquet_path, &page_projection, &row_ids)
         .map_err(AppError::from)?;
-    let page_ioc_outcomes = outcome_map(&ioc_outcomes, &row_ids);
     let mut rows = page::materialize_page_rows(
         &page_df,
         &row_ids,
         &visible_columns,
         &flags,
-        &page_ioc_outcomes,
-        apply_ioc_tags,
+        &HashMap::new(),
+        false,
     )?;
     apply_page_colors(&mut rows, &page_df, &color_rules)?;
 

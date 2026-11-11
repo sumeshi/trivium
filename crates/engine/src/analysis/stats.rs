@@ -7,6 +7,8 @@ use crate::analysis::infer::{dtype_kind, KindFlags};
 use crate::value_utils::anyvalue_to_search_string;
 
 const TOP_VALUES: usize = 20;
+/// The rare list is bounded too: the UI must never receive every unique value.
+const RARE_VALUES: usize = 20;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ValueCount {
@@ -56,6 +58,7 @@ pub fn summarize_series(column: &str, series: &Series, rare_max: u64) -> ColumnS
     let rare = ranked
         .into_iter()
         .filter(|item| item.count <= rare_max)
+        .take(RARE_VALUES)
         .collect();
 
     ColumnStats {

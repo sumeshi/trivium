@@ -19,7 +19,7 @@ fn default_rare_max() -> u64 {
     1
 }
 
-/// Column kind, missing count, distinct count, top 20 values, and rare values.
+/// Column kind, missing count, distinct count, top 20 values, and up to 20 rare values.
 pub fn column_stats(
     store: &ProjectsStore,
     payload: ColumnStatsPayload,

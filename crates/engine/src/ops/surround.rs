@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::models::ProjectRow;
 use crate::project_io::{is_internal_column, read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
@@ -98,15 +97,13 @@ pub fn surrounding_rows(
         }
     };
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let rows = materialize_page(
         &df,
         &selected,
         project_columns.columns(),
         &flags,
-        &ioc_outcomes,
-        !iocs.is_empty(),
+        &[],
+        false,
     )?;
     Ok(SurroundingRowsResponse { rows })
 }

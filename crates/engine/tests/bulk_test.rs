@@ -350,21 +350,15 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 }
 
 #[test]
-fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
+fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
     let _guard = undo_guard();
     let (root, store, id, _ids) = setup(true);
 
+    // A saved IOC definition does not flag or tag any row by itself.
     let initial = query_flags(&store, id);
-    for index in [2usize, 4, 7, 10] {
-        assert_eq!(initial[index].0, "critical", "row {index}");
-        assert!(
-            initial[index]
-                .1
-                .as_deref()
-                .unwrap_or("")
-                .contains("[logon-fail]"),
-            "row {index}"
-        );
+    for (index, (flag, memo)) in initial.iter().enumerate() {
+        assert_eq!(flag, "", "row {index}");
+        assert_eq!(memo, &None, "row {index}");
     }
 
     let applied = bulk_update(
@@ -376,30 +370,19 @@ fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
 
     let rows = query_flags(&store, id);
     for (index, (flag, memo)) in rows.iter().enumerate() {
-        assert_eq!(flag, "safe", "user flag must win on row {index}");
-        if [2usize, 4, 7, 10].contains(&index) {
-            assert!(
-                memo.as_deref().unwrap_or("").contains("[logon-fail]"),
-                "row {index} keeps the IOC tag"
-            );
-        }
+        assert_eq!(flag, "safe", "user flag must apply on row {index}");
+        assert_eq!(memo, &None, "row {index} must not gain an IOC tag");
     }
-    // The bulk path does not recalculate IOC counters.
     assert_eq!(
         store.find(&id).expect("meta missing").ioc_applied_records,
-        4,
+        0,
         "bulk_update must not recalculate ioc_applied_records"
     );
 
     assert_eq!(undo(&store, id), 12);
     let restored = query_flags(&store, id);
     for (index, (flag, _)) in restored.iter().enumerate() {
-        let expected = if [2usize, 4, 7, 10].contains(&index) {
-            "critical"
-        } else {
-            ""
-        };
-        assert_eq!(flag, expected, "row {index}");
+        assert_eq!(flag, "", "row {index}");
     }
     assert_eq!(flagged(&store, id), 0);
 
@@ -407,7 +390,7 @@ fn bulk_update_preserves_ioc_outcomes_and_undo_restores_them() {
 }
 
 #[test]
-fn bulk_clear_removes_entries_and_reveals_ioc_flags() {
+fn bulk_clear_does_not_reveal_legacy_ioc_flags() {
     let _guard = undo_guard();
     let (root, store, id, _ids) = setup(true);
 
@@ -428,12 +411,7 @@ fn bulk_clear_removes_entries_and_reveals_ioc_flags() {
 
     let rows = query_flags(&store, id);
     for (index, (flag, _)) in rows.iter().enumerate() {
-        let expected = if [2usize, 4, 7, 10].contains(&index) {
-            "critical"
-        } else {
-            ""
-        };
-        assert_eq!(flag, expected, "row {index}");
+        assert_eq!(flag, "", "row {index}");
     }
 
     let _ = fs::remove_dir_all(root);

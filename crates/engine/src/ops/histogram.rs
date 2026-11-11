@@ -4,13 +4,12 @@ use uuid::Uuid;
 use crate::analysis::histogram::{histogram_series_ranged, Histogram, DEFAULT_BUCKETS};
 use crate::condition::Node;
 use crate::error::AppError;
-use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::jobs::JobContext;
 use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
-use super::query::{filtered_indices, final_flags, prepare_search};
+use super::query::{filtered_indices, prepare_search, user_flags};
 
 #[derive(Debug, Deserialize)]
 pub struct HistogramPayload {
@@ -73,9 +72,7 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         &JobContext::none(),
     )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
+    let final_flag_vec = user_flags(df.height(), &flags);
     let bookmarked: Vec<bool> = (0..df.height())
         .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
         .collect();

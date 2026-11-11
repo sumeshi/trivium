@@ -5,12 +5,11 @@ use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::ioc::IocRowOutcome;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::project_io::is_internal_column;
 
-use super::ioc::final_flags;
+use super::ioc::user_flags;
 use super::page::filtered_indices;
 use super::search::prepare_search;
 use super::sort::ordered_row_indices;
@@ -61,9 +60,9 @@ pub struct QuerySpec {
 pub struct ResolvedTarget {
     /// Original row ids in display order.
     pub filtered: Vec<usize>,
-    /// Rows with a non-empty final flag inside `filtered`.
+    /// Rows with a non-empty user flag inside `filtered`.
     pub annotated_filtered: usize,
-    /// Rows with a non-empty final flag in the whole project.
+    /// Rows with a non-empty user flag in the whole project.
     pub annotated_total: usize,
 }
 
@@ -86,7 +85,6 @@ pub fn resolve_target(
     spec: &QuerySpec,
     all_columns: &[String],
     flags: &HashMap<usize, FlagEntry>,
-    ioc_outcomes: &[IocRowOutcome],
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
     RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -103,12 +101,8 @@ pub fn resolve_target(
         spec.condition.as_ref(),
         job,
     )?;
-    let ordered = ordered_row_indices(
-        df,
-        spec.sort_key.as_deref(),
-        spec.sort_direction.as_deref(),
-    );
-    let final_flag_vec = final_flags(df.height(), flags, ioc_outcomes);
+    let ordered = ordered_row_indices(df, spec.sort_key.as_deref(), spec.sort_direction.as_deref());
+    let final_flag_vec = user_flags(df.height(), flags);
     let bookmarked: Vec<bool> = (0..df.height())
         .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
         .collect();

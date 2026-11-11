@@ -3,8 +3,11 @@
   import type { Backend } from "../../backend";
   import type { ConditionNode, TimeAnalysis } from "../../types";
   import { conditionPayload, filterByRange } from "../../stores/condition";
+  import { shouldRequestPanel } from "../../panelRequest";
   import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
+
+  export let open = false;
 
   let column = "";
   let gapSeconds: number | null = 60;
@@ -74,7 +77,12 @@
     }
   };
 
-  $: if ($backend && projectId && column) {
+  $: if (!open) {
+    // Ignore any response that was already in flight.
+    request += 1;
+  }
+
+  $: if ($backend && shouldRequestPanel({ open, projectId, column })) {
     void loadAnalysis(
       $backend,
       projectId,

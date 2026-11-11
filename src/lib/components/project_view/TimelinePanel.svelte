@@ -3,8 +3,11 @@
   import type { Backend } from "../../backend";
   import type { ConditionNode, Histogram } from "../../types";
   import { conditionPayload, filterByRange } from "../../stores/condition";
+  import { shouldRequestPanel } from "../../panelRequest";
   import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
   import type { FlagFilterValue } from "./state";
+
+  export let open = false;
 
   const BUCKET_COUNT = 60;
   const VIEW_WIDTH = 1000;
@@ -19,7 +22,6 @@
   let error = "";
   let request = 0;
   let alive = true;
-  let open = true;
   let dragging = false;
   let dragStart: number | null = null;
   let dragEnd: number | null = null;
@@ -248,7 +250,12 @@
     dragging = false;
   }
 
-  $: if ($backend && projectId && column) {
+  $: if (!open) {
+    // Ignore any response that was already in flight.
+    request += 1;
+  }
+
+  $: if ($backend && shouldRequestPanel({ open, projectId, column })) {
     void loadHistogram(
       $backend,
       projectId,
@@ -295,9 +302,7 @@
 {#if timeColumns.length > 0}
   <div class="stats-panel timeline-panel">
     <div class="condition-toolbar">
-      <button type="button" class="ghost" aria-expanded={open} on:click={() => (open = !open)}>
-        {open ? "▾" : "▸"} Timeline
-      </button>
+      <span class="filter-label">Timeline</span>
       {#if open}
         <label class="condition-count">
           Column

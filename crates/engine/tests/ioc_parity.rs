@@ -1,15 +1,9 @@
-//! Parity test for the unified IOC evaluation (R5 + B2).
+//! Query/export parity for user annotations after automatic IOC removal (T25).
 //!
-//! The query path (`ops::rows`), the export path (`ops::export`), and the
-//! applied-record count (`ioc::calculate_ioc_applied_records`) must produce
-//! the same flags and the same memo tags for the same data, IOC set, and
-//! user flags.
-//!
-//! Unified rules (B2):
-//! - a non-empty user flag wins the flag column; a memo-only entry (empty
-//!   flag) does not block the IOC flag
-//! - matched IOC tags are appended to the memo on every matching row,
-//!   whether or not the user set a flag
+//! Saving IOC definitions must not change row flags, memos, or the stored
+//! `ioc_applied_records` count. The query path, the export path, and the
+//! project load path all show user annotations only. The IOC evaluation module
+//! remains for an explicit future operation; it is not called here.
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,14 +16,14 @@ use trivium_engine::ops;
 use trivium_engine::ops::export::ExportProjectPayload;
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::iocs::SaveIocsPayload;
-use trivium_engine::ops::projects::CreateProjectPayload;
+use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::{QueryRowsPayload, QuerySpec};
 use trivium_engine::store::ProjectsStore;
 
 mod common;
 
 // 10 rows: rows 0..4 are EventID 4624 (alice), rows 5..9 are 4625 (bob).
-// The IOC below matches every 4625 row.
+// The legacy IOC below matches every 4625 row.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
     let path = root.join("parity.csv");
     let mut body = String::from("ts,EventID,host,user,proc\n");
@@ -68,8 +62,8 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
     .expect("failed to create project");
     let ids = common::column_ids(&store, summary.meta.id);
 
-    // User flags: row 0 (no IOC match), row 5 "safe" (IOC match; user wins),
-    // and row 6 memo-only (empty flag; must NOT block the IOC flag).
+    // User flags: row 0 (no IOC match), row 5 "safe" (IOC match), and row 6
+    // memo-only. The legacy IOC matches every 4625 row (5..9).
     for (row_index, flag, memo) in [
         (0usize, "suspicious", None),
         (5usize, "safe", None),
@@ -170,13 +164,32 @@ fn export_flags(destination: &std::path::Path) -> Vec<(String, String)> {
 }
 
 #[test]
-fn query_export_and_count_agree_on_flags_and_tags() {
+fn query_export_and_load_show_user_annotations_only() {
     let (root, store, id) = setup();
 
-    // Count path: IOC applies only where no user flag exists. Row 6 has a
-    // memo-only entry (empty flag), so it still counts. -> rows 6..9.
+    // The stored legacy count is not recalculated when IOC definitions change.
     let meta = store.find(&id).expect("meta missing");
-    assert_eq!(meta.ioc_applied_records, 4);
+    assert_eq!(meta.ioc_applied_records, 0);
+
+    // Project load returns the definitions, but opening the project leaves
+    // every row without an automatic flag or tag.
+    let loaded = ops::projects::load_project(&store, ProjectRequest { project_id: id })
+        .expect("load failed");
+    assert_eq!(loaded.iocs.len(), 1, "legacy IOC definitions are kept");
+    assert_eq!(loaded.project.meta.ioc_applied_records, 0);
+    for row in &loaded.initial_rows {
+        let expected = match row.row_index {
+            0 => "suspicious",
+            5 => "safe",
+            _ => "",
+        };
+        assert_eq!(row.flag, expected, "loaded flag for row {}", row.row_index);
+        assert!(
+            !row.memo.as_deref().unwrap_or("").contains("[logon-fail]"),
+            "loaded memo for row {} must not gain the IOC tag",
+            row.row_index
+        );
+    }
 
     // Query path.
     let query = query_flags(&store, id);
@@ -208,37 +221,34 @@ fn query_export_and_count_agree_on_flags_and_tags() {
     assert_eq!(exported.len(), 10);
 
     let expected = [
-        "suspicious", // row 0: user flag, no IOC match
-        "", "", "", "", // rows 1..4: nothing
-        "safe",     // row 5: user flag wins over IOC
-        "critical", // row 6: memo-only entry does not block the IOC flag
-        "critical", "critical", "critical", // rows 7..9: IOC
+        "suspicious", // row 0: user flag
+        "",
+        "",
+        "",
+        "",     // rows 1..4: nothing
+        "safe", // row 5: user flag
+        "",     // row 6: memo-only entry, no automatic flag
+        "",
+        "",
+        "", // rows 7..9: no automatic IOC flag
     ];
     for i in 0..10 {
         assert_eq!(query[i].0, expected[i], "query flag for row {i}");
         assert_eq!(exported[i].0, expected[i], "export flag for row {i}");
     }
 
-    // Count path agrees with the flag sources: exactly the four IOC rows.
-    let ioc_rows = (0..10).filter(|&i| query[i].0 == "critical").count();
-    assert_eq!(ioc_rows, meta.ioc_applied_records as usize);
-
-    // B2 tag parity: every matching row (5..9) shows [logon-fail] in both
-    // paths, including the user-flagged row 5 and the memo-only row 6.
-    for i in [5usize, 6, 7, 8, 9] {
+    // The memo-only note survives in both paths and no IOC tag is appended.
+    assert_eq!(query[6].1.as_deref(), Some("memo only"));
+    assert_eq!(exported[6].1, "memo only");
+    for i in [0usize, 5, 6, 7, 8, 9] {
         assert!(
-            query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"),
+            !query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"),
             "query memo for row {i}"
         );
-        assert!(exported[i].1.contains("[logon-fail]"), "export memo for row {i}");
-    }
-    // The memo-only note survives in both paths alongside the tag.
-    assert!(query[6].1.as_deref().unwrap_or("").contains("memo only"));
-    assert!(exported[6].1.contains("memo only"));
-    // Non-matching rows carry no tag.
-    for i in [0usize, 1, 2, 3, 4] {
-        assert!(!query[i].1.as_deref().unwrap_or("").contains("[logon-fail]"));
-        assert!(!exported[i].1.contains("[logon-fail]"));
+        assert!(
+            !exported[i].1.contains("[logon-fail]"),
+            "export memo for row {i}"
+        );
     }
 
     let _ = fs::remove_dir_all(root);

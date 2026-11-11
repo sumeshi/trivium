@@ -11,7 +11,6 @@ use uuid::Uuid;
 use super::annotations;
 use crate::{
     error::AppError,
-    ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome},
     jobs::JobContext,
     models::{FlagEntry, ProjectMeta},
     ops::query::{data_columns, ordered_row_indices, resolve_target},
@@ -99,24 +98,12 @@ pub fn export_project_with_job(
     job.check_cancelled()?;
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-    // IOC evaluation runs on the full column set so queries targeting hidden
-    // columns keep matching even when the export restricts output columns.
-    let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let project_columns = ProjectColumns::from_meta(&meta, &df);
     let all_columns = data_columns(&df);
 
     job.report_progress(1, Some(3), Some("Resolving export rows".into()));
     let scope = payload.scope.as_deref().unwrap_or("filtered");
-    let final_indices = resolve_export_rows(
-        &df,
-        scope,
-        &payload,
-        &all_columns,
-        &flags,
-        &ioc_outcomes,
-        job,
-    )?;
+    let final_indices = resolve_export_rows(&df, scope, &payload, &all_columns, &flags, job)?;
     job.check_cancelled()?;
 
     // Apply the output column restriction after the target is fixed. Only the
@@ -152,7 +139,7 @@ pub fn export_project_with_job(
     };
 
     let annotation_data = if include_annotations {
-        Some(annotations::build_annotations(&df, &flags, &ioc_outcomes))
+        Some(annotations::build_annotations(&df, &flags))
     } else {
         None
     };
@@ -203,7 +190,6 @@ fn resolve_export_rows(
     payload: &ExportProjectPayload,
     all_columns: &[String],
     flags: &std::collections::HashMap<usize, FlagEntry>,
-    ioc_outcomes: &[IocRowOutcome],
     job: &JobContext,
 ) -> Result<Vec<usize>, AppError> {
     match scope {
@@ -212,9 +198,7 @@ fn resolve_export_rows(
             payload.spec.sort_key.as_deref(),
             payload.spec.sort_direction.as_deref(),
         )),
-        "filtered" => {
-            Ok(resolve_target(df, &payload.spec, all_columns, flags, ioc_outcomes, job)?.filtered)
-        }
+        "filtered" => Ok(resolve_target(df, &payload.spec, all_columns, flags, job)?.filtered),
         "selected" => {
             let requested = payload
                 .row_indices
@@ -235,13 +219,11 @@ fn resolve_export_rows(
             // The QuerySpec result is the base order. Selected ids outside the
             // current result are dropped rather than falling back to another
             // scope.
-            Ok(
-                resolve_target(df, &payload.spec, all_columns, flags, ioc_outcomes, job)?
-                    .filtered
-                    .into_iter()
-                    .filter(|idx| selected.contains(idx))
-                    .collect(),
-            )
+            Ok(resolve_target(df, &payload.spec, all_columns, flags, job)?
+                .filtered
+                .into_iter()
+                .filter(|idx| selected.contains(idx))
+                .collect())
         }
         other => Err(AppError::Message(format!(
             "Unknown export scope: {}.",

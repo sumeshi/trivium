@@ -1,5 +1,5 @@
 //! End-to-end smoke test over the engine ops, without any GUI:
-//! create -> query -> annotate -> IOC -> export -> re-import -> delete.
+//! create -> query -> annotate -> legacy IOC definitions -> export -> re-import -> delete.
 //!
 //! Most fixtures are inline. Gap and duplicate checks also call python3.
 
@@ -514,7 +514,9 @@ fn column_stats_match_python_counts() {
     assert_eq!(token.top[0].count, 2);
     assert!(token.top.windows(2).all(|pair| pair[0].count >= pair[1].count));
     assert!(token.rare.iter().all(|item| item.count == 1));
-    assert_eq!(token.rare.len() as u64, token.unique - 1);
+    // The UI list is bounded even when many values are rare.
+    assert_eq!(token.rare.len(), 20);
+    assert!(token.unique > 20);
     assert!(!token.rare.iter().any(|item| item.value == "dup"));
 
     assert!(ops::stats::column_stats(
@@ -1264,10 +1266,10 @@ fn flag_update_and_flag_filter() {
 }
 
 #[test]
-fn ioc_apply_and_query() {
+fn saving_iocs_does_not_flag_rows() {
     let (root, store, id, ids) = setup_project();
 
-    // User flag on an alice/4624 row (no IOC match)...
+    // User flag on an alice/4624 row (no IOC match) and on a 4625 row.
     ops::flags::update_flag(
         &store,
         UpdateFlagPayload {
@@ -1280,8 +1282,6 @@ fn ioc_apply_and_query() {
         },
     )
     .expect("update failed");
-    // ...and on an alice/4625 row (IOC match): the user flag wins the flag
-    // column, but the matched tag must still surface (B2).
     ops::flags::update_flag(
         &store,
         UpdateFlagPayload {
@@ -1308,37 +1308,32 @@ fn ioc_apply_and_query() {
     )
     .expect("save iocs failed");
 
-    // ioc_applied_records counts rows where the IOC flag actually applies
-    // (no user flag): the three remaining 4625 rows (6, 8, 9).
+    // The legacy definitions are stored, but saving them does not evaluate
+    // rows or change the existing applied-record count.
     let meta = store.find(&id).expect("meta missing");
-    assert_eq!(meta.ioc_applied_records, 3);
+    assert_eq!(meta.ioc_applied_records, 0);
 
     let r = query(&store, id);
-    assert_eq!(r.annotated_total, 5); // 2 user safe + 3 IOC critical
+    assert_eq!(r.annotated_total, 2); // two user safe flags
 
-    let flagged: Vec<&trivium_engine::models::ProjectRow> = r
-        .rows
-        .iter()
-        .filter(|row| row.flag == "critical")
-        .collect();
-    assert_eq!(flagged.len(), 3);
-    for row in &flagged {
-        let memo = row.memo.as_deref().unwrap_or_default();
-        assert!(memo.contains("[logon-fail]"), "memo was: {memo:?}");
-    }
+    let flagged: Vec<&trivium_engine::models::ProjectRow> =
+        r.rows.iter().filter(|row| row.flag == "critical").collect();
+    assert!(flagged.is_empty(), "no row is automatically flagged");
 
-    // User flag wins over IOC on row 0 (no match, no tag)...
     let row0 = r.rows.iter().find(|row| row.row_index == 0).unwrap();
     assert_eq!(row0.flag, "safe");
     assert!(row0.memo.is_none());
-    // ...and on row 7 (match: user flag, but the tag is appended).
     let row7 = r.rows.iter().find(|row| row.row_index == 7).unwrap();
     assert_eq!(row7.flag, "safe");
-    assert!(row7
-        .memo
-        .as_deref()
-        .unwrap_or_default()
-        .contains("[logon-fail]"));
+    assert!(
+        !row7.memo.as_deref().unwrap_or("").contains("[logon-fail]"),
+        "the legacy IOC tag must not be appended"
+    );
+    for index in [6usize, 8, 9] {
+        let row = r.rows.iter().find(|row| row.row_index == index).unwrap();
+        assert_eq!(row.flag, "");
+        assert!(row.memo.is_none());
+    }
 
     let _ = fs::remove_dir_all(root);
 }
@@ -1398,7 +1393,10 @@ fn export_and_reimport_roundtrip() {
     assert_eq!(lines.len(), 21); // header + 20 rows
     assert!(lines[0].starts_with("trivium-safe,trivium-suspicious,trivium-critical,trivium-memo"));
     assert!(exported.contains("manual note"));
-    assert!(exported.contains("[logon-fail]"));
+    assert!(
+        !exported.contains("[logon-fail]"),
+        "a saved IOC definition must not add tags to the export"
+    );
     // The quoted message with a comma survives the round trip.
     assert!(exported.contains("note, with comma"));
 
@@ -1414,7 +1412,7 @@ fn export_and_reimport_roundtrip() {
     )
     .expect("reimport failed");
     assert_eq!(reimported.meta.total_records, 20);
-    assert_eq!(reimported.meta.flagged_records, 5); // 1 suspicious + 4 critical
+    assert_eq!(reimported.meta.flagged_records, 1); // 1 manual suspicious
 
     let r = query(&store, reimported.meta.id);
     let suspicious: Vec<&trivium_engine::models::ProjectRow> = r
@@ -1429,6 +1427,11 @@ fn export_and_reimport_roundtrip() {
         .as_deref()
         .unwrap_or_default()
         .contains("manual note"));
+    assert!(!suspicious[0]
+        .memo
+        .as_deref()
+        .unwrap_or_default()
+        .contains("[logon-fail]"));
 
     let _ = fs::remove_dir_all(root);
 }

@@ -18,14 +18,15 @@
   import ConditionEditor from './ConditionEditor.svelte';
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
-  import GroupingPanel from './GroupingPanel.svelte';
-  import ColorRulesPanel from './ColorRulesPanel.svelte';
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
 
 
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
+
+  let statsOpen = false;
+  let timeOpen = false;
 
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
@@ -206,21 +207,13 @@
     <summary>Conditions</summary>
     <ConditionEditor />
   </details>
-  <details class="filter-advanced">
+  <details class="filter-advanced" bind:open={statsOpen}>
     <summary>Column stats</summary>
-    <StatsPanel />
+    <StatsPanel open={statsOpen} />
   </details>
-  <details class="filter-advanced">
+  <details class="filter-advanced" bind:open={timeOpen}>
     <summary>Time analysis</summary>
-    <TimePanel />
-  </details>
-  <details class="filter-advanced">
-    <summary>Grouping</summary>
-    <GroupingPanel />
-  </details>
-  <details class="filter-advanced">
-    <summary>Row colors</summary>
-    <ColorRulesPanel />
+    <TimePanel open={timeOpen} />
   </details>
   <details class="filter-advanced">
     <summary>Presets</summary>
@@ -231,8 +224,9 @@
     <BulkControls on:refresh />
   </details>
   <details class="filter-advanced">
-    <summary>IOC rules</summary>
+    <summary>IOC rules (legacy)</summary>
     <div class="filter-ioc">
+      <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
       <button type="button" class="ghost" on:click={() => {
         dispatch('iocManagerOpen');
       }}>
