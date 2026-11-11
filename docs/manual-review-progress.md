@@ -1960,3 +1960,110 @@ fields.
   not started.
 
 Next card: T24.
+
+
+## T24 — persist per-project view state with atomic writes
+
+Recorded: 2026-11-11.
+
+### Change
+
+- **Engine file.** `crates/engine/src/models.rs` adds `ViewState`
+  (`version`, `search`, `searchColumns`, `condition`, `flagFilter`,
+  `bookmarkedOnly`, `sortKey`, `sortDirection`, `hiddenColumns`,
+  `columnWidths`, `logicalRow`). `condition` is the frontend `EditorGroup`
+  JSON; the engine stores it without interpreting it. Current version is 1.
+- **Engine operations.** `crates/engine/src/ops/view.rs` (new) writes
+  `projects/{uuid}/view_state.json` through a sibling
+  `view_state.json.tmp.<pid>.<uuid>` file and replaces it with `fs::rename`.
+  A failed write removes only the temporary file. The view state is a
+  separate file from annotations, so a view save cannot change `flags.json`.
+- **Load rules.** A missing file returns `None`. Unreadable JSON returns
+  `None` with a warning, and a file whose `version` is newer than 1 returns
+  `None` without overwriting it. An older-version file is returned; missing
+  fields are filled by serde defaults and the next save writes version 1.
+  A project load and its annotations do not depend on this file.
+- **Commands.** `src-tauri/src/commands/view.rs` adds `load_view_state` and
+  `save_view_state`; they are re-exported from `commands/mod.rs` and listed
+  in `generate_handler!` in `main.rs`.
+- **Frontend contract.** `src/lib/types.ts` adds `ViewState`;
+  `backend.ts` adds `loadViewState` / `saveViewState`. Project deletion keeps
+  removing the whole project directory, so `view_state.json` needs no extra
+  deletion path.
+- **Pure mapping.** `src/lib/viewStateMapping.ts` (new) converts between the
+  engine DTO and `SavedView`. It drops columns unknown to the current project
+  from search scope, hidden columns, sort key, and widths; an unreadable
+  condition tree returns `null` instead of becoming an empty filter.
+- **Restore.** `ProjectView.svelte` now reads the engine file for each
+  project. Before the read it resets search, search columns, condition, flag
+  filter, bookmark-only, sort, hidden columns, and column widths to that
+  project's defaults, so no value from the previously selected project is
+  shown. The saved `logicalRow` is applied after the first page reports the
+  filtered count, as before.
+- **Save.** The existing 250 ms debounce now sends all view fields to
+  `saveViewState`. A project switch flushes the old project before its stores
+  are replaced; unmount also flushes. A failed send shows an error notice but
+  leaves evidence, annotations, and the current screen usable.
+- **Column widths.** Initial estimates are replaced by saved widths for known
+  columns and clamped to the table's minimum/maximum; columns without a
+  usable saved width fall back to the existing estimate.
+
+### Legacy localStorage migration
+
+`stores/viewHistory.ts` still reads the old `trivium:view:<projectId>`
+localStorage key only when the engine has no state. When a legacy value is
+read, it is applied and written to the engine once; later loads use the engine
+file. `loadProjectView` and `saveProjectView` remain for that migration path
+and are marked deprecated.
+
+### Tests
+
+New `crates/engine/tests/view_state_test.rs` (8 tests):
+
+- Full round trip of every field, including condition JSON, widths, and row.
+- Corrupt JSON returns `None`, while `load_project`, evidence rows, and a
+  previously saved flag/memo/bookmark still load.
+- A newer storage version is ignored and its file bytes are not overwritten.
+- Save replaces the previous file and leaves no temporary file.
+- A read-only project directory (when permissions are enforced) fails the
+  save, keeps the previous view state, and removes the temporary file.
+- Projects A and B keep different view states without influencing each other.
+- Deleting a project removes its view state with the project directory.
+- Saved search columns, sort key, and widths use internal column ids.
+
+New `src/lib/viewStateMapping.test.ts` (5 tests):
+
+- Save/restore keeps search, search columns, flag filter, bookmark-only,
+  hidden columns, sort, widths, and logical row.
+- A legacy save without the new fields restores documented defaults and keeps
+  the old `offset` as `logicalRow`.
+- Unknown columns and invalid widths are dropped.
+- An unreadable condition tree returns `null` rather than an empty filter.
+- An unknown flag filter falls back to `all`.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | exit 0; all suites passed, 0 failed (8 new view-state tests) |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 28 passed, 0 failed (5 new mapping tests) |
+
+### Unverified / deferred
+
+- The native GUI/WebView was not exercised. Switching A/B, restarting, and
+  seeing each project's search/condition/scroll restored are covered by the
+  engine round trip and pure mapping tests only; real-app confirmation is T26.
+- The desktop crate was not rebuilt. `cargo check -p trivium-desktop` stops at
+  the missing `gdk-pixbuf-2.0` pkg-config input (same environment limit as
+  T23). Command names, payload fields, re-exports, and `generate_handler!`
+  registration were checked by grep only.
+- `fs::rename` replacement was verified on Linux. Native Windows replacement
+  behaviour was not tested.
+- The existing `projects.json` metadata write path was not changed; only the
+  rebuildable per-project view state uses the new atomic write.
+- T25 panel/IOC separation was not started.
+
+Next card: T25.
