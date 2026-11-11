@@ -14,10 +14,7 @@ use crate::project_io::{read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
-use super::query::{
-    data_columns, filtered_indices, materialize_page, ordered_row_indices, prepare_search,
-    user_flags,
-};
+use super::query::{data_columns, materialize_page, resolve_target, user_flags, QuerySpec};
 use super::util::resolve_columns;
 
 #[derive(Debug, Deserialize)]
@@ -26,10 +23,16 @@ pub struct BuildReportPayload {
     pub project_id: Uuid,
     #[serde(default)]
     pub search: Option<String>,
+    /// Display columns. For old callers this also remains the search scope
+    /// when `searchColumns` is omitted.
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
+    #[serde(default, rename = "bookmarkedOnly")]
+    pub bookmarked_only: Option<bool>,
     #[serde(default, rename = "sortKey")]
     pub sort_key: Option<String>,
     #[serde(default, rename = "sortDirection")]
@@ -69,31 +72,22 @@ pub fn build_report(
         None => all_columns.clone(),
     };
 
-    let search_state = prepare_search(
-        &df,
-        payload.columns.as_deref(),
-        &all_columns,
-        payload.search.as_deref(),
-        payload.condition.as_ref(),
-        &JobContext::none(),
-    )?;
     let final_flag_vec = user_flags(df.height(), &flags);
-    let bookmarked: Vec<bool> = (0..df.height())
-        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
-        .collect();
-    let ordered = ordered_row_indices(
-        &df,
-        payload.sort_key.as_deref(),
-        payload.sort_direction.as_deref(),
-    );
-    let (filtered, flagged_in_matches) = filtered_indices(
-        &ordered,
-        &final_flag_vec,
-        &bookmarked,
-        None,
-        payload.flag_filter.as_deref(),
-        search_state.mask.as_deref(),
-    );
+    let spec = QuerySpec {
+        search: payload.search.clone(),
+        search_columns: payload
+            .search_columns
+            .clone()
+            .or_else(|| payload.columns.clone()),
+        condition: payload.condition.clone(),
+        flag_filter: payload.flag_filter.clone(),
+        bookmarked_only: payload.bookmarked_only,
+        sort_key: payload.sort_key.clone(),
+        sort_direction: payload.sort_direction.clone(),
+    };
+    let target = resolve_target(&df, &spec, &all_columns, &flags, &JobContext::none())?;
+    let flagged_in_matches = target.annotated_filtered;
+    let filtered = target.filtered;
     let hit_rows = filtered.len();
 
     let annotated_indices: Vec<usize> = filtered

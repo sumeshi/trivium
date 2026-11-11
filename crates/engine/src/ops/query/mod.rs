@@ -9,10 +9,9 @@ mod target;
 use std::collections::HashMap;
 
 pub(crate) use ioc::user_flags;
-pub(crate) use page::{filtered_indices, materialize_page};
+pub(crate) use page::materialize_page;
 pub(crate) use result_cache::cache_remove_project;
 pub use result_cache::{clear_result_cache, result_cache_stats, ResultCacheStats};
-pub(crate) use search::prepare_search;
 pub(crate) use sort::ordered_row_indices;
 pub use target::{
     data_columns, reset_resolve_count, resolve_count, resolve_target, spec_token_json, QuerySpec,
