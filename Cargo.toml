@@ -1,3 +1,15 @@
 [workspace]
 resolver = "2"
 members = ["src-tauri", "crates/engine"]
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = 0
