@@ -1,4 +1,5 @@
 pub mod bulk;
+pub mod cell;
 pub mod cross;
 pub mod diff;
 pub mod dupes;

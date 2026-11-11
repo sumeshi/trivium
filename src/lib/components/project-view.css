@@ -1244,6 +1244,22 @@ button.primary:disabled {
   color: var(--fg);
 }
 
+.cell-load-state {
+  color: var(--muted);
+}
+
+.cell-load-error-detail {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.retry-cell {
+  margin-top: 8px;
+  padding: 4px 10px;
+}
+
 .row-around {
   margin: 0;
   padding: 0;

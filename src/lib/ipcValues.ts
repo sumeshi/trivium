@@ -14,10 +14,11 @@ export function displayText(cell: Cell | null | undefined): string {
 }
 
 /**
- * Text copied from a cell and used as a filter value.
+ * Text copied from a full cell value and used as a filter value.
  *
  * This is the source representation, not the display decoration: an explicit
- * null copies as "null", while a missing key has no value to copy.
+ * null copies as "null", while a missing key has no value to copy. A list
+ * preview must never be passed here; it comes from `getCell` instead.
  */
 export function copyText(cell: Cell | null | undefined): string {
   if (!cell) return "";
@@ -28,18 +29,26 @@ export function copyText(cell: Cell | null | undefined): string {
 
 export type CellCaches = {
   displayCache: Record<string, string>;
-  copyCache: Record<string, string>;
+  /** Preview text only; the detail dialog fetches the full value on demand. */
+  previewCache: Record<string, string>;
 };
 
-/** Builds the display/copy caches from the backend cell DTOs. */
+/**
+ * Builds the display/preview caches from the backend cell DTOs.
+ *
+ * A truncated display value gets a trailing "…" so the table never presents a
+ * preview as a complete value. The preview cache stores the raw prefix without
+ * decoration; it is an initial hint, not a copy/filter source.
+ */
 export function buildCellCaches(
   cells: Record<string, Cell> | null | undefined
 ): CellCaches {
   const displayCache: Record<string, string> = {};
-  const copyCache: Record<string, string> = {};
+  const previewCache: Record<string, string> = {};
   for (const [column, cell] of Object.entries(cells ?? {})) {
-    displayCache[column] = displayText(cell);
-    copyCache[column] = copyText(cell);
+    const text = displayText(cell);
+    displayCache[column] = cell.truncated ? `${text}…` : text;
+    previewCache[column] = copyText(cell);
   }
-  return { displayCache, copyCache };
+  return { displayCache, previewCache };
 }

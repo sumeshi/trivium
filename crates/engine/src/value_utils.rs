@@ -85,9 +85,16 @@ pub fn value_display_length(value: &Value) -> usize {
     }
 }
 
+/// Number of characters kept in a list-response cell preview.
+///
+/// The page DTO carries this many characters plus the original length; the
+/// full value is fetched on demand by `ops::cell::get_cell`. Truncation is by
+/// `char`, so a multi-byte character is never split.
+pub const CELL_PREVIEW_CHARS: usize = 256;
+
 /// Column-level context for the per-cell IPC DTO.
 ///
-/// Kinds are inferred once per column from the full frame and never per cell.
+/// Kinds are inferred once per column from the given frame and never per cell.
 /// `sources` are the original CSV headers / JSON Pointers; they are only used
 /// to tell an absent JSON key ("missing") from an explicit null.
 pub struct CellColumns {
@@ -105,8 +112,14 @@ impl CellColumns {
         Self { kinds, sources }
     }
 
-    /// Builds one cell. `original` is the parsed row from `__original`.
+    /// Builds one list cell with a preview. `original` is the parsed row from
+    /// `__original`.
     pub fn build(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
+        preview_cell(self.build_full(column, value, original))
+    }
+
+    /// Builds one cell with the full text, for the on-demand cell fetch.
+    pub fn build_full(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
         let kind = self
             .kinds
             .get(column)
@@ -117,7 +130,7 @@ impl CellColumns {
             .get(column)
             .map(String::as_str)
             .unwrap_or(column);
-        build_cell(value, kind, original, source)
+        build_full_cell(value, kind, original, source)
     }
 }
 
@@ -132,8 +145,19 @@ pub fn cell_kind_name(kind: ColumnKind) -> &'static str {
     }
 }
 
-/// Builds one cell DTO from the exact text and the column kind.
+/// Builds one list cell: full text reduced to a preview plus its original
+/// length.
 pub fn build_cell(
+    value: &AnyValue,
+    column_kind: ColumnKind,
+    original: Option<&Value>,
+    source: &str,
+) -> Cell {
+    preview_cell(build_full_cell(value, column_kind, original, source))
+}
+
+/// Builds one cell with the full source text and no truncation.
+pub fn build_full_cell(
     value: &AnyValue,
     column_kind: ColumnKind,
     original: Option<&Value>,
@@ -141,14 +165,39 @@ pub fn build_cell(
 ) -> Cell {
     let text = anyvalue_to_search_string(value);
     match text {
-        Some(text) => Cell {
-            text: Some(text),
-            kind: cell_kind_name(column_kind).to_string(),
-        },
+        Some(text) => {
+            let length = text.chars().count();
+            Cell {
+                text: Some(text),
+                kind: cell_kind_name(column_kind).to_string(),
+                truncated: false,
+                length: Some(length),
+            }
+        }
         None => Cell {
             text: None,
             kind: null_cell_kind(original, source).to_string(),
+            truncated: false,
+            length: None,
         },
+    }
+}
+
+/// Reduces a full cell to the list preview. Idempotent for already-short text.
+fn preview_cell(cell: Cell) -> Cell {
+    let Some(text) = cell.text.as_ref() else {
+        return cell;
+    };
+    let length = cell.length.unwrap_or_else(|| text.chars().count());
+    if length <= CELL_PREVIEW_CHARS {
+        return cell;
+    }
+    let preview: String = text.chars().take(CELL_PREVIEW_CHARS).collect();
+    Cell {
+        text: Some(preview),
+        truncated: true,
+        length: Some(length),
+        ..cell
     }
 }
 

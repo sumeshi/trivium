@@ -70,8 +70,8 @@ export type CachedRow = ProjectRow & {
   memo: string;
   /** Text rendered in the table/detail view (null/missing are distinguished). */
   displayCache: Record<string, string>;
-  /** Exact text copied and used as a filter value. */
-  copyCache: Record<string, string>;
+  /** List preview only; full cell text is fetched per open cell. */
+  previewCache: Record<string, string>;
 };
 
 export type VirtualRow = { position: number; row: CachedRow | null };
@@ -161,8 +161,13 @@ export const filteredFlaggedCount = writable(0);
 export const positionToRowIndex = writable<Map<number, number>>(new Map());
 
 export const expandedCell = writable<{
-  column: string;
-  value: string;
+  projectId: string;
+  /** Original row id, stable across page-cache eviction. */
+  rowIndex: number;
+  columnId: string;
+  /** List preview; never treated as the full value. */
+  preview: string;
+  /** Row snapshot for the surrounding-row view; annotation is not edited here. */
   row: CachedRow;
 } | null>(null);
 export type MemoEditorTarget = {
@@ -431,13 +436,17 @@ export function formatCell(value: unknown): string {
 }
 
 export function normalizeRow(incoming: ProjectRow): CachedRow {
-  const { displayCache, copyCache } = buildCellCaches(incoming.cells);
+  const { displayCache, previewCache } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
+    // `data` is a compatibility copy of the full row values. The UI reads
+    // `cells` (previews), so keeping `data` would retain a 1MiB cell on every
+    // cached page and defeat the page-cache bound.
+    data: {},
     flag: mapStoredFlag(incoming.flag) || "",
     memo: sanitizeMemoInput(incoming.memo ?? ""),
     displayCache,
-    copyCache,
+    previewCache,
   };
 }
 
@@ -572,18 +581,30 @@ export const editMemo = (row: CachedRow, projectId: string) => {
   memoEditor.set({ projectId, rowIndex: row.row_index, row });
 };
 
-export const openCell = (column: string, value: string, row: CachedRow) => {
-  expandedCell.set({ column, value, row });
+export const openCell = (
+  projectId: string,
+  columnId: string,
+  preview: string,
+  row: CachedRow
+) => {
+  expandedCell.set({
+    projectId,
+    rowIndex: row.row_index,
+    columnId,
+    preview,
+    row,
+  });
 };
 
 export const handleCellKeydown = (
   event: KeyboardEvent,
-  column: string,
-  value: string,
+  projectId: string,
+  columnId: string,
+  preview: string,
   row: CachedRow
 ) => {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
-    openCell(column, value, row);
+    openCell(projectId, columnId, preview, row);
   }
 };

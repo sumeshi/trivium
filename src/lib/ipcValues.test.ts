@@ -71,18 +71,37 @@ test("table, detail, copy, and filter share the same exact string", () => {
     c000003: { text: null, kind: "missing" },
     c000004: { text: "", kind: "string" },
   });
-  const { displayCache, copyCache } = buildCellCaches(row.cells);
+  const { displayCache, previewCache } = buildCellCaches(row.cells);
 
   // Table and detail both read displayCache.
   assert.equal(displayCache.c000001, "9007199254740993");
-  // Copy and the filter value both read copyCache.
-  assert.equal(copyCache.c000001, "9007199254740993");
-  assert.equal(copyCache.c000001, displayCache.c000001);
+  // The preview cache holds the same text for an untruncated cell.
+  assert.equal(previewCache.c000001, "9007199254740993");
+  assert.equal(previewCache.c000001, displayCache.c000001);
 
   assert.equal(displayCache.c000002, "null");
-  assert.equal(copyCache.c000002, "null");
+  assert.equal(previewCache.c000002, "null");
   assert.equal(displayCache.c000003, "—");
-  assert.equal(copyCache.c000003, "");
+  assert.equal(previewCache.c000003, "");
   assert.equal(displayCache.c000004, "");
-  assert.equal(copyCache.c000004, "");
+  assert.equal(previewCache.c000004, "");
+});
+
+test("a truncated cell is marked as a preview, not shown as the full value", () => {
+  const preview = "x".repeat(256);
+  const row = rowFromIpc({
+    c000001: {
+      text: preview,
+      kind: "string",
+      truncated: true,
+      length: 300_000,
+    },
+  });
+  const { displayCache, previewCache } = buildCellCaches(row.cells);
+
+  // The table ends the preview with an ellipsis; the raw prefix stays
+  // available as the dialog's initial hint.
+  assert.equal(displayCache.c000001, `${preview}…`);
+  assert.equal(previewCache.c000001, preview);
+  assert.notEqual(previewCache.c000001, displayCache.c000001);
 });

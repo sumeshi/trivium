@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  CellKind,
   ColorRule,
   ConditionNode,
   FlagFilterValue,
@@ -173,6 +174,21 @@ export interface QueryProjectRowsResponse {
   offset: number;
 }
 
+export interface GetCellArgs {
+  projectId: string;
+  /** Original row id, independent of the current query result order. */
+  rowIndex: number;
+  columnId: string;
+}
+
+/** Full cell value from `getCell`; `text` is never a list preview. */
+export interface GetCellResult {
+  text: string | null;
+  kind: CellKind;
+  truncated: boolean;
+  length: number | null;
+}
+
 export interface GroupTreeArgs {
   projectId: string;
   groupColumns: string[];
@@ -214,6 +230,7 @@ export interface Backend {
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
+  getCell(args: GetCellArgs): Promise<GetCellResult>;
   groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse>;
   bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount>;
   bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied>;
@@ -356,6 +373,16 @@ class NativeBackend implements Backend {
         sortKey: args.sortKey,
         sortDirection: args.sortDirection,
         condition: args.condition,
+      },
+    });
+  }
+
+  getCell(args: GetCellArgs): Promise<GetCellResult> {
+    return invoke("get_cell", {
+      payload: {
+        projectId: args.projectId,
+        rowIndex: args.rowIndex,
+        columnId: args.columnId,
       },
     });
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
+  import type { GetCellResult } from '../../backend';
   import type { ProjectRow } from '../../types';
   import {
     backend,
@@ -8,7 +9,7 @@
     hiddenColumns,
     projectDetail,
   } from './state';
-  import { displayText } from '../../ipcValues';
+  import { copyText, displayText } from '../../ipcValues';
 
   const dispatch = createEventDispatcher();
 
@@ -21,8 +22,18 @@
   let pinnedRow = -1;
   let alive = true;
 
+  // Full value for the focused cell only. It is cleared when the dialog
+  // closes, so no page or row cache keeps an untruncated value.
+  let fullValue: GetCellResult | null = null;
+  let fullState: 'loading' | 'loaded' | 'error' = 'loading';
+  let fullError = '';
+  let loadSeq = 0;
+  let loadedKey = '';
+  let retry = 0;
+
   onDestroy(() => {
     alive = false;
+    loadSeq += 1;
   });
 
   const closeCell = () => {
@@ -42,9 +53,59 @@
     }
   };
 
+  const loadFullValue = async () => {
+    const target = $expandedCell;
+    const api = $backend;
+    if (!target || !api) {
+      fullState = 'error';
+      fullError = 'Cell value is unavailable.';
+      return;
+    }
+    const ticket = ++loadSeq;
+    fullValue = null;
+    fullState = 'loading';
+    fullError = '';
+    try {
+      const result = await api.getCell({
+        projectId: target.projectId,
+        rowIndex: target.rowIndex,
+        columnId: target.columnId,
+      });
+      // A response for a closed dialog or a different project/row/column is
+      // stale even if it arrived successfully.
+      if (!alive || ticket !== loadSeq) return;
+      fullValue = result;
+      fullState = 'loaded';
+    } catch (err) {
+      if (!alive || ticket !== loadSeq) return;
+      fullValue = null;
+      fullState = 'error';
+      fullError = err instanceof Error ? err.message : String(err);
+    }
+  };
+
+  // Opening the same cell again must fetch again; a different target or a
+  // retry must discard the previous response.
+  $: sourceKey = $expandedCell
+    ? `${$expandedCell.projectId}\u0000${$expandedCell.rowIndex}\u0000${$expandedCell.columnId}`
+    : '';
+  $: fetchKey = sourceKey ? `${sourceKey}\u0000${retry}` : '';
+  $: if (fetchKey && $backend && fetchKey !== loadedKey) {
+    loadedKey = fetchKey;
+    void loadFullValue();
+  } else if (!fetchKey) {
+    loadedKey = '';
+    loadSeq += 1;
+    fullValue = null;
+    fullState = 'loading';
+    fullError = '';
+  }
+
   const copyExpandedCell = async () => {
-    if (!$expandedCell) return;
-    const text = $expandedCell.value ?? '';
+    // Copy reads only the fetched full value. While loading or after a
+    // failure the button is disabled, so the preview is never copied.
+    if (fullState !== 'loaded' || !fullValue) return;
+    const text = copyText(fullValue);
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         await navigator.clipboard.writeText(text);
@@ -75,9 +136,11 @@
 
   $: if (!$expandedCell && pinnedRow !== -1) {
     pinnedRow = -1;
-  } else if ($expandedCell && $expandedCell.row.row_index !== pinnedRow) {
-    pinnedRow = $expandedCell.row.row_index;
-    timeColumn = timeColumns.includes($expandedCell.column) ? $expandedCell.column : timeColumns[0] ?? '';
+  } else if ($expandedCell && $expandedCell.rowIndex !== pinnedRow) {
+    pinnedRow = $expandedCell.rowIndex;
+    timeColumn = timeColumns.includes($expandedCell.columnId)
+      ? $expandedCell.columnId
+      : timeColumns[0] ?? '';
     mode = 'neighbors';
     count = 5;
   }
@@ -112,7 +175,7 @@
   };
 
   $: if ($expandedCell && $backend && projectId && timeColumn && ready(count)) {
-    void loadAround(projectId, $expandedCell.row.row_index, timeColumn, mode, count ?? 0);
+    void loadAround(projectId, $expandedCell.rowIndex, timeColumn, mode, count ?? 0);
   } else if ($expandedCell) {
     request += 1;
     around = [];
@@ -125,7 +188,7 @@
 
 {#if $expandedCell}
   {@const row = $expandedCell.row}
-  {@const focusColumn = $expandedCell.column}
+  {@const focusColumn = $expandedCell.columnId}
   <div
     class="cell-dialog-backdrop"
     role="button"
@@ -137,12 +200,19 @@
       class="cell-dialog row-detail-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label={`Row ${row.row_index}`}
+      aria-label={`Row ${$expandedCell.rowIndex}`}
     >
       <div class="cell-dialog-header">
-        <h3>Row {row.row_index}</h3>
+        <h3>Row {$expandedCell.rowIndex}</h3>
         <div class="cell-dialog-actions">
-          <button type="button" class="ghost" on:click={copyExpandedCell}>Copy</button>
+          <button
+            type="button"
+            class="ghost"
+            on:click={copyExpandedCell}
+            disabled={fullState !== 'loaded'}
+          >
+            Copy
+          </button>
           <button type="button" class="ghost close-dialog" on:click={closeCell}>Close</button>
         </div>
       </div>
@@ -152,7 +222,29 @@
             <dt class:is-focus={name === focusColumn}>
               {$columnLabels.get(name) ?? name}{$hiddenColumns.has(name) ? ' (hidden)' : ''}
             </dt>
-            <dd>{row.displayCache[name] ?? ''}</dd>
+            <dd>
+              {#if name === focusColumn}
+                {#if fullState === 'loading'}
+                  <span class="cell-load-state">Loading full value…</span>
+                {:else if fullState === 'error'}
+                  <span class="memo-error">Failed to load the full value.</span>
+                  {#if fullError}
+                    <span class="cell-load-error-detail">{fullError}</span>
+                  {/if}
+                  <button
+                    type="button"
+                    class="ghost retry-cell"
+                    on:click={() => (retry += 1)}
+                  >
+                    Retry
+                  </button>
+                {:else if fullValue}
+                  {displayText(fullValue)}
+                {/if}
+              {:else}
+                {row.displayCache[name] ?? ''}
+              {/if}
+            </dd>
           {/each}
         </dl>
         <div class="condition-toolbar">
@@ -180,7 +272,7 @@
         {:else}
           <ul class="row-around">
             {#each around as item (item.row_index)}
-              <li class:is-anchor={item.row_index === row.row_index}>{rowLine(item)}</li>
+              <li class:is-anchor={item.row_index === $expandedCell.rowIndex}>{rowLine(item)}</li>
             {/each}
           </ul>
         {/if}

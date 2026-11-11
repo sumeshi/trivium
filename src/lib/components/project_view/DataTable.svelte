@@ -120,6 +120,7 @@
     }
   }
   $: loadedRowCount = $rowsCache.size;
+  $: projectId = $projectDetail?.project.meta.id ?? '';
 
   const buildVirtualRows = (
     start: number,
@@ -373,9 +374,9 @@
                       item.row && column in item.row.displayCache
                         ? item.row.displayCache[column]
                         : null}
-                    {@const copyValue =
-                      item.row && column in item.row.copyCache
-                        ? item.row.copyCache[column]
+                    {@const previewValue =
+                      item.row && column in item.row.previewCache
+                        ? item.row.previewCache[column]
                         : ''}
                     <button
                       type="button"
@@ -388,12 +389,18 @@
                           : cellValue
                       }
                       on:click={() => {
-                        if (!item.row) return;
-                        _openCell(column, copyValue, item.row);
+                        if (!item.row || !projectId) return;
+                        _openCell(projectId, column, previewValue, item.row);
                       }}
                       on:keydown={(event) => {
-                        if (!item.row) return;
-                        _handleCellKeydown(event, column, copyValue, item.row);
+                        if (!item.row || !projectId) return;
+                        _handleCellKeydown(
+                          event,
+                          projectId,
+                          column,
+                          previewValue,
+                          item.row
+                        );
                       }}
                       disabled={!item.row}
                     >

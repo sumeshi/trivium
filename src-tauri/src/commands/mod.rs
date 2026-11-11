@@ -1,4 +1,5 @@
 mod bulk;
+mod cell;
 mod cross;
 mod diff;
 mod dupes;
@@ -24,6 +25,7 @@ mod time;
 // path-based re-exports of macro-expanded `#[macro_export]` macros are
 // rejected by rustc (rust-lang/rust#52234).
 pub use bulk::{bulk_preview, bulk_undo, bulk_update};
+pub use cell::get_cell;
 pub use cross::search_projects;
 pub use diff::diff_projects;
 pub use dupes::duplicate_rows;

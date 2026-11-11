@@ -72,15 +72,26 @@ pub struct ProjectSummary {
 
 /// One cell as the frontend should read it.
 ///
-/// `text` is the exact source text (`None` for null/missing) and `kind` is the
-/// column-level type. Integers are always passed as decimal strings, so a long
-/// integer never travels through a JavaScript `Number`.
+/// For list responses `text` is a preview truncated to a fixed number of
+/// characters; `truncated` and `length` describe the original value. The
+/// source Parquet data is never truncated. `get_cell` returns the full text in
+/// the same shape with `truncated = false`.
+///
+/// `kind` is the column-level type. Integers are always passed as decimal
+/// strings, so a long integer never travels through a JavaScript `Number`.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Cell {
-    /// Exact display text. `None` for null/missing.
+    /// Preview text for list responses; full text from `get_cell`. `None` for
+    /// null/missing.
     pub text: Option<String>,
     /// "string" | "int" | "float" | "bool" | "null" | "missing"
     pub kind: String,
+    /// True when `text` is a prefix of the original value.
+    #[serde(default)]
+    pub truncated: bool,
+    /// Original character count. `None` for null/missing.
+    #[serde(default)]
+    pub length: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

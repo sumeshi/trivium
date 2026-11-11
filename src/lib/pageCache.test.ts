@@ -18,7 +18,7 @@ function rowWithText(text: string): CachedRow {
     bookmarked: false,
     memo: "",
     displayCache: { column: text },
-    copyCache: { column: text },
+    previewCache: { column: text },
   } as CachedRow;
 }
 
@@ -33,7 +33,7 @@ function cachePages(entries: Array<[number, number]>): Map<number, PageCacheEntr
 test("estimatePageBytes counts the rendered cell strings", () => {
   const text = "x".repeat(10_000);
   const bytes = estimatePageBytes([rowWithText(text)]);
-  // displayCache and copyCache each retain the text, plus row overhead.
+  // displayCache and previewCache each retain the text, plus row overhead.
   assert.ok(bytes >= 20_000);
 });
 

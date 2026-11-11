@@ -60,6 +60,17 @@ fn query_json(store: &ProjectsStore, id: Uuid) -> serde_json::Value {
     serde_json::to_value(&response).expect("serialize response")
 }
 
+/// The list Cell DTO also carries the preview metadata.
+fn cell_json(text: Option<&str>, kind: &str) -> serde_json::Value {
+    let length = text.map(|value| value.chars().count());
+    json!({
+        "text": text,
+        "kind": kind,
+        "truncated": false,
+        "length": length,
+    })
+}
+
 #[test]
 fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     let root = temp_root();
@@ -79,57 +90,41 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     let response = query_json(&store, id);
 
     let cell = |row: usize, source: &str| {
-        let column = ids.get(source).unwrap_or_else(|| panic!("missing column {}", source));
+        let column = ids
+            .get(source)
+            .unwrap_or_else(|| panic!("missing column {}", source));
         response["rows"][row]["cells"][column].clone()
     };
 
-    assert_eq!(
-        cell(0, "/big"),
-        json!({ "text": "9007199254740993", "kind": "int" })
-    );
+    assert_eq!(cell(0, "/big"), cell_json(Some("9007199254740993"), "int"));
     assert_eq!(
         cell(1, "/big"),
-        json!({ "text": "18446744073709551615", "kind": "int" })
+        cell_json(Some("18446744073709551615"), "int")
     );
     assert_eq!(
         cell(2, "/big"),
-        json!({ "text": "-9223372036854775808", "kind": "int" })
+        cell_json(Some("-9223372036854775808"), "int")
     );
 
     // No exponent spelling and no rounded neighbor.
     for row in 0..3 {
-        let text = cell(row, "/big")["text"].as_str().expect("text").to_string();
+        let text = cell(row, "/big")["text"]
+            .as_str()
+            .expect("text")
+            .to_string();
         assert!(!text.contains(['e', 'E']), "exponent spelling: {}", text);
         assert!(!text.contains('.'), "non-decimal spelling: {}", text);
     }
 
-    assert_eq!(cell(0, "/nullv"), json!({ "text": null, "kind": "null" }));
-    assert_eq!(
-        cell(0, "/empty"),
-        json!({ "text": "", "kind": "string" })
-    );
-    assert_eq!(
-        cell(0, "/flag"),
-        json!({ "text": "true", "kind": "string" })
-    );
-    assert_eq!(
-        cell(1, "/flag"),
-        json!({ "text": "false", "kind": "string" })
-    );
-    assert_eq!(
-        cell(0, "/arr"),
-        json!({ "text": "[1,2,3]", "kind": "string" })
-    );
+    assert_eq!(cell(0, "/nullv"), cell_json(None, "null"));
+    assert_eq!(cell(0, "/empty"), cell_json(Some(""), "string"));
+    assert_eq!(cell(0, "/flag"), cell_json(Some("true"), "string"));
+    assert_eq!(cell(1, "/flag"), cell_json(Some("false"), "string"));
+    assert_eq!(cell(0, "/arr"), cell_json(Some("[1,2,3]"), "string"));
 
     // An absent JSON key is "missing", not null and not an empty string.
-    assert_eq!(
-        cell(0, "/missing"),
-        json!({ "text": null, "kind": "missing" })
-    );
-    assert_eq!(
-        cell(1, "/missing"),
-        json!({ "text": "present", "kind": "string" })
-    );
+    assert_eq!(cell(0, "/missing"), cell_json(None, "missing"));
+    assert_eq!(cell(1, "/missing"), cell_json(Some("present"), "string"));
 
     // The load path materializes the same cells for the initial page.
     let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load");
@@ -137,6 +132,6 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     let big = ids.get("/big").expect("big column");
     assert_eq!(
         loaded_json[0]["cells"][big],
-        json!({ "text": "9007199254740993", "kind": "int" })
+        cell_json(Some("9007199254740993"), "int")
     );
 }

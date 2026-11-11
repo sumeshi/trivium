@@ -16,7 +16,7 @@ export type PageCacheEntry = {
 
 /**
  * Approximate the bytes retained for one page. Only the cell strings the table
- * renders/copies are counted (`displayCache` and `copyCache`); raw `data` and
+ * renders (`displayCache` and `previewCache`) are counted; raw `data` and
  * `cells` values are not added on top. Character count is used as a proxy for
  * bytes, which is close enough for an eviction bound.
  */
@@ -27,7 +27,7 @@ export function estimatePageBytes(rows: readonly CachedRow[]): number {
     for (const value of Object.values(row.displayCache)) {
       bytes += value.length;
     }
-    for (const value of Object.values(row.copyCache)) {
+    for (const value of Object.values(row.previewCache)) {
       bytes += value.length;
     }
   }

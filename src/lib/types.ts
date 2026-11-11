@@ -40,13 +40,18 @@ export type CellKind =
   | "missing";
 
 /**
- * Exact cell value from the backend. `text` is the source text (`null` for
- * null/missing); `kind` is the column-level type. Integers arrive as decimal
- * strings so the UI never converts them through `Number`.
+ * Cell value from the backend. In list responses `text` is a preview up to 256
+ * characters; `truncated` and `length` describe the original value. `getCell`
+ * returns the full text in the same shape. Integers arrive as decimal strings
+ * so the UI never converts them through `Number`.
  */
 export interface Cell {
   text: string | null;
   kind: CellKind;
+  /** True when `text` is only the list preview. */
+  truncated?: boolean;
+  /** Original character count; `null`/absent for null and missing cells. */
+  length?: number | null;
 }
 
 export interface ProjectRow {
