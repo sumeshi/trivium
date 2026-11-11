@@ -324,7 +324,7 @@
         <span><strong>{$selectedCount}</strong> selected</span>
       {/if}
     </div>
-    <span class="table-meta-right">{$filteredFlaggedCount} flagged in results</span>
+    <span class="table-meta-right">Flagged {$filteredFlaggedCount.toLocaleString()}</span>
   </div>
   {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">

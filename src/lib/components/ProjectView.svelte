@@ -8,7 +8,8 @@
   import ExpandedCellDialog from './project_view/ExpandedCellDialog.svelte';
   import ExportDialog from './project_view/ExportDialog.svelte';
   import FilterControls from './project_view/FilterControls.svelte';
-  import TimelinePanel from './project_view/TimelinePanel.svelte';
+  import HistoryButtons from './project_view/HistoryButtons.svelte';
+  import { parseFlagFilter } from '../flagFilters';
   import type { IocEntry, LoadProjectResponse, ProjectRow, ViewState } from '../types';
   import type { Backend } from '../backend';
   import { listenToJobEvents } from '../backend';
@@ -59,6 +60,8 @@
     totalRows,
     totalFilteredRows,
     appliedResultLoading,
+    annotationVersions,
+    bulkAnnotationVersions,
     flaggedCount,
     filteredFlaggedCount,
     expandedCell,
@@ -142,7 +145,9 @@ import type {
   let gotoRowInput: number | undefined;
   let locatingRow = false;
   let rowLookupSequence = 0;
-  let timelineOpen = false;
+  let lastAnnotationRevision = 0;
+  let lastBulkAnnotationRevision = 0;
+  let annotationRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let applyingProjectId: string | null = null;
   // False when the saved view state is newer/unreadable; do not overwrite it.
@@ -427,6 +432,30 @@ import type {
     scrollToRow(Math.max(0, get(totalFilteredRows) - 1));
   };
 
+  const queueAnnotationRefresh = () => {
+    if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
+    annotationRefreshTimer = setTimeout(() => {
+      annotationRefreshTimer = null;
+      if (!destroyed && initialized) void forceRefreshFilteredRows(false);
+    }, 50);
+  };
+
+  $: annotationRevision = $annotationVersions[$currentProjectId ?? ''] ?? 0;
+  $: bulkAnnotationRevision = $bulkAnnotationVersions[$currentProjectId ?? ''] ?? 0;
+  $: if (initialized && bulkAnnotationRevision !== lastBulkAnnotationRevision) {
+    lastBulkAnnotationRevision = bulkAnnotationRevision;
+    queueAnnotationRefresh();
+  }
+  $: if (initialized && annotationRevision !== lastAnnotationRevision) {
+    lastAnnotationRevision = annotationRevision;
+    const selectedFlags = parseFlagFilter($flagFilter) ?? [];
+    // Ordinary source-order rows are updated in place. Only annotation-based
+    // result membership needs a new query after a single-row edit.
+    if ($bookmarkedOnly || (selectedFlags.length > 0 && selectedFlags.length < 4)) {
+      queueAnnotationRefresh();
+    }
+  }
+
   const applyProjectDetail = async (detail: LoadProjectResponse, _resetScroll: boolean) => {
     // Any response from the previous project or screen must be ignored from here on.
     invalidateViewRequests();
@@ -632,6 +661,8 @@ import type {
     if ($headerScrollEl) {
       $headerScrollEl.scrollLeft = 0;
     }
+    lastAnnotationRevision = get(annotationVersions)[projectId] ?? 0;
+    lastBulkAnnotationRevision = get(bulkAnnotationVersions)[projectId] ?? 0;
     initialized = true;
     applyingProjectId = null;
     // Always request first page to ensure flags and memos are reflected after project reload
@@ -659,7 +690,7 @@ import type {
       // Visibility is presentation only: the search scope (and therefore the
       // result set) must not change when a column is hidden.
       hiddenColumns.set(new Set(nextHiddenColumns));
-      initializeColumnWidths();
+      initializeColumnWidths(Object.fromEntries(columnWidths));
     }
     lastHiddenColumnsRef.set([...nextHiddenColumns]);
   }
@@ -1189,6 +1220,7 @@ import type {
   });
 
   onDestroy(() => {
+    if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
     const snapshot = snapshotSession();
     if (snapshot) onSessionSnapshot(snapshot);
     // Snapshot and queue the save before another keyed view resets global stores.
@@ -1237,9 +1269,10 @@ import type {
 </script>
 
 <section class="project-view">
-  <FilterControls on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={() => dispatch('refresh')} />
+  <FilterControls on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 
-  <div class="row-jump" role="group" aria-label="Go to original row">
+  <div slot="navigation" class="row-jump" role="group" aria-label="Table navigation">
+    <HistoryButtons />
     <label class="row-jump-field">
       <span>Row #</span>
       <input
@@ -1264,36 +1297,36 @@ import type {
       type="button"
       class="ghost"
       on:click={jumpToEnteredRow}
+      aria-label="Go"
+      aria-busy={locatingRow}
       title="Find this original row within the current filtered and sorted result"
       disabled={!initialized || $totalRows === 0 || $appliedResultLoading || filterTimeout !== null || locatingRow}
     >
-      {locatingRow ? 'Go…' : 'Go'}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
     </button>
     <button
       type="button"
       class="ghost"
       on:click={jumpToFirstRow}
+      aria-label="First"
       title="First row in the current result"
       disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
-      First
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v14m13-14-7 7 7 7" /></svg>
     </button>
     <button
       type="button"
       class="ghost"
       on:click={jumpToLastRow}
+      aria-label="Last"
       title="Last row in the current result"
       disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
-      Last
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5v14M6 5l7 7-7 7" /></svg>
     </button>
     <span class="row-jump-range">of {$totalRows.toLocaleString()} original rows</span>
   </div>
-
-  <details class="filter-advanced" bind:open={timelineOpen}>
-    <summary>Timeline</summary>
-    <TimelinePanel open={timelineOpen} />
-  </details>
+  </FilterControls>
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 

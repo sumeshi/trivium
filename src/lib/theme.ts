@@ -1,7 +1,7 @@
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
-import { isLightTheme, parseTheme } from "./themeModel.ts";
+import { parseTheme } from "./themeModel.ts";
 import type { Theme } from "./themeModel";
 
 export { THEME_OPTIONS } from "./themeModel";
@@ -80,14 +80,4 @@ export async function setTheme(next: Theme) {
   applyThemeAttr(next);
   theme.set(next);
   await persistTheme(next);
-}
-
-export async function toggleTheme() {
-  let current: Theme = "dark";
-  theme.update((t) => {
-    current = t;
-    return t;
-  });
-  const next: Theme = isLightTheme(current) ? "dark" : "light";
-  await setTheme(next);
 }

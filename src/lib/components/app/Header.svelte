@@ -19,24 +19,34 @@
   const copySha = async () => {
     const sha = meta?.source_sha256;
     if (!sha) return;
+    let copied = false;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(sha);
-      } else {
-        const input = document.createElement('textarea');
-        input.value = sha;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.append(input);
-        input.select();
-        const copied = document.execCommand('copy');
-        input.remove();
-        if (!copied) throw new Error('Clipboard unavailable');
+        copied = true;
       }
-      copyMessage = 'SHA-256 copied';
     } catch {
-      copyMessage = 'Could not copy SHA-256';
+      // Some webviews expose the API while denying its permission. Try the
+      // user-initiated document copy path in that case too.
     }
+    if (!copied) {
+      const input = document.createElement('textarea');
+      const focused = document.activeElement;
+      input.value = sha;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.append(input);
+      try {
+        input.select();
+        copied = document.execCommand('copy');
+      } catch {
+        copied = false;
+      } finally {
+        input.remove();
+        if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
+      }
+    }
+    copyMessage = copied ? 'SHA-256 copied' : 'Could not copy SHA-256';
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copyMessage = ''; }, 2400);
   };

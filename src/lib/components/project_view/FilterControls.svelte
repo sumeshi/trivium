@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import {
     visibleColumns,
     hiddenColumns,
@@ -13,30 +13,65 @@
     columnLabels,
     FLAG_FILTER_OPTIONS
   } from './state';
-  import type { FlagFilterValue } from './state';
+  import type { FlagFilterSelection } from '../../types';
+  import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
+  import { showToast } from '../../utils/toast';
+  import { errorMessage } from '../../errors';
   import ConditionEditor from './ConditionEditor.svelte';
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
+  import TimelinePanel from './TimelinePanel.svelte';
 
 
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
+  let columnSearch = '';
 
-  let statsOpen = false;
-  let timeOpen = false;
+  const tools = [
+    { id: 'conditions', label: 'Conditions' },
+    { id: 'stats', label: 'Column stats' },
+    { id: 'time', label: 'Time analysis' },
+    { id: 'timeline', label: 'Timeline' },
+    { id: 'presets', label: 'Presets' },
+    { id: 'bulk', label: 'Bulk annotation' },
+    { id: 'iocs', label: 'IOC rules (legacy)' },
+  ] as const;
+  type Tool = typeof tools[number]['id'];
+  let activeTool: Tool | null = null;
+  let drawerEl: HTMLDivElement | null = null;
+  let drawerTrigger: HTMLButtonElement | null = null;
+
+  const closeTool = () => {
+    activeTool = null;
+    if (drawerTrigger?.isConnected) drawerTrigger.focus();
+  };
+
+  const openTool = async (tool: Tool, event: MouseEvent) => {
+    if (activeTool === tool) {
+      closeTool();
+      return;
+    }
+    drawerTrigger = event.currentTarget as HTMLButtonElement;
+    flagMenuOpen = false;
+    columnsOpen = false;
+    activeTool = tool;
+    await tick();
+    drawerEl?.querySelector<HTMLButtonElement>('[aria-label="Close analysis panel"]')?.focus();
+  };
 
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
 
   const dispatch = createEventDispatcher();
 
-  const getFlagFilterDetails = (value: FlagFilterValue) => {
-    return (
-      FLAG_FILTER_OPTIONS.find((option) => option.value === value) ?? FLAG_FILTER_OPTIONS[0]
-    );
-  };
+  $: selectedFlags = parseFlagFilter($flagFilter) ?? [];
+  $: selectedFlagNames = FLAG_FILTER_OPTIONS
+    .filter((option) => selectedFlags.includes(option.value)).map((option) => option.label);
+  $: matchingColumns = ($projectDetail?.columns ?? []).filter((column) =>
+    ($columnLabels.get(column) ?? column).toLocaleLowerCase().includes(columnSearch.trim().toLocaleLowerCase())
+  );
 
   const toggleFlagMenu = () => {
     flagMenuOpen = !flagMenuOpen;
@@ -45,12 +80,26 @@
     }
   };
 
-  const selectFlagFilter = (value: FlagFilterValue) => {
-    flagFilter.set(value);
-    flagMenuOpen = false;
+  const toggleFlag = (value: FlagFilterSelection) => {
+    flagFilter.update((current) => toggleFlagFilter(current, value));
   };
 
-  const toggleColumn = async (column: string) => {
+  const persistColumns = () => {
+    // Capture this project's snapshot before another tab can replace stores.
+    const service = $backend;
+    const projectId = $projectDetail?.project.meta.id;
+    const nextHidden = Array.from($hiddenColumns);
+    if (!service || !projectId) return;
+    // Register immediately; the backend orders saves across tab instances.
+    void service.setHiddenColumns({
+      projectId, hiddenColumns: nextHidden,
+    }).catch((error) => {
+      console.error('Failed to save hidden columns:', error);
+      showToast(errorMessage(error, 'Failed to save visible columns.'), 'error');
+    });
+  };
+
+  const toggleColumn = (column: string) => {
     hiddenColumns.update(hidden => {
       const nextHidden = new Set(hidden);
       if (nextHidden.has(column)) {
@@ -60,18 +109,21 @@
       }
       return nextHidden;
     });
-    
-    // Save to backend
-    if ($backend && $projectDetail) {
-      try {
-        await $backend.setHiddenColumns({
-          projectId: $projectDetail.project.meta.id,
-          hiddenColumns: Array.from($hiddenColumns)
-        });
-      } catch (error) {
-        console.error('Failed to save hidden columns:', error);
-      }
-    }
+    persistColumns();
+  };
+
+  const setAllColumns = (visible: boolean) => {
+    hiddenColumns.set(new Set(visible ? [] : $projectDetail?.columns ?? []));
+    persistColumns();
+  };
+
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return;
+    if (flagMenuOpen) flagPickerEl?.querySelector('button')?.focus();
+    if (columnsOpen) columnPickerEl?.querySelector('button')?.focus();
+    flagMenuOpen = false;
+    columnsOpen = false;
+    if (activeTool) closeTool();
   };
 
   const handleClickOutside = (event: MouseEvent) => {
@@ -90,10 +142,12 @@
 
   onMount(() => {
     document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
   });
 
   onDestroy(() => {
     document.removeEventListener('click', handleClickOutside);
+    document.removeEventListener('keydown', handleEscape);
   });
 </script>
 
@@ -105,67 +159,60 @@
         class="flag-trigger"
         class:open={flagMenuOpen}
         on:click={toggleFlagMenu}
-        aria-haspopup="listbox"
+        aria-label={`Filter by flag: ${selectedFlagNames.join(', ') || 'All rows'}`}
+        title="Filter by flag; no selection shows all rows"
+        aria-controls="flag-filter-menu"
         aria-expanded={flagMenuOpen}
       >
-        {#if getFlagFilterDetails($flagFilter).hint}
-          <span class="flag-hint">{getFlagFilterDetails($flagFilter).hint}</span>
-        {/if}
-        <span class="flag-label">{getFlagFilterDetails($flagFilter).label}</span>
+        <span class="flag-label">Flags</span>
+        <span class="count-chip">{selectedFlags.length || 'All'}</span>
         <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
       {#if flagMenuOpen}
-        <div class="flag-menu" role="listbox">
+        <div class="flag-menu" id="flag-filter-menu" role="group" aria-label="Flag filters">
           {#each FLAG_FILTER_OPTIONS as option}
-            <button
-              type="button"
-              class="flag-option"
-              class:active={$flagFilter === option.value}
-              on:click={() => selectFlagFilter(option.value)}
-              role="option"
-              aria-selected={$flagFilter === option.value}
-            >
-              {#if option.hint}
-                <span class="flag-hint">{option.hint}</span>
-              {/if}
+            <label class="flag-checkbox-option" class:active={selectedFlags.includes(option.value)}>
+              <input type="checkbox" checked={selectedFlags.includes(option.value)}
+                on:change={() => toggleFlag(option.value)} />
+              <span class={`filter-flag-dot filter-flag-${option.value}`} aria-hidden="true"></span>
               <span>{option.label}</span>
-              {#if $flagFilter === option.value}
-                <span class="flag-check" aria-hidden="true">✓</span>
-              {/if}
-            </button>
+            </label>
           {/each}
+          <button type="button" class="clear-flag-filter" title="Clear flag selection and show all rows"
+            on:click={() => flagFilter.set('all')}>Show all</button>
         </div>
       {/if}
     </div>
-
-    <button
-      type="button"
-      class="tool-button bookmark-toggle"
-      class:active={$bookmarkedOnly}
-      aria-pressed={$bookmarkedOnly}
-      title="Show bookmarked rows only"
-      on:click={() => bookmarkedOnly.update((value) => !value)}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
-      </svg>
-      <span class="tool-label">Bookmarked</span>
-    </button>
 
     <label class="search-field">
       <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
         <circle cx="11" cy="11" r="7" />
         <path d="m20 20-3.5-3.5" />
       </svg>
-      <input placeholder="Search rows" bind:value={$search} type="search" />
+      <input placeholder="Search rows" aria-label="Search rows" title="Search rows"
+        bind:value={$search} type="search" />
       <span class="scope-chip" title="Search scope">
         {$searchColumns.length === 0
           ? 'All columns'
           : $searchColumns.map((column) => $columnLabels.get(column) ?? column).join(', ')}
       </span>
     </label>
+
+    <button
+      type="button"
+      class="tool-button bookmark-toggle"
+      class:active={$bookmarkedOnly}
+      aria-pressed={$bookmarkedOnly}
+      aria-label="Show bookmarked rows only"
+      title="Show bookmarked rows only"
+      on:click={() => bookmarkedOnly.update((value) => !value)}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
+      </svg>
+    </button>
 
     <div class="column-picker" bind:this={columnPickerEl}>
       <button
@@ -176,6 +223,9 @@
           columnsOpen = !columnsOpen;
         }}
         aria-expanded={columnsOpen}
+        aria-controls="visible-column-menu"
+        aria-label="Choose visible columns"
+        title="Choose visible columns"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
           <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -185,13 +235,19 @@
         <span class="count-chip">{$visibleColumns.length}/{$projectDetail?.columns.length ?? 0}</span>
       </button>
       {#if columnsOpen}
-        <div class="column-panel">
+        <div class="column-panel" id="visible-column-menu">
           <div class="column-panel-head">
             <span>Visible columns</span>
-            <button type="button" class="column-close" on:click={() => (columnsOpen = false)}>Done</button>
+            <button type="button" class="column-close" title="Close visible columns" on:click={() => (columnsOpen = false)}>Done</button>
           </div>
+          <div class="column-actions">
+            <button type="button" title="Show every data column" on:click={() => setAllColumns(true)}>Select all</button>
+            <button type="button" title="Hide every data column" on:click={() => setAllColumns(false)}>Deselect all</button>
+          </div>
+          <input class="column-search" type="search" aria-label="Find a column" placeholder="Find column"
+            bind:value={columnSearch} />
           <ul>
-            {#each $projectDetail?.columns ?? [] as column}
+            {#each matchingColumns as column}
               <li>
                 <input
                   type="checkbox"
@@ -199,10 +255,11 @@
                   checked={!$hiddenColumns.has(column)}
                   on:change={() => toggleColumn(column)}
                 />
-                <label for="column-{column}">{$columnLabels.get(column) ?? column}</label>
+                <label for="column-{column}" title={$columnLabels.get(column) ?? column}>{$columnLabels.get(column) ?? column}</label>
               </li>
             {/each}
           </ul>
+          {#if matchingColumns.length === 0}<p class="column-empty">No matching columns</p>{/if}
         </div>
       {/if}
     </div>
@@ -216,36 +273,191 @@
   </div>
 
   <div class="advanced-row">
-    <details class="filter-advanced">
-      <summary>Conditions</summary>
-      <ConditionEditor />
-    </details>
-    <details class="filter-advanced" bind:open={statsOpen}>
-      <summary>Column stats</summary>
-      <StatsPanel open={statsOpen} />
-    </details>
-    <details class="filter-advanced" bind:open={timeOpen}>
-      <summary>Time analysis</summary>
-      <TimePanel open={timeOpen} />
-    </details>
-    <details class="filter-advanced">
-      <summary>Presets</summary>
-      <PresetControls />
-    </details>
-    <details class="filter-advanced">
-      <summary>Bulk annotation</summary>
-      <BulkControls on:refresh />
-    </details>
-    <details class="filter-advanced">
-      <summary>IOC rules (legacy)</summary>
-      <div class="filter-ioc">
-        <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
-        <button type="button" class="ghost" on:click={() => {
-          dispatch('iocManagerOpen');
-        }}>
-          IOC Rules
+    <slot name="navigation" />
+    {#each tools as tool}
+      <button type="button" class="aux-trigger" class:active={activeTool === tool.id}
+        aria-label={`Open ${tool.label}`} title={`Open ${tool.label}`}
+        aria-controls="analysis-drawer" aria-expanded={activeTool === tool.id}
+        on:click={(event) => void openTool(tool.id, event)}>{tool.label}</button>
+    {/each}
+  </div>
+
+  {#if activeTool}
+    <div class="analysis-drawer" id="analysis-drawer" role="dialog" aria-labelledby="analysis-tool-label"
+      bind:this={drawerEl} tabindex="-1">
+      <div class="analysis-head">
+        <span id="analysis-tool-label">Analysis tools</span>
+        <select aria-label="Analysis tool" bind:value={activeTool}>
+          {#each tools as tool}<option value={tool.id}>{tool.label}</option>{/each}
+        </select>
+        <button type="button" class="analysis-close" aria-label="Close analysis panel"
+          title="Close analysis panel" on:click={closeTool}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
         </button>
       </div>
-    </details>
-  </div>
+      <div class="analysis-body">
+        {#if activeTool === 'conditions'}
+          <ConditionEditor />
+        {:else if activeTool === 'stats'}
+          <StatsPanel open={true} />
+        {:else if activeTool === 'time'}
+          <TimePanel open={true} />
+        {:else if activeTool === 'timeline'}
+          <TimelinePanel open={true} />
+        {:else if activeTool === 'presets'}
+          <PresetControls />
+        {:else if activeTool === 'bulk'}
+          <BulkControls on:refresh />
+        {:else}
+          <div class="filter-ioc">
+            <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
+            <button type="button" class="ghost" title="Manage saved IOC definitions" on:click={() => {
+              closeTool(); dispatch('iocManagerOpen');
+            }}>IOC Rules</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </section>
+
+<style>
+  /* Let the project view contain the overlay; opening a tool never adds a
+     vertical block above the table. Individual pickers remain positioned. */
+  .filters { position: static; }
+  .aux-trigger {
+    display: inline-flex;
+    align-items: center;
+    min-height: 25px;
+    padding: 3px 7px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+  .aux-trigger:hover, .aux-trigger.active {
+    background: var(--surface-weak);
+    border-color: var(--border);
+    color: var(--fg);
+  }
+  .analysis-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 35;
+    display: flex;
+    flex-direction: column;
+    width: min(560px, calc(100% - 16px));
+    min-height: 0;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow-strong);
+  }
+  .analysis-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 39px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .analysis-head > span { color: var(--muted); font-size: 10.5px; }
+  .analysis-head select { flex: 1; min-width: 0; min-height: 27px; }
+  .analysis-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 27px;
+    height: 27px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--muted);
+    background: transparent;
+  }
+  .analysis-close:hover { background: var(--surface-weak); color: var(--fg); }
+  .analysis-body { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+  .flag-checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 7px;
+    border-radius: 4px;
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .flag-checkbox-option:hover, .flag-checkbox-option.active {
+    background: var(--surface-weak);
+  }
+  .flag-checkbox-option input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .filter-flag-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 7px;
+    background: var(--muted);
+  }
+  .filter-flag-safe { background: var(--flag-safe-text); }
+  .filter-flag-suspicious { background: var(--flag-suspicious-text); }
+  .filter-flag-critical { background: var(--flag-critical-text); }
+  .clear-flag-filter {
+    margin-top: 3px;
+    padding: 5px 7px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    text-align: left;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .column-panel {
+    max-height: min(440px, 65vh);
+  }
+  .column-actions {
+    display: flex;
+    gap: 10px;
+    padding: 0 6px 7px;
+  }
+  .column-actions button {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .column-search {
+    width: 100%;
+    margin-bottom: 5px;
+    min-height: 27px;
+  }
+  .column-panel ul {
+    min-height: 0;
+  }
+  .column-panel li {
+    padding: 3px 6px;
+    min-height: 25px;
+  }
+  .column-panel li label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .column-empty {
+    margin: 6px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+</style>

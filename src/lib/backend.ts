@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites";
+import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions";
 import type {
   CellKind,
   ColorRule,
@@ -169,6 +171,8 @@ export interface HistogramArgs {
   columns?: string[];
   condition?: ConditionNode | null;
   range?: { min: string; max: string } | null;
+  /** Focus the initial datetime histogram on its main populated interval. */
+  focus?: boolean;
 }
 
 export interface SurroundingRowsArgs {
@@ -356,11 +360,13 @@ class NativeBackend implements Backend {
     });
   }
 
-  deleteProject(projectId: string): Promise<void> {
-    return invoke("delete_project", { request: { projectId: projectId } });
+  async deleteProject(projectId: string): Promise<void> {
+    await invoke("delete_project", { request: { projectId: projectId } });
+    forgetAnnotationVersion(projectId);
   }
 
-  loadProject(projectId: string): Promise<LoadProjectResponse> {
+  async loadProject(projectId: string): Promise<LoadProjectResponse> {
+    await waitForHiddenColumnWrites(projectId);
     return invoke("load_project", {
       request: { projectId: projectId },
     });
@@ -396,6 +402,7 @@ class NativeBackend implements Backend {
         columns: args.columns ?? null,
         condition: args.condition ?? null,
         range: args.range ?? null,
+        focus: args.focus ?? false,
       },
     });
   }
@@ -498,8 +505,8 @@ class NativeBackend implements Backend {
     });
   }
 
-  bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
-    return invoke("bulk_update", {
+  async bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
+    const result = await invoke<BulkApplied>("bulk_update", {
       payload: {
         projectId: args.projectId,
         target: args.target,
@@ -515,14 +522,18 @@ class NativeBackend implements Backend {
         ...annotationFields(args),
       },
     });
+    markBulkAnnotationsChanged(args.projectId);
+    return result;
   }
 
-  bulkUndo(args: BulkUndoArgs): Promise<BulkApplied> {
-    return invoke("bulk_undo", {
+  async bulkUndo(args: BulkUndoArgs): Promise<BulkApplied> {
+    const result = await invoke<BulkApplied>("bulk_undo", {
       payload: {
         projectId: args.projectId,
       },
     });
+    markBulkAnnotationsChanged(args.projectId);
+    return result;
   }
 
   saveIocs(args: SaveIocsArgs): Promise<void> {
@@ -592,23 +603,25 @@ class NativeBackend implements Backend {
     });
   }
 
-  updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
-    return invoke("update_flag", {
+  async updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
+    const result = await invoke<UpdateFlagResult>("update_flag", {
       payload: {
         projectId: args.projectId,
         row_index: args.rowIndex,
         ...annotationFields(args),
       },
     });
+    markAnnotationsChanged(args.projectId);
+    return result;
   }
 
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void> {
-    return invoke("set_hidden_columns", {
-      payload: {
-        projectId: args.projectId,
-        hidden_columns: args.hiddenColumns,
-      },
-    });
+    const projectId = args.projectId;
+    return queueHiddenColumnWrite(projectId, args.hiddenColumns, (hiddenColumns) =>
+      invoke("set_hidden_columns", {
+        payload: { projectId, hidden_columns: hiddenColumns },
+      })
+    );
   }
 
   loadViewState(args: LoadViewStateArgs): Promise<LoadViewStateResult> {

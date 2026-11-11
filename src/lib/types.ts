@@ -77,13 +77,11 @@ export interface FlagEntry {
   bookmarked: boolean;
 }
 
-export type FlagFilterValue =
-  | "all"
-  | "none"
-  | "priority"
-  | "safe"
-  | "suspicious"
-  | "critical";
+export type FlagFilterSelection = FlagSymbol | "none";
+
+/** Legacy single values remain valid; new selections use pipe-separated tokens. */
+export type FlagFilterValue = "all" | "priority" | FlagFilterSelection
+  | `${FlagFilterSelection}|${string}`;
 
 /**
  * Shared query contract. `searchColumns` is the search scope, not the visible
@@ -180,7 +178,9 @@ export interface ColumnStats {
 export interface HistogramBucket {
   start: string;
   end: string;
+  end_inclusive: boolean;
   count: number;
+  flags: { safe: number; suspicious: number; critical: number; unflagged: number };
 }
 
 export interface Histogram {
@@ -189,6 +189,8 @@ export interface Histogram {
   buckets: HistogramBucket[];
   missing: number;
   outside: number;
+  full_range: { min: string; max: string } | null;
+  auto_focused: boolean;
 }
 
 export interface TimeSpan {

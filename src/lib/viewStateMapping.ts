@@ -1,6 +1,7 @@
 import type { FlagFilterValue, ViewState } from "./types";
 import type { EditorGroup } from "./stores/condition";
 import type { SavedView } from "./viewState";
+import { isFlagFilterValue } from "./flagFilters.ts";
 
 const COMPARE_OPS = new Set([
   "eq",
@@ -14,15 +15,6 @@ const COMPARE_OPS = new Set([
   "endsWith",
   "regex",
   "in",
-]);
-
-const FLAG_FILTERS = new Set<FlagFilterValue>([
-  "all",
-  "none",
-  "priority",
-  "safe",
-  "suspicious",
-  "critical",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,8 +64,8 @@ function stringArray(value: unknown, known: Set<string>): string[] {
 }
 
 function flagFilter(value: unknown): FlagFilterValue {
-  return typeof value === "string" && FLAG_FILTERS.has(value as FlagFilterValue)
-    ? (value as FlagFilterValue)
+  return isFlagFilterValue(value)
+    ? value
     : "all";
 }
 
@@ -175,7 +167,7 @@ export function viewStateWarnings(
   if (unknownSearch.length > 0) {
     warnings.push(`search columns ${unknownSearch.join(", ")}`);
   }
-  if (!FLAG_FILTERS.has(state.flagFilter as FlagFilterValue)) {
+  if (!isFlagFilterValue(state.flagFilter)) {
     warnings.push("flag filter");
   }
   if (state.sortKey !== null && !known.has(state.sortKey)) {

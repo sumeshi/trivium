@@ -4,6 +4,7 @@ import type {
   ConditionNode,
   FlagEntry,
   FlagFilterValue,
+  FlagFilterSelection,
   FlagSymbol,
   IocEntry,
   LoadProjectResponse,
@@ -20,6 +21,7 @@ import {
 import type { SelectionScope } from "../../selection";
 import { FLAG_HINTS } from "../../skin";
 import { ROW_HEIGHT, logicalRowAt } from "../../virtualScroll";
+export { annotationVersions, bulkAnnotationVersions } from "../../annotationVersions";
 
 export const FLAG_OPTIONS = [
   { value: "safe", label: "Safe", hint: FLAG_HINTS.safe, tone: "safe" },
@@ -42,15 +44,13 @@ export type { FlagFilterValue } from "../../types";
 export const PRIORITY_FLAGS: FlagSymbol[] = ["suspicious", "critical"];
 
 export const FLAG_FILTER_OPTIONS: Array<{
-  value: FlagFilterValue;
+  value: FlagFilterSelection;
   label: string;
   hint?: string;
 }> = [
-  { value: "all", label: "All" },
   { value: "safe", label: "Safe", hint: FLAG_HINTS.safe },
   { value: "suspicious", label: "Suspicious", hint: FLAG_HINTS.suspicious },
   { value: "critical", label: "Critical", hint: FLAG_HINTS.critical },
-  { value: "priority", label: "Sus + Crit", hint: "!?" },
   { value: "none", label: "Unflagged", hint: "–" },
 ];
 

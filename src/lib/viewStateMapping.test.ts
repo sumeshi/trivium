@@ -136,3 +136,14 @@ test("flag filter falls back to all when the stored value is unknown", () => {
   assert.ok(restored);
   assert.equal(restored.flagFilter, "all");
 });
+
+test("composite flags survive save and restore and legacy priority remains compatible", () => {
+  for (const flagFilter of ["safe|critical|none", "safe|suspicious|critical|none", "priority", "none", "all"] as const) {
+    const state = savedViewToViewState(saved({ flagFilter }));
+    assert.equal(viewStateToSavedView(state, columns)?.flagFilter, flagFilter);
+    assert.deepEqual(viewStateWarnings(state, columns), []);
+  }
+  const malformed = { ...savedViewToViewState(saved()), flagFilter: "safe|future" as const };
+  assert.equal(viewStateToSavedView(malformed, columns)?.flagFilter, "all");
+  assert.deepEqual(viewStateWarnings(malformed, columns), ["flag filter"]);
+});
