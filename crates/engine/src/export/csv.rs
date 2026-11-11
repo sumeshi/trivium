@@ -81,13 +81,16 @@ pub fn export_project(
 /// untouched and removes the temporary file.
 pub fn export_project_with_job(
     store: &ProjectsStore,
-    payload: ExportProjectPayload,
+    mut payload: ExportProjectPayload,
     job: &JobContext,
 ) -> Result<ExportResult, AppError> {
     job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    if payload.scope.as_deref() != Some("all") {
+        payload.spec.resolve_search_labels(&meta.columns)?;
+    }
     let destination = PathBuf::from(&payload.destination);
     ensure_destination_is_not_source(&destination, &meta)?;
 

@@ -76,11 +76,10 @@ fn query(
                 search: None,
                 search_columns: None,
                 flag_filter: None,
-                bookmarked_only: bookmarked_only,
+                bookmarked_only,
                 sort_key: None,
                 sort_direction: None,
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -292,6 +291,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             flag_filter: None,
             bookmarked_only: None,
             condition: None,
+            focus: false,
             range: None,
         },
     )

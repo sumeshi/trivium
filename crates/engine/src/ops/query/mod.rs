@@ -1,4 +1,5 @@
 mod ioc;
+mod labels;
 mod locate;
 mod page;
 mod page_read;
@@ -90,13 +91,14 @@ pub fn query_project_rows(
 /// original row ids. Search and sort run only when the cache misses.
 pub fn query_project_rows_with_job(
     store: &ProjectsStore,
-    payload: QueryRowsPayload,
+    mut payload: QueryRowsPayload,
     job: &JobContext,
 ) -> Result<QueryRowsResponse, AppError> {
     job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    payload.spec.resolve_search_labels(&meta.columns)?;
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {

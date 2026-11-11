@@ -49,13 +49,14 @@ pub fn locate_project_row(
 /// Lookup transfers only a position/counts, never page data or all resolved ids.
 pub fn locate_project_row_with_job(
     store: &ProjectsStore,
-    payload: LocateRowPayload,
+    mut payload: LocateRowPayload,
     job: &JobContext,
 ) -> Result<LocateRowResponse, AppError> {
     job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    payload.spec.resolve_search_labels(&meta.columns)?;
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {

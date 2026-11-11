@@ -101,6 +101,7 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
             flag_filter: None,
             bookmarked_only: Some(true),
             condition: None,
+            focus: false,
             range: None,
         },
     )

@@ -174,6 +174,9 @@ fn looks_integer(text: &str) -> bool {
 }
 
 pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(text) {
+        return datetime.timestamp_nanos_opt();
+    }
     const FORMATS: [&str; 5] = [
         "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%dT%H:%M:%S",

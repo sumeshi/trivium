@@ -111,7 +111,6 @@ fn query(store: &ProjectsStore, id: uuid::Uuid) -> ops::rows::QueryRowsResponse 
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -126,7 +125,7 @@ fn create_and_load_project() {
     let response = ops::projects::load_project(
         &store,
         ProjectRequest {
-            project_id: id.clone(),
+            project_id: id,
         },
     )
     .expect("load failed");
@@ -175,14 +174,13 @@ fn search_scoping_and_operators() {
             QueryRowsPayload {
                 project_id: id,
                 spec: QuerySpec {
-                    search: search,
-                    search_columns: search_columns,
+                    search,
+                    search_columns,
                     flag_filter: None,
                     sort_key: None,
                     sort_direction: None,
                     condition: None,
                     bookmarked_only: None,
-                    ..Default::default()
                 },
                 offset: None,
                 limit: None,
@@ -285,7 +283,6 @@ fn nested_condition_matches_either_group() {
                 sort_direction: None,
                 condition: Some(condition),
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -350,7 +347,6 @@ fn nanosecond_integer_is_not_rounded() {
                 sort_direction: None,
                 condition: Some(eq_condition(&n_id, exact)),
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -718,7 +714,6 @@ fn histogram_bucket_sum_matches_filtered_rows() {
                 sort_direction: None,
                 condition: condition.clone(),
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -737,6 +732,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             bookmarked_only: None,
             flag_filter: None,
             condition,
+            focus: false,
             range: None,
         },
     )
@@ -757,7 +753,6 @@ fn histogram_bucket_sum_matches_filtered_rows() {
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -776,6 +771,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: None,
         },
     )
@@ -806,6 +802,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: None,
         },
     )
@@ -847,6 +844,7 @@ fn histogram_places_values_in_equal_width_buckets() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: None,
         },
     )
@@ -872,6 +870,7 @@ fn histogram_places_values_in_equal_width_buckets() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: None,
         },
     )
@@ -901,6 +900,7 @@ fn histogram_range_counts_outside_values() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: Some(HistogramRange {
                 min: "4624".to_string(),
                 max: "4625".to_string(),
@@ -926,6 +926,7 @@ fn histogram_range_counts_outside_values() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: Some(HistogramRange {
                 min: "2024-01-01T00:00:01".to_string(),
                 max: "2024-01-01T00:00:11".to_string(),
@@ -960,6 +961,7 @@ fn histogram_range_counts_outside_values() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: Some(HistogramRange {
                 min: "not-a-date".to_string(),
                 max: "2024-01-01T00:00:11".to_string(),
@@ -980,6 +982,7 @@ fn histogram_range_counts_outside_values() {
             bookmarked_only: None,
             flag_filter: None,
             condition: None,
+            focus: false,
             range: Some(HistogramRange {
                 min: "4625".to_string(),
                 max: "4624".to_string(),
@@ -1175,7 +1178,6 @@ fn time_analysis_gap_range_matches_bounds() {
                 sort_direction: None,
                 condition: Some(condition),
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -1203,7 +1205,6 @@ fn sort_and_pagination() {
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: Some(5),
@@ -1230,7 +1231,6 @@ fn sort_and_pagination() {
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: Some(5),
             limit: Some(5),
@@ -1276,7 +1276,6 @@ fn flag_update_and_flag_filter() {
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -1471,7 +1470,7 @@ fn delete_project_removes_files_and_meta() {
     ops::projects::delete_project(
         &store,
         ProjectRequest {
-            project_id: id.clone(),
+            project_id: id,
         },
     )
     .expect("delete failed");
@@ -1658,7 +1657,6 @@ ts,EventID,host,user,proc,path,msg
                     sort_direction: None,
                     condition: Some(condition.clone()),
                     bookmarked_only: None,
-                    ..Default::default()
                 },
                 offset: None,
                 limit: Some(1),

@@ -78,7 +78,7 @@ pub fn time_analysis(
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;
     let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let spec = QuerySpec {
+    let mut spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -90,6 +90,7 @@ pub fn time_analysis(
         sort_key: None,
         sort_direction: None,
     };
+    spec.resolve_search_labels(&meta.columns)?;
     let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
     analyze_series(
         &payload.column,

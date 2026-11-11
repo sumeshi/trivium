@@ -213,11 +213,14 @@ fn resolve_and_token(
 /// 対象件数プレビュー（状態を変更しない）
 pub fn bulk_preview(
     store: &ProjectsStore,
-    payload: BulkAnnotatePayload,
+    mut payload: BulkAnnotatePayload,
 ) -> Result<BulkCount, AppError> {
     let Some(meta) = store.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()));
     };
+    if payload.target == "filtered" {
+        payload.spec.resolve_search_labels(&meta.columns)?;
+    }
     let (project_dir, df) = load_frame(store, &payload.project_id)?;
     let (target, preview_token) =
         resolve_and_token(&df, &project_dir, &payload, meta.storage_version)?;
@@ -230,12 +233,15 @@ pub fn bulk_preview(
 /// 一括適用
 pub fn bulk_update(
     store: &ProjectsStore,
-    payload: BulkAnnotatePayload,
+    mut payload: BulkAnnotatePayload,
 ) -> Result<BulkApplied, AppError> {
     let (_, df) = load_frame(store, &payload.project_id)?;
     let Some(meta) = store.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()));
     };
+    if payload.target == "filtered" {
+        payload.spec.resolve_search_labels(&meta.columns)?;
+    }
     let flags_path = store.flags_path(&payload.project_id);
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 

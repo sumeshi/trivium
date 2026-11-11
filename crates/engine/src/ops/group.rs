@@ -80,7 +80,7 @@ pub fn group_tree(
         resolved.iter().map(|name| df.column(name).ok()).collect();
 
     let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let spec = QuerySpec {
+    let mut spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -92,6 +92,7 @@ pub fn group_tree(
         sort_key: None,
         sort_direction: None,
     };
+    spec.resolve_search_labels(&meta.columns)?;
     let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
     let total = filtered.len();
 

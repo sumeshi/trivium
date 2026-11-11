@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::analysis::histogram::{histogram_series_ranged, Histogram, DEFAULT_BUCKETS};
+use crate::analysis::histogram::{histogram_series_annotated, Histogram, DEFAULT_BUCKETS};
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::jobs::JobContext;
@@ -34,6 +34,8 @@ pub struct HistogramPayload {
     pub condition: Option<Node>,
     #[serde(default)]
     pub range: Option<HistogramRange>,
+    #[serde(default)]
+    pub focus: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +67,7 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;
     let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let spec = QuerySpec {
+    let mut spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -77,6 +79,7 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         sort_key: None,
         sort_direction: None,
     };
+    spec.resolve_search_labels(&meta.columns)?;
     let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
     let bucket_count = if payload.buckets == 0 {
         DEFAULT_BUCKETS
@@ -87,6 +90,14 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         .range
         .as_ref()
         .map(|range| (range.min.as_str(), range.max.as_str()));
-    histogram_series_ranged(&payload.column, series, &filtered, bucket_count, range)
-        .map_err(AppError::Message)
+    histogram_series_annotated(
+        &payload.column,
+        series,
+        &filtered,
+        bucket_count,
+        range,
+        &flags,
+        payload.focus,
+    )
+    .map_err(AppError::Message)
 }

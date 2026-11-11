@@ -73,7 +73,7 @@ pub fn build_report(
     };
 
     let final_flag_vec = user_flags(df.height(), &flags);
-    let spec = QuerySpec {
+    let mut spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -85,6 +85,7 @@ pub fn build_report(
         sort_key: payload.sort_key.clone(),
         sort_direction: payload.sort_direction.clone(),
     };
+    spec.resolve_search_labels(&meta.columns)?;
     let target = resolve_target(&df, &spec, &all_columns, &flags, &JobContext::none())?;
     let flagged_in_matches = target.annotated_filtered;
     let filtered = target.filtered;

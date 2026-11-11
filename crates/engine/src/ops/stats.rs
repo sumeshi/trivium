@@ -31,11 +31,12 @@ fn default_rare_max() -> u64 {
 /// Column kind, missing count, distinct count, top 20 values, and up to 20 rare values.
 pub fn column_stats(
     store: &ProjectsStore,
-    payload: ColumnStatsPayload,
+    mut payload: ColumnStatsPayload,
 ) -> Result<ColumnStats, AppError> {
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    payload.spec.resolve_search_labels(&meta.columns)?;
     if is_internal_column_for_version(&payload.column, meta.storage_version) {
         return Err(AppError::Message("Column not found.".into()));
     }

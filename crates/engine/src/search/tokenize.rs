@@ -83,7 +83,14 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
 
     // Words AND/OR/NOT are not operators. Only space, '|', and a leading '-' are.
     let mut tokens: Vec<SearchToken> = Vec::new();
-    for (part, quoted) in merged {
+    for (mut part, quoted) in merged {
+        // The merged `-column:"phrase"` retains its quotes, but its leading
+        // minus is still the same NOT operator as in `-column:value`.
+        // A quoted literal such as `"-column:value"` remains literal.
+        if quoted && part.starts_with('-') && part.contains(":\"") {
+            tokens.push(SearchToken::Not);
+            part.remove(0);
+        }
         if part == "|" && !quoted {
             tokens.push(SearchToken::Or);
             continue;
