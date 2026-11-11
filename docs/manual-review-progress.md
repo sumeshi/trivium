@@ -1688,3 +1688,76 @@ Recorded: 2026-11-11.
 
 Next card: T21.
 
+
+## T21 — put manual review actions next to the table
+
+Recorded: 2026-11-11.
+
+### Change
+
+- **Initial screen.** `FilterControls.svelte` now keeps search, flag filter,
+  bookmark-only, columns and Export visible. Conditions, Column stats, Time
+  analysis, Grouping, Row colors, Presets, Bulk annotation and IOC rules are
+  each inside a closed `<details class="filter-advanced">` section. The
+  components stay mounted; only their rendering is folded. `ProjectView.svelte`
+  wraps `TimelinePanel` in the same closed section. Colors and the existing
+  theme variables were not redesigned.
+- **Row height.** `virtualScroll.ts` sets `ROW_HEIGHT` to 32px (it was 56px in
+  T20d). `DataTable.svelte` already writes `--row-height` from that constant, so
+  the virtual window, spacer mapping and rendered row height all use 32px. The
+  row-specific padding and the flag/memo control sizes in
+  `project-view.css` were reduced to fit 32px; header size and colors are
+  unchanged.
+- **Cell context menu.** `CellContextMenu.svelte` (new) is opened from a
+  `contextmenu` handler on each data cell. It offers Filter in, Filter out,
+  Copy value and View details, flips at the window edges, and closes on an
+  outside click, Escape, scroll or resize. View details opens the existing
+  `ExpandedCellDialog`.
+- **Exact values.** Copy and both filter actions use the list preview only when
+  the cell is not truncated. A truncated cell calls `getCell` and uses its
+  full text; a failed fetch closes the menu and emits an error notification
+  instead of substituting the preview.
+- **Structured conditions.** `conditionFilters.ts` (new, pure) appends one
+  `eq`/`ne` condition with the value in its own field. An AND root gets a new
+  child; an OR root is wrapped in a new AND group that contains the original OR
+  tree and the new condition. `stores/condition.ts` exposes
+  `addFilterCondition(column, op, value)`. No search-string concatenation or
+  escaping is involved, so quotes, colons and backslashes remain exact.
+- **Shortcuts.** The only global shortcuts (`Alt+Left`/`Alt+Right` history) were
+  already guarded with `event.target` input/textarea/select/contenteditable
+  detection. No new shortcut was added; Escape remains the menu/dialog close
+  key.
+
+### Tests
+
+`src/lib/conditionFilters.test.ts` (new, 3 tests):
+
+- AND root: the new condition is appended and existing children are unchanged;
+  the input tree is not mutated.
+- OR root: the result is an AND wrapper whose children are the original OR
+  group and the new leaf.
+- A value with quotes, a colon and backslashes stays byte-for-byte in the
+  condition's `value` field.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| UI tests | `npm run test:ui` | 19 passed, 0 failed (3 new; existing ipcValues/pageCache/virtualScroll tests pass) |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+### Unverified / deferred
+
+- The native GUI/WebView was not exercised. Right-click menus at the screen
+  edge, 32px row rendering, and a full search → details → annotation pass are
+  covered by static checks and pure tests only; real-app confirmation is T26.
+- Folded panels are still mounted and may still compute while closed. Stopping
+  histogram/stats/time requests while closed is T25, not this card.
+- `src-tauri` was not rebuilt in this environment; no Rust file changed here.
+- Selection, export scope UI and removal of automatic IOC assignment are not
+  part of this card.
+
+Next card: T22.
