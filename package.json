@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "svelte-check --tsconfig ./tsconfig.json",
+    "lint:test": "tsc -p tsconfig.test.json",
     "test:ui": "node --test --experimental-strip-types src/lib/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
@@ -15,17 +16,13 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
-    "@tauri-apps/plugin-opener": "^2",
     "dayjs": "^1.11.13",
     "svelte": "^4.2.18"
   },
   "devDependencies": {
-    "@openai/codex": "^0.47.0",
     "@sveltejs/vite-plugin-svelte": "^3.1.2",
     "@tauri-apps/cli": "^2",
     "@types/node": "^20.14.12",
-    "@typescript-eslint/eslint-plugin": "^7.16.1",
-    "@typescript-eslint/parser": "^7.16.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "postcss-load-config": "^5.1.0",

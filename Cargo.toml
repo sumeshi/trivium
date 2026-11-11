@@ -2,6 +2,18 @@
 resolver = "2"
 members = ["src-tauri", "crates/engine"]
 
+[workspace.dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+polars = { version = "0.40", features = ["lazy", "parquet", "serde", "fmt"] }
+serde = { version = "1.0", features = ["derive"] }
+# The engine needs exact JSON number text. The desktop crate can share the
+# same build; the extra features do not change its command payloads.
+serde_json = { version = "1.0", features = ["preserve_order", "arbitrary_precision"] }
+thiserror = "1.0"
+uuid = { version = "1", features = ["v4", "serde"] }
+
 [profile.dev]
 debug = 0
 incremental = false

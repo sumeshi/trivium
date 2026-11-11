@@ -1,0 +1,6 @@
+flag,memo,__rowid,trivium-memo,zip,comma,quote,multiline,bigint,spaced
+old-user-note,original memo,7,old trivium memo,00123,"a,b","say ""hi""","line1
+line2",9007199254740993,"  padded  "
+,,8,,00000,"x,y","q""q","l1
+l2",9223372036854775807,padded
+,,9,,00001,"p,q","z""z",plain,18446744073709551615,

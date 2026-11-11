@@ -5,30 +5,25 @@ edition = "2021"
 authors = ["sumeshi <sum3sh1@protonmail.com>"]
 
 [dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
-parking_lot = "0.12"
-polars = { version = "0.40", features = ["lazy", "parquet", "serde", "fmt"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+anyhow.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+polars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
-thiserror = "1.0"
-uuid = { version = "1", features = ["v4", "serde"] }
+thiserror.workspace = true
+uuid.workspace = true
 trivium-engine = { path = "../crates/engine" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-[profile.release]
-opt-level = "s"        # minimize size (use 3 for max performance)
-lto = "thin"           # link-time optimization for size/perf balance
-codegen-units = 1      # better optimization, slightly longer compile
-panic = "abort"        # smaller binary; no unwinding
-strip = true           # strip symbols in the final binary
-debug = false          # no debug info
+# Release settings live in the workspace root Cargo.toml. Keeping a second
+# profile here makes Cargo warn that the non-root profile is ignored.
 
 [features]
 default = []
