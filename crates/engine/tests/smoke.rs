@@ -1230,7 +1230,7 @@ fn flag_update_and_flag_filter() {
         },
     )
     .expect("update failed");
-    assert_eq!(updated.flag, "suspicious");
+    assert_eq!(updated.entry.expect("entry missing").flag, "suspicious");
 
     let r = query(&store, id);
     assert_eq!(r.annotated_total, 1);

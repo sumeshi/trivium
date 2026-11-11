@@ -8,6 +8,8 @@
     nextAnnotationRequest,
     isLatestAnnotationRequest,
     updateCachedRow,
+    applyAnnotationEntry,
+    flaggedCount,
     currentProjectId,
   } from './state';
 
@@ -97,16 +99,10 @@
 
       // A stale success must not overwrite a newer optimistic change.
       if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
-        updateCachedRow(rowIndex, (cached) => {
-          const memo = sanitizeMemoInput(updated.memo ?? '');
-          return {
-            ...cached,
-            memo,
-            tags: updated.tags ?? [],
-            bookmarked: updated.bookmarked,
-            displayCache: { ...cached.displayCache, memo },
-          };
-        });
+        updateCachedRow(rowIndex, (cached) =>
+          applyAnnotationEntry(cached, updated.entry)
+        );
+        flaggedCount.set(updated.flaggedRecords);
       }
 
       dispatch('notify', { message: 'Memo updated.', tone: 'success' });

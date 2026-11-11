@@ -16,6 +16,7 @@ import type {
   SurroundingRows,
   ProjectRow,
   ProjectSummary,
+  FlagEntry,
 } from "./types";
 
 export type { FlagFilterValue } from "./types";
@@ -40,6 +41,15 @@ export interface AnnotationPatch {
 export interface UpdateFlagArgs extends AnnotationPatch {
   projectId: string;
   rowIndex: number;
+}
+
+export interface UpdateFlagResult {
+  /** `null` when this update removed the row's last annotation. */
+  entry: FlagEntry | null;
+  /** Process-local monotonic revision for the project. */
+  revision: number;
+  /** Whole-project annotated row count after the update. */
+  flaggedRecords: number;
 }
 
 export interface HiddenColumnsArgs {
@@ -211,7 +221,7 @@ export interface Backend {
   loadPreset(args: LoadPresetArgs): Promise<PresetData>;
   colorRules(args: ColorRuleArgs): Promise<ColorRulesResponse>;
   saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse>;
-  updateFlag(args: UpdateFlagArgs): Promise<ProjectRow>;
+  updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<void>;
 }
@@ -468,7 +478,7 @@ class NativeBackend implements Backend {
     });
   }
 
-  updateFlag(args: UpdateFlagArgs): Promise<ProjectRow> {
+  updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
     return invoke("update_flag", {
       payload: {
         projectId: args.projectId,

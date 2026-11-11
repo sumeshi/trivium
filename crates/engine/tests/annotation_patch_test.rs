@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use trivium_engine::annotation::AnnotationPatch;
-use trivium_engine::models::{FlagEntry, ProjectRow};
+use trivium_engine::models::{FlagEntry, UpdateFlagResponse};
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{bulk_preview, bulk_update, BulkAnnotatePayload};
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
@@ -54,7 +54,7 @@ fn update(
     memo: Option<Option<&str>>,
     tags: Option<Vec<&str>>,
     bookmarked: Option<bool>,
-) -> ProjectRow {
+) -> UpdateFlagResponse {
     update_flag(
         store,
         UpdateFlagPayload {
@@ -168,7 +168,9 @@ fn clearing_a_flag_keeps_memo_tags_and_bookmark() {
     let (root, store, id) = setup();
     annotate_all_fields(&store, id, 0);
 
-    let row = update(&store, id, 0, Some(""), None, None, None);
+    let row = update(&store, id, 0, Some(""), None, None, None)
+        .entry
+        .expect("entry must remain");
     assert_eq!(row.flag, "");
     assert_eq!(row.memo.as_deref(), Some("note"));
     assert_eq!(row.tags, vec!["pc".to_string(), "triage".to_string()]);
@@ -197,7 +199,9 @@ fn saving_a_memo_keeps_flag_tags_bookmark_and_other_rows() {
         Some(false),
     );
 
-    let row = update(&store, id, 0, None, Some(Some("changed")), None, None);
+    let row = update(&store, id, 0, None, Some(Some("changed")), None, None)
+        .entry
+        .expect("entry must remain");
     assert_eq!(row.flag, "suspicious");
     assert_eq!(row.memo.as_deref(), Some("changed"));
     assert_eq!(row.tags, vec!["pc".to_string(), "triage".to_string()]);

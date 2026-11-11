@@ -144,3 +144,18 @@ pub struct FlagEntry {
     #[serde(default)]
     pub bookmarked: bool,
 }
+
+/// Result of a single-row annotation update.
+///
+/// The updated row data is not included: the frontend already has it and
+/// applies only the annotation fields to its cache.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFlagResponse {
+    /// `None` when the patch removed the last annotation on the row.
+    pub entry: Option<FlagEntry>,
+    /// Process-local monotonic revision for the project.
+    pub revision: u64,
+    /// Whole-project count after applying this update.
+    pub flagged_records: usize,
+}

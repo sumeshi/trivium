@@ -2,10 +2,12 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::Duration,
 };
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 use sled::Db;
@@ -18,6 +20,17 @@ use crate::{
 
 const SEARCHABLE_CACHE_KEY: &[u8] = b"searchable_cache";
 const IOC_FLAG_CACHE_KEY: &[u8] = b"ioc_flag_cache";
+
+/// One open sled handle per annotation database.
+///
+/// sled keeps an exclusive lock on its directory, so every read and write in
+/// this process must share the same handle. `close_flags_db` removes a project's
+/// handle when the project is deleted.
+static FLAGS_DBS: OnceLock<Mutex<HashMap<PathBuf, Db>>> = OnceLock::new();
+
+fn flags_dbs() -> &'static Mutex<HashMap<PathBuf, Db>> {
+    FLAGS_DBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Cached searchable text, keyed by the column set it was built from and the
 /// row count.
@@ -96,6 +109,28 @@ fn open_flags_db(path: &Path) -> Result<Db> {
     open_sled(path).with_context(|| format!("failed to open flags db at {:?}", path))
 }
 
+/// Returns the process-wide handle for an annotation database path.
+fn flags_db(db_path: &Path) -> Result<Db> {
+    let mut dbs = flags_dbs().lock();
+    if let Some(db) = dbs.get(db_path) {
+        return Ok(db.clone());
+    }
+    let db = open_flags_db(db_path)?;
+    dbs.insert(db_path.to_path_buf(), db.clone());
+    Ok(db)
+}
+
+fn close_flags_db_path(db_path: &Path) {
+    if let Some(dbs) = FLAGS_DBS.get() {
+        dbs.lock().remove(db_path);
+    }
+}
+
+/// Closes the cached annotation handle for a project directory.
+pub fn close_flags_db(project_dir: &Path) {
+    close_flags_db_path(&flags_db_path(&project_dir.join("flags.json")));
+}
+
 fn open_cache_db(path: &Path) -> Result<Db> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -136,6 +171,10 @@ fn read_flags_from_json(path: &Path) -> Result<HashMap<usize, FlagEntry>> {
 }
 
 fn write_flags_to_db(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<()> {
+    // This path is used for imports (before the project directory is moved
+    // into place) and legacy migration. Drop any cached handle first so the
+    // database is not moved or rewritten while a process-wide handle is open.
+    close_flags_db_path(path);
     let db = open_flags_db(path)?;
     let mut to_delete: Vec<Vec<u8>> = Vec::new();
     for result in db.iter() {
@@ -159,7 +198,7 @@ fn write_flags_to_db(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<(
 }
 
 fn read_flags_from_db(path: &Path) -> Result<HashMap<usize, FlagEntry>> {
-    let db = open_flags_db(path)?;
+    let db = flags_db(path)?;
     let mut map = HashMap::new();
     for result in db.iter() {
         let (key, value) = result.with_context(|| "failed to iterate flag entries")?;
@@ -276,8 +315,26 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
     column_max_chars
 }
 
+/// Reads one row's annotation directly, without loading the whole database.
+pub fn load_flag(path: &Path, row_index: usize) -> Result<Option<FlagEntry>> {
+    let db = flags_db(&flags_db_path(path))?;
+    let key = encode_row_key(row_index);
+    let value = db
+        .get(key)
+        .with_context(|| format!("failed to read flag entry for row {}", row_index))?;
+    match value {
+        Some(value) => {
+            let entry: FlagEntry = serde_json::from_slice(&value).with_context(|| {
+                format!("failed to deserialize flag entry for row {}", row_index)
+            })?;
+            Ok(Some(entry))
+        }
+        None => Ok(None),
+    }
+}
+
 pub fn upsert_flag(path: &Path, row_index: usize, entry: &FlagEntry) -> Result<()> {
-    let db = open_flags_db(&flags_db_path(path))?;
+    let db = flags_db(&flags_db_path(path))?;
     let key = encode_row_key(row_index);
     let value = serde_json::to_vec(entry)
         .with_context(|| format!("failed to serialize flag entry for row {}", row_index))?;
@@ -289,7 +346,7 @@ pub fn upsert_flag(path: &Path, row_index: usize, entry: &FlagEntry) -> Result<(
 }
 
 pub fn remove_flag(path: &Path, row_index: usize) -> Result<()> {
-    let db = open_flags_db(&flags_db_path(path))?;
+    let db = flags_db(&flags_db_path(path))?;
     let key = encode_row_key(row_index);
     db.remove(key)
         .with_context(|| format!("failed to delete flag entry for row {}", row_index))?;
@@ -299,7 +356,7 @@ pub fn remove_flag(path: &Path, row_index: usize) -> Result<()> {
 }
 
 pub fn count_flagged(path: &Path) -> Result<usize> {
-    let db = open_flags_db(&flags_db_path(path))?;
+    let db = flags_db(&flags_db_path(path))?;
     let mut count = 0;
     for result in db.iter() {
         let (_, value) = result.with_context(|| "failed to iterate flag entries for counting")?;

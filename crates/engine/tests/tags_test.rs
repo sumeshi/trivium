@@ -97,7 +97,7 @@ fn update(
     memo: Option<&str>,
     tags: Option<Vec<&str>>,
     bookmarked: Option<bool>,
-) -> trivium_engine::models::ProjectRow {
+) -> trivium_engine::models::UpdateFlagResponse {
     ops::flags::update_flag(
         store,
         UpdateFlagPayload {
@@ -161,11 +161,15 @@ fn update_flag_preserves_tags_and_bookmark_when_omitted() {
         Some("note"),
         Some(vec!["pc", "gpu"]),
         Some(true),
-    );
+    )
+    .entry
+    .expect("entry missing");
     assert_eq!(created.tags, vec!["pc".to_string(), "gpu".to_string()]);
     assert!(created.bookmarked);
 
-    let changed = update(&store, id, 0, "suspicious", Some("updated"), None, None);
+    let changed = update(&store, id, 0, "suspicious", Some("updated"), None, None)
+        .entry
+        .expect("entry missing");
     assert_eq!(changed.memo.as_deref(), Some("updated"));
     assert_eq!(changed.tags, vec!["pc".to_string(), "gpu".to_string()]);
     assert!(changed.bookmarked);

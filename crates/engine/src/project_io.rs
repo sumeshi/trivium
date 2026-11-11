@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use polars::prelude::{AnyValue, DataFrame, ParquetReader, ParquetWriter, SerReader};
@@ -20,7 +21,23 @@ pub fn is_internal_column(name: &str) -> bool {
     name == INTERNAL_ROW_ID || name == INTERNAL_ORIGINAL
 }
 
+/// Number of full project-data reads since process start.
+///
+/// Test instrumentation only: annotation updates must not increment this.
+pub static PROJECT_DATA_READS: AtomicU64 = AtomicU64::new(0);
+
+/// Reads the counter maintained by [`read_project_dataframe`]. Test-only.
+pub fn project_data_reads() -> u64 {
+    PROJECT_DATA_READS.load(Ordering::Relaxed)
+}
+
+/// Resets the counter. Test-only.
+pub fn reset_project_data_reads() {
+    PROJECT_DATA_READS.store(0, Ordering::Relaxed);
+}
+
 pub fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
+    PROJECT_DATA_READS.fetch_add(1, Ordering::Relaxed);
     ParquetReader::new(File::open(path)?)
         .finish()
         .context("failed to read parquet file")

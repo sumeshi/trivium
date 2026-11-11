@@ -2,6 +2,7 @@ import { derived, get, writable } from "svelte/store";
 import type { Backend } from "../../backend";
 import type {
   ConditionNode,
+  FlagEntry,
   FlagSymbol,
   IocEntry,
   LoadProjectResponse,
@@ -280,6 +281,25 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   };
 }
 
+/**
+ * Applies an update result to an existing cached row. The row data and caches
+ * stay untouched; only annotation fields are replaced.
+ */
+export function applyAnnotationEntry(
+  row: CachedRow,
+  entry: FlagEntry | null
+): CachedRow {
+  const memo = sanitizeMemoInput(entry?.memo ?? "");
+  return {
+    ...row,
+    flag: mapStoredFlag(entry?.flag),
+    memo,
+    tags: entry?.tags ?? [],
+    bookmarked: entry?.bookmarked ?? false,
+    displayCache: { ...row.displayCache, memo },
+  };
+}
+
 export const escapeCsvValue = (value: string): string =>
   /[\",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 
@@ -359,10 +379,10 @@ export const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
 
     // A stale success must not overwrite a newer optimistic change.
     if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
-      updateCachedRow(rowIndex, (cached) => ({
-        ...cached,
-        flag: mapStoredFlag(updated.flag),
-      }));
+      updateCachedRow(rowIndex, (cached) =>
+        applyAnnotationEntry(cached, updated.entry)
+      );
+      flaggedCount.set(updated.flaggedRecords);
     }
   } catch (error) {
     console.error(error);

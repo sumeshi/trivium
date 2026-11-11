@@ -1,4 +1,9 @@
-use std::{fs, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
@@ -10,6 +15,9 @@ pub struct ProjectsStore {
     root_dir: PathBuf,
     meta_path: PathBuf,
     inner: Mutex<Vec<ProjectMeta>>,
+    /// Process-local annotation revisions. Durable state is the annotation DB;
+    /// this counter only lets the frontend discard stale responses.
+    revisions: Mutex<HashMap<Uuid, AtomicU64>>,
 }
 
 impl ProjectsStore {
@@ -58,6 +66,7 @@ impl ProjectsStore {
             root_dir,
             meta_path,
             inner: Mutex::new(projects),
+            revisions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -101,10 +110,27 @@ impl ProjectsStore {
         self.persist_locked(&guard)
     }
 
+    /// Returns the next annotation revision for a project.
+    ///
+    /// Revisions are process-local and monotonic; they are not persisted and
+    /// do not need to match across restarts.
+    pub fn next_revision(&self, id: &Uuid) -> u64 {
+        self.revisions
+            .lock()
+            .entry(*id)
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed)
+            + 1
+    }
+
     pub fn remove(&self, id: &Uuid) -> Result<()> {
         let mut guard = self.inner.lock();
         guard.retain(|meta| &meta.id != id);
-        self.persist_locked(&guard)
+        let result = self.persist_locked(&guard);
+        if result.is_ok() {
+            self.revisions.lock().remove(id);
+        }
+        result
     }
 
     pub fn find(&self, id: &Uuid) -> Option<ProjectMeta> {

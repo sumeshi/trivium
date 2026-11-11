@@ -219,7 +219,7 @@ fn query_colors_matching_rows_and_keeps_order_and_counts() {
 }
 
 #[test]
-fn update_flag_returns_matching_row_color() {
+fn flag_update_then_query_returns_matching_row_color() {
     let (root, store, id, ids) = setup();
     let user_id = common::id(&ids, "user");
     save(
@@ -244,10 +244,14 @@ fn update_flag_returns_matching_row_color() {
         },
     )
     .expect("update flag failed");
-    assert_eq!(updated.data[&user_id], serde_json::json!("alice"));
-    assert_eq!(updated.color.as_deref(), Some("#ff0000"));
+    assert_eq!(updated.entry.expect("entry missing").flag, "suspicious");
 
-    let bob = ops::flags::update_flag(
+    let rows = query(&store, id).rows;
+    let alice = rows.iter().find(|row| row.row_index == 0).expect("row 0");
+    assert_eq!(alice.data[&user_id], serde_json::json!("alice"));
+    assert_eq!(alice.color.as_deref(), Some("#ff0000"));
+
+    ops::flags::update_flag(
         &store,
         UpdateFlagPayload {
             project_id: id,
@@ -259,6 +263,9 @@ fn update_flag_returns_matching_row_color() {
         },
     )
     .expect("update flag failed");
+
+    let rows = query(&store, id).rows;
+    let bob = rows.iter().find(|row| row.row_index == 6).expect("row 6");
     assert_eq!(bob.color, None);
 
     let _ = fs::remove_dir_all(root);

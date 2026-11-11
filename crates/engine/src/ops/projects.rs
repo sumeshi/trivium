@@ -17,7 +17,7 @@ use crate::{
     models::{LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{read_project_dataframe, write_project_dataframe, ProjectColumns},
     storage::{
-        clear_ioc_flag_cache, clear_searchable_cache, compute_column_max_chars,
+        clear_ioc_flag_cache, clear_searchable_cache, close_flags_db, compute_column_max_chars,
         load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
     },
     store::ProjectsStore,
@@ -269,6 +269,8 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
         return Ok(());
     };
     let project_dir = store.project_dir(&meta.id);
+    // Release the annotation database before removing its directory.
+    close_flags_db(&project_dir);
     if let Err(err) = clear_searchable_cache(&project_dir) {
         eprintln!(
             "[cache] failed to clear searchable cache for {:?}: {:?}",

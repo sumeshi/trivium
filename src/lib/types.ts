@@ -62,6 +62,14 @@ export interface ProjectRow {
   color?: string | null;
 }
 
+/** Stored annotation for one row. */
+export interface FlagEntry {
+  flag: string;
+  memo?: string | null;
+  tags: string[];
+  bookmarked: boolean;
+}
+
 export type FlagFilterValue =
   | "all"
   | "none"
