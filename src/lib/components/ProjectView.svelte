@@ -45,7 +45,6 @@
     sortKey,
     sortDirection,
     isExporting,
-    isUpdatingColumns,
     rowsCache,
     pendingPages,
     loadedPages,
@@ -60,7 +59,6 @@
     iocManagerOpen,
     viewportHeight,
     scrollTop,
-    tableWidth,
     bodyScrollEl,
     headerScrollEl,
     iocDraft,
@@ -68,21 +66,13 @@
     normalizeFlag,
     normalizeRow,
     mapStoredFlag,
-    FLAG_OPTIONS,
-    FLAG_FILTER_OPTIONS,
-    PRIORITY_FLAGS,
     ROW_HEIGHT,
     BUFFER,
-    SELECT_COL_WIDTH,
-    INDEX_COL_WIDTH,
-    FLAG_COL_WIDTH,
-    MEMO_COL_WIDTH,
     MIN_DATA_WIDTH,
     WIDTH_LIMIT_CHARS,
     CHAR_PIXEL,
     COLUMN_PADDING,
     MAX_DATA_WIDTH,
-    STICKY_COLUMNS_WIDTH,
     PAGE_SIZE,
     PREFETCH_PAGES,
     currentProjectId,
@@ -121,13 +111,6 @@ import type {
     summary: { flagged: number; iocApplied: number; hiddenColumns: string[] };
   }>();
 
-  let columnsOpen = false;
-  let columnPickerEl: HTMLDivElement | null = null;
-
-  let flagMenuOpen = false;
-  let flagPickerEl: HTMLDivElement | null = null;
-
-
   let iocError: string | null = null;
   let isSavingIocs = false;
   let iocImportInput: HTMLInputElement | null = null;
@@ -143,7 +126,6 @@ import type {
   let lastSearchColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
   let applyingHistory = false;
-  let suppressScrollRecord = false;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
   let gotoRowInput = '';
@@ -156,15 +138,7 @@ import type {
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
-  let activeFilters: AppliedFilters = { search: '', flag: 'all', bookmarkedOnly: false, searchColumns: [], condition: null };
   let exportSnapshot: ExportSnapshot | null = null;
-  let resizeObserver: ResizeObserver | null = null;
-  let observedScrollEl: HTMLDivElement | null = null;
-
-  let releaseHeaderSyncFrame: number | null = null;
-  let releaseBodySyncFrame: number | null = null;
-  let isSyncingHeaderScroll = false;
-  let isSyncingBodyScroll = false;
 
   // Query jobs are tracked by the job-started/finished events so a new applied
   // filter can cancel the previous search at its next batch boundary.
@@ -205,8 +179,11 @@ import type {
     }
   };
 
-  projectDetailStore.set(projectDetail);
-  backendStore.set(backend);
+  // Keep the shared stores in sync when the parent replaces the project
+  // detail (for example after a refresh); the one-time assignment used to
+  // leave child components on the initial snapshot.
+  $: projectDetailStore.set(projectDetail);
+  $: backendStore.set(backend);
 
   const hasRow = (row: CachedRow | null): row is CachedRow => row !== null;
 
@@ -324,12 +301,10 @@ import type {
     const total = totalOverride ?? get(totalFilteredRows);
     const row = clampRow(offset, total);
     const px = scrollTopForRow(row, total, get(viewportHeight));
-    suppressScrollRecord = true;
     scrollTop.set(px);
     if ($bodyScrollEl) {
       $bodyScrollEl.scrollTop = px;
     }
-    suppressScrollRecord = false;
   };
 
   const scrollToRow = (row: number) => {
@@ -518,19 +493,12 @@ import type {
     }
     pendingFilters = null;
     resetPaginationState();
-    activeFilters = {
+    appliedFilters.set({
       search: filters.search,
       flag: filters.flag,
       bookmarkedOnly: filters.bookmarkedOnly,
       searchColumns: [...filters.searchColumns],
       condition: filters.condition,
-    };
-    appliedFilters.set({
-      search: activeFilters.search,
-      flag: activeFilters.flag,
-      bookmarkedOnly: activeFilters.bookmarkedOnly,
-      searchColumns: [...activeFilters.searchColumns],
-      condition: activeFilters.condition,
     });
     lastAppliedFilters = buildFilterSignature(filters);
     syncSelectionScope(projectId, lastAppliedFilters);
@@ -680,9 +648,7 @@ import type {
   $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
   $: ensureRangeLoaded(startIndex, endIndex);
   $: if ($bodyScrollEl && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
-    suppressScrollRecord = true;
     $bodyScrollEl.scrollTop = $scrollTop;
-    suppressScrollRecord = false;
   }
   $: loadedRowCount = $rowsCache.size;
 
@@ -737,7 +703,7 @@ import type {
     }
     const offset = normalizedPage * PAGE_SIZE;
     const limit = PAGE_SIZE;
-    const filters = activeFilters;
+    const filters = get(appliedFilters);
     pendingPages.update((pending) => {
       const next = new Set(pending);
       next.add(pendingKey);
@@ -854,19 +820,12 @@ import type {
     // A new applied query supersedes the previous search. Cancel it before
     // queueing pages for the new result.
     cancelActiveQueryJobs();
-    activeFilters = {
+    appliedFilters.set({
       search: normalized.search,
       flag: normalized.flag,
       bookmarkedOnly: normalized.bookmarkedOnly,
       searchColumns: [...normalized.searchColumns],
       condition: normalized.condition,
-    };
-    appliedFilters.set({
-      search: activeFilters.search,
-      flag: activeFilters.flag,
-      bookmarkedOnly: activeFilters.bookmarkedOnly,
-      searchColumns: [...activeFilters.searchColumns],
-      condition: activeFilters.condition,
     });
     appliedResultLoading.set(true);
     lastAppliedFilters = signature;
@@ -894,149 +853,12 @@ import type {
     return requestPage(Math.floor(targetRow / PAGE_SIZE), true);
   };
 
-  const resolveColumnWidth = (column: string) => {
-    const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
-    if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
-    if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-    return width;
-  };
-
-  const expandColumnWidths = (baseWidths: number[], _availableWidth: number) => {
-    return baseWidths.map((width) => {
-      if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
-      if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-      return Math.round(width);
-    });
-  };
-
-  $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column));
-  $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
-  $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
-  $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
-  $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
-  $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
-  $: gridTemplate = [
-    `${SELECT_COL_WIDTH}px`,
-    `${INDEX_COL_WIDTH}px`,
-    `${FLAG_COL_WIDTH}px`,
-    `${MEMO_COL_WIDTH}px`,
-    ...distributedDataWidths.map((width) => `${width}px`)
-  ].join(' ');
-  $: if (resizeObserver) {
-    if ($bodyScrollEl && $bodyScrollEl !== observedScrollEl) {
-      if (observedScrollEl) {
-        resizeObserver.unobserve(observedScrollEl);
-      }
-      resizeObserver.observe($bodyScrollEl);
-      observedScrollEl = $bodyScrollEl;
-      tableWidth.set($bodyScrollEl.clientWidth);
-    } else if (!$bodyScrollEl && observedScrollEl) {
-      resizeObserver.unobserve(observedScrollEl);
-      observedScrollEl = null;
-      tableWidth.set(0);
-    }
-  }
-
-  $: firstDataColumn = $visibleColumns.length > 0 ? $visibleColumns[0] : null;
-  $: stickyFlagOffset = SELECT_COL_WIDTH + INDEX_COL_WIDTH;
-  $: stickyMemoOffset = stickyFlagOffset + FLAG_COL_WIDTH;
-  $: stickyDataOffset = stickyMemoOffset + MEMO_COL_WIDTH;
-  $: stickyVariables = `--sticky-index:${SELECT_COL_WIDTH}px; --sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
-
   const padNumber = (value: number) => value.toString().padStart(2, '0');
   const formatTimestampForFilename = (date: Date) =>
     `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
 
-  const getFlagFilterDetails = (value: FlagFilterValue) => {
-    return (
-      FLAG_FILTER_OPTIONS.find((option) => option.value === value) ?? FLAG_FILTER_OPTIONS[0]
-    );
-  };
-
-  const toggleFlagMenu = () => {
-    flagMenuOpen = !flagMenuOpen;
-    if (flagMenuOpen) {
-      columnsOpen = false;
-    }
-  };
-
-  const selectFlagFilter = (value: FlagFilterValue) => {
-    flagFilter.set(value);
-    flagMenuOpen = false;
-  };
-
-
   const closeCell = () => {
     expandedCell.set(null);
-  };
-
-
-
-  const handleScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLDivElement;
-    if (suppressScrollRecord) {
-      return;
-    }
-    scrollTop.set(target.scrollTop);
-    rememberOffset(
-      logicalRowAt(target.scrollTop, get(totalFilteredRows), get(viewportHeight))
-    );
-    if (isSyncingBodyScroll) {
-      isSyncingBodyScroll = false;
-      return;
-    }
-    if ($headerScrollEl && $headerScrollEl.scrollLeft !== target.scrollLeft) {
-      if (releaseHeaderSyncFrame !== null) {
-        cancelAnimationFrame(releaseHeaderSyncFrame);
-      }
-      isSyncingHeaderScroll = true;
-      $headerScrollEl.scrollLeft = target.scrollLeft;
-      releaseHeaderSyncFrame = requestAnimationFrame(() => {
-        isSyncingHeaderScroll = false;
-        releaseHeaderSyncFrame = null;
-      });
-    }
-  };
-
-  const handleHeaderScroll = () => {
-    if (!$headerScrollEl || !$bodyScrollEl) return;
-    if (isSyncingHeaderScroll) {
-      isSyncingHeaderScroll = false;
-      return;
-    }
-    const nextLeft = $headerScrollEl.scrollLeft;
-    if ($bodyScrollEl.scrollLeft !== nextLeft) {
-      if (releaseBodySyncFrame !== null) {
-        cancelAnimationFrame(releaseBodySyncFrame);
-      }
-      isSyncingBodyScroll = true;
-      $bodyScrollEl.scrollLeft = nextLeft;
-      releaseBodySyncFrame = requestAnimationFrame(() => {
-        isSyncingBodyScroll = false;
-        releaseBodySyncFrame = null;
-      });
-    }
-  };
-
-  const forwardWheel = (event: WheelEvent) => {
-    if (!$bodyScrollEl) return;
-    if (event.currentTarget === $bodyScrollEl) {
-      return;
-    }
-    let handled = false;
-    if (event.deltaY !== 0) {
-      const previousTop = $bodyScrollEl.scrollTop;
-      $bodyScrollEl.scrollTop += event.deltaY;
-      handled = handled || $bodyScrollEl.scrollTop !== previousTop;
-    }
-    if (event.deltaX !== 0) {
-      const previousLeft = $bodyScrollEl.scrollLeft;
-      $bodyScrollEl.scrollLeft += event.deltaX;
-      handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
-    }
-    if (handled) {
-      event.preventDefault();
-    }
   };
 
   const scheduleFilterRefresh = (
@@ -1135,12 +957,13 @@ import type {
       });
       return;
     }
+    const filters = get(appliedFilters);
     exportSnapshot = {
-      search: activeFilters.search,
-      searchColumns: [...activeFilters.searchColumns],
-      condition: activeFilters.condition,
-      flagFilter: activeFilters.flag,
-      bookmarkedOnly: activeFilters.bookmarkedOnly,
+      search: filters.search,
+      searchColumns: [...filters.searchColumns],
+      condition: filters.condition,
+      flagFilter: filters.flag,
+      bookmarkedOnly: filters.bookmarkedOnly,
       sortKey: $sortKey,
       sortDirection: $sortDirection,
       rowIndices: Array.from($selectedRowIds),
@@ -1209,15 +1032,6 @@ import type {
   };
 
   onMount(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (columnsOpen && columnPickerEl && !(columnPickerEl as HTMLElement).contains(target)) {
-        columnsOpen = false;
-      }
-      if (flagMenuOpen && flagPickerEl && !(flagPickerEl as HTMLElement).contains(target)) {
-        flagMenuOpen = false;
-      }
-    };
     const handleKeydown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing = !!target && (
@@ -1237,8 +1051,6 @@ import type {
         return;
       }
       if (event.key === 'Escape') {
-        columnsOpen = false;
-        flagMenuOpen = false;
         if (exportSnapshot) {
           exportSnapshot = null;
         } else if ($iocManagerOpen) {
@@ -1250,26 +1062,21 @@ import type {
         }
       }
     };
-    resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        tableWidth.set(entry.contentRect.width);
-      }
-    });
-    if ($bodyScrollEl) {
-      tableWidth.set($bodyScrollEl.clientWidth);
-    }
     const handleSortChanged = (event: CustomEvent) => {
-      const filters: AppliedFilters = {
-        search: activeFilters.search,
-        flag: activeFilters.flag,
-        bookmarkedOnly: activeFilters.bookmarkedOnly,
-        searchColumns: [...activeFilters.searchColumns],
-        condition: activeFilters.condition,
-      };
-      void applyFilters(filters, false, true);
+      const filters = get(appliedFilters);
+      void applyFilters(
+        {
+          search: filters.search,
+          flag: filters.flag,
+          bookmarkedOnly: filters.bookmarkedOnly,
+          searchColumns: [...filters.searchColumns],
+          condition: filters.condition,
+        },
+        false,
+        true
+      );
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
     document.addEventListener('sortChanged', handleSortChanged as EventListener);
 
@@ -1295,13 +1102,8 @@ import type {
       });
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
       document.removeEventListener('sortChanged', handleSortChanged as EventListener);
-      if (resizeObserver && observedScrollEl) {
-        resizeObserver.unobserve(observedScrollEl);
-      }
-      resizeObserver?.disconnect();
     };
   });
 
@@ -1320,14 +1122,6 @@ import type {
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
-    }
-    if (releaseHeaderSyncFrame !== null) {
-      cancelAnimationFrame(releaseHeaderSyncFrame);
-      releaseHeaderSyncFrame = null;
-    }
-    if (releaseBodySyncFrame !== null) {
-      cancelAnimationFrame(releaseBodySyncFrame);
-      releaseBodySyncFrame = null;
     }
   });
 

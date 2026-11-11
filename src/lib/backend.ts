@@ -272,7 +272,7 @@ export interface Backend {
   bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied>;
   bulkUndo(args: BulkUndoArgs): Promise<BulkApplied>;
   saveIocs(args: SaveIocsArgs): Promise<void>;
-  importIocs(args: ImportIocsArgs): Promise<void>;
+  importIocs(args: ImportIocsArgs): Promise<IocEntry[]>;
   exportIocs(args: ExportIocsArgs): Promise<void>;
   savePreset(args: SavePresetArgs): Promise<void>;
   loadPreset(args: LoadPresetArgs): Promise<PresetData>;
@@ -511,7 +511,7 @@ class NativeBackend implements Backend {
     });
   }
 
-  importIocs(args: ImportIocsArgs): Promise<void> {
+  importIocs(args: ImportIocsArgs): Promise<IocEntry[]> {
     return invoke("import_iocs", {
       payload: {
         projectId: args.projectId,

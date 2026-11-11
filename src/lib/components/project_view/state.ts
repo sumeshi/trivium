@@ -3,6 +3,7 @@ import type { Backend } from "../../backend";
 import type {
   ConditionNode,
   FlagEntry,
+  FlagFilterValue,
   FlagSymbol,
   IocEntry,
   LoadProjectResponse,
@@ -36,7 +37,7 @@ export const FLAG_OPTIONS = [
   },
 ] as const;
 
-export type FlagFilterValue = FlagSymbol | "all" | "none" | "priority";
+export type { FlagFilterValue } from "../../types";
 
 export const PRIORITY_FLAGS: FlagSymbol[] = ["suspicious", "critical"];
 
@@ -142,14 +143,9 @@ export const columnLabels = derived(projectDetail, (detail) => {
   return labels;
 });
 
-export function columnLabel(id: string): string {
-  return get(columnLabels).get(id) ?? id;
-}
-
 export const currentProjectId = writable<string | null>(null);
 export const lastHiddenColumnsRef = writable<string[] | null>(null);
 export const hiddenColumns = writable(new Set<string>());
-export const columnsOpen = writable(false);
 
 export const search = writable("");
 export const searchColumns = writable<string[]>([]);
@@ -172,7 +168,6 @@ export const sortKey = writable<string | null>(null);
 export const sortDirection = writable<"asc" | "desc">("asc");
 
 export const isExporting = writable(false);
-export const isUpdatingColumns = writable(false);
 
 export const rowsCache = writable<Map<number, CachedRow>>(new Map()); // Keyed by row_index
 /** Current screen generation. Bumped on project changes and on unmount. */
@@ -515,20 +510,6 @@ export function mapStoredFlag(
   if (trimmed === "?") return "suspicious";
   if (trimmed === "✗") return "critical";
   return "";
-}
-
-export function formatCell(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
 }
 
 export function normalizeRow(incoming: ProjectRow): CachedRow {

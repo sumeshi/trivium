@@ -8,7 +8,6 @@
     flagFilter,
     bookmarkedOnly,
     isExporting,
-    isUpdatingColumns,
     projectDetail,
     backend,
     columnLabels,
@@ -184,7 +183,6 @@
                   type="checkbox"
                   id="column-{column}"
                   checked={!$hiddenColumns.has(column)}
-                  disabled={$isUpdatingColumns}
                   on:change={() => toggleColumn(column)}
                 />
                 <label for="column-{column}">{$columnLabels.get(column) ?? column}</label>

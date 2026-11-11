@@ -145,7 +145,7 @@ import FlagSelect from './FlagSelect.svelte';
       const newIocs = await $backend.importIocs({
         projectId: $projectDetail.project.meta.id,
         path
-      }) as unknown as IocEntry[];
+      });
       // Directly update the stores with the new data from the backend
       projectDetail.update(pd => pd ? { ...pd, iocs: newIocs } : pd);
       iocDraft.set(newIocs.map((entry: IocEntry) => ({ ...entry, id: crypto.randomUUID() })));
