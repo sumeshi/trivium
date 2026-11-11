@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::super::util::{collect_row_record_from_series, matched_rule_color};
+use super::page::is_unrestricted_flag_filter;
 use super::target::QuerySpec;
 
 pub(super) fn is_unconditional_page(spec: &QuerySpec) -> bool {
@@ -27,12 +28,7 @@ pub(super) fn is_unconditional_page(spec: &QuerySpec) -> bool {
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty);
-    let flag_filter_empty = spec
-        .flag_filter
-        .as_deref()
-        .map(str::trim)
-        .map(|filter| filter.is_empty() || filter == "all")
-        .unwrap_or(true);
+    let flag_filter_empty = is_unrestricted_flag_filter(spec.flag_filter.as_deref());
     let sort_empty = spec
         .sort_key
         .as_deref()

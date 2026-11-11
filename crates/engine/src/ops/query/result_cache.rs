@@ -15,7 +15,7 @@ use std::{
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use super::target::QuerySpec;
+use super::{page::is_unrestricted_flag_filter, target::QuerySpec};
 
 pub(crate) const MAX_RESULTS: usize = 2;
 pub(crate) const MAX_RESULT_BYTES: usize = 64 * 1024 * 1024;
@@ -214,12 +214,7 @@ fn normalized_spec_json(spec: &QuerySpec) -> String {
     {
         normalized.search_columns = None;
     }
-    if normalized
-        .flag_filter
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|filter| filter.is_empty() || filter == "all")
-    {
+    if is_unrestricted_flag_filter(normalized.flag_filter.as_deref()) {
         normalized.flag_filter = None;
     }
     if normalized.bookmarked_only == Some(false) {
@@ -244,12 +239,7 @@ fn normalized_spec_json(spec: &QuerySpec) -> String {
 /// invalidate a result. A flag filter reads final flags (user flags plus IOC
 /// flags) and bookmark-only reads bookmarks.
 pub(crate) fn spec_depends_on_annotations(spec: &QuerySpec) -> bool {
-    let flag_filter = spec
-        .flag_filter
-        .as_deref()
-        .map(str::trim)
-        .filter(|filter| !filter.is_empty() && *filter != "all");
-    flag_filter.is_some() || spec.bookmarked_only == Some(true)
+    !is_unrestricted_flag_filter(spec.flag_filter.as_deref()) || spec.bookmarked_only == Some(true)
 }
 
 pub(crate) fn query_cache_key(

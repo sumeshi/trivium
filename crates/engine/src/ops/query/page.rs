@@ -11,14 +11,51 @@ use crate::value_utils::{build_row_cells, CellColumns};
 
 use super::ioc::append_ioc_tags;
 
-pub fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
-    match filter {
-        "all" => true,
-        "none" => current_flag.is_empty(),
-        "priority" => current_flag == "suspicious" || current_flag == "critical",
-        "safe" | "suspicious" | "critical" => current_flag == filter,
-        _ => true,
+/// Parse once per query population, rather than splitting a combination for
+/// every row. Unknown legacy values retain the old match-all fallback.
+struct FlagFilterMask(u8);
+
+impl FlagFilterMask {
+    const ALL: Self = Self(u8::MAX);
+
+    fn parse(filter: Option<&str>) -> Self {
+        let filter = filter.unwrap_or("all").trim();
+        match filter {
+            "" | "all" => return Self::ALL,
+            "priority" => return Self(2 | 4),
+            _ => {}
+        }
+        let mut mask = 0;
+        for token in filter.split('|') {
+            mask |= match token.trim() {
+                "safe" => 1,
+                "suspicious" => 2,
+                "critical" => 4,
+                "none" => 8,
+                _ => return Self::ALL,
+            };
+        }
+        Self(mask)
     }
+
+    fn matches(&self, flag: &str) -> bool {
+        self.0 == Self::ALL.0
+            || self.0
+                & match flag {
+                    "safe" => 1,
+                    "suspicious" => 2,
+                    "critical" => 4,
+                    "" => 8,
+                    _ => 0,
+                }
+                != 0
+    }
+}
+
+/// No selection and selecting every normalized flag population are both
+/// unrestricted, while the UI can retain their distinct checkbox state.
+pub(super) fn is_unrestricted_flag_filter(filter: Option<&str>) -> bool {
+    matches!(FlagFilterMask::parse(filter).0, 15 | u8::MAX)
 }
 
 pub fn filtered_indices(
@@ -29,15 +66,11 @@ pub fn filtered_indices(
     flag_filter: Option<&str>,
     search_mask: Option<&[bool]>,
 ) -> (Vec<usize>, usize) {
+    let flag_filter = FlagFilterMask::parse(flag_filter);
     let mut filtered_indices: Vec<usize> = Vec::with_capacity(ordered_indices.len());
     for &idx in ordered_indices {
         let ff = &final_flag_vec[idx];
-        let flag_ok = if let Some(filter) = flag_filter {
-            matches_flag_filter(ff, filter)
-        } else {
-            true
-        };
-        if !flag_ok {
+        if !flag_filter.matches(ff) {
             continue;
         }
         if bookmarked_only == Some(true) && !bookmarked.get(idx).copied().unwrap_or(false) {
