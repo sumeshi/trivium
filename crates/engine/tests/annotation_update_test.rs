@@ -160,6 +160,98 @@ fn flagged_count_changes_by_difference_and_revision_increases() {
 }
 
 #[test]
+fn update_before_project_load_migrates_legacy_flags_json() {
+    let (root, store, id) = setup(10);
+
+    // Create the annotation db, then replace it with the legacy JSON file and
+    // keep the saved flagged count non-zero. ProjectsStore::new therefore
+    // skips its migration, and the first annotation update must not open an
+    // empty db that hides the legacy entry.
+    update(&store, id, 0, Some("safe"), None, None, None).expect("initial update failed");
+    let project_dir = store.project_dir(&id);
+    close_flags_db(&project_dir);
+    drop(store);
+    let db_path = project_dir.join("flags.db");
+    if db_path.exists() {
+        fs::remove_dir_all(&db_path).expect("failed to remove flags db");
+    }
+    let legacy: std::collections::HashMap<usize, trivium_engine::models::FlagEntry> =
+        std::collections::HashMap::from([(
+            0,
+            trivium_engine::models::FlagEntry {
+                flag: "safe".to_string(),
+                memo: Some("legacy memo".to_string()),
+                tags: vec!["legacy".to_string()],
+                bookmarked: true,
+            },
+        )]);
+    fs::write(
+        project_dir.join("flags.json"),
+        serde_json::to_vec(&legacy).expect("serialize legacy flags"),
+    )
+    .expect("write legacy flags");
+
+    let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");
+    assert_eq!(
+        reopened.find(&id).expect("project").flagged_records,
+        1,
+        "the saved count keeps the startup migration off"
+    );
+    update(&reopened, id, 1, Some("critical"), None, None, None)
+        .expect("update before load_project failed");
+
+    let path = flags_path(&reopened, id);
+    let row0 = load_flag(&path, 0)
+        .expect("read row 0")
+        .expect("legacy row 0 disappeared");
+    assert_eq!(row0.flag, "safe");
+    assert_eq!(row0.memo.as_deref(), Some("legacy memo"));
+    assert_eq!(row0.tags, vec!["legacy".to_string()]);
+    assert!(row0.bookmarked);
+    assert_eq!(
+        load_flag(&path, 1)
+            .expect("read row 1")
+            .expect("row 1 missing")
+            .flag,
+        "critical"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn metadata_write_failure_does_not_report_the_annotation_as_unsaved() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (root, store, id) = setup(5);
+    let original_permissions = fs::metadata(&root).expect("root metadata").permissions();
+    let mut read_only = original_permissions.clone();
+    read_only.set_mode(0o555);
+    fs::set_permissions(&root, read_only).expect("make root read-only");
+
+    let result = update(&store, id, 0, Some("safe"), None, None, None);
+
+    fs::set_permissions(&root, original_permissions).expect("restore root permissions");
+    let response = result.expect("a metadata write failure must not fail the annotation");
+    assert_eq!(response.flagged_records, 1);
+    assert_eq!(
+        load_flag(&flags_path(&store, id), 0)
+            .expect("read row 0")
+            .expect("annotation missing")
+            .flag,
+        "safe"
+    );
+    assert_eq!(
+        store.find(&id).expect("project").flagged_records,
+        1,
+        "the in-memory count must still reflect the committed annotation"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn row_index_outside_the_project_is_rejected() {
     let (root, store, id) = setup(10);
 

@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::state::AppState;
-use trivium_engine::models::ProjectRow;
+use trivium_engine::models::UpdateFlagResponse;
 use trivium_engine::ops;
 use trivium_engine::ops::flags::{HiddenColumnsPayload, UpdateFlagPayload};
 
@@ -10,7 +10,7 @@ use trivium_engine::ops::flags::{HiddenColumnsPayload, UpdateFlagPayload};
 pub fn update_flag(
     state: State<AppState>,
     payload: UpdateFlagPayload,
-) -> Result<ProjectRow, String> {
+) -> Result<UpdateFlagResponse, String> {
     ops::flags::update_flag(&state.projects, payload).map_err(String::from)
 }
 

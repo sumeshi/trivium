@@ -8,7 +8,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use uuid::Uuid;
 
+use trivium_engine::annotation::AnnotationPatch;
 use trivium_engine::ops;
+use trivium_engine::ops::bulk::{
+    bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
+};
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::{
@@ -296,6 +300,81 @@ fn cache_keeps_two_results_and_evicts_the_oldest() {
     assert_eq!(row_ids(&first_again), vec![0]);
     assert_eq!(resolve_count(), 4, "the evicted result is a miss");
     assert_eq!(result_cache_stats().entries, 2);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn filtered_data_only_hit_refreshes_the_result_internal_flagged_count() {
+    let _guard = cache_test_guard();
+    let (root, store, id) = setup_project();
+
+    let spec = QuerySpec {
+        search: Some("special-a".to_string()),
+        ..Default::default()
+    };
+    let first = query(&store, id, spec.clone(), 0, PAGE);
+    assert_eq!(first.total_filtered_rows, 1);
+    assert_eq!(first.annotated_filtered, 0);
+    assert_eq!(resolve_count(), 1);
+
+    update(&store, id, 3, Some("critical"), None, None);
+    let second = query(&store, id, spec, 0, PAGE);
+    assert_eq!(
+        resolve_count(),
+        1,
+        "a data-only result must not be re-resolved after a flag update"
+    );
+    assert_eq!(second.annotated_total, 1);
+    assert_eq!(
+        second.annotated_filtered, 1,
+        "the result-internal count must be refreshed on a cache hit"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn undo_invalidates_a_flag_filtered_result() {
+    let _guard = cache_test_guard();
+    let (root, store, id) = setup_project();
+
+    let priority = QuerySpec {
+        flag_filter: Some("priority".to_string()),
+        ..Default::default()
+    };
+    let before = query(&store, id, priority.clone(), 0, PAGE);
+    assert_eq!(before.total_filtered_rows, 0);
+    assert_eq!(resolve_count(), 1);
+
+    let payload = BulkAnnotatePayload {
+        project_id: id,
+        target: "all".to_string(),
+        row_indices: None,
+        preview_token: None,
+        spec: QuerySpec::default(),
+        patch: AnnotationPatch {
+            flag: Some("critical".to_string()),
+            ..Default::default()
+        },
+    };
+    let preview = bulk_preview(&store, payload.clone()).expect("preview failed");
+    let mut payload = payload;
+    payload.preview_token = Some(preview.preview_token);
+    bulk_update(&store, payload).expect("bulk update failed");
+
+    let flagged = query(&store, id, priority.clone(), 0, PAGE);
+    assert_eq!(flagged.total_filtered_rows, ROWS);
+    assert_eq!(resolve_count(), 2);
+
+    bulk_undo(&store, BulkUndoPayload { project_id: id }).expect("undo failed");
+
+    let restored = query(&store, id, priority, 0, PAGE);
+    assert_eq!(
+        restored.total_filtered_rows, 0,
+        "undo must invalidate the flag-filtered cached result"
+    );
+    assert_eq!(resolve_count(), 3, "undo must force a new resolution");
 
     let _ = fs::remove_dir_all(root);
 }

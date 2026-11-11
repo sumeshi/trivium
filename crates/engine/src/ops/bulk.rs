@@ -310,6 +310,9 @@ pub fn bulk_undo(store: &ProjectsStore, payload: BulkUndoPayload) -> Result<Bulk
     }
 
     apply_flag_batch(&flags_path, &undo.previous).map_err(AppError::from)?;
+    // Undo restores annotation state, so flag/bookmark-dependent result caches
+    // must see a new revision just like a normal bulk update.
+    store.next_revision(&payload.project_id);
 
     let flagged_records = count_after(meta.flagged_records, &undo.applied, &undo.previous);
     if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {

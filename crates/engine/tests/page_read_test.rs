@@ -133,8 +133,65 @@ fn unconditional_page_moves_read_pages_not_the_whole_frame() {
 
     let projection = last_page_projection();
     assert!(projection.iter().any(|column| column == &id_column));
-    assert!(projection.iter().any(|column| column == "__original"));
+    // CSV cells are source strings and have no null/missing distinction, so
+    // the page does not read the full `__original` copy.
+    assert!(
+        !projection.iter().any(|column| column == "__original"),
+        "a CSV page must not carry the full original record: {projection:?}"
+    );
     assert!(projection.iter().any(|column| column == "__rowid"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn json_page_reads_the_original_record_for_cell_kinds() {
+    let _guard = page_test_guard();
+    let root = std::env::temp_dir().join(format!("trivium-page-read-json-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).expect("failed to create temp dir");
+    let jsonl = root.join("page.jsonl");
+    fs::write(
+        &jsonl,
+        "{\"id\":1,\"nullv\":null}\n{\"id\":2,\"later\":\"present\"}\n",
+    )
+    .expect("failed to write fixture");
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: jsonl.to_string_lossy().to_string(),
+            description: None,
+            delimiter: None,
+            restore_annotations: None,
+        },
+    )
+    .expect("failed to create project")
+    .meta
+    .id;
+    let ids = common::column_ids(&store, id);
+
+    reset_project_read_counters();
+    let response = query(&store, id, QuerySpec::default(), 0, PAGE);
+    assert_eq!(response.rows.len(), 2);
+    let projection = last_page_projection();
+    assert!(
+        projection.iter().any(|column| column == "__original"),
+        "a JSON page needs the original record to classify null and missing: {projection:?}"
+    );
+    assert_eq!(
+        response.rows[0]
+            .cells
+            .get(&common::id(&ids, "/nullv"))
+            .map(|cell| cell.kind.as_str()),
+        Some("null")
+    );
+    assert_eq!(
+        response.rows[0]
+            .cells
+            .get(&common::id(&ids, "/later"))
+            .map(|cell| cell.kind.as_str()),
+        Some("missing")
+    );
 
     let _ = fs::remove_dir_all(root);
 }

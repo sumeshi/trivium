@@ -325,7 +325,14 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
 
 /// Reads one row's annotation directly, without loading the whole database.
 pub fn load_flag(path: &Path, row_index: usize) -> Result<Option<FlagEntry>> {
-    let db = flags_db(&flags_db_path(path))?;
+    let db_path = flags_db_path(path);
+    // An update can arrive before load_project has migrated a legacy
+    // flags.json. Migrate here first so opening an empty db cannot hide the
+    // existing annotations.
+    if !db_path.exists() && path.exists() {
+        load_flags(path)?;
+    }
+    let db = flags_db(&db_path)?;
     let key = encode_row_key(row_index);
     let value = db
         .get(key)

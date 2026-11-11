@@ -85,9 +85,15 @@ pub fn update_flag(
         (true, false) => meta.flagged_records.saturating_sub(1),
         _ => meta.flagged_records,
     };
-    store
-        .update_flagged_records(&payload.project_id, flagged_records)
-        .map_err(AppError::from)?;
+    // The annotation database is authoritative. The project list count is
+    // derived and rebuildable, so a metadata write failure must not make the
+    // UI report an already-committed annotation as unsaved.
+    if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
+        eprintln!(
+            "[flags] failed to persist the flagged count for {}: {:?}",
+            payload.project_id, err
+        );
+    }
 
     Ok(UpdateFlagResponse {
         entry: next,

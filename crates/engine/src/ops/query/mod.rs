@@ -109,6 +109,11 @@ pub fn query_project_rows_with_job(
         .collect();
     let has_row_id = schema_columns.iter().any(|name| name == INTERNAL_ROW_ID);
     let has_original = schema_columns.iter().any(|name| name == INTERNAL_ORIGINAL);
+    // CSV originals are arrays of source strings and CSV cells are never null,
+    // so the page does not need `__original` to classify them. JSON pages do:
+    // the original object separates null from a missing key and carries the
+    // per-cell JSON type.
+    let needs_original = has_original && meta.source_format.as_deref() != Some("csv");
     let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema_columns);
     // Hidden columns are presentation-only. The page captures the visible
     // columns, then `__original` (for missing/null cell kinds) and `__rowid`
@@ -132,7 +137,7 @@ pub fn query_project_rows_with_job(
         .iter()
         .map(|column| column.id.clone())
         .collect();
-    if has_original {
+    if needs_original {
         page_projection.push(INTERNAL_ORIGINAL.to_string());
     }
     // Color rules may read a hidden column. Add only rule columns that are not
@@ -193,9 +198,11 @@ pub fn query_project_rows_with_job(
     }
 
     // The annotation revision is part of the key only when the resolved ids
-    // depend on annotations.
+    // depend on annotations. Data-only results keep their ids but compare the
+    // revision on a hit to refresh the result-internal annotated count.
+    let annotation_revision = store.current_revision(&meta.id);
     let annotation_token = if result_cache::spec_depends_on_annotations(&payload.spec) {
-        Some(store.current_revision(&meta.id).to_string())
+        Some(annotation_revision.to_string())
     } else {
         None
     };
@@ -232,14 +239,24 @@ pub fn query_project_rows_with_job(
         // project's flagged count current.
         let annotated_total = meta.flagged_records;
         // A result that contains every row has the same annotated count as the
-        // project. This keeps the common unfiltered table consistent with
-        // `annotated_total` after a flag update; a filtered data-only result
-        // cannot be recounted without loading every annotation, so it keeps
-        // the value from the miss.
+        // project. A filtered data-only result keeps its ids across annotation
+        // edits, so refresh its count from the stored flags only when the
+        // annotation revision changed. This is a count, not a re-search.
         let annotated_filtered = if cached.ids.len() == total_rows {
             annotated_total
-        } else {
+        } else if cached.annotation_revision == store.current_revision(&meta.id) {
             cached.annotated_filtered
+        } else {
+            let flags = load_flags(&flags_path).map_err(AppError::from)?;
+            cached
+                .ids
+                .iter()
+                .filter(|idx| {
+                    flags
+                        .get(idx)
+                        .is_some_and(|entry| !entry.flag.trim().is_empty())
+                })
+                .count()
         };
 
         job.report_progress(3, Some(3), Some("Rows ready".into()));
@@ -267,6 +284,7 @@ pub fn query_project_rows_with_job(
         target.filtered,
         target.annotated_filtered,
         target.annotated_total,
+        annotation_revision,
     );
     let filtered_ids = std::sync::Arc::clone(&cached.ids);
     let annotated_filtered = cached.annotated_filtered;

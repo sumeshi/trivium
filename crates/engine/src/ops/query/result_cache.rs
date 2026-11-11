@@ -26,6 +26,10 @@ pub(crate) struct CachedResult {
     pub ids: std::sync::Arc<Vec<usize>>,
     pub annotated_filtered: usize,
     pub annotated_total: usize,
+    /// Annotation revision when the counts were computed. A data-only result
+    /// keeps its ids across annotation edits, but its result-internal count
+    /// must be refreshed when this no longer matches the project revision.
+    pub annotation_revision: u64,
     pub estimated_bytes: usize,
 }
 
@@ -34,12 +38,14 @@ impl CachedResult {
         ids: Vec<usize>,
         annotated_filtered: usize,
         annotated_total: usize,
+        annotation_revision: u64,
     ) -> Self {
         let estimated_bytes = ids.len() * size_of::<usize>() + ENTRY_OVERHEAD_BYTES;
         Self {
             ids: std::sync::Arc::new(ids),
             annotated_filtered,
             annotated_total,
+            annotation_revision,
             estimated_bytes,
         }
     }
@@ -305,7 +311,7 @@ mod tests {
     }
 
     fn result(rows: usize) -> CachedResult {
-        CachedResult::new((0..rows).collect(), 0, 0)
+        CachedResult::new((0..rows).collect(), 0, 0, 0)
     }
 
     #[test]
