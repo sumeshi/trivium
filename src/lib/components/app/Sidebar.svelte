@@ -88,7 +88,7 @@
           class="w-full rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
           on:click={() => dispatch('pickCsv')}
         >
-          Import CSV / JSON File
+          Import CSV / JSON / JSONL File
         </button>
         {#if pendingFileName}
           <p class="truncate text-xs text-muted">{pendingFileName}</p>
@@ -109,7 +109,7 @@
             on:change={handleDelimiterChange}
             class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
           >
-            <option value="">auto (default)</option>
+            <option value="">Comma (default)</option>
             <option value=",">Comma ,</option>
             <option value={'\t'}>Tab</option>
             <option value=";">Semicolon ;</option>
@@ -141,7 +141,7 @@
       {#if isLoadingProjects}
         <p class="text-xs text-muted">Loading projects…</p>
       {:else if projects.length === 0}
-        <p class="text-xs text-muted">No projects yet. Import a CSV or JSON file to get started.</p>
+        <p class="text-xs text-muted">No projects yet. Import a CSV, JSON, or JSONL file to get started.</p>
       {:else}
         <ul class="space-y-3">
           {#each projects as project}

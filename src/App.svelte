@@ -26,7 +26,14 @@
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'CSV or JSON Files', extensions: ['csv', 'json', 'jsonl', 'ndjson'] }]
+        // Linux file-dialog filters are case-sensitive, so list the uppercase
+        // spellings as well. The backend lowercases the extension again.
+        filters: [
+          {
+            name: 'CSV or JSON Files',
+            extensions: ['csv', 'CSV', 'json', 'JSON', 'jsonl', 'JSONL', 'ndjson', 'NDJSON']
+          }
+        ]
       });
       if (!selected || Array.isArray(selected)) {
         return;
@@ -45,7 +52,14 @@
       sidebarOpen = false;
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : 'Failed to import file.';
+      // Tauri commands return Result<_, String>, so the line/record reason is
+      // usually a plain string rather than an Error instance.
+      const message =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : 'Failed to import file.';
       showToast(message, 'error');
     }
   };

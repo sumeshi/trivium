@@ -219,7 +219,7 @@ export function createProjectController(backend: Backend) {
   async function createProject() {
     const current = get(state);
     if (!current.pendingFilePath) {
-      throw new Error("Select a CSV file first.");
+      throw new Error("Select a CSV, JSON, JSONL, or NDJSON file first.");
     }
 
     state.update((value) => ({
