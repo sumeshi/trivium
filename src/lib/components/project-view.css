@@ -545,18 +545,15 @@ button.primary:disabled {
 }
 
 .table-header-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* Follow the body's scrollLeft. A second horizontal scrollbar intercepts
+     header hit-testing in WebKitGTK when the table is wider than the view. */
+  overflow: hidden;
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
   height: 38px !important;
   min-height: 38px !important;
   background: var(--surface-weak);
-}
-
-.table-header-scroll::-webkit-scrollbar {
-  height: 6px;
 }
 
 .data-header {
