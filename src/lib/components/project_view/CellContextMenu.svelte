@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
+  import type { CellKind } from '../../types';
   import type { CachedRow } from './state';
   import { backend, openCell, projectDetail } from './state';
   import { addFilterCondition } from '../../stores/condition';
@@ -10,6 +11,7 @@
   export let columnId: string;
   export let preview: string;
   export let truncated: boolean;
+  export let kind: CellKind;
   export let row: CachedRow;
   export let x: number;
   export let y: number;
@@ -25,6 +27,10 @@
   let top = y;
   let busy = false;
   let alive = true;
+  // A null/missing cell has no string value for an eq/ne condition, and the
+  // evaluator intentionally treats null as non-matching. Do not offer a filter
+  // that would silently match a literal "null" or empty string instead.
+  $: filterable = kind !== 'null' && kind !== 'missing';
 
   onDestroy(() => {
     alive = false;
@@ -159,12 +165,19 @@
     type="button"
     role="menuitem"
     bind:this={firstButton}
-    disabled={busy}
+    disabled={busy || !filterable}
+    title={filterable ? '' : 'Null and missing cells have no filter value.'}
     on:click={() => applyFilter('eq')}
   >
     Filter in
   </button>
-  <button type="button" role="menuitem" disabled={busy} on:click={() => applyFilter('ne')}>
+  <button
+    type="button"
+    role="menuitem"
+    disabled={busy || !filterable}
+    title={filterable ? '' : 'Null and missing cells have no filter value.'}
+    on:click={() => applyFilter('ne')}
+  >
     Filter out
   </button>
   <button type="button" role="menuitem" disabled={busy} on:click={copyValue}>

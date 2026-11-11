@@ -144,6 +144,12 @@ export interface LoadProjectResponse {
  * independent from annotations: the UI can fall back to defaults when it is
  * missing or unreadable without hiding evidence or saved annotations.
  */
+/** Result of reading view state; `status` separates missing from unreadable. */
+export interface LoadViewStateResult {
+  state: ViewState | null;
+  status: "ok" | "missing" | "unreadable" | "newer";
+}
+
 export interface ViewState {
   version: number;
   search: string;

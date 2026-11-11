@@ -17,7 +17,11 @@
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
   import type { SavedView } from '../viewState';
-  import { savedViewToViewState, viewStateToSavedView } from '../viewStateMapping';
+  import {
+    savedViewToViewState,
+    viewStateToSavedView,
+    viewStateWarnings,
+  } from '../viewStateMapping';
   import {
     goBack,
     goForward,
@@ -89,7 +93,8 @@
     resetPageCache,
     touchPage,
     syncSelectionScope,
-    selectedRowIds
+    selectedRowIds,
+    appliedFilters
   } from './project_view/state';
 import type {
     FlagFilterValue,
@@ -144,6 +149,8 @@ import type {
   let timelineOpen = false;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let applyingProjectId: string | null = null;
+  // False when the saved view state is newer/unreadable; do not overwrite it.
+  let viewStateWritable = true;
   let lastSummaryFlagged = -1;
   let lastSummaryHiddenKey = '';
 
@@ -285,7 +292,7 @@ import type {
     projectId: string | null,
     notifyOnError = true
   ): Promise<void> => {
-    if (!projectId) {
+    if (!projectId || !viewStateWritable) {
       return;
     }
     const state = buildViewState();
@@ -381,6 +388,7 @@ import type {
     cancelActiveQueryJobs();
     initialized = false;
     applyingProjectId = projectId;
+    viewStateWritable = true;
     currentProjectId.set(projectId);
     setHistoryProject(projectId);
 
@@ -397,6 +405,13 @@ import type {
     searchColumns.set([]);
     flagFilter.set('all');
     bookmarkedOnly.set(false);
+    appliedFilters.set({
+      search: '',
+      flag: 'all',
+      bookmarkedOnly: false,
+      searchColumns: [],
+      condition: null,
+    });
     sortKey.set(null);
     sortDirection.set('asc');
     conditionTree.set(emptyTree);
@@ -405,8 +420,11 @@ import type {
 
     let engineState: ViewState | null = null;
     let loadFailed = false;
+    let viewStateStatus: "ok" | "missing" | "unreadable" | "newer" = "missing";
     try {
-      engineState = await backend.loadViewState({ projectId });
+      const loaded = await backend.loadViewState({ projectId });
+      engineState = loaded.state;
+      viewStateStatus = loaded.status;
     } catch (error) {
       console.error('[view] failed to load view state:', error);
       loadFailed = true;
@@ -428,8 +446,16 @@ import type {
           message: 'Saved view settings could not be restored. Showing the default view.',
           tone: 'error',
         });
+      } else {
+        const warnings = viewStateWarnings(engineState, detail.columns);
+        if (warnings.length > 0) {
+          dispatch('notify', {
+            message: `Saved view settings used unknown values: ${warnings.join(', ')}. Showing defaults for those fields.`,
+            tone: 'error',
+          });
+        }
       }
-    } else {
+    } else if (!loadFailed && viewStateStatus === "missing") {
       // Legacy projects stored their view in localStorage. Migrate it once the
       // engine write succeeds; later loads read the engine file.
       const legacy = loadProjectView(projectId, detail.columns);
@@ -446,9 +472,15 @@ import type {
           });
       }
     }
-    if (loadFailed) {
+    if (loadFailed || viewStateStatus === "unreadable" || viewStateStatus === "newer") {
+      // Keep the original file untouched instead of replacing it with the
+      // defaults shown on screen.
+      viewStateWritable = false;
       dispatch('notify', {
-        message: 'Failed to read saved view settings. Evidence and annotations are unchanged.',
+        message:
+          viewStateStatus === "newer"
+            ? 'Saved view settings were written by a newer version. The file is kept; changes in this session will not overwrite it.'
+            : 'Saved view settings could not be read. The file is kept; changes in this session will not overwrite it.',
         tone: 'error',
       });
     }
@@ -491,6 +523,13 @@ import type {
       searchColumns: [...filters.searchColumns],
       condition: filters.condition,
     };
+    appliedFilters.set({
+      search: activeFilters.search,
+      flag: activeFilters.flag,
+      bookmarkedOnly: activeFilters.bookmarkedOnly,
+      searchColumns: [...activeFilters.searchColumns],
+      condition: activeFilters.condition,
+    });
     lastAppliedFilters = buildFilterSignature(filters);
     syncSelectionScope(projectId, lastAppliedFilters);
     lastSearchValue = filters.search;
@@ -598,7 +637,10 @@ import type {
     }
   }
 
-  $: persistedView = initialized && projectDetail
+  // `$scrollTop` is a dependency so scrolling alone schedules the debounced
+  // view-state save; `rowOffset()` reads the store via `get()` and would
+  // otherwise stay invisible to the reactive dependency graph.
+  $: persistedView = initialized && projectDetail && $scrollTop >= 0
     ? {
         search: $search,
         searchColumns: [...$searchColumns],
@@ -810,6 +852,13 @@ import type {
       searchColumns: [...normalized.searchColumns],
       condition: normalized.condition,
     };
+    appliedFilters.set({
+      search: activeFilters.search,
+      flag: activeFilters.flag,
+      bookmarkedOnly: activeFilters.bookmarkedOnly,
+      searchColumns: [...activeFilters.searchColumns],
+      condition: activeFilters.condition,
+    });
     lastAppliedFilters = signature;
     syncSelectionScope(projectDetail.project.meta.id, signature);
     filterRequestId += 1;
@@ -1065,6 +1114,21 @@ import type {
     if (!projectDetail) {
       return;
     }
+    // The displayed result counts lag the applied QuerySpec until the first
+    // page of a new result returns. Do not open a dialog whose counts and
+    // export target disagree.
+    const firstPageKey = pendingPageKey(
+      get(viewGeneration),
+      filterRequestId,
+      0
+    );
+    if ($pendingPages.has(firstPageKey)) {
+      dispatch('notify', {
+        message: 'Wait for the current query to finish before exporting.',
+        tone: 'error'
+      });
+      return;
+    }
     exportSnapshot = {
       search: activeFilters.search,
       searchColumns: [...activeFilters.searchColumns],
@@ -1074,7 +1138,9 @@ import type {
       sortKey: $sortKey,
       sortDirection: $sortDirection,
       rowIndices: Array.from($selectedRowIds),
-      totalRows: $totalRows,
+      // `$totalRows` is reset to 0 while a result loads; the project metadata
+      // is the stable all-rows count.
+      totalRows: projectDetail.project.meta.total_records,
       totalFilteredRows: $totalFilteredRows,
       selectedCount: $selectedRowIds.size,
       visibleColumns: [...$visibleColumns]
@@ -1122,7 +1188,15 @@ import type {
       });
     } catch (error) {
       console.error(error);
-      dispatch('notify', { message: 'Failed to export CSV.', tone: 'error' });
+      // Tauri returns the engine error as a plain string; keep the actionable
+      // message (for example, choosing another destination).
+      const message =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : 'Failed to export CSV.';
+      dispatch('notify', { message, tone: 'error' });
     } finally {
       isExporting.set(false);
     }

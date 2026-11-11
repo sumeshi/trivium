@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import type { Backend } from "../../backend";
-  import type { ConditionNode, Histogram } from "../../types";
-  import { conditionPayload, filterByRange } from "../../stores/condition";
+  import type { Histogram } from "../../types";
+  import { filterByRange } from "../../stores/condition";
   import { shouldRequestPanel } from "../../panelRequest";
-  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
-  import type { FlagFilterValue } from "./state";
+  import { appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import type { AppliedFilters } from "./state";
 
   export let open = false;
 
@@ -197,10 +197,7 @@
     activeProjectId: string,
     activeColumn: string,
     activeRange: { min: string; max: string } | null,
-    activeSearch: string,
-    activeFlag: FlagFilterValue,
-    activeColumns: string[],
-    activeCondition: ConditionNode | null
+    spec: AppliedFilters
   ) => {
     const ticket = ++request;
     error = "";
@@ -210,10 +207,11 @@
         column: activeColumn,
         buckets: BUCKET_COUNT,
         range: activeRange,
-        search: activeSearch.trim() || undefined,
-        flagFilter: activeFlag,
-        columns: activeColumns,
-        condition: activeCondition,
+        search: spec.search.trim() || undefined,
+        searchColumns: [...spec.searchColumns],
+        flagFilter: spec.flag,
+        bookmarkedOnly: spec.bookmarkedOnly,
+        condition: spec.condition,
       });
       if (!alive || ticket !== request) {
         return;
@@ -237,7 +235,7 @@
   $: if (projectId && !timeColumns.includes(column)) {
     column = timeColumns[0] ?? "";
   }
-  $: filtersKey = `${$search}::${$flagFilter}::${$visibleColumns.join("|")}::${JSON.stringify($conditionPayload)}`;
+  $: filtersKey = `${$appliedFilters.search}::${$appliedFilters.flag}::${$appliedFilters.searchColumns.join("|")}::${$appliedFilters.bookmarkedOnly}::${JSON.stringify($appliedFilters.condition)}`;
   $: resetKey = `${projectId}::${column}::${filtersKey}`;
   $: if (resetKey !== lastResetKey) {
     lastResetKey = resetKey;
@@ -261,10 +259,7 @@
       projectId,
       column,
       zoomRange,
-      $search,
-      $flagFilter,
-      $visibleColumns,
-      $conditionPayload
+      $appliedFilters
     );
   }
 

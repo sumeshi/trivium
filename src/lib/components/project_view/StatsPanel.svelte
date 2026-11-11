@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import type { Backend } from "../../backend";
-  import type { ColumnStats, ConditionNode, Histogram } from "../../types";
-  import { conditionPayload, filterByValue } from "../../stores/condition";
+  import type { ColumnStats, Histogram } from "../../types";
+  import { filterByValue } from "../../stores/condition";
   import { shouldRequestPanel } from "../../panelRequest";
-  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
-  import type { FlagFilterValue } from "./state";
+  import { appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import type { AppliedFilters } from "./state";
 
   export let open = false;
 
@@ -41,7 +41,8 @@
     api: Backend,
     activeProjectId: string,
     activeColumn: string,
-    activeRareMax: number | null
+    activeRareMax: number | null,
+    spec: AppliedFilters
   ) => {
     if (!Number.isInteger(activeRareMax) || (activeRareMax ?? 0) < 1) {
       return;
@@ -54,6 +55,13 @@
         projectId: activeProjectId,
         column: activeColumn,
         rareMax: activeRareMax ?? 1,
+        search: spec.search.trim(),
+        searchColumns: [...spec.searchColumns],
+        flagFilter: spec.flag,
+        bookmarkedOnly: spec.bookmarkedOnly,
+        condition: spec.condition,
+        sortKey: null,
+        sortDirection: "asc",
       });
       if (!alive || ticket !== request) {
         return;
@@ -72,10 +80,7 @@
     activeProjectId: string,
     activeColumn: string,
     activeBuckets: number | null,
-    activeSearch: string,
-    activeFlag: FlagFilterValue,
-    activeColumns: string[],
-    activeCondition: ConditionNode | null
+    spec: AppliedFilters
   ) => {
     if (!Number.isInteger(activeBuckets) || (activeBuckets ?? 0) < 1) {
       return;
@@ -88,10 +93,11 @@
         projectId: activeProjectId,
         column: activeColumn,
         buckets: activeBuckets ?? 50,
-        search: activeSearch.trim() || undefined,
-        flagFilter: activeFlag,
-        columns: activeColumns,
-        condition: activeCondition,
+        search: spec.search.trim() || undefined,
+        searchColumns: [...spec.searchColumns],
+        flagFilter: spec.flag,
+        bookmarkedOnly: spec.bookmarkedOnly,
+        condition: spec.condition,
       });
       if (!alive || ticket !== histogramRequest) {
         return;
@@ -112,7 +118,7 @@
   }
 
   $: if ($backend && shouldRequestPanel({ open, projectId, column })) {
-    void loadStats($backend, projectId, column, rareMax);
+    void loadStats($backend, projectId, column, rareMax, $appliedFilters);
   }
 
   $: if ($backend && shouldRequestPanel({ open, projectId, column }) && numeric) {
@@ -121,10 +127,7 @@
       projectId,
       column,
       bucketCount,
-      $search,
-      $flagFilter,
-      $visibleColumns,
-      $conditionPayload
+      $appliedFilters
     );
   }
 </script>

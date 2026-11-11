@@ -161,6 +161,33 @@ export function viewStateToSavedView(
   return savedViewFromUnknown(state, columns);
 }
 
+/**
+ * Names saved fields whose stored values cannot be applied to the current
+ * project. The caller shows a notice; the original file is not rewritten.
+ */
+export function viewStateWarnings(
+  state: ViewState,
+  columns: readonly string[]
+): string[] {
+  const known = new Set(columns);
+  const warnings: string[] = [];
+  const unknownSearch = state.searchColumns.filter((column) => !known.has(column));
+  if (unknownSearch.length > 0) {
+    warnings.push(`search columns ${unknownSearch.join(", ")}`);
+  }
+  if (!FLAG_FILTERS.has(state.flagFilter as FlagFilterValue)) {
+    warnings.push("flag filter");
+  }
+  if (state.sortKey !== null && !known.has(state.sortKey)) {
+    warnings.push(`sort column ${state.sortKey}`);
+  }
+  const unknownHidden = state.hiddenColumns.filter((column) => !known.has(column));
+  if (unknownHidden.length > 0) {
+    warnings.push(`hidden columns ${unknownHidden.join(", ")}`);
+  }
+  return warnings;
+}
+
 /** Converts the component view model to the engine DTO, including version. */
 export function savedViewToViewState(view: SavedView): ViewState {
   return {

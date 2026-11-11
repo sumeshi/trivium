@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import type { Backend } from "../../backend";
-  import type { ConditionNode, TimeAnalysis } from "../../types";
-  import { conditionPayload, filterByRange } from "../../stores/condition";
+  import type { TimeAnalysis } from "../../types";
+  import { filterByRange } from "../../stores/condition";
   import { shouldRequestPanel } from "../../panelRequest";
-  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
-  import type { FlagFilterValue } from "./state";
+  import { appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import type { AppliedFilters } from "./state";
 
   export let open = false;
 
@@ -41,10 +41,7 @@
     activeSession: number | null,
     activeWindow: number | null,
     activeBurstMin: number | null,
-    activeSearch: string,
-    activeFlag: FlagFilterValue,
-    activeColumns: string[],
-    activeCondition: ConditionNode | null
+    spec: AppliedFilters
   ) => {
     if (!ready(activeGap) || !ready(activeSession) || !ready(activeWindow) || !ready(activeBurstMin)) {
       return;
@@ -60,10 +57,11 @@
         sessionMinutes: activeSession ?? 30,
         burstWindowSeconds: activeWindow ?? 60,
         burstMin: activeBurstMin ?? 10,
-        search: activeSearch.trim() || undefined,
-        flagFilter: activeFlag,
-        columns: activeColumns,
-        condition: activeCondition,
+        search: spec.search.trim() || undefined,
+        searchColumns: [...spec.searchColumns],
+        flagFilter: spec.flag,
+        bookmarkedOnly: spec.bookmarkedOnly,
+        condition: spec.condition,
       });
       if (!alive || ticket !== request) {
         return;
@@ -91,10 +89,7 @@
       sessionMinutes,
       burstWindowSeconds,
       burstMin,
-      $search,
-      $flagFilter,
-      $visibleColumns,
-      $conditionPayload
+      $appliedFilters
     );
   }
 </script>

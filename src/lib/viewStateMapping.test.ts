@@ -5,6 +5,7 @@ import {
   savedViewFromUnknown,
   savedViewToViewState,
   viewStateToSavedView,
+  viewStateWarnings,
 } from "./viewStateMapping.ts";
 import type { EditorGroup } from "./stores/condition.ts";
 import type { SavedView } from "./viewState.ts";
@@ -50,6 +51,24 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   const restored = viewStateToSavedView(state, columns);
 
   assert.deepEqual(restored, saved());
+});
+
+test("unknown saved fields are reported instead of silently reset", () => {
+  const state = savedViewToViewState(
+    saved({
+      searchColumns: ["c999999"],
+      flagFilter: "future" as never,
+      sortKey: "c999999",
+      hiddenColumns: ["c999999"],
+    })
+  );
+  const warnings = viewStateWarnings(state, columns);
+  assert.deepEqual(warnings, [
+    "search columns c999999",
+    "flag filter",
+    "sort column c999999",
+    "hidden columns c999999",
+  ]);
 });
 
 test("a legacy save without the new fields restores safe defaults", () => {

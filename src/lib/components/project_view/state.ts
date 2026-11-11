@@ -155,6 +155,18 @@ export const search = writable("");
 export const searchColumns = writable<string[]>([]);
 export const flagFilter = writable<FlagFilterValue>("all");
 export const bookmarkedOnly = writable(false);
+/**
+ * The QuerySpec that produced the current table result. Panels, bulk actions
+ * and export read this snapshot instead of the live inputs, which may still be
+ * waiting for the debounce.
+ */
+export const appliedFilters = writable<AppliedFilters>({
+  search: "",
+  flag: "all",
+  bookmarkedOnly: false,
+  searchColumns: [],
+  condition: null,
+});
 
 export const sortKey = writable<string | null>(null);
 export const sortDirection = writable<"asc" | "desc">("asc");

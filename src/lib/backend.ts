@@ -15,6 +15,7 @@ import type {
   JobInfo,
   JobProgress,
   LoadProjectResponse,
+  LoadViewStateResult,
   PresetData,
   QuerySpec,
   TimeAnalysis,
@@ -150,7 +151,7 @@ export interface ColorRulesResponse {
   rules: ColorRule[];
 }
 
-export interface ColumnStatsArgs {
+export interface ColumnStatsArgs extends QuerySpec {
   projectId: string;
   column: string;
   rareMax?: number;
@@ -161,7 +162,10 @@ export interface HistogramArgs {
   column: string;
   buckets?: number;
   search?: string;
+  searchColumns?: string[];
   flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
+  /** Deprecated visible-column field; `searchColumns` takes precedence. */
   columns?: string[];
   condition?: ConditionNode | null;
   range?: { min: string; max: string } | null;
@@ -183,7 +187,10 @@ export interface TimeAnalysisArgs {
   burstWindowSeconds?: number;
   burstMin?: number;
   search?: string;
+  searchColumns?: string[];
   flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
+  /** Deprecated visible-column field; `searchColumns` takes precedence. */
   columns?: string[];
   condition?: ConditionNode | null;
 }
@@ -274,7 +281,7 @@ export interface Backend {
   updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
   /** Rebuildable per-project view state; null when the project has none yet. */
-  loadViewState(args: LoadViewStateArgs): Promise<ViewState | null>;
+  loadViewState(args: LoadViewStateArgs): Promise<LoadViewStateResult>;
   saveViewState(args: SaveViewStateArgs): Promise<void>;
   exportProject(args: ExportProjectArgs): Promise<ExportResult>;
   /** Requests cancellation of one running job; `false` means it already ended. */
@@ -348,6 +355,13 @@ class NativeBackend implements Backend {
         projectId: args.projectId,
         column: args.column,
         rareMax: args.rareMax ?? 1,
+        search: args.search,
+        searchColumns: args.searchColumns,
+        flagFilter: args.flagFilter,
+        bookmarkedOnly: args.bookmarkedOnly,
+        condition: args.condition,
+        sortKey: args.sortKey,
+        sortDirection: args.sortDirection,
       },
     });
   }
@@ -359,7 +373,9 @@ class NativeBackend implements Backend {
         column: args.column,
         buckets: args.buckets ?? 50,
         search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
         range: args.range ?? null,
@@ -377,7 +393,9 @@ class NativeBackend implements Backend {
         burstWindowSeconds: args.burstWindowSeconds ?? 60,
         burstMin: args.burstMin ?? 10,
         search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
       },
@@ -570,7 +588,7 @@ class NativeBackend implements Backend {
     });
   }
 
-  loadViewState(args: LoadViewStateArgs): Promise<ViewState | null> {
+  loadViewState(args: LoadViewStateArgs): Promise<LoadViewStateResult> {
     return invoke("load_view_state", {
       request: { projectId: args.projectId },
     });

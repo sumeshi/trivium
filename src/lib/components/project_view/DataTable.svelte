@@ -43,6 +43,7 @@
     toggleRowSelection
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
+  import type { CellKind } from '../../types';
   import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
   import { theme } from '../../theme';
@@ -72,6 +73,7 @@
     columnId: string;
     preview: string;
     truncated: boolean;
+    kind: CellKind;
     row: CachedRow;
     x: number;
     y: number;
@@ -178,6 +180,7 @@
       columnId: column,
       preview: row.previewCache[column] ?? '',
       truncated: row.cells?.[column]?.truncated === true,
+      kind: row.cells?.[column]?.kind ?? 'string',
       row,
       x: event.clientX,
       y: event.clientY

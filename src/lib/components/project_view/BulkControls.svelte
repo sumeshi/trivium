@@ -1,20 +1,15 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
   import type { AnnotationPatch, BulkAnnotateArgs } from "../../backend";
-  import { conditionPayload } from "../../stores/condition";
   import {
+    appliedFilters,
     backend,
-    bookmarkedOnly,
-    flagFilter,
     projectDetail,
-    search,
-    searchColumns,
     selectedCount,
     selectedRowIds,
     sortDirection,
     sortKey,
     totalFilteredRows,
-    totalRows,
     FLAG_OPTIONS,
   } from "./state";
 
@@ -35,6 +30,7 @@
   });
 
   $: projectId = $projectDetail?.project.meta.id ?? "";
+  $: allRowCount = $projectDetail?.project.meta.total_records ?? 0;
   // A zero-row selection is not a request for the filtered or all scope.
   $: selectedTargetEmpty = target === "selection" && $selectedCount === 0;
   $: canApplyTag = tagInput.trim().length > 0 && !selectedTargetEmpty;
@@ -43,13 +39,15 @@
     projectId,
     target,
     ...(target === "selection" ? { rowIndices: Array.from($selectedRowIds) } : {}),
-    search: $search.trim() || undefined,
-    searchColumns: $searchColumns,
-    flagFilter: $flagFilter,
-    bookmarkedOnly: $bookmarkedOnly,
+    // Use the applied QuerySpec, not the live inputs. The search box may still
+    // be waiting for its debounce while the table shows the previous result.
+    search: $appliedFilters.search.trim() || undefined,
+    searchColumns: $appliedFilters.searchColumns,
+    flagFilter: $appliedFilters.flag,
+    bookmarkedOnly: $appliedFilters.bookmarkedOnly,
     sortKey: $sortKey,
     sortDirection: $sortDirection,
-    condition: $conditionPayload,
+    condition: $appliedFilters.condition,
     ...(previewToken ? { previewToken } : {}),
     ...patch,
   });
@@ -148,7 +146,7 @@
         Selected ({$selectedCount})
       </option>
       <option value="filtered">Current results ({$totalFilteredRows})</option>
-      <option value="all">All rows ({$totalRows})</option>
+      <option value="all">All rows ({allRowCount})</option>
     </select>
     <select bind:value={flag} aria-label="Bulk flag">
       {#each FLAG_OPTIONS as option}
