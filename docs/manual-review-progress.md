@@ -2475,7 +2475,7 @@ metadata updates (`project_create_test`), selected export outside the result
 
 Verification after these fixes: `cargo test -p trivium-engine` all suites
 passed; `bash scripts/check_rust_size.sh` exit 0; `npm run lint` 0 errors;
-`npm run build` success; `npm run test:ui` 34 passed. Native Tauri compilation
+`npm run build` success; `npm run test:ui` 39 passed. Native Tauri compilation
 and the real GUI remain unverified in this environment.
 
 ## Maintainability pass
@@ -2515,6 +2515,11 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
 - `ProjectRow.data` was removed. Rows now carry only the exact `cells` map;
   report rendering and tests use that map, so a page no longer builds a second
   full-value HashMap.
+- Grouping and HTML reports use the shared `resolve_target` path. CSV/JSON
+  importers share column-id and empty-frame construction.
+- Export payload construction moved to `exportFlow.ts`; panel request
+  invalidation uses `createLatestRequest`; UI errors use one `errorMessage`
+  helper.
 - A corrupt `projects.json` is preserved as a timestamped backup and the app
   starts with an empty registry instead of failing to launch. Derived flagged
   counts are rebuilt from the annotation database.
