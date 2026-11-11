@@ -633,3 +633,64 @@ shape the frontend receives, and checks `rows[0].cells` plus the
   unavailable); `src-tauri` command signatures are unchanged.
 
 Next card: T11.
+
+## T11 — open JSON arrays and JSONL from the GUI
+
+Recorded: 2026-11-11. Code commit `263403c`.
+
+Changes:
+- `crates/engine/src/import/json.rs` (new): reads a UTF-8 JSON file (BOM
+  ignored). A single object becomes one record; an array becomes one record
+  per element. A non-object array element fails with its 1-based position
+  (`Record 2 in the JSON array is not an object.`), and any other top-level
+  value is rejected. Parse failures use `Failed to parse JSON: …`.
+- `crates/engine/src/import/jsonl.rs`: the record → columns/DataFrame part is
+  now `pub(crate) fn build_import(records: &[(usize, Value)], source_format:
+  &str)`. `json.rs` and `jsonl.rs` both call it, so the column union,
+  first-appearance order, JSON Pointer paths, exact cell text, null/absent
+  handling, and `__original` payload are unchanged from T08b/T09. JSONL keeps
+  the physical line number (empty lines included) for parse and non-object
+  errors; blank lines are still skipped.
+- `crates/engine/src/ops/projects.rs`: `create_project` dispatches on the
+  lowercased extension: `.json` → `json::load`, `.jsonl` / `.ndjson` →
+  `jsonl::load`, everything else → CSV. There is no CSV fallback for a
+  malformed JSON/JSONL file.
+- `src/App.svelte`: the Tauri open dialog accepts `csv`, `json`, `jsonl`,
+  `ndjson`; the empty-state text and import failure message mention CSV or
+  JSON instead of CSV only.
+- `src/lib/components/app/Sidebar.svelte`: button and empty-project text
+  mention CSV / JSON. No layout change and no delimiter UI change (the
+  delimiter still applies only to CSV).
+- `src/lib/backend.ts` needed no change; `createProject` already forwards the
+  selected path and the backend decides by extension.
+- `crates/engine/tests/json_import_test.rs` (new): 8 tests covering a 3-record
+  array (3 rows, Pointer columns, later-only key), a single object, a numeric
+  array element, broken JSON without CSV fallback and without a registered
+  project, uppercase `.JSON` / `.NDJSON`, CSV/JSON/JSONL equivalence for the
+  same 3 records, JSONL physical line numbers after a blank line, and project
+  reload after an array import.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New JSON tests | `cargo test -p trivium-engine --test json_import_test` | 8 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- The real GUI was not operated: the native Tauri app was not built here
+  (`pkg-config` reports GTK 3 unavailable), so selecting a `.json` / `.jsonl`
+  file through the dialog and reading the table is deferred to T26. The dialog
+  filter and the engine path are covered only by the source change and engine
+  tests.
+- Large-file streaming (T17) and temporary-directory atomic creation (T12)
+  were not started; JSON arrays are still read into memory as before.
+- `.csv` files still use the existing CSV path, including its delimiter
+  option; no new JSON-specific UI settings were added.
+
+Next card: T12.
