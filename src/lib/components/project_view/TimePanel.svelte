@@ -1,6 +1,7 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
+  import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { TimeAnalysis } from "../../types";
   import { filterByRange } from "../../stores/condition";
@@ -17,11 +18,10 @@
   let burstMin: number | null = 10;
   let analysis: TimeAnalysis | null = null;
   let error = "";
-  let request = 0;
-  let alive = true;
+  const requests = createLatestRequest();
 
   onDestroy(() => {
-    alive = false;
+    requests.dispose();
   });
 
   $: timeColumns = ($projectDetail?.columns ?? []).filter(
@@ -47,7 +47,7 @@
     if (!ready(activeGap) || !ready(activeSession) || !ready(activeWindow) || !ready(activeBurstMin)) {
       return;
     }
-    const ticket = ++request;
+    const ticket = requests.next();
     analysis = null;
     error = "";
     try {
@@ -64,12 +64,12 @@
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
       });
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       analysis = next;
     } catch (err) {
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       error = errorMessage(err);
@@ -78,7 +78,7 @@
 
   $: if (!open) {
     // Ignore any response that was already in flight.
-    request += 1;
+    requests.invalidate();
   }
 
   $: if ($backend && shouldRequestPanel({ open, projectId, column })) {

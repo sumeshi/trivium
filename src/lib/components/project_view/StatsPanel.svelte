@@ -1,6 +1,7 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
+  import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { ColumnStats, Histogram } from "../../types";
   import { filterByValue } from "../../stores/condition";
@@ -17,12 +18,12 @@
   let histogram: Histogram | null = null;
   let error = "";
   let histogramError = "";
-  let request = 0;
-  let histogramRequest = 0;
-  let alive = true;
+  const statsRequests = createLatestRequest();
+  const histogramRequests = createLatestRequest();
 
   onDestroy(() => {
-    alive = false;
+    statsRequests.dispose();
+    histogramRequests.dispose();
   });
 
   $: columns = $projectDetail?.columns ?? [];
@@ -33,7 +34,7 @@
     column = columns[0] ?? "";
   }
   $: if (!numeric) {
-    histogramRequest += 1;
+    histogramRequests.invalidate();
     histogram = null;
     histogramError = "";
   }
@@ -48,7 +49,7 @@
     if (!Number.isInteger(activeRareMax) || (activeRareMax ?? 0) < 1) {
       return;
     }
-    const ticket = ++request;
+    const ticket = statsRequests.next();
     stats = null;
     error = "";
     try {
@@ -64,12 +65,12 @@
         sortKey: null,
         sortDirection: "asc",
       });
-      if (!alive || ticket !== request) {
+      if (!statsRequests.isCurrent(ticket)) {
         return;
       }
       stats = next;
     } catch (err) {
-      if (!alive || ticket !== request) {
+      if (!statsRequests.isCurrent(ticket)) {
         return;
       }
       error = errorMessage(err);
@@ -86,7 +87,7 @@
     if (!Number.isInteger(activeBuckets) || (activeBuckets ?? 0) < 1) {
       return;
     }
-    const ticket = ++histogramRequest;
+    const ticket = histogramRequests.next();
     histogram = null;
     histogramError = "";
     try {
@@ -100,12 +101,12 @@
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
       });
-      if (!alive || ticket !== histogramRequest) {
+      if (!histogramRequests.isCurrent(ticket)) {
         return;
       }
       histogram = next;
     } catch (err) {
-      if (!alive || ticket !== histogramRequest) {
+      if (!histogramRequests.isCurrent(ticket)) {
         return;
       }
       histogramError = errorMessage(err);
@@ -114,8 +115,8 @@
 
   $: if (!open) {
     // Ignore any response that was already in flight.
-    request += 1;
-    histogramRequest += 1;
+    statsRequests.invalidate();
+    histogramRequests.invalidate();
   }
 
   $: if ($backend && shouldRequestPanel({ open, projectId, column })) {

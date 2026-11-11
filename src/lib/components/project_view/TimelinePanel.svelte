@@ -1,6 +1,7 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
+  import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { Histogram } from "../../types";
   import { filterByRange } from "../../stores/condition";
@@ -21,8 +22,7 @@
   let histogram: Histogram | null = null;
   let fullHistogram: Histogram | null = null;
   let error = "";
-  let request = 0;
-  let alive = true;
+  const requests = createLatestRequest();
   let dragging = false;
   let dragStart: number | null = null;
   let dragEnd: number | null = null;
@@ -30,7 +30,7 @@
   let lastResetKey = "";
 
   onDestroy(() => {
-    alive = false;
+    requests.dispose();
   });
 
   const boundaryList = (source: Histogram | null): string[] => {
@@ -200,7 +200,7 @@
     activeRange: { min: string; max: string } | null,
     spec: AppliedFilters
   ) => {
-    const ticket = ++request;
+    const ticket = requests.next();
     error = "";
     try {
       const next = await api.histogram({
@@ -214,7 +214,7 @@
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
       });
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       if (activeRange === null) {
@@ -222,7 +222,7 @@
       }
       histogram = next;
     } catch (err) {
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       error = errorMessage(err);
@@ -251,7 +251,7 @@
 
   $: if (!open) {
     // Ignore any response that was already in flight.
-    request += 1;
+    requests.invalidate();
   }
 
   $: if ($backend && shouldRequestPanel({ open, projectId, column })) {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
   import { createEventDispatcher, onDestroy } from 'svelte';
+  import { createLatestRequest } from '../../latestRequest';
   import type { GetCellResult } from '../../backend';
   import type { ProjectRow } from '../../types';
   import {
@@ -19,22 +20,21 @@
   let count: number | null = 5;
   let around: ProjectRow[] | null = null;
   let error = '';
-  let request = 0;
   let pinnedRow = -1;
-  let alive = true;
+  const aroundRequests = createLatestRequest();
+  const cellRequests = createLatestRequest();
 
   // Full value for the focused cell only. It is cleared when the dialog
   // closes, so no page or row cache keeps an untruncated value.
   let fullValue: GetCellResult | null = null;
   let fullState: 'loading' | 'loaded' | 'error' = 'loading';
   let fullError = '';
-  let loadSeq = 0;
   let loadedKey = '';
   let retry = 0;
 
   onDestroy(() => {
-    alive = false;
-    loadSeq += 1;
+    aroundRequests.dispose();
+    cellRequests.dispose();
   });
 
   const closeCell = () => {
@@ -62,7 +62,7 @@
       fullError = 'Cell value is unavailable.';
       return;
     }
-    const ticket = ++loadSeq;
+    const ticket = cellRequests.next();
     fullValue = null;
     fullState = 'loading';
     fullError = '';
@@ -74,11 +74,11 @@
       });
       // A response for a closed dialog or a different project/row/column is
       // stale even if it arrived successfully.
-      if (!alive || ticket !== loadSeq) return;
+      if (!cellRequests.isCurrent(ticket)) return;
       fullValue = result;
       fullState = 'loaded';
     } catch (err) {
-      if (!alive || ticket !== loadSeq) return;
+      if (!cellRequests.isCurrent(ticket)) return;
       fullValue = null;
       fullState = 'error';
       fullError = errorMessage(err);
@@ -96,7 +96,7 @@
     void loadFullValue();
   } else if (!fetchKey) {
     loadedKey = '';
-    loadSeq += 1;
+    cellRequests.invalidate();
     fullValue = null;
     fullState = 'loading';
     fullError = '';
@@ -155,7 +155,7 @@
   ) => {
     const api = $backend;
     if (!api) return;
-    const ticket = ++request;
+    const ticket = aroundRequests.next();
     around = null;
     error = '';
     try {
@@ -166,10 +166,10 @@
         mode: activeMode,
         count: activeCount,
       });
-      if (!alive || ticket !== request) return;
+      if (!aroundRequests.isCurrent(ticket)) return;
       around = next.rows;
     } catch (err) {
-      if (!alive || ticket !== request) return;
+      if (!aroundRequests.isCurrent(ticket)) return;
       around = [];
       error = errorMessage(err);
     }
@@ -178,7 +178,7 @@
   $: if ($expandedCell && $backend && projectId && timeColumn && ready(count)) {
     void loadAround(projectId, $expandedCell.rowIndex, timeColumn, mode, count ?? 0);
   } else if ($expandedCell) {
-    request += 1;
+    aroundRequests.invalidate();
     around = [];
     error = timeColumn ? '' : 'No datetime column.';
   }

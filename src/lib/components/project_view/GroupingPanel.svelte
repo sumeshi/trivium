@@ -1,6 +1,7 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
+  import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { ConditionNode, GroupTreeNode, GroupTreeResponse } from "../../types";
   import { conditionPayload, filterByValues } from "../../stores/condition";
@@ -20,12 +21,11 @@
   let expanded = new Set<string>();
   let error = "";
   let loading = false;
-  let request = 0;
-  let alive = true;
+  const requests = createLatestRequest();
   let loadedProjectId = "";
 
   onDestroy(() => {
-    alive = false;
+    requests.dispose();
   });
 
   $: columns = $projectDetail?.columns ?? [];
@@ -120,7 +120,7 @@
       error = "Add at least one group column.";
       return;
     }
-    const ticket = ++request;
+    const ticket = requests.next();
     loading = true;
     error = "";
     try {
@@ -132,19 +132,19 @@
         columns: activeColumns,
         condition: activeCondition,
       });
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       tree = next;
       expanded = new Set(next.nodes.map((node) => nodeKey([node])));
     } catch (err) {
-      if (!alive || ticket !== request) {
+      if (!requests.isCurrent(ticket)) {
         return;
       }
       tree = null;
       error = errorMessage(err);
     } finally {
-      if (alive && ticket === request) {
+      if (requests.isCurrent(ticket)) {
         loading = false;
       }
     }
