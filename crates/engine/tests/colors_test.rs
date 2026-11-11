@@ -137,7 +137,7 @@ fn sorted_query(store: &ProjectsStore, id: Uuid, event_id: &str) -> QueryRowsRes
 
 fn event_ids(rows: &[trivium_engine::models::ProjectRow], event_id: &str) -> Vec<String> {
     rows.iter()
-        .map(|row| row.data[event_id].to_string())
+        .map(|row| common::cell_text(row, event_id).unwrap_or("").to_string())
         .collect()
 }
 
@@ -207,7 +207,7 @@ fn query_colors_matching_rows_and_keeps_order_and_counts() {
     );
 
     for row in &after.rows {
-        let user = row.data[&user_id].as_str().unwrap_or_default();
+        let user = common::cell_text(row, &user_id).unwrap_or_default();
         if user == "alice" {
             assert_eq!(row.color.as_deref(), Some("#ff0000"), "row {:?}", row.row_index);
         } else {
@@ -248,7 +248,7 @@ fn flag_update_then_query_returns_matching_row_color() {
 
     let rows = query(&store, id).rows;
     let alice = rows.iter().find(|row| row.row_index == 0).expect("row 0");
-    assert_eq!(alice.data[&user_id], serde_json::json!("alice"));
+    assert_eq!(common::cell_text(alice, &user_id), Some("alice"));
     assert_eq!(alice.color.as_deref(), Some("#ff0000"));
 
     ops::flags::update_flag(

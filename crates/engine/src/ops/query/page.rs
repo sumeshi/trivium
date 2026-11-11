@@ -9,7 +9,6 @@ use crate::ioc::IocRowOutcome;
 use crate::models::{ColumnMeta, FlagEntry, ProjectRow};
 use crate::value_utils::{build_row_cells, CellColumns};
 
-use super::super::util::collect_row_record_from_series;
 use super::ioc::append_ioc_tags;
 
 pub fn matches_flag_filter(current_flag: &str, filter: &str) -> bool {
@@ -99,13 +98,7 @@ pub fn materialize_page_rows(
             "Page row count does not match the selected row ids.".into(),
         ));
     }
-    let column_names: Vec<String> = columns.iter().map(|column| column.id.clone()).collect();
     let cell_columns = CellColumns::new(df, columns);
-    let series_map: HashMap<&str, &Series> = df
-        .get_columns()
-        .iter()
-        .map(|series| (series.name(), series))
-        .collect();
     let page_flags: HashMap<usize, FlagEntry> = row_ids
         .iter()
         .filter_map(|idx| flags.get(idx).cloned().map(|entry| (*idx, entry)))
@@ -113,7 +106,6 @@ pub fn materialize_page_rows(
 
     let mut rows = Vec::with_capacity(row_ids.len());
     for (position, &row_idx) in row_ids.iter().enumerate() {
-        let record = collect_row_record_from_series(&series_map, &column_names, position);
         let cells = build_row_cells(df, position, columns, &cell_columns);
         let user_memo = page_flags
             .get(&row_idx)
@@ -132,7 +124,6 @@ pub fn materialize_page_rows(
         let bookmarked = page_flags.get(&row_idx).is_some_and(|e| e.bookmarked);
         rows.push(ProjectRow {
             row_index: row_idx,
-            data: record,
             cells,
             flag: final_flag_for(row_idx, &page_flags, ioc_outcomes),
             memo: if final_memo.is_empty() {

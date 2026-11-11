@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::analysis::stats::{summarize_series, ColumnStats};
@@ -258,11 +257,11 @@ fn render_rows_table(html: &mut String, columns: &[String], rows: &[ProjectRow])
         html.push_str(&format!("<tr><td>{}</td>", row.row_index));
         for column in columns {
             let text = row
-                .data
+                .cells
                 .get(column)
-                .map(value_text)
+                .and_then(|cell| cell.text.as_deref())
                 .unwrap_or_default();
-            html.push_str(&format!("<td>{}</td>", html_escape(&text)));
+            html.push_str(&format!("<td>{}</td>", html_escape(text)));
         }
         html.push_str(&format!(
             "<td class=\"flag\">{}</td><td class=\"memo\">{}</td></tr>\n",
@@ -298,14 +297,6 @@ fn render_stats_table(html: &mut String, stats: &[ColumnStats]) {
         html.push_str("</table></td></tr>\n");
     }
     html.push_str("</tbody></table>\n");
-}
-
-fn value_text(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
 }
 
 fn write_report(destination: &str, html: &str) -> Result<(), AppError> {

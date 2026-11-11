@@ -158,12 +158,8 @@ pub struct Cell {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectRow {
     pub row_index: usize,
-    /// In-process compatibility map. It is not sent over IPC: a page must not
-    /// carry full cell values next to the previews in `cells`.
-    #[serde(skip_serializing)]
-    pub data: HashMap<String, Value>,
-    /// Exact per-column cell DTOs. The UI reads display, copy and filter values
-    /// from `cells`.
+    /// Exact per-column cell DTOs. This is the only row-value map; display,
+    /// copy and filter values all come from here.
     #[serde(default)]
     pub cells: HashMap<String, Cell>,
     pub flag: String,

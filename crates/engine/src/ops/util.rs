@@ -36,21 +36,10 @@ pub fn resolve_columns(
     Ok(resolved)
 }
 
-/// Collects a row's data into a JSON map using the provided column ordering.
-pub fn collect_row_record(
-    df: &DataFrame,
-    column_names: &[String],
-    row_idx: usize,
-) -> HashMap<String, Value> {
-    let series_map: HashMap<&str, &Series> = df
-        .get_columns()
-        .iter()
-        .map(|series| (series.name(), series))
-        .collect();
-    collect_row_record_from_series(&series_map, column_names, row_idx)
-}
-
-/// Collects a row's data using a precomputed series map to avoid repeated lookups.
+/// Collects a row's indexed values using a precomputed series map.
+///
+/// Color rules are evaluated against this map; `ProjectRow` itself only keeps
+/// the cell DTOs.
 pub fn collect_row_record_from_series(
     series_map: &HashMap<&str, &Series>,
     column_names: &[String],
@@ -117,16 +106,13 @@ pub fn materialize_rows(
     row_indices: impl Iterator<Item = usize>,
     flags: &HashMap<usize, FlagEntry>,
 ) -> Vec<ProjectRow> {
-    let column_names: Vec<String> = columns.iter().map(|column| column.id.clone()).collect();
     let cell_columns = CellColumns::new(df, columns);
     let mut rows = Vec::new();
     for row_idx in row_indices {
-        let record = collect_row_record(df, &column_names, row_idx);
         let cells = build_row_cells(df, row_idx, columns, &cell_columns);
         let flag_entry = flags.get(&row_idx);
         rows.push(ProjectRow {
             row_index: row_idx,
-            data: record,
             cells,
             flag: flag_entry
                 .as_ref()

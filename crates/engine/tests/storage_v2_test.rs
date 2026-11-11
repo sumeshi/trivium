@@ -21,6 +21,8 @@ use trivium_engine::project_io::{
 };
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("trivium-storage-v2-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
@@ -148,10 +150,10 @@ fn load_returns_metadata_and_hides_internal_columns() {
     assert!(!loaded.column_max_chars.contains_key("__rowid"));
     assert!(!loaded.column_max_chars.contains_key("__original"));
     assert_eq!(
-        loaded.initial_rows[0].data.get("c000001"),
-        Some(&json!("alpha"))
+        common::cell_text(&loaded.initial_rows[0], "c000001"),
+        Some("alpha")
     );
-    assert!(!loaded.initial_rows[0].data.contains_key("__original"));
+    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -170,8 +172,8 @@ fn same_label_columns_are_addressed_by_id() {
         },
     );
     assert_eq!(first.total_filtered_rows, 1);
-    assert_eq!(first.rows[0].data.get("c000001"), Some(&json!("beta")));
-    assert_eq!(first.rows[0].data.get("c000002"), Some(&json!("y")));
+    assert_eq!(common::cell_text(&first.rows[0], "c000001"), Some("beta"));
+    assert_eq!(common::cell_text(&first.rows[0], "c000002"), Some("y"));
 
     let second = query(
         &store,
@@ -182,8 +184,8 @@ fn same_label_columns_are_addressed_by_id() {
         },
     );
     assert_eq!(second.total_filtered_rows, 1);
-    assert_eq!(second.rows[0].data.get("c000001"), Some(&json!("alpha")));
-    assert_eq!(second.rows[0].data.get("c000002"), Some(&json!("x")));
+    assert_eq!(common::cell_text(&second.rows[0], "c000001"), Some("alpha"));
+    assert_eq!(common::cell_text(&second.rows[0], "c000002"), Some("x"));
 
     let scoped = query(
         &store,
@@ -195,7 +197,7 @@ fn same_label_columns_are_addressed_by_id() {
         },
     );
     assert_eq!(scoped.total_filtered_rows, 1);
-    assert_eq!(scoped.rows[0].data.get("c000001"), Some(&json!("gamma")));
+    assert_eq!(common::cell_text(&scoped.rows[0], "c000001"), Some("gamma"));
 
     let reserved_name = query(
         &store,
@@ -207,8 +209,8 @@ fn same_label_columns_are_addressed_by_id() {
     );
     assert_eq!(reserved_name.total_filtered_rows, 1);
     assert_eq!(
-        reserved_name.rows[0].data.get("c000003"),
-        Some(&json!("reserved-b"))
+        common::cell_text(&reserved_name.rows[0], "c000003"),
+        Some("reserved-b")
     );
 
     // The original record column is not part of the default search scope.

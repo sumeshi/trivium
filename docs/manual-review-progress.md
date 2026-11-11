@@ -2511,6 +2511,9 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
 - `FlagEntry::is_flagged` / `is_annotated` centralize annotation semantics.
   The unused searchable-text cache API was removed; bulk undo entries are
   dropped when a project is deleted.
+- `ProjectRow.data` was removed. Rows now carry only the exact `cells` map;
+  report rendering and tests use that map, so a page no longer builds a second
+  full-value HashMap.
 - A corrupt `projects.json` is preserved as a timestamped backup and the app
   starts with an empty registry instead of failing to launch. Derived flagged
   counts are rebuilt from the annotation database.
@@ -2530,8 +2533,6 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
 
 - Split `ProjectView.svelte` orchestration (page requests, view-state restore)
   into testable modules.
-- Remove `ProjectRow.data` by migrating report/tests to `cells`; this would
-  stop building a second full value map per page.
 - Share a project-frame/cache abstraction across stats, histogram, time, group,
   report, and bulk instead of each reading the full Parquet frame.
 - Consolidate the 40+ integration test binaries and their duplicated

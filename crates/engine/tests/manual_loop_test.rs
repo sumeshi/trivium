@@ -341,10 +341,6 @@ fn hidden_column_condition_and_search_match_without_returning_the_column() {
     for response in [&by_condition, &by_search, &all_rows] {
         for row in &response.rows {
             assert!(
-                !row.data.contains_key(&comma),
-                "hidden column leaked into row data"
-            );
-            assert!(
                 !row.cells.contains_key(&comma),
                 "hidden column leaked into row cells"
             );

@@ -17,7 +17,7 @@ function rowFromIpc(cells: Record<string, unknown>): ProjectRow {
   return JSON.parse(
     JSON.stringify({
       row_index: 0,
-      data: {},
+
       cells,
       flag: "",
       tags: [],

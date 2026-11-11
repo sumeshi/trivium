@@ -76,8 +76,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
         .rows
         .iter()
         .map(|row| {
-            row.data[&event_id]
-                .as_str()
+            common::cell_text(row, &event_id)
                 .expect("cell is stored as exact text")
                 .to_string()
         })

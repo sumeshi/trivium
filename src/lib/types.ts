@@ -60,8 +60,6 @@ export interface Cell {
 
 export interface ProjectRow {
   row_index: number;
-  /** Compatibility copy of the row values. The UI reads `cells`. */
-  data: Record<string, unknown>;
   /** Exact display/copy cells, keyed by column id. */
   cells: Record<string, Cell>;
   flag: string;

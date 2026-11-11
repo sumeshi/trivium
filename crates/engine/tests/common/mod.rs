@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+use trivium_engine::models::ProjectRow;
 use trivium_engine::ops::projects::{self, ProjectRequest};
 use trivium_engine::store::ProjectsStore;
 
@@ -38,4 +39,11 @@ pub fn id(ids: &HashMap<String, String>, source: &str) -> String {
 /// Builds a column-scoped search expression with an internal id.
 pub fn search(ids: &HashMap<String, String>, column: &str, expression: &str) -> String {
     format!("{}:{}", id(ids, column), expression)
+}
+
+/// Exact text of one cell, or `None` for null/missing.
+pub fn cell_text<'a>(row: &'a ProjectRow, column: &str) -> Option<&'a str> {
+    row.cells
+        .get(column)
+        .and_then(|cell| cell.text.as_deref())
 }

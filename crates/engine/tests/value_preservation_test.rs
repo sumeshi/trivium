@@ -14,6 +14,8 @@ use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec}
 use trivium_engine::project_io::read_original_records;
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("trivium-values-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
@@ -68,9 +70,10 @@ fn condition(column: &str, op: Op, value: &str) -> Node {
 
 fn cell(response: &trivium_engine::ops::rows::QueryRowsResponse, row: usize, column: &str) -> serde_json::Value {
     response.rows[row]
-        .data
+        .cells
         .get(column)
-        .cloned()
+        .and_then(|cell| cell.text.clone())
+        .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null)
 }
 
@@ -202,7 +205,7 @@ fn adjacent_long_integers_compare_without_rounding() {
     assert!(hits
         .rows
         .iter()
-        .all(|row| row.data.get(n).and_then(|value| value.as_str()) != Some("9007199254740992")));
+        .all(|row| common::cell_text(row, n) != Some("9007199254740992")));
 
     let sorted = query(
         &store,
@@ -216,7 +219,7 @@ fn adjacent_long_integers_compare_without_rounding() {
     let ordered: Vec<&str> = sorted
         .rows
         .iter()
-        .map(|row| row.data.get(n).and_then(|value| value.as_str()).unwrap())
+        .map(|row| common::cell_text(row, n).unwrap())
         .collect();
     assert_eq!(
         ordered,

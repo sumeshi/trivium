@@ -105,16 +105,6 @@ fn long_cell_page_is_a_preview_and_get_cell_returns_the_full_value() {
     assert_eq!(preview.length, Some(LONG_CHARS));
     assert_eq!(preview.kind, "string");
 
-    // The compatibility `data` field is not truncated; only `cells` is a
-    // preview. The frontend drops `data` from its page cache.
-    let data_text = long_row
-        .data
-        .get(&payload_id)
-        .and_then(|value| value.as_str())
-        .expect("data payload");
-    assert_eq!(data_text.chars().count(), LONG_CHARS);
-    assert_eq!(data_text, long_text);
-
     // Hidden columns are presentation-only: get_cell still serves them.
     set_hidden_columns(
         &store,

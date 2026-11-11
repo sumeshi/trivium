@@ -19,6 +19,8 @@ use trivium_engine::project_io::{
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
+mod common;
+
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("trivium-import-ids-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
@@ -173,7 +175,7 @@ fn csv_duplicate_and_empty_headers_get_positional_ids() {
         "an empty header gets an auxiliary label while keeping its empty source"
     );
     assert!(!loaded.columns.iter().any(|id| id == "__original"));
-    assert!(!loaded.initial_rows[0].data.contains_key("__original"));
+    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -220,12 +222,12 @@ fn csv_original_cells_and_duplicate_columns_keep_their_values() {
     );
     assert_eq!(second_condition.total_filtered_rows, 1);
     assert_eq!(
-        second_condition.rows[0].data.get(&second_msg),
-        Some(&json!("beta"))
+        common::cell_text(&second_condition.rows[0], &second_msg),
+        Some("beta")
     );
     assert_eq!(
-        second_condition.rows[0].data.get(&first_msg),
-        Some(&json!("alpha"))
+        common::cell_text(&second_condition.rows[0], &first_msg),
+        Some("alpha")
     );
 
     let first_scoped = query(
@@ -261,12 +263,12 @@ fn csv_original_cells_and_duplicate_columns_keep_their_values() {
             ..Default::default()
         },
     );
-    let sorted_second: Vec<Value> = sorted
+    let sorted_second: Vec<&str> = sorted
         .rows
         .iter()
-        .map(|row| row.data.get(&second_msg).cloned().unwrap_or(Value::Null))
+        .map(|row| common::cell_text(row, &second_msg).unwrap_or(""))
         .collect();
-    assert_eq!(sorted_second, vec![json!("beta"), json!("second")]);
+    assert_eq!(sorted_second, vec!["beta", "second"]);
 
     let destination = root.join("csv-export.csv");
     let rows = export(&store, id, &destination, None);
@@ -442,15 +444,15 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
         ]
     );
     assert!(!loaded.columns.iter().any(|id| id == "__original"));
-    assert!(!loaded.initial_rows[0].data.contains_key("__original"));
+    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
 
     let literal = "c000001".to_string();
     let nested = "c000002".to_string();
     assert_eq!(loaded.initial_rows.len(), 3, "the empty object is one row");
-    assert_eq!(loaded.initial_rows[0].data.get(&literal), Some(&json!("1")));
-    assert_eq!(loaded.initial_rows[0].data.get(&nested), Some(&json!("2")));
-    assert_eq!(loaded.initial_rows[2].data.get(&literal), Some(&json!("3")));
-    assert_eq!(loaded.initial_rows[2].data.get(&nested), Some(&json!("4")));
+    assert_eq!(common::cell_text(&loaded.initial_rows[0], &literal), Some("1"));
+    assert_eq!(common::cell_text(&loaded.initial_rows[0], &nested), Some("2"));
+    assert_eq!(common::cell_text(&loaded.initial_rows[2], &literal), Some("3"));
+    assert_eq!(common::cell_text(&loaded.initial_rows[2], &nested), Some("4"));
 
     let collision = query(
         &store,
@@ -462,7 +464,7 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     );
     assert_eq!(collision.total_filtered_rows, 1);
     assert_eq!(collision.rows[0].row_index, 2);
-    assert_eq!(collision.rows[0].data.get(&nested), Some(&json!("4")));
+    assert_eq!(common::cell_text(&collision.rows[0], &nested), Some("4"));
 
     let sorted = query(
         &store,
@@ -473,16 +475,12 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
             ..Default::default()
         },
     );
-    let sorted_nested: Vec<Value> = sorted
+    let sorted_non_null: Vec<&str> = sorted
         .rows
         .iter()
-        .map(|row| row.data.get(&nested).cloned().unwrap_or(Value::Null))
+        .filter_map(|row| common::cell_text(row, &nested))
         .collect();
-    let sorted_non_null: Vec<Value> = sorted_nested
-        .into_iter()
-        .filter(|value| !value.is_null())
-        .collect();
-    assert_eq!(sorted_non_null, vec![json!("4"), json!("2")]);
+    assert_eq!(sorted_non_null, vec!["4", "2"]);
 
     let records = read_original_records(&store.project_dir(&id)).expect("original records failed");
     assert_eq!(records[1], json!({}));

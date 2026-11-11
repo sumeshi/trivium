@@ -96,8 +96,8 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
         response["rows"][row]["cells"][column].clone()
     };
 
-    // The compatibility `ProjectRow.data` map is in-process only; a page must
-    // carry the previews in `cells`, not a second full copy of every value.
+    // A page carries only the previews in `cells`, not a second full copy of
+    // every value.
     assert!(
         response["rows"][0].get("data").is_none(),
         "page rows must not serialize the full compatibility data map"

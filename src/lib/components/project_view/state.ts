@@ -516,10 +516,6 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   const { displayCache, previewCache } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
-    // `data` is a compatibility copy of the full row values. The UI reads
-    // `cells` (previews), so keeping `data` would retain a 1MiB cell on every
-    // cached page and defeat the page-cache bound.
-    data: {},
     flag: mapStoredFlag(incoming.flag) || "",
     memo: sanitizeMemoInput(incoming.memo ?? ""),
     displayCache,

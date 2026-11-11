@@ -106,9 +106,10 @@ fn unconditional_page_moves_read_pages_not_the_whole_frame() {
         assert_eq!(response.total_filtered_rows, ROWS);
         assert_eq!(response.rows.len(), PAGE);
         assert_eq!(row_ids(&response)[0], offset);
+        let expected = format!("row{offset:03}");
         assert_eq!(
-            response.rows[0].data.get(&id_column),
-            Some(&serde_json::json!(format!("row{offset:03}")))
+            common::cell_text(&response.rows[0], &id_column),
+            Some(expected.as_str())
         );
         assert_eq!(
             response.rows[0]
@@ -225,7 +226,7 @@ fn hidden_columns_are_not_in_the_page_projection_or_rows() {
     );
     assert!(projection.iter().any(|column| column == &id_column));
     for row in &response.rows {
-        assert!(!row.data.contains_key(&hidden_column));
+        assert!(!row.cells.contains_key(&hidden_column));
         assert!(!row.cells.contains_key(&hidden_column));
         assert!(row.cells.contains_key(&id_column));
     }
@@ -256,8 +257,8 @@ fn scoped_search_resolves_with_only_the_search_columns() {
     assert_eq!(response.total_filtered_rows, 3);
     assert_eq!(row_ids(&response), vec![7, 42, 77]);
     assert_eq!(
-        response.rows[0].data.get(&id_column),
-        Some(&serde_json::json!("row007"))
+        common::cell_text(&response.rows[0], &id_column),
+        Some("row007")
     );
     assert_eq!(
         project_full_reads(),
@@ -307,8 +308,8 @@ fn sorted_pages_keep_the_requested_order_without_a_full_frame() {
         "the later page keeps the same order"
     );
     assert_eq!(
-        first.rows[0].data.get(&id_column),
-        Some(&serde_json::json!("row099"))
+        common::cell_text(&first.rows[0], &id_column),
+        Some("row099")
     );
     assert_eq!(project_full_reads(), 0);
     assert!(project_page_reads() >= 2);

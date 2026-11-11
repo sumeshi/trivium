@@ -294,8 +294,8 @@ fn nested_condition_matches_either_group() {
     .expect("query failed");
     assert_eq!(response.total_filtered_rows, 11);
     assert!(response.rows.iter().all(|row| {
-        let user = row.data.get(&user_id).and_then(|value| value.as_str());
-        let event = row.data.get(&event_id).and_then(|value| value.as_str());
+        let user = common::cell_text(row, &user_id);
+        let event = common::cell_text(row, &event_id);
         matches!(
             (user, event),
             (Some("alice"), Some("4624")) | (Some("bob"), Some("4688"))
@@ -358,10 +358,8 @@ fn nanosecond_integer_is_not_rounded() {
     )
     .expect("query failed");
     assert_eq!(response.total_filtered_rows, 1);
-    let cell = response.rows[0].data.get(&n_id).expect("n");
-    let preserved = cell.as_i64() == Some(1_700_000_000_123_456_789)
-        || cell.as_str() == Some(exact);
-    assert!(preserved, "value was rounded: {cell}");
+    let cell = common::cell_text(&response.rows[0], &n_id).expect("n");
+    assert_eq!(cell, exact, "value was rounded");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -1217,7 +1215,7 @@ fn sort_and_pagination() {
     assert_eq!(r.total_filtered_rows, 20);
     // 4688 is the largest EventID; descending sort puts those first.
     for row in &r.rows {
-        assert_eq!(row.data[&event_id], serde_json::json!("4688"));
+        assert_eq!(common::cell_text(row, &event_id), Some("4688"));
     }
 
     let r2 = ops::rows::query_project_rows(
@@ -1542,13 +1540,7 @@ ts,note,secret
     };
     let secrets = |rows: &[trivium_engine::models::ProjectRow]| -> Vec<String> {
         rows.iter()
-            .map(|row| {
-                row.data
-                    .get(&secret_id)
-                    .and_then(|value| value.as_str())
-                    .unwrap()
-                    .to_string()
-            })
+            .map(|row| common::cell_text(row, &secret_id).unwrap().to_string())
             .collect()
     };
 

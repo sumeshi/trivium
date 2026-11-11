@@ -11,7 +11,7 @@ const MAX_BYTES = 16 * MIB;
 function rowWithText(text: string): CachedRow {
   return {
     row_index: 0,
-    data: {},
+
     cells: {},
     flag: "",
     tags: [],

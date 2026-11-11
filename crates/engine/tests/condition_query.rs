@@ -1,6 +1,5 @@
 use std::fs;
 
-use serde_json::json;
 use uuid::Uuid;
 
 use trivium_engine::condition::{Condition, Node, Op};
@@ -87,7 +86,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
     )
     .unwrap();
     assert_eq!(exact.total_filtered_rows, 1);
-    assert_eq!(exact.rows[0].data[&name_id], json!("b"));
+    assert_eq!(common::cell_text(&exact.rows[0], &name_id), Some("b"));
 
     let search_only = ops::rows::query_project_rows(
         &store,
@@ -111,7 +110,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
     )
     .unwrap();
     assert_eq!(both.total_filtered_rows, 1);
-    assert_eq!(both.rows[0].data[&name_id], json!("a"));
+    assert_eq!(common::cell_text(&both.rows[0], &name_id), Some("a"));
 
     let _ = fs::remove_dir_all(root);
 }
