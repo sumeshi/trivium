@@ -2156,3 +2156,74 @@ Recorded: 2026-11-11.
 - T26 acceptance work and T27 measurements were not started.
 
 Next card: T26.
+
+## T26 — exercise the manual review loop in the real app
+
+Recorded: 2026-11-11.
+
+**未完了: 実機確認待ち**
+
+自動化部分は完了: the engine/IPC/save-reopen contracts of the manual loop are
+covered by `crates/engine/tests/manual_loop_test.rs` (6 tests), and the
+acceptance record is `docs/manual-review-acceptance.md`. T26 itself is not
+complete because the Tauri native app could not be built or started here.
+
+### Changes
+
+- **New cross-layer regression suite.** `crates/engine/tests/manual_loop_test.rs`
+  uses `tests/fixtures/manual/t00_source.csv`, `.json`, and `.jsonl`:
+  - CSV display text equals the fixture's original strings for leading zeros,
+    comma, quotes, embedded newline, whitespace, long integers, and the
+    input-derived `flag`/`memo`/`__rowid`/`trivium-memo` columns; an all-row CSV
+    export has the same values.
+  - JSON/JSONL keep i64::MAX, u64::MAX, 2^53+1, i64::MIN, arrays, `a.b` vs
+    `a`→`b`, and null / missing / empty-string distinctions.
+  - A hidden column is usable in a condition and a scoped search, while the page
+    response omits it from both `data` and `cells` (T20a).
+  - A sorted result pages as `[1,2]` then `[0]`; a two-row selection bulk
+    annotation updates exactly rows 0 and 2; `scope=selected` exports those rows
+    in query order (`[2,0]`) with independent `trivium-*` columns (T22/T23).
+  - Flag/memo/tags/bookmark survive `ProjectsStore` recreation; bookmark-only
+    returns 0 rows before any bookmark and 1 row after one; clearing only the
+    bookmark keeps the other fields.
+  - `serde_json::to_value` of the query response carries long integers as
+    plain decimal strings, not JSON numbers (T10).
+- **Acceptance record.** `docs/manual-review-acceptance.md` lists the real-app
+  checklist with three explicit states (自動テストで確認済み /
+  モック・コードレビューで確認 / 実 native アプリで未確認), the environment
+  limits, and the deb-based Kali/Debian procedure.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New manual loop suite | `cargo test -p trivium-engine --test manual_loop_test` | 6 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | 229 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 30 passed, 0 failed |
+
+### Unverified / required next steps
+
+- The native Tauri app was not built or started: this environment has no
+  GTK/WebKitGTK development libraries (`pkg-config --exists gdk-3.0` and
+  `pkg-config --exists webkit2gtk-4.1` both fail), and `sudo` requires a
+  password, so the missing packages cannot be installed. No checkbox in the
+  acceptance record is marked as confirmed in the real app.
+- Remaining real-app checks: opening CSV/JSON/JSONL from the dialog, the full
+  search → details/copy → annotation → selection → export loop, project
+  switching, continuous search typing, save failure, dialog Cancel and
+  in-flight job Cancel, bookmark-only empty state, end-of-result scrolling,
+  complete app exit/reopen, and T20d's 2M-row first/middle/last arrival in the
+  real WebView.
+- 必要な手順: run the `debian.yml` workflow on develop, download the
+  `trivium-deb` artifact, install the `.deb` and launch Trivium on Kali or
+  another Debian desktop, generate the 2M-row fixture with
+  `scripts/gen_fixture.py`, then execute the checklist in
+  `docs/manual-review-acceptance.md` and update the three-state column.
+  Items that fail or remain unconfirmed return their owning card
+  (T05–T07, T11, T13, T20b–T20d, T21–T25) to incomplete.
+
+Next card: T27 after T26 is confirmed in the real app (T27 measurement work is
+not started here).
