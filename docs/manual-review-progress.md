@@ -2225,5 +2225,79 @@ complete because the Tauri native app could not be built or started here.
   Items that fail or remain unconfirmed return their owning card
   (T05–T07, T11, T13, T20b–T20d, T21–T25) to incomplete.
 
-Next card: T27 after T26 is confirmed in the real app (T27 measurement work is
-not started here).
+## T27 — measure speed and memory before deciding completion
+
+Recorded: 2026-11-11.
+
+**測定完了 / 未達 1 件 / 未測定 4 件**
+
+T27 の engine 計測は完了した。ただし実 WebView を含む RSS、UI の描画・入力
+debounce、フロントのページキャッシュ保持量はこの環境では測れない。
+2M 標準 fixture の Rust プロセス単体ピーク RSS は 1226.4MiB で、暫定目標
+1GiB を超えた。T26 の実機確認が残る限り、性能だけを理由にリリース判断は
+しない。
+
+### Changes
+
+- `scripts/gen_fixture.py` に `--variant long` を追加した。120 列、3 列の
+  約 160 文字セル、残りは短い値で、平均 1136.0 B/レコード。乱数 seed と
+  セル生成は決定的。既存の `ascii` / `utf16` / `wide` 出力は旧スクリプトと
+  バイト一致することを確認した。
+- `crates/engine/src/bin/bench.rs` を T27 指標へ入れ替えた。IOC 指標は
+  T25 で通常経路から外れているため削除した。測る項目は import 3 回、
+  案件再開、先頭表示 cold/warm、通常・sort 後ページ、初回検索、同一検索の
+  再表示、フラグ保存、filtered/selected 出力、事前 cancel、結果IDキャッシュ、
+  案件 close 後のキャッシュ解放、`VmHWM`。短い操作は n=20、import と出力は
+  n=3 で p95 を出さない。
+- 各 fixture は同じ bench バイナリの子プロセスで実行し、`VmHWM` を fixture
+  ごとに分離した。補助コードは `crates/engine/src/bin/bench/support.rs`。
+- 実測値と判定は `docs/performance.md` の T27 節に記録した。
+
+### 実測の要約
+
+| fixture | import median (n=3) | 再開 p95 | page move p95 | search warm p95 | flag p95 | ピーク RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| 100k / 7 列 | 206.2ms | 397.1ms | 4.2ms | 6.0ms | 0.31ms | 121.2MiB |
+| 400k / 7 列 | 921.6ms | 1495.2ms | 9.8ms | 9.1ms | 0.24ms | 277.6MiB |
+| 2M / 7 列 | 4330.5ms | 7749.3ms | 6.6ms | 9.4ms | 0.33ms | 1226.4MiB |
+| long 100k / 120 列 | 2382.5ms | 7220.2ms | 56.5ms | 64.2ms | 1.09ms | 687.0MiB |
+
+- 初回の全列部分一致は 100k 98.0ms、400k 385.9ms、2M 1981.3ms、
+  long 100k 1310.0ms。任意ソート（ts 昇順 cold）は 21.5ms、106.3ms、
+  386.7ms、64.9ms。瞬時ではない。
+- 同条件ページ移動・sort 後 warm・同一検索 warm の `resolve_target` は
+  全 fixture で 0 回。結果IDキャッシュは同一 spec の 3 ページで resolve 1 回。
+- フラグ保存 20 回で `project_data_reads` は 0 回。p95 は最大 1.09ms。
+- 案件削除で結果IDキャッシュは 1 エントリ→0、0.763–15.259MiB→0MiB。
+  ただし close 後の VmHWM は下がらず、2M の VmRSS は 927.8MiB 残った。
+- 2M のピーク RSS の主因は、案件再開の `load_project` 全列読み
+  （再開後 973.0MiB）と出力の全列読み（出力後 1188.2MiB）。import 後は
+  101.9MiB で、ストリーミング取込み自体は小さい。
+
+### 目標判定
+
+| 目標 | 判定 |
+|---|---|
+| フラグの画面反映 50ms 程度以内 | **未測定**（engine 保存は達成） |
+| 1件の注釈保存 p95 100ms 以内・全件読込み 0 回 | **達成** |
+| 同条件のページ移動 p95 150ms 以内・再実行 0 回 | **達成** |
+| 同じ検索結果の再表示 p95 200ms 以内 | **達成** |
+| 検索入力から実行まで 200ms 前後の debounce | **未測定**（コード上は 160ms） |
+| 中断要求への反応 通常バッチで 500ms 以内 | **一部達成 / 未測定**（事前 cancel のみ） |
+| フロントのページキャッシュ 5 ページ / 16MiB | **未測定**（設定値のみ） |
+| 結果IDキャッシュ 2 結果 / 64MiB | **達成** |
+| 2M 標準 fixture の全体ピーク RSS 1GiB 以下 | **未達**（Rust のみ 1226.4MiB） |
+
+### Unverified / required next steps
+
+- WebView 関連プロセスを含む RSS は未測定。native アプリを起動できる環境で、
+  Rust と WebView の合計を測る必要がある。
+- UI のフラグ描画時間、検索入力から要求までの実時間、フロントのページ
+  キャッシュ保持量は未測定。
+- バッチ実行途中の Cancel 応答は未測定。今回の値は事前 cancel の
+  チェックポイント到達時間である。
+- T26 の実 native GUI 確認は未完了。性能の達成項目だけでリリース可とは
+  しない。
+
+Next card: T26 の実機確認を完了し、その後 T27 の未測定項目を実アプリ環境で
+補完する。
