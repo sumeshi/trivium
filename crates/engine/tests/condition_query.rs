@@ -14,14 +14,13 @@ fn payload(id: Uuid, search: Option<String>, condition: Option<Node>) -> QueryRo
     QueryRowsPayload {
         project_id: id,
         spec: QuerySpec {
-            search: search,
+            search,
             search_columns: None,
             flag_filter: None,
             sort_key: None,
             sort_direction: None,
-            condition: condition,
+            condition,
             bookmarked_only: None,
-            ..Default::default()
         },
         offset: None,
         limit: None,

@@ -108,7 +108,6 @@ fn filtered_scope_row_count_matches_query_total() {
                 sort_key: None,
                 sort_direction: None,
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

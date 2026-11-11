@@ -125,7 +125,6 @@ fn report_hit_rows_match_query() {
                 sort_direction: Some("desc".to_string()),
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

@@ -106,7 +106,6 @@ fn query_total(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> usize {
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

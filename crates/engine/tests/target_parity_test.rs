@@ -259,7 +259,7 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
         "an unselected annotated row must not change"
     );
     assert!(
-        flags.get(&1).is_none(),
+        !flags.contains_key(&1),
         "an unselected unannotated row must stay untouched"
     );
 

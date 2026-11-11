@@ -203,7 +203,7 @@ fn non_append_changes_fall_back_to_full_evaluation() {
     cached_ioc_outcomes(&project_dir, &df, &[a.clone(), b.clone()]);
 
     // Deletion of the first entry is not an append.
-    assert_matches_full(&project_dir, &df, &[b.clone()]);
+    assert_matches_full(&project_dir, &df, std::slice::from_ref(&b));
     // Insertion at the front is not an append either.
     assert_matches_full(&project_dir, &df, &[c.clone(), a.clone(), b.clone()]);
 

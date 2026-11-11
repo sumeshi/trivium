@@ -300,9 +300,9 @@ fn legacy_width_estimate_scans_only_the_leading_sample() {
         .map(|_| "short".to_string())
         .collect();
     values.push("z".repeat(500));
-    let mut df = DataFrame::new(vec![Series::new("c000001", values)]).expect("build frame");
+    let df = DataFrame::new(vec![Series::new("c000001", values)]).expect("build frame");
 
-    let metrics = compute_column_max_chars(&mut df);
+    let metrics = compute_column_max_chars(&df);
     assert_eq!(
         metrics.get("c000001"),
         Some(&7),

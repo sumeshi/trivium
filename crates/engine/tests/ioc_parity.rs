@@ -112,7 +112,6 @@ fn query_flags(store: &ProjectsStore, id: uuid::Uuid) -> Vec<(String, Option<Str
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

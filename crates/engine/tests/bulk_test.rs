@@ -99,7 +99,7 @@ fn payload(
     BulkAnnotatePayload {
         project_id: id,
         target: target.to_string(),
-        row_indices: row_indices,
+        row_indices,
         preview_token: None,
         spec: QuerySpec {
             search: search.map(|value| value.to_string()),
@@ -138,7 +138,6 @@ fn query(store: &ProjectsStore, id: Uuid, search: Option<&str>) -> QueryRowsResp
                 sort_direction: None,
                 condition: None,
                 bookmarked_only: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

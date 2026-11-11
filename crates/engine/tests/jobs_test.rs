@@ -70,8 +70,7 @@ fn cancel_targets_only_the_requested_job() {
 
     let error = first
         .check_cancelled()
-        .err()
-        .expect("the cancelled job must fail its checkpoint");
+        .expect_err("the cancelled job must fail its checkpoint");
     assert_eq!(error.to_string(), "Cancelled.");
     assert!(second.check_cancelled().is_ok());
 
@@ -170,8 +169,7 @@ fn job_context_observes_cancel_and_emits_progress() {
 
     let error = context
         .check_cancelled()
-        .err()
-        .expect("cancelled context must fail");
+        .expect_err("cancelled context must fail");
     assert_eq!(error.to_string(), "Cancelled.");
 
     let values = emitted.lock().expect("emitted progress");
@@ -197,8 +195,7 @@ fn cancelled_query_stops_before_reading_project_data() {
     };
 
     let error = query_project_rows_with_job(&store, payload, &context)
-        .err()
-        .expect("cancelled query must fail");
+        .expect_err("cancelled query must fail");
     assert_eq!(error.to_string(), "Cancelled.");
 
     // A cancelled import is rejected before touching the selected path.
@@ -215,8 +212,7 @@ fn cancelled_query_stops_before_reading_project_data() {
         },
         &context,
     )
-    .err()
-    .expect("cancelled import must fail");
+    .expect_err("cancelled import must fail");
     assert_eq!(error.to_string(), "Cancelled.");
 
     let _ = std::fs::remove_dir_all(root);

@@ -17,7 +17,7 @@ fn anyvalue_to_search_string_converts_scalar_variants() {
         Some("-8".to_string())
     );
     assert_eq!(
-        anyvalue_to_search_string(&AnyValue::Int64(123_456_789_0123)),
+        anyvalue_to_search_string(&AnyValue::Int64(1_234_567_890_123)),
         Some("1234567890123".to_string())
     );
     assert_eq!(

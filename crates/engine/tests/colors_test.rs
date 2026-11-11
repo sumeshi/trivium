@@ -104,7 +104,6 @@ fn query(store: &ProjectsStore, id: Uuid) -> QueryRowsResponse {
                 sort_key: None,
                 sort_direction: None,
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -126,7 +125,6 @@ fn sorted_query(store: &ProjectsStore, id: Uuid, event_id: &str) -> QueryRowsRes
                 sort_key: Some(event_id.to_string()),
                 sort_direction: Some("asc".to_string()),
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

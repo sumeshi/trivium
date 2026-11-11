@@ -76,13 +76,12 @@ fn query(
             project_id: id,
             spec: QuerySpec {
                 search: search.map(str::to_string),
-                search_columns: search_columns,
+                search_columns,
                 flag_filter: None,
                 bookmarked_only: None,
                 sort_key: None,
                 sort_direction: None,
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,

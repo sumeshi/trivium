@@ -365,7 +365,7 @@ fn restore_annotations_is_explicit_and_keeps_the_columns() {
     let entry = flags.get(&0).expect("row 0 annotation");
     assert_eq!(entry.flag, "critical");
     assert_eq!(entry.memo.as_deref(), Some("memo one"));
-    assert!(flags.get(&1).is_none(), "zero flag and blank memo is no entry");
+    assert!(!flags.contains_key(&1), "zero flag and blank memo is no entry");
 
     let loaded_with = load_project(
         &store,

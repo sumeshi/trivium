@@ -65,7 +65,6 @@ fn sort_search_and_export_keep_i64_max_precision() {
                 sort_key: Some(event_id.clone()),
                 sort_direction: Some("asc".to_string()),
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
@@ -99,7 +98,6 @@ fn sort_search_and_export_keep_i64_max_precision() {
                 sort_key: None,
                 sort_direction: None,
                 condition: None,
-                ..Default::default()
             },
             offset: None,
             limit: None,
