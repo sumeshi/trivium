@@ -197,6 +197,8 @@ fn query_export_and_count_agree_on_flags_and_tags() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");

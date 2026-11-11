@@ -79,6 +79,8 @@ fn default_scope_exports_every_row() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -129,6 +131,8 @@ fn filtered_scope_row_count_matches_query_total() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -168,6 +172,8 @@ fn columns_option_limits_output_columns() {
                 ..Default::default()
             },
             columns: Some(vec![msg_id]),
+            row_indices: None,
+            include_annotations: None,
         },
     );
     let header = exported.lines().next().expect("export must have a header");
@@ -178,6 +184,8 @@ fn columns_option_limits_output_columns() {
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
+            "trivium-tags",
+            "trivium-bookmarked",
             "msg"
         ],
         "only the requested column plus derived trivium columns must remain"
@@ -237,6 +245,8 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     );
     let lines: Vec<&str> = exported.lines().collect();
@@ -247,6 +257,8 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
+            "trivium-tags",
+            "trivium-bookmarked",
             "flag",
             "memo",
             "msg"
@@ -261,23 +273,25 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             "1",
             "0",
             "0",
-            "investigated [alpha]",
+            "investigated",
+            "alpha",
+            "0",
             "safe",
             "original memo one",
             "first message"
         ],
-        "annotation and the original flag/memo/msg values must both be present"
+        "user tags are a separate column and must not be copied into the memo"
     );
 
     let second: Vec<&str> = lines[2].split(',').collect();
-    assert_eq!(second[4], "review", "unannotated input flag must be kept");
-    assert_eq!(second[5], "original memo two", "unannotated input memo must be kept");
-    assert_eq!(second[6], "second message");
+    assert_eq!(second[6], "review", "unannotated input flag must be kept");
+    assert_eq!(second[7], "original memo two", "unannotated input memo must be kept");
+    assert_eq!(second[8], "second message");
 
     let third: Vec<&str> = lines[3].split(',').collect();
-    assert_eq!(third[4], "hold");
-    assert_eq!(third[5], "original memo three");
-    assert_eq!(third[6], "third message");
+    assert_eq!(third[6], "hold");
+    assert_eq!(third[7], "original memo three");
+    assert_eq!(third[8], "third message");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -302,6 +316,8 @@ fn sort_options_reflect_exported_row_order() {
             ..Default::default()
         },
         columns: None,
+        row_indices: None,
+        include_annotations: None,
     };
 
     let asc = run_export(&store, &root, build_payload("asc"));

@@ -1,28 +1,38 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use polars::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::annotations;
 use crate::{
     error::AppError,
-    flags::normalize_flag_value,
-    ioc::{cached_ioc_outcomes, load_ioc_entries},
+    ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome},
     jobs::JobContext,
+    models::{FlagEntry, ProjectMeta},
     ops::query::{data_columns, ordered_row_indices, resolve_target},
-    project_io::{
-        read_project_dataframe, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
-    },
+    project_io::{read_project_dataframe, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID},
     storage::load_flags,
     store::ProjectsStore,
 };
 
-/// Export selection. `scope = "all"` (default) exports every row; `"filtered"`
-/// exports the rows selected by the flattened `QuerySpec`. Input/output column
-/// restriction is `columns`; search scope is `QuerySpec.searchColumns`.
+/// Rows written per CSV batch. Cancellation is checked between batches.
+const EXPORT_BATCH_ROWS: usize = 10_000;
+
+/// Export selection.
+///
+/// `scope = "filtered"` (default) exports the rows selected by the flattened
+/// `QuerySpec`; `"all"` exports every row in the requested sort order;
+/// `"selected"` intersects `rowIndices` with the `QuerySpec` result and keeps
+/// the result order. Input/output column restriction is `columns`; search scope
+/// is `QuerySpec.searchColumns`.
+///
+/// `includeAnnotations = true` (default) adds the independent `trivium-*`
+/// columns. `false` writes only data columns.
 #[derive(Debug, Deserialize)]
 pub struct ExportProjectPayload {
     #[serde(rename = "projectId")]
@@ -35,30 +45,53 @@ pub struct ExportProjectPayload {
     /// Output only these base columns (derived trivium columns are kept).
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    /// Required when `scope = "selected"`. Duplicates are ignored and ids are
+    /// emitted in the applied `QuerySpec` order.
+    #[serde(default, rename = "rowIndices")]
+    pub row_indices: Option<Vec<usize>>,
+    /// Whether to add the derived annotation columns.
+    #[serde(default, rename = "includeAnnotations")]
+    pub include_annotations: Option<bool>,
+}
+
+/// Result of one export.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportResult {
+    /// Number of data rows written (excluding the header).
+    pub rows: usize,
+    /// Header labels in output order.
+    pub columns: Vec<String>,
+    /// Non-fatal notes, such as an annotation column renamed to avoid a
+    /// collision with a data column.
+    pub warnings: Vec<String>,
 }
 
 /// Exports the project data with derived trivium columns to a CSV file.
 pub fn export_project(
     store: &ProjectsStore,
     payload: ExportProjectPayload,
-) -> Result<(), AppError> {
+) -> Result<ExportResult, AppError> {
     export_project_with_job(store, payload, &JobContext::none())
 }
 
 /// [`export_project`] with cancellation checkpoints and progress reporting.
 ///
-/// The destination is not yet written through a temporary file, so a cancel
-/// during the CSV write is only observed after the write; preserving the
-/// destination belongs to T23.
+/// The CSV is written to a sibling temporary file and renamed over the
+/// destination only after every batch, the flush, and a final cancellation
+/// check succeed. A failure or cancellation leaves the previous destination
+/// untouched and removes the temporary file.
 pub fn export_project_with_job(
     store: &ProjectsStore,
     payload: ExportProjectPayload,
     job: &JobContext,
-) -> Result<(), AppError> {
+) -> Result<ExportResult, AppError> {
     job.check_cancelled()?;
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    let destination = PathBuf::from(&payload.destination);
+    ensure_destination_is_not_source(&destination, &meta)?;
+
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     job.report_progress(0, Some(3), Some("Reading project data".into()));
@@ -74,106 +107,22 @@ pub fn export_project_with_job(
     let all_columns = data_columns(&df);
 
     job.report_progress(1, Some(3), Some("Resolving export rows".into()));
-    // Resolve rows and order before touching output columns. The search scope
-    // is `spec.search_columns`, never the output column list.
-    let final_indices: Vec<IdxSize> = if payload.scope.as_deref() == Some("filtered") {
-        resolve_target(
-            &df,
-            &payload.spec,
-            &all_columns,
-            &flags,
-            &ioc_outcomes,
-            job,
-        )?
-        .filtered
-        .into_iter()
-        .map(|row_idx| row_idx as IdxSize)
-        .collect()
-    } else {
-        ordered_row_indices(
-            &df,
-            payload.spec.sort_key.as_deref(),
-            payload.spec.sort_direction.as_deref(),
-        )
-        .into_iter()
-        .map(|row_idx| row_idx as IdxSize)
-        .collect()
-    };
+    let scope = payload.scope.as_deref().unwrap_or("filtered");
+    let final_indices = resolve_export_rows(
+        &df,
+        scope,
+        &payload,
+        &all_columns,
+        &flags,
+        &ioc_outcomes,
+        job,
+    )?;
     job.check_cancelled()?;
 
-    let mut safe_flags: Vec<i32> = vec![0; df.height()];
-    let mut suspicious_flags: Vec<i32> = vec![0; df.height()];
-    let mut critical_flags: Vec<i32> = vec![0; df.height()];
-    let mut memo_series: Vec<String> = vec![String::new(); df.height()];
-
-    for i in 0..df.height() {
-        let outcome = ioc_outcomes.get(i).cloned().unwrap_or_default();
-        let ioc_flag = outcome.flag;
-        let memo_tags = outcome.tags;
-
-        // B2 unified rule: a non-empty user flag wins the flag column; a user
-        // entry with an empty flag (memo-only) does not block the IOC flag.
-        // The user memo always survives, and matched tags are appended.
-        let user_flag = flags
-            .get(&i)
-            .map(|entry| normalize_flag_value(entry.flag.trim()))
-            .unwrap_or_default();
-        let final_flag = if user_flag.is_empty() {
-            ioc_flag
-        } else {
-            user_flag
-        };
-        let mut final_memo = flags
-            .get(&i)
-            .and_then(|entry| entry.memo.clone())
-            .unwrap_or_default();
-
-        for tag in memo_tags {
-            if !final_memo.contains(&tag) {
-                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
-                    final_memo.push(' ');
-                }
-                final_memo.push_str(&tag);
-            }
-        }
-
-        // F19 user tags are exported as `[tag]` tokens after the IOC tags, so
-        // they survive the CSV round trip as memo text. Re-import keeps the
-        // whole memo verbatim (create_project does not parse tags back out),
-        // so the tag becomes part of the memo on import. That is the known
-        // F19 limit; do not change the import-side memo handling for it.
-        let user_tags = flags
-            .get(&i)
-            .map(|entry| entry.tags.clone())
-            .unwrap_or_default();
-        for tag in user_tags {
-            let token = format!("[{}]", tag);
-            if !final_memo.contains(&token) {
-                if !final_memo.is_empty() && !final_memo.ends_with(' ') {
-                    final_memo.push(' ');
-                }
-                final_memo.push_str(&token);
-            }
-        }
-
-        match final_flag.as_str() {
-            "safe" => safe_flags[i] = 1,
-            "suspicious" => suspicious_flags[i] = 1,
-            "critical" => critical_flags[i] = 1,
-            _ => {}
-        }
-        memo_series[i] = final_memo;
-    }
-
-    // Apply the output column restriction after the target and annotations are
-    // fixed. Only the internal row id is removed here. `flag` and `memo` used
-    // to be internal annotation columns, but input CSVs may legitimately have
-    // columns with those names, so dropping them unconditionally erased user
-    // data. Annotation metadata now lives in `flags.json` and is exported as
-    // the `trivium-*` columns below.
+    // Apply the output column restriction after the target is fixed. Only the
+    // internal storage columns are removed; input columns that happen to be
+    // named `flag` or `memo` are ordinary data.
     if let Some(columns) = &payload.columns {
-        // Output columns are ids, never labels. Filtering happens after the
-        // target and annotations are fixed, and internal columns are excluded.
         let selected: Vec<String> = columns
             .iter()
             .filter(|name| all_columns.contains(name))
@@ -189,11 +138,32 @@ pub fn export_project_with_job(
         }
     }
 
+    let data_headers: Vec<String> = df
+        .get_column_names()
+        .iter()
+        .map(|name| project_columns.label(name))
+        .collect();
+    let mut warnings = Vec::new();
+    let include_annotations = payload.include_annotations.unwrap_or(true);
+    let annotation_plan = if include_annotations {
+        annotations::plan_annotation_columns(&data_headers, &df, &mut warnings)
+    } else {
+        Vec::new()
+    };
+
+    let annotation_data = if include_annotations {
+        Some(annotations::build_annotations(&df, &flags, &ioc_outcomes))
+    } else {
+        None
+    };
+
     let mut out_cols: Vec<Series> = Vec::new();
-    out_cols.push(Series::new("trivium-safe", safe_flags));
-    out_cols.push(Series::new("trivium-suspicious", suspicious_flags));
-    out_cols.push(Series::new("trivium-critical", critical_flags));
-    out_cols.push(Series::new("trivium-memo", memo_series));
+    if let Some(annotation_data) = annotation_data {
+        out_cols.extend(annotations::annotation_series(
+            annotation_data,
+            &annotation_plan,
+        ));
+    }
     for name in df.get_column_names() {
         if let Ok(series) = df.column(name) {
             out_cols.push(series.clone());
@@ -201,40 +171,176 @@ pub fn export_project_with_job(
     }
     df = DataFrame::new(out_cols).map_err(|e| AppError::Other(e.into()))?;
 
-    let index_column = IdxCa::from_vec("", final_indices);
+    let index_column = IdxCa::from_vec(
+        "",
+        final_indices.iter().map(|idx| *idx as IdxSize).collect(),
+    );
     df = df
         .take(&index_column)
         .map_err(|e| AppError::Message(format!("Failed to select export rows: {}", e)))?;
 
-    let destination = PathBuf::from(payload.destination);
+    let headers: Vec<String> = annotation_plan
+        .iter()
+        .map(|planned| planned.header.clone())
+        .chain(data_headers)
+        .collect();
+    let rows = df.height();
+
     job.report_progress(2, Some(3), Some("Writing CSV".into()));
-    job.check_cancelled()?;
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create export dir {:?}", parent))
-            .map_err(AppError::from)?;
+    write_csv_atomically(&destination, &headers, &mut df, job)?;
+
+    job.report_progress(3, Some(3), Some("Export complete".into()));
+    Ok(ExportResult {
+        rows,
+        columns: headers,
+        warnings,
+    })
+}
+
+fn resolve_export_rows(
+    df: &DataFrame,
+    scope: &str,
+    payload: &ExportProjectPayload,
+    all_columns: &[String],
+    flags: &std::collections::HashMap<usize, FlagEntry>,
+    ioc_outcomes: &[IocRowOutcome],
+    job: &JobContext,
+) -> Result<Vec<usize>, AppError> {
+    match scope {
+        "all" => Ok(ordered_row_indices(
+            df,
+            payload.spec.sort_key.as_deref(),
+            payload.spec.sort_direction.as_deref(),
+        )),
+        "filtered" => {
+            Ok(resolve_target(df, &payload.spec, all_columns, flags, ioc_outcomes, job)?.filtered)
+        }
+        "selected" => {
+            let requested = payload
+                .row_indices
+                .as_ref()
+                .ok_or_else(|| AppError::Message("Selected export requires row indices.".into()))?;
+            if requested.is_empty() {
+                return Err(AppError::Message(
+                    "Select at least one row to export.".into(),
+                ));
+            }
+            if let Some(invalid) = requested.iter().find(|idx| **idx >= df.height()) {
+                return Err(AppError::Message(format!(
+                    "Selected row id {} is out of range.",
+                    invalid
+                )));
+            }
+            let selected: HashSet<usize> = requested.iter().copied().collect();
+            // The QuerySpec result is the base order. Selected ids outside the
+            // current result are dropped rather than falling back to another
+            // scope.
+            Ok(
+                resolve_target(df, &payload.spec, all_columns, flags, ioc_outcomes, job)?
+                    .filtered
+                    .into_iter()
+                    .filter(|idx| selected.contains(idx))
+                    .collect(),
+            )
+        }
+        other => Err(AppError::Message(format!(
+            "Unknown export scope: {}.",
+            other
+        ))),
+    }
+}
+
+fn canonical_path(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = fs::canonicalize(path) {
+        return Some(canonical);
+    }
+    let file_name = path.file_name()?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    Some(fs::canonicalize(parent).ok()?.join(file_name))
+}
+
+fn ensure_destination_is_not_source(
+    destination: &Path,
+    meta: &ProjectMeta,
+) -> Result<(), AppError> {
+    let Some(source) = &meta.source_path else {
+        return Ok(());
+    };
+    let source = PathBuf::from(source);
+    let source = fs::canonicalize(&source).unwrap_or(source);
+    let Some(destination) = canonical_path(destination) else {
+        return Ok(());
+    };
+    if destination == source {
+        return Err(AppError::Message(
+            "Choose a different file name: the destination is the source evidence file.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Removes the temporary file on every path that does not commit it.
+struct PendingFile {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl PendingFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path, keep: true }
     }
 
-    // Export headers are display labels, not internal ids. Duplicate labels
-    // are written as-is until T23 adds the id correspondence metadata.
-    let headers: Vec<String> = df
-        .get_column_names()
-        .iter()
-        .map(|name| project_columns.label(name))
-        .collect();
+    fn disarm(&mut self) {
+        self.keep = false;
+    }
+}
 
-    let file = File::create(&destination)
-        .with_context(|| format!("failed to create export file {:?}", destination))
+impl Drop for PendingFile {
+    fn drop(&mut self) {
+        if self.keep {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn write_csv_atomically(
+    destination: &Path,
+    headers: &[String],
+    df: &mut DataFrame,
+    job: &JobContext,
+) -> Result<(), AppError> {
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create export dir {:?}", parent))
+        .map_err(AppError::from)?;
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| AppError::Message("Export destination has no file name.".into()))?;
+    let temp_path = parent.join(format!(
+        "{}.tmp.{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+    let mut pending = PendingFile::new(temp_path.clone());
+
+    let file = File::create(&temp_path)
+        .with_context(|| format!("failed to create export file {:?}", temp_path))
         .map_err(AppError::from)?;
     let mut writer = BufWriter::new(file);
 
     // Polars rejects duplicate DataFrame column names, so write the header
-    // separately to keep duplicate display labels intact.
+    // separately to keep duplicate source display labels intact.
     let mut header_bytes = Vec::new();
     {
         let mut header_writer = csv::Writer::from_writer(&mut header_bytes);
         header_writer
-            .write_record(&headers)
+            .write_record(headers)
             .context("failed to write export CSV header")?;
         header_writer
             .flush()
@@ -244,16 +350,29 @@ pub fn export_project_with_job(
         .write_all(&header_bytes)
         .context("failed to write export CSV header")?;
 
-    let mut writer = CsvWriter::new(writer).include_header(false);
-    let mut df_out = df.clone();
+    let mut written = 0usize;
+    while written < df.height() {
+        job.check_cancelled()?;
+        let len = EXPORT_BATCH_ROWS.min(df.height() - written);
+        let mut batch = df.slice(written as i64, len);
+        CsvWriter::new(&mut writer)
+            .include_header(false)
+            .finish(&mut batch)
+            .context("failed to write export CSV")
+            .map_err(AppError::from)?;
+        written += len;
+    }
     writer
-        .finish(&mut df_out)
-        .context("failed to write export CSV")
+        .flush()
+        .context("failed to flush export CSV")
         .map_err(AppError::from)?;
+    drop(writer);
 
-    // A cancel during the write is only observed here. The destination may
-    // already be complete; T23 adds a temporary file and atomic replacement.
+    // The last cancellation point before the existing destination changes.
     job.check_cancelled()?;
-    job.report_progress(3, Some(3), Some("Export complete".into()));
+    fs::rename(&temp_path, destination)
+        .with_context(|| format!("failed to finalize export file {:?}", destination))
+        .map_err(AppError::from)?;
+    pending.disarm();
     Ok(())
 }

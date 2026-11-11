@@ -127,6 +127,8 @@ fn sort_search_and_export_keep_i64_max_precision() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");

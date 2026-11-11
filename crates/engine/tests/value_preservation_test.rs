@@ -120,6 +120,8 @@ fn csv_cell_text_is_stored_and_exported_verbatim() {
             scope: None,
             spec: QuerySpec::default(),
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export");

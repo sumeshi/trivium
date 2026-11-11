@@ -300,6 +300,12 @@ pub fn create_project_with_job(
             .map(|name| name.to_string_lossy().to_string()),
         source_format: Some(source_format.to_string()),
         source_size: Some(copied.size),
+        source_path: Some(
+            fs::canonicalize(&source_path)
+                .unwrap_or_else(|_| source_path.clone())
+                .to_string_lossy()
+                .to_string(),
+        ),
         hidden_columns: Vec::new(),
         // New projects always use internal column ids and the `__original`
         // record column. Legacy version 0 projects are only read.

@@ -335,10 +335,18 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
 }
 
 #[test]
-fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
+fn export_writes_user_tags_as_a_separate_column_and_reimport_restores_them() {
     let (root, store, id, _ids) = setup();
 
-    update(&store, id, 0, "safe", Some("manual note"), Some(vec!["pc"]), None);
+    update(
+        &store,
+        id,
+        0,
+        "safe",
+        Some("manual note"),
+        Some(vec!["pc"]),
+        Some(true),
+    );
 
     let destination = root.join("exported.csv");
     ops::export::export_project(
@@ -355,16 +363,38 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");
 
     let exported = fs::read_to_string(&destination).expect("failed to read export");
-    assert!(exported.contains("[pc]"), "export must contain the user tag");
-    assert!(exported.contains("manual note"));
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_reader(exported.as_bytes());
+    let headers = reader.headers().expect("headers").clone();
+    let tag_index = headers
+        .iter()
+        .position(|header| header == "trivium-tags")
+        .expect("tags column");
+    let bookmark_index = headers
+        .iter()
+        .position(|header| header == "trivium-bookmarked")
+        .expect("bookmark column");
+    let memo_index = headers
+        .iter()
+        .position(|header| header == "trivium-memo")
+        .expect("memo column");
+    let first = reader.records().next().expect("row").expect("record");
+    assert_eq!(&first[tag_index], "pc");
+    assert_eq!(&first[bookmark_index], "1");
+    assert_eq!(
+        &first[memo_index], "manual note",
+        "user tags must not be copied into the memo"
+    );
 
-    // Known F19 limit: import keeps the whole memo text and does not rebuild
-    // tags. The tag therefore survives as part of the memo.
+    // The explicit annotation restore reads the independent columns back.
     let reimported = ops::projects::create_project(
         &store,
         CreateProjectPayload {
@@ -380,12 +410,9 @@ fn export_writes_user_tags_and_reimport_keeps_them_as_memo_text() {
         .into_iter()
         .find(|row| row.row_index == 0)
         .expect("reimported row missing");
-    assert!(row
-        .memo
-        .as_deref()
-        .unwrap_or_default()
-        .contains("[pc]"));
-    assert!(row.tags.is_empty(), "import must not rebuild tags");
+    assert_eq!(row.memo.as_deref(), Some("manual note"));
+    assert_eq!(row.tags, vec!["pc".to_string()]);
+    assert!(row.bookmarked);
 
     let _ = fs::remove_dir_all(root);
 }

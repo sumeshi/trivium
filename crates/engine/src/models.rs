@@ -57,6 +57,11 @@ pub struct ProjectMeta {
     /// Size of the imported bytes. The recorded hash covers the same bytes.
     #[serde(default)]
     pub source_size: Option<u64>,
+    /// Absolute path of the evidence file as it was when the project was
+    /// created. Export refuses to overwrite this file. Legacy projects and
+    /// hand-built fixtures have none.
+    #[serde(default)]
+    pub source_path: Option<String>,
     pub hidden_columns: Vec<String>,
     /// 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
     #[serde(default)]

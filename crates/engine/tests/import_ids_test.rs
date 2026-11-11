@@ -71,6 +71,8 @@ fn export(store: &ProjectsStore, id: Uuid, destination: &Path, columns: Option<V
             scope: None,
             spec: QuerySpec::default(),
             columns,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");
@@ -272,8 +274,10 @@ fn csv_original_cells_and_duplicate_columns_keep_their_values() {
         vec![
             "trivium-safe",
             "trivium-suspicious",
-            "trivium-critical",
-            "trivium-memo",
+            "trivium-critical_2",
+            "trivium-memo_2",
+            "trivium-tags",
+            "trivium-bookmarked",
             "msg",
             "msg",
             "column 3",
@@ -287,24 +291,24 @@ fn csv_original_cells_and_duplicate_columns_keep_their_values() {
             "spaced",
             "bigint"
         ],
-        "headers are labels and both duplicate msg columns survive"
+        "headers are labels, both duplicate msg columns survive, and derived columns aliased"
     );
     assert!(
         !rows[0].iter().any(|header| header == "__original"),
         "the internal original record column must not be exported"
     );
-    assert_eq!(rows[1][4], "first");
-    assert_eq!(rows[1][5], "second");
-    assert_eq!(rows[1][7], "row-zero");
-    assert_eq!(rows[1][8], "memo one");
-    assert_eq!(rows[1][11], "a,b");
-    assert_eq!(rows[1][12], "say \"hi\"");
-    assert_eq!(rows[1][13], "line1\nline2");
-    assert_eq!(rows[1][14], "  padded  ");
-    assert_eq!(rows[1][15], "9007199254740993");
-    assert_eq!(rows[2][4], "alpha");
-    assert_eq!(rows[2][5], "beta");
-    assert_eq!(rows[2][7], "row-one");
+    assert_eq!(rows[1][6], "first");
+    assert_eq!(rows[1][7], "second");
+    assert_eq!(rows[1][9], "row-zero");
+    assert_eq!(rows[1][10], "memo one");
+    assert_eq!(rows[1][13], "a,b");
+    assert_eq!(rows[1][14], "say \"hi\"");
+    assert_eq!(rows[1][15], "line1\nline2");
+    assert_eq!(rows[1][16], "  padded  ");
+    assert_eq!(rows[1][17], "9007199254740993");
+    assert_eq!(rows[2][6], "alpha");
+    assert_eq!(rows[2][7], "beta");
+    assert_eq!(rows[2][9], "row-one");
 
     let msg_only = export(
         &store,

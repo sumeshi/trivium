@@ -83,6 +83,7 @@ fn create_new_format_project(root: &Path) -> (ProjectsStore, Uuid) {
         source_file_name: None,
         source_format: None,
         source_size: None,
+        source_path: None,
         hidden_columns: Vec::new(),
         storage_version: 2,
         columns: vec![
@@ -272,6 +273,8 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
             scope: Some("all".to_string()),
             spec: QuerySpec::default(),
             columns: Some(vec!["c000002".to_string(), "c000001".to_string()]),
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");
@@ -297,13 +300,15 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
+            "trivium-tags",
+            "trivium-bookmarked",
             "name",
             "name"
         ]
     );
     assert_eq!(records.len(), 4, "header plus three rows");
-    assert_eq!(&records[1][4], "x");
-    assert_eq!(&records[1][5], "alpha");
+    assert_eq!(&records[1][6], "x");
+    assert_eq!(&records[1][7], "alpha");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -339,6 +344,7 @@ fn legacy_project_loads_with_synthesized_column_metadata() {
             source_file_name: None,
             source_format: None,
             source_size: None,
+            source_path: None,
             hidden_columns: Vec::new(),
             storage_version: 0,
             columns: Vec::new(),

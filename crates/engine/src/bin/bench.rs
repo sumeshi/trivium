@@ -88,9 +88,11 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
             ExportProjectPayload {
                 project_id: id,
                 destination: root.join("bench-export.csv").to_string_lossy().to_string(),
-                scope: None,
+                scope: Some("all".to_string()),
                 spec: Default::default(),
                 columns: None,
+                row_indices: None,
+                include_annotations: None,
             },
         )
     })?;

@@ -130,6 +130,8 @@ fn export_column(
             scope: Some(scope.to_string()),
             spec,
             columns: Some(columns),
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");

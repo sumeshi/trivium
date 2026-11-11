@@ -66,11 +66,13 @@ export interface HiddenColumnsArgs {
   hiddenColumns: string[];
 }
 
+export type ExportScope = "all" | "filtered" | "selected";
+
 export interface ExportProjectArgs {
   projectId: string;
   destination?: string;
-  /** `"all"` (default) exports every row; `"filtered"` uses the query fields. */
-  scope?: "all" | "filtered";
+  /** `"filtered"` (default) uses the query fields; `"selected"` intersects `rowIndices`. */
+  scope?: ExportScope;
   search?: string;
   searchColumns?: string[];
   condition?: ConditionNode | null;
@@ -80,6 +82,19 @@ export interface ExportProjectArgs {
   sortDirection?: "asc" | "desc";
   /** Output columns only; search scope is `searchColumns`. */
   columns?: string[];
+  /** Required for the `"selected"` scope. Ids keep the query result order. */
+  rowIndices?: number[];
+  /** Adds the independent `trivium-*` columns; defaults to true. */
+  includeAnnotations?: boolean;
+}
+
+export interface ExportResult {
+  /** Data rows written, excluding the header. */
+  rows: number;
+  /** Header labels in output order. */
+  columns: string[];
+  /** Non-fatal notes, such as an annotation column renamed to avoid a clash. */
+  warnings: string[];
 }
 
 export interface SaveIocsArgs {
@@ -248,7 +263,7 @@ export interface Backend {
   saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse>;
   updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult>;
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void>;
-  exportProject(args: ExportProjectArgs): Promise<void>;
+  exportProject(args: ExportProjectArgs): Promise<ExportResult>;
   /** Requests cancellation of one running job; `false` means it already ended. */
   cancelJob(jobId: number): Promise<boolean>;
   /** Lists running background jobs. */
@@ -542,7 +557,7 @@ class NativeBackend implements Backend {
     });
   }
 
-  exportProject(args: ExportProjectArgs): Promise<void> {
+  exportProject(args: ExportProjectArgs): Promise<ExportResult> {
     if (!args.destination) {
       return Promise.reject(
         new Error("Destination path is required to export a project.")
@@ -552,7 +567,7 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
-        scope: args.scope ?? "all",
+        scope: args.scope ?? "filtered",
         search: args.search ?? null,
         searchColumns: args.searchColumns ?? null,
         condition: args.condition ?? null,
@@ -561,6 +576,8 @@ class NativeBackend implements Backend {
         sortKey: args.sortKey ?? null,
         sortDirection: args.sortDirection ?? null,
         columns: args.columns ?? null,
+        rowIndices: args.rowIndices ?? null,
+        includeAnnotations: args.includeAnnotations ?? true,
       },
     });
   }

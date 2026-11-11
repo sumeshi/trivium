@@ -89,6 +89,8 @@ struct FlagColumns {
     suspicious: Option<usize>,
     critical: Option<usize>,
     memo: Option<usize>,
+    tags: Option<usize>,
+    bookmarked: Option<usize>,
 }
 
 impl FlagColumns {
@@ -105,6 +107,8 @@ impl FlagColumns {
             suspicious: Self::find(columns, "trivium-suspicious"),
             critical: Self::find(columns, "trivium-critical"),
             memo: Self::find(columns, "trivium-memo"),
+            tags: Self::find(columns, "trivium-tags"),
+            bookmarked: Self::find(columns, "trivium-bookmarked"),
         }
     }
 
@@ -113,6 +117,8 @@ impl FlagColumns {
             || self.suspicious.is_some()
             || self.critical.is_some()
             || self.memo.is_some()
+            || self.tags.is_some()
+            || self.bookmarked.is_some()
     }
 }
 
@@ -135,14 +141,32 @@ fn flag_entry(columns: FlagColumns, record: &csv::StringRecord) -> Option<FlagEn
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string);
-    if flag.is_empty() && memo_value.is_none() {
+    // `trivium-tags` is a `;`-separated list. A tag that itself contains `;`
+    // is split on re-import; the export format has no escaping for it.
+    let tags: Vec<String> = columns
+        .tags
+        .and_then(|column| record.get(column))
+        .map(|text| {
+            text.split(';')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let bookmarked = columns
+        .bookmarked
+        .and_then(|column| record.get(column))
+        .map(|text| text.trim() == "1")
+        .unwrap_or(false);
+    if flag.is_empty() && memo_value.is_none() && tags.is_empty() && !bookmarked {
         return None;
     }
     Some(FlagEntry {
         flag,
         memo: memo_value,
-        tags: Vec::new(),
-        bookmarked: false,
+        tags,
+        bookmarked,
     })
 }
 

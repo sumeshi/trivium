@@ -1387,6 +1387,8 @@ fn export_and_reimport_roundtrip() {
                 ..Default::default()
             },
             columns: None,
+            row_indices: None,
+            include_annotations: None,
         },
     )
     .expect("export failed");

@@ -94,6 +94,33 @@ export type AppliedFilters = {
   condition: ConditionNode | null;
 };
 
+/**
+ * Frozen output target captured when the export dialog opens. Background
+ * search edits must not change what the dialog is about to write.
+ */
+export type ExportSnapshot = {
+  search: string;
+  searchColumns: string[];
+  condition: ConditionNode | null;
+  flagFilter: FlagFilterValue;
+  bookmarkedOnly: boolean;
+  sortKey: string | null;
+  sortDirection: "asc" | "desc";
+  /** Original row ids of the explicit selection at dialog open. */
+  rowIndices: number[];
+  totalRows: number;
+  totalFilteredRows: number;
+  selectedCount: number;
+  /** Visible data column ids for the "Visible columns" option. */
+  visibleColumns: string[];
+};
+
+export type ExportOptions = {
+  scope: "all" | "filtered" | "selected";
+  useVisibleColumns: boolean;
+  includeAnnotations: boolean;
+};
+
 export const projectDetail = writable<LoadProjectResponse | null>(null);
 export const backend = writable<Backend | null>(null);
 

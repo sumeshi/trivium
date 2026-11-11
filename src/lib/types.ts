@@ -20,6 +20,8 @@ export interface ProjectMeta {
   source_file_name?: string | null;
   source_format?: "csv" | "json" | "jsonl" | "ndjson" | string | null;
   source_size?: number | null;
+  /** Absolute path of the evidence file when the project was created. */
+  source_path?: string | null;
   hidden_columns: string[];
   storage_version?: number;
   columns?: ColumnMeta[];

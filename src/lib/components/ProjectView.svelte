@@ -6,6 +6,7 @@
   import IocManagerDialog from './project_view/IocManagerDialog.svelte';
   import MemoEditorDialog from './project_view/MemoEditorDialog.svelte';
   import ExpandedCellDialog from './project_view/ExpandedCellDialog.svelte';
+  import ExportDialog from './project_view/ExportDialog.svelte';
   import FilterControls from './project_view/FilterControls.svelte';
   import TimelinePanel from './project_view/TimelinePanel.svelte';
   import type { IocEntry, LoadProjectResponse, ProjectRow } from '../types';
@@ -84,13 +85,16 @@
     registerLoadedPage,
     resetPageCache,
     touchPage,
-    syncSelectionScope
+    syncSelectionScope,
+    selectedRowIds
   } from './project_view/state';
 import type {
     FlagFilterValue,
     CachedRow,
     VirtualRow,
-    AppliedFilters
+    AppliedFilters,
+    ExportOptions,
+    ExportSnapshot
   } from './project_view/state';
   import {
     clampRow,
@@ -140,6 +144,7 @@ import type {
 
   let columnWidths: Map<string, number> = new Map();
   let activeFilters: AppliedFilters = { search: '', flag: 'all', bookmarkedOnly: false, searchColumns: [], condition: null };
+  let exportSnapshot: ExportSnapshot | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
 
@@ -846,7 +851,36 @@ import type {
     iocManagerOpen.set(false);
   };
 
-  const exportProject = async () => {
+  /**
+   * Captures the applied QuerySpec and selection once, when the dialog opens.
+   * Debounced search input or later edits must not change the exported rows.
+   */
+  const openExportDialog = () => {
+    if (!projectDetail) {
+      return;
+    }
+    exportSnapshot = {
+      search: activeFilters.search,
+      searchColumns: [...activeFilters.searchColumns],
+      condition: activeFilters.condition,
+      flagFilter: activeFilters.flag,
+      bookmarkedOnly: activeFilters.bookmarkedOnly,
+      sortKey: $sortKey,
+      sortDirection: $sortDirection,
+      rowIndices: Array.from($selectedRowIds),
+      totalRows: $totalRows,
+      totalFilteredRows: $totalFilteredRows,
+      selectedCount: $selectedRowIds.size,
+      visibleColumns: [...$visibleColumns]
+    };
+  };
+
+  const runExport = async (options: ExportOptions) => {
+    const snapshot = exportSnapshot;
+    exportSnapshot = null;
+    if (!snapshot || !projectDetail) {
+      return;
+    }
     isExporting.set(true);
     try {
       const baseName = projectDetail.project.meta.name || 'trivium-export.csv';
@@ -858,14 +892,28 @@ import type {
         defaultPath: suggested
       });
       if (!selected) {
-        isExporting.set(false);
         return;
       }
-      await backend.exportProject({
+      const result = await backend.exportProject({
         projectId: projectDetail.project.meta.id,
-        destination: selected
+        destination: selected,
+        scope: options.scope,
+        search: snapshot.search,
+        searchColumns: snapshot.searchColumns,
+        condition: snapshot.condition,
+        flagFilter: snapshot.flagFilter,
+        bookmarkedOnly: snapshot.bookmarkedOnly,
+        sortKey: snapshot.sortKey,
+        sortDirection: snapshot.sortDirection,
+        ...(options.scope === 'selected' ? { rowIndices: snapshot.rowIndices } : {}),
+        ...(options.useVisibleColumns ? { columns: snapshot.visibleColumns } : {}),
+        includeAnnotations: options.includeAnnotations
       });
-      dispatch('notify', { message: 'Exported CSV with flags and memos.', tone: 'success' });
+      const warnings = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
+      dispatch('notify', {
+        message: `Exported ${result.rows} rows to CSV.${warnings}`,
+        tone: 'success'
+      });
     } catch (error) {
       console.error(error);
       dispatch('notify', { message: 'Failed to export CSV.', tone: 'error' });
@@ -905,7 +953,9 @@ import type {
       if (event.key === 'Escape') {
         columnsOpen = false;
         flagMenuOpen = false;
-        if ($iocManagerOpen) {
+        if (exportSnapshot) {
+          exportSnapshot = null;
+        } else if ($iocManagerOpen) {
           closeIocManager();
         } else if ($memoEditor) {
           memoEditor.set(null);
@@ -986,7 +1036,7 @@ import type {
 </script>
 
 <section class="project-view">
-  <FilterControls on:iocManagerOpen={openIocManager} on:export={exportProject} on:refresh={() => dispatch('refresh')} />
+  <FilterControls on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={() => dispatch('refresh')} />
 
   <div class="row-jump" role="group" aria-label="Go to result row">
     <label class="row-jump-field">
@@ -1044,6 +1094,14 @@ import type {
   <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
   <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')} />
+
+  {#if exportSnapshot}
+    <ExportDialog
+      snapshot={exportSnapshot}
+      on:close={() => (exportSnapshot = null)}
+      on:export={(event) => void runExport(event.detail)}
+    />
+  {/if}
 
   <DataTable {columnWidths} on:notify={(e) => dispatch('notify', e.detail)} />
 </section>
