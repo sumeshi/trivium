@@ -229,7 +229,10 @@ export interface GroupTreeArgs {
   projectId: string;
   groupColumns: string[];
   search?: string;
+  searchColumns?: string[];
   flagFilter?: FlagFilterValue;
+  bookmarkedOnly?: boolean;
+  /** Deprecated visible-column field; `searchColumns` takes precedence. */
   columns?: string[];
   condition?: ConditionNode | null;
 }
@@ -448,7 +451,9 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
         columns: args.columns ?? null,
         condition: args.condition ?? null,
         groupColumns: args.groupColumns,
