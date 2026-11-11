@@ -9,7 +9,7 @@ use crate::error::AppError;
 use crate::import::utf16::{detect_bom, Encoding, Utf16Reader};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
-use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID};
+use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
 use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 /// Maximum number of records in one import batch. The byte limit can stop a
@@ -54,13 +54,15 @@ impl BatchLimits {
 }
 
 /// Maps a delimiter option string to a single-byte polars separator.
-/// An empty string represents polars' automatic detection.
+///
+/// The plan fixes an empty or omitted option to a comma; automatic detection
+/// is not offered because it is not implemented as a user-visible choice.
 pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> {
     let Some(text) = delimiter else {
-        return Ok(None);
+        return Ok(Some(b','));
     };
     if text.is_empty() {
-        return Ok(None);
+        return Ok(Some(b','));
     }
     match text {
         "\t" => return Ok(Some(b'\t')),
@@ -306,6 +308,7 @@ impl CsvImporter {
         let mut cells: Vec<Vec<String>> = vec![Vec::new(); column_meta.len()];
         let mut originals: Vec<String> = Vec::new();
         let mut row_ids: Vec<i64> = Vec::new();
+        let mut source_records: Vec<i64> = Vec::new();
         let mut estimated_bytes = 0usize;
         let mut batch_rows = 0usize;
         let mut exhausted = false;
@@ -357,6 +360,14 @@ impl CsvImporter {
                 estimated_bytes += original.len() + 8;
                 originals.push(original);
                 row_ids.push(row_index as i64);
+                // Physical line of the record's first field. The csv reader
+                // accounts for quotes and embedded newlines.
+                source_records.push(
+                    record
+                        .position()
+                        .map(|position| position.line() as i64)
+                        .unwrap_or((row_index as i64) + 2),
+                );
 
                 if *restore_annotations && flag_columns.any() {
                     if let Some(entry) = flag_entry(*flag_columns, &record) {
@@ -385,6 +396,7 @@ impl CsvImporter {
         }
         series.push(Series::new(INTERNAL_ORIGINAL, originals));
         series.push(Series::new(INTERNAL_ROW_ID, row_ids));
+        series.push(Series::new(INTERNAL_SOURCE_RECORD, source_records));
         let frame = DataFrame::new(series)
             .map_err(|_| AppError::Message("Failed to build the dataset.".into()))?;
 
@@ -409,6 +421,10 @@ fn empty_frame(columns: &[ColumnMeta]) -> Result<DataFrame, AppError> {
         .collect();
     series.push(Series::new(INTERNAL_ORIGINAL, Vec::<String>::new()));
     series.push(Series::new(INTERNAL_ROW_ID, Vec::<i64>::new()));
+    series.push(Series::new(
+        INTERNAL_SOURCE_RECORD,
+        Vec::<i64>::new(),
+    ));
     DataFrame::new(series).map_err(|_| AppError::Message("Failed to build the dataset.".into()))
 }
 

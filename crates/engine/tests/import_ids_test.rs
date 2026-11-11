@@ -13,7 +13,9 @@ use trivium_engine::condition::{Condition, Node, Op};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::projects::{create_project, load_project, CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
-use trivium_engine::project_io::read_original_records;
+use trivium_engine::project_io::{
+    read_original_records, read_project_dataframe, INTERNAL_SOURCE_RECORD,
+};
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
@@ -506,6 +508,45 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     let nested_index = header.iter().position(|name| name == "a/b").unwrap();
     assert_eq!(rows[1][literal_index], "1");
     assert_eq!(rows[1][nested_index], "2");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn source_records(store: &ProjectsStore, id: Uuid) -> Vec<i64> {
+    let df = read_project_dataframe(&store.project_dir(&id).join("data.parquet"))
+        .expect("read project data");
+    df.column(INTERNAL_SOURCE_RECORD)
+        .expect("source record column")
+        .i64()
+        .expect("integer source records")
+        .into_no_null_iter()
+        .collect()
+}
+
+#[test]
+fn source_record_numbers_survive_csv_and_json_import() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("store");
+
+    // Header line 1; the first record starts on line 2 and spans lines 2-3
+    // because of the embedded newline; the second record starts on line 4.
+    let csv_path = root.join("records.csv");
+    fs::write(&csv_path, "id,msg\n0,\"line\nbreak\"\n1,ok\n").expect("write csv");
+    let csv_id = create(&store, &csv_path, None).meta.id;
+    assert_eq!(source_records(&store, csv_id), vec![2, 4]);
+
+    // Blank JSONL lines are ignored as records but still advance the physical
+    // line number used for errors.
+    let jsonl_path = root.join("records.jsonl");
+    fs::write(&jsonl_path, "{\"id\":1}\n\n{\"id\":2}\n").expect("write jsonl");
+    let jsonl_id = create(&store, &jsonl_path, None).meta.id;
+    assert_eq!(source_records(&store, jsonl_id), vec![1, 3]);
+
+    // JSON array elements use their 1-based element number.
+    let json_path = root.join("records.json");
+    fs::write(&json_path, "[{\"id\":1},{\"id\":2}]").expect("write json");
+    let json_id = create(&store, &json_path, None).meta.id;
+    assert_eq!(source_records(&store, json_id), vec![1, 2]);
 
     let _ = fs::remove_dir_all(root);
 }

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use trivium_engine::import::csv;
 use trivium_engine::ops;
+use trivium_engine::project_io::is_internal_column;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::store::ProjectsStore;
 
@@ -121,13 +122,13 @@ macro_rules! column_count {
     ($df:expr) => {
         $df.get_column_names()
             .into_iter()
-            .filter(|name| *name != "__rowid" && *name != "__original")
+            .filter(|name| !is_internal_column(name))
             .count()
     };
 }
 
 #[test]
-fn comma_fixture_loads_with_automatic_delimiter() {
+fn comma_fixture_loads_with_default_delimiter() {
     let root = temp_root();
     let path = write_fixture(&root, "comma.csv", ',');
 
@@ -187,8 +188,15 @@ fn wrong_delimiter_never_yields_seven_columns() {
 
 #[test]
 fn build_delimiter_maps_options_to_bytes() {
-    assert_eq!(csv::build_delimiter(None).expect("none"), None);
-    assert_eq!(csv::build_delimiter(Some("")).expect("empty"), None);
+    // The plan fixes no selection/empty to a comma, not auto-detection.
+    assert_eq!(
+        csv::build_delimiter(None).expect("none"),
+        Some(b',')
+    );
+    assert_eq!(
+        csv::build_delimiter(Some("")).expect("empty"),
+        Some(b',')
+    );
     assert_eq!(
         csv::build_delimiter(Some("\t")).expect("tab"),
         Some(b'\t')

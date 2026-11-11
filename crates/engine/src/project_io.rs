@@ -20,11 +20,16 @@ pub const INTERNAL_ROW_ID: &str = "__rowid";
 /// Original record JSON column. Only the new storage format writes it; legacy
 /// projects keep the source only in the flattened, typed columns.
 pub const INTERNAL_ORIGINAL: &str = "__original";
+/// Source record location for each imported row: the physical CSV/JSONL line
+/// number or the 1-based JSON array element. Kept so an import error or a
+/// later review can point back to the original record even when blank lines or
+/// embedded newlines make the row id differ from the source location.
+pub const INTERNAL_SOURCE_RECORD: &str = "__source_record";
 
 /// Internal columns are never part of the data column list, search scope,
 /// output columns, or analysis inputs.
 pub fn is_internal_column(name: &str) -> bool {
-    name == INTERNAL_ROW_ID || name == INTERNAL_ORIGINAL
+    name == INTERNAL_ROW_ID || name == INTERNAL_ORIGINAL || name == INTERNAL_SOURCE_RECORD
 }
 
 /// Number of [`read_project_dataframe`] calls since process start.
@@ -229,7 +234,7 @@ pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {
 /// [`write_batch`](Self::write_batch) call as its own row group and only
 /// writes the footer on [`finish`](Self::finish). The schema is fixed from the
 /// CSV header so every batch has the same columns: the imported data columns,
-/// then `__original`, then `__rowid`.
+/// then `__original`, `__rowid`, and `__source_record`.
 pub struct BatchDataWriter {
     inner: BatchedWriter<BufWriter<File>>,
 }
@@ -242,6 +247,7 @@ impl BatchDataWriter {
             .chain([
                 Field::new(INTERNAL_ORIGINAL, DataType::String),
                 Field::new(INTERNAL_ROW_ID, DataType::Int64),
+                Field::new(INTERNAL_SOURCE_RECORD, DataType::Int64),
             ])
             .collect();
         let schema: Schema = fields.into_iter().collect();

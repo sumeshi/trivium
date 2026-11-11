@@ -8,7 +8,7 @@ use crate::error::AppError;
 use crate::import::json_source::{for_each_record, value_to_cell, visit_leaves};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
-use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID};
+use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
 use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 pub use crate::import::json_source::RecordFormat;
@@ -194,11 +194,12 @@ impl JsonImporter {
         let mut cells: Vec<Vec<Option<String>>> = vec![Vec::new(); columns.len()];
         let mut originals: Vec<String> = Vec::new();
         let mut row_ids: Vec<i64> = Vec::new();
+        let mut source_records: Vec<i64> = Vec::new();
         let mut rows_read = 0usize;
         let mut batch_rows = 0usize;
         let mut estimated_bytes = 0usize;
 
-        for_each_record(&path, format, |_record_no, value| {
+        for_each_record(&path, format, |record_no, value| {
             job.check_cancelled()?;
             let row_position = row_ids.len();
             for values in &mut cells {
@@ -237,11 +238,19 @@ impl JsonImporter {
 
             originals.push(original);
             row_ids.push(rows_read as i64);
+            // Physical JSONL line or 1-based JSON array element.
+            source_records.push(record_no as i64);
             rows_read += 1;
             batch_rows += 1;
 
             if batch_rows >= limits.max_rows || estimated_bytes >= limits.max_bytes {
-                let frame = build_batch(&columns, &mut cells, &mut originals, &mut row_ids)?;
+                let frame = build_batch(
+                    &columns,
+                    &mut cells,
+                    &mut originals,
+                    &mut row_ids,
+                    &mut source_records,
+                )?;
                 write(&frame)?;
                 job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
                 batch_rows = 0;
@@ -251,7 +260,13 @@ impl JsonImporter {
         })?;
 
         if batch_rows > 0 {
-            let frame = build_batch(&columns, &mut cells, &mut originals, &mut row_ids)?;
+            let frame = build_batch(
+                &columns,
+                &mut cells,
+                &mut originals,
+                &mut row_ids,
+                &mut source_records,
+            )?;
             write(&frame)?;
             job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
         }
@@ -278,8 +293,9 @@ fn build_batch(
     cells: &mut [Vec<Option<String>>],
     originals: &mut Vec<String>,
     row_ids: &mut Vec<i64>,
+    source_records: &mut Vec<i64>,
 ) -> Result<DataFrame, AppError> {
-    let mut series: Vec<Series> = Vec::with_capacity(columns.len() + 2);
+    let mut series: Vec<Series> = Vec::with_capacity(columns.len() + 3);
     for (column, values) in columns.iter().zip(cells.iter_mut()) {
         series.push(Series::new(column.id.as_str(), std::mem::take(values)));
     }
@@ -288,6 +304,10 @@ fn build_batch(
         std::mem::take(originals),
     ));
     series.push(Series::new(INTERNAL_ROW_ID, std::mem::take(row_ids)));
+    series.push(Series::new(
+        INTERNAL_SOURCE_RECORD,
+        std::mem::take(source_records),
+    ));
     DataFrame::new(series)
         .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
 }
@@ -299,6 +319,10 @@ fn empty_frame(columns: &[ColumnMeta]) -> Result<DataFrame, AppError> {
         .collect();
     series.push(Series::new(INTERNAL_ORIGINAL, Vec::<String>::new()));
     series.push(Series::new(INTERNAL_ROW_ID, Vec::<i64>::new()));
+    series.push(Series::new(
+        INTERNAL_SOURCE_RECORD,
+        Vec::<i64>::new(),
+    ));
     DataFrame::new(series)
         .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
 }

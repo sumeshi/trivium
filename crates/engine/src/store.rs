@@ -176,7 +176,24 @@ impl ProjectsStore {
 
     fn persist_locked(&self, guard: &[ProjectMeta]) -> Result<()> {
         let data = serde_json::to_vec_pretty(guard)?;
-        fs::write(&self.meta_path, data)
-            .with_context(|| format!("failed to write metadata file {:?}", self.meta_path))
+        // Replace the project list atomically: a failed write must not leave a
+        // truncated metadata file that loses the existing projects on restart.
+        let temp_path = self
+            .meta_path
+            .with_extension(format!("json.tmp.{}", std::process::id()));
+        let result = fs::write(&temp_path, data)
+            .with_context(|| format!("failed to write metadata file {:?}", temp_path))
+            .and_then(|_| {
+                fs::rename(&temp_path, &self.meta_path).with_context(|| {
+                    format!(
+                        "failed to replace metadata file {:?} with {:?}",
+                        self.meta_path, temp_path
+                    )
+                })
+            });
+        if result.is_err() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        result
     }
 }

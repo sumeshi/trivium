@@ -120,17 +120,70 @@ fn successful_import_records_source_metadata_and_zero_based_row_ids() {
         "a successful import must remove its staging directory"
     );
 
-    // Source record numbers are the zero-based internal row ids.
+    // `__rowid` stays zero-based and contiguous; `__source_record` points at
+    // the physical source line (header is line 1, first data record line 2).
     let df = read_project_dataframe(&project_dir.join("data.parquet"))
         .expect("failed to read project data");
-    let row_ids = df.column("__rowid").expect("missing __rowid column");
-    let row_ids: Vec<i64> = (0..row_ids.len())
-        .map(|index| match row_ids.get(index).expect("missing row id") {
-            AnyValue::Int64(value) => value,
+    let row_ids: Vec<i64> = (0..df.height())
+        .map(|index| match df.column("__rowid").expect("__rowid").get(index) {
+            Ok(AnyValue::Int64(value)) => value,
             other => panic!("unexpected row id value: {:?}", other),
         })
         .collect();
     assert_eq!(row_ids, vec![0, 1, 2]);
+    let source_records: Vec<i64> = (0..df.height())
+        .map(|index| match df.column("__source_record").expect("__source_record").get(index) {
+            Ok(AnyValue::Int64(value)) => value,
+            other => panic!("unexpected source record value: {:?}", other),
+        })
+        .collect();
+    assert_eq!(source_records, vec![2, 3, 4]);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn metadata_write_failure_keeps_the_existing_registry_intact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let path = write_file(&root, "events.csv", "id,msg\n1,first\n");
+    let summary = create_project(&store, payload(&path)).expect("create failed");
+
+    let mut extra = summary.meta.clone();
+    extra.id = Uuid::new_v4();
+    extra.name = "unregistered".to_string();
+
+    let original_permissions = fs::metadata(&root).expect("root metadata").permissions();
+    let mut read_only = original_permissions.clone();
+    read_only.set_mode(0o555);
+    fs::set_permissions(&root, read_only).expect("make root read-only");
+    let result = store.insert(extra);
+    fs::set_permissions(&root, original_permissions).expect("restore root permissions");
+
+    result.expect_err("insert must fail while the registry is read-only");
+    assert_eq!(
+        store.all().len(),
+        1,
+        "a failed registration must be rolled back in memory"
+    );
+    let registry: Vec<trivium_engine::models::ProjectMeta> = serde_json::from_slice(
+        &fs::read(root.join("projects.json")).expect("read projects.json"),
+    )
+    .expect("projects.json must remain valid JSON");
+    assert_eq!(registry.len(), 1);
+    assert_eq!(registry[0].id, summary.meta.id);
+    assert!(
+        entries(&root)
+            .iter()
+            .all(|path| !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("projects.json.tmp."))),
+        "a failed metadata write must remove its temporary file"
+    );
 
     let _ = fs::remove_dir_all(root);
 }

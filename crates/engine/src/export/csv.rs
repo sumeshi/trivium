@@ -14,7 +14,7 @@ use crate::{
     jobs::JobContext,
     models::{FlagEntry, ProjectMeta},
     ops::query::{data_columns, ordered_row_indices, resolve_target},
-    project_io::{read_project_dataframe, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID},
+    project_io::{is_internal_column, read_project_dataframe, ProjectColumns},
     storage::load_flags,
     store::ProjectsStore,
 };
@@ -119,8 +119,14 @@ pub fn export_project_with_job(
             .select(&selected)
             .map_err(|e| AppError::Message(format!("Failed to select columns: {}", e)))?;
     }
-    for internal in [INTERNAL_ROW_ID, INTERNAL_ORIGINAL] {
-        if let Ok(next) = df.drop(internal) {
+    let internal_columns: Vec<String> = df
+        .get_column_names()
+        .iter()
+        .filter(|name| is_internal_column(name))
+        .map(|name| name.to_string())
+        .collect();
+    for internal in internal_columns {
+        if let Ok(next) = df.drop(&internal) {
             df = next;
         }
     }
