@@ -1109,3 +1109,81 @@ Regression coverage (`crates/engine/tests/import_streaming_test.rs`, 7 tests):
   (T18) and destination-preserving output cancellation (T23) are unchanged.
 
 Next card: T17.
+
+## T17 — JSON import keeps no record list
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/import/json_source.rs` (new): shared record streaming for
+  the two import passes. JSONL is read line by line with the physical line
+  number for errors. A JSON array goes through `serde_json::Deserializer` and a
+  custom `Visitor`/`deserialize_seq`, so each element is dropped before the next
+  one is parsed. A single JSON object is one record. Non-object array elements
+  keep the T11 message with the element number.
+- `crates/engine/src/import/jsonl.rs`: `JsonImporter` now runs pass 1 to collect
+  the JSON Pointer column union in first-appearance order and count records,
+  then pass 2 to re-read the same file and write bounded batches. Neither pass
+  keeps `Vec<Value>` records. Pass 1 reports progress every 1,024 records and
+  checks cancellation; pass 2 checks cancellation per record, so a request from
+  the previous batch's progress callback stops at the next boundary.
+- Pass 2 maps each flattened pointer to a column index through a
+  `HashMap<String, usize>` and fills `Vec<Option<String>>` per column. It does
+  not search the column list for each cell. Batch limits are 50,000 rows and an
+  approximate 8 MiB of cell text plus `__original`, matching T16. A batch is
+  written through the existing `BatchDataWriter` (one Parquet row group per
+  batch). File size and record count are rechecked between passes.
+- Values follow T08–T10: numbers keep their source text, booleans become
+  `true`/`false`, null and absent keys stay null, an empty string stays `""`,
+  arrays/objects stay JSON text in one cell, and `__original` keeps the source
+  object. An empty object is still one record with no data columns.
+- The leading-sample width estimate is computed during pass 2 and written to
+  `column_max_chars.json` in staging, so `load_project` does not rescan the
+  frame.
+- `crates/engine/src/import/json.rs`: `json::load` delegates to the shared
+  streaming loader. `jsonl::load` and `json::load` remain for direct callers and
+  tests; production import uses the two-pass importer.
+- `crates/engine/src/ops/projects.rs`: JSON and JSONL now use the same batch
+  path as CSV. The load-then-write branches were removed.
+- `crates/engine/src/jobs.rs`: the module comment now lists CSV/JSON import
+  batch checkpoints as implemented.
+
+Regression coverage (`crates/engine/tests/json_streaming_test.rs`, 9 tests):
+- A key that first appears only in the last record stays a column and keeps its
+  value; absent keys stay null.
+- A generated 50,000-element JSON array imports every record; the first and last
+  rows have the expected `id`/`msg` values.
+- JSON and JSONL with the same records produce the same Pointer columns, row
+  count, and cell text.
+- `u64::MAX`, `2^53 + 1`, an i128-sized number, null, missing, empty string, and
+  an empty-object record keep their values; `__original` restores the types and
+  missing keys.
+- Cancellation during pass 1 and at a pass-2 batch boundary returns
+  `Cancelled.`; a cancelled staged import leaves no project or staging
+  directory.
+- Broken JSON, a non-object array element, a broken JSONL line after a blank
+  line, and a non-object JSONL line report the element/line number.
+- A streamed JSON array can be reopened with `load_project`.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New streaming tests | `cargo test -p trivium-engine --test json_streaming_test` | 9 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | 177 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- Peak RSS was not measured in this card. T27 records it. The per-record
+  `Value` and the record list are gone by construction, but a single oversized
+  record still grows its parsed value and formatted `__original` string.
+- The native GUI was not exercised. Import through the Tauri command, progress
+  delivery, and cancel from the UI remain code-review checks.
+- Search batches (T18) and destination-preserving output cancellation (T23)
+  are unchanged.
+
+Next card: T18.
