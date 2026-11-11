@@ -12,9 +12,11 @@ use trivium_engine::ops;
 use trivium_engine::ops::bulk::{
     bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
 };
+use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
+use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
 mod common;
@@ -164,6 +166,56 @@ fn undo(store: &ProjectsStore, id: Uuid) -> usize {
     bulk_undo(store, BulkUndoPayload { project_id: id })
         .expect("undo failed")
         .updated
+}
+
+fn update_single(
+    store: &ProjectsStore,
+    id: Uuid,
+    row_index: usize,
+    flag: Option<&str>,
+    memo: Option<Option<&str>>,
+    tags: Option<Vec<&str>>,
+    bookmarked: Option<bool>,
+) {
+    update_flag(
+        store,
+        UpdateFlagPayload {
+            project_id: id,
+            row_index,
+            flag: flag.map(str::to_string),
+            memo: memo.map(|value| value.map(str::to_string)),
+            tags: tags.map(|values| values.into_iter().map(str::to_string).collect()),
+            bookmarked,
+        },
+    )
+    .expect("single update failed");
+}
+
+type Annotations = (String, Option<String>, Vec<String>, bool);
+
+/// Per-row (flag, memo, tags, bookmark), indexed by row_index.
+fn annotations(store: &ProjectsStore, id: Uuid) -> Vec<Annotations> {
+    let response = query(store, id, None);
+    let mut by_index: Vec<Annotations> =
+        vec![(String::new(), None, Vec::new(), false); response.total_rows];
+    for row in &response.rows {
+        by_index[row.row_index] = (
+            row.flag.clone(),
+            row.memo.clone(),
+            row.tags.clone(),
+            row.bookmarked,
+        );
+    }
+    by_index
+}
+
+/// Counts flagged rows directly from the annotation database.
+fn flagged_from_db(store: &ProjectsStore, id: Uuid) -> usize {
+    load_flags(&store.project_dir(&id).join("flags.json"))
+        .expect("failed to load flags")
+        .values()
+        .filter(|entry| !entry.flag.trim().is_empty())
+        .count()
 }
 
 #[test]
@@ -383,6 +435,215 @@ fn bulk_clear_removes_entries_and_reveals_ioc_flags() {
         };
         assert_eq!(flag, expected, "row {index}");
     }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bulk_clear_undo_restores_memo_tags_and_bookmark() {
+    let _guard = undo_guard();
+    let (root, store, id, _ids) = setup(false);
+
+    update_single(
+        &store,
+        id,
+        0,
+        Some("suspicious"),
+        Some(Some("note")),
+        Some(vec!["pc", "gpu"]),
+        Some(true),
+    );
+    update_single(
+        &store,
+        id,
+        1,
+        Some("critical"),
+        Some(Some("second")),
+        Some(vec!["server"]),
+        Some(false),
+    );
+
+    bulk_update(
+        &store,
+        previewed(&store, payload(id, "all", None, None, "", None)),
+    )
+    .expect("bulk clear failed");
+    // Clearing the flag keeps the other fields of each entry.
+    let cleared = annotations(&store, id);
+    assert_eq!(cleared[0].0, "");
+    assert_eq!(cleared[0].1.as_deref(), Some("note"));
+    assert_eq!(cleared[0].2, vec!["pc".to_string(), "gpu".to_string()]);
+    assert!(cleared[0].3);
+    assert_eq!(flagged(&store, id), 0);
+    assert_eq!(flagged_from_db(&store, id), 0);
+
+    assert_eq!(undo(&store, id), 12);
+
+    let restored = annotations(&store, id);
+    assert_eq!(restored[0].0, "suspicious");
+    assert_eq!(restored[0].1.as_deref(), Some("note"));
+    assert_eq!(restored[0].2, vec!["pc".to_string(), "gpu".to_string()]);
+    assert!(restored[0].3);
+    assert_eq!(restored[1].0, "critical");
+    assert_eq!(restored[1].1.as_deref(), Some("second"));
+    assert_eq!(restored[1].2, vec!["server".to_string()]);
+    assert!(!restored[1].3);
+    for row in &restored[2..] {
+        assert_eq!(row.0, "");
+        assert_eq!(row.1, None);
+        assert!(row.2.is_empty());
+        assert!(!row.3);
+    }
+    assert_eq!(flagged(&store, id), 2);
+    assert_eq!(flagged_from_db(&store, id), 2);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn undo_is_independent_per_project() {
+    let _guard = undo_guard();
+    let (root_a, store_a, id_a, _ids_a) = setup(false);
+    let (root_b, store_b, id_b, _ids_b) = setup(false);
+
+    bulk_update(
+        &store_a,
+        previewed(&store_a, payload(id_a, "all", None, None, "safe", None)),
+    )
+    .expect("bulk update A failed");
+    bulk_update(
+        &store_b,
+        previewed(&store_b, payload(id_b, "all", None, None, "suspicious", None)),
+    )
+    .expect("bulk update B failed");
+
+    // Undoing A must not remove or consume B's undo entry.
+    assert_eq!(undo(&store_a, id_a), 12);
+    for (index, (flag, _)) in query_flags(&store_a, id_a).iter().enumerate() {
+        assert_eq!(flag, "", "A row {index}");
+    }
+    for (index, (flag, _)) in query_flags(&store_b, id_b).iter().enumerate() {
+        assert_eq!(flag, "suspicious", "B row {index}");
+    }
+
+    assert_eq!(undo(&store_b, id_b), 12);
+    for (index, (flag, _)) in query_flags(&store_b, id_b).iter().enumerate() {
+        assert_eq!(flag, "", "B row {index}");
+    }
+
+    let _ = fs::remove_dir_all(root_a);
+    let _ = fs::remove_dir_all(root_b);
+}
+
+#[test]
+fn undo_refuses_to_overwrite_a_later_update() {
+    let _guard = undo_guard();
+    let (root, store, id, _ids) = setup(false);
+
+    bulk_update(
+        &store,
+        previewed(&store, payload(id, "all", None, None, "safe", None)),
+    )
+    .expect("bulk update failed");
+
+    update_single(
+        &store,
+        id,
+        3,
+        Some("critical"),
+        Some(Some("after bulk")),
+        Some(vec!["manual"]),
+        Some(true),
+    );
+    let before = annotations(&store, id);
+
+    let error = bulk_undo(&store, BulkUndoPayload { project_id: id })
+        .expect_err("undo must not overwrite a later update");
+    assert!(
+        error
+            .to_string()
+            .contains("Annotation changed since the bulk operation; undo would overwrite it."),
+        "unexpected error: {error}"
+    );
+    assert_eq!(annotations(&store, id), before, "failed undo must not write");
+    assert_eq!(flagged_from_db(&store, id), 12);
+
+    // The conflict leaves the undo entry in place, so a retry reports the same
+    // conflict instead of silently applying the old snapshot.
+    let retry = bulk_undo(&store, BulkUndoPayload { project_id: id })
+        .expect_err("undo entry must remain after a conflict");
+    assert!(
+        retry
+            .to_string()
+            .contains("Annotation changed since the bulk operation; undo would overwrite it."),
+        "unexpected error: {retry}"
+    );
+    assert_eq!(annotations(&store, id), before, "retry must not write");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bulk_and_undo_update_flagged_counts_by_difference() {
+    let _guard = undo_guard();
+    let (root, store, id, ids) = setup(false);
+
+    update_single(&store, id, 0, Some("safe"), None, None, None);
+    update_single(&store, id, 1, None, None, None, Some(true));
+    update_single(&store, id, 2, Some("suspicious"), None, None, None);
+    assert_eq!(flagged(&store, id), 2);
+    assert_eq!(flagged_from_db(&store, id), 2);
+
+    let applied = bulk_update(
+        &store,
+        previewed(
+            &store,
+            payload(
+                id,
+                "filtered",
+                Some(&common::search(&ids, "user", "alice")),
+                None,
+                "safe",
+                None,
+            ),
+        ),
+    )
+    .expect("bulk update failed");
+    assert_eq!(applied.updated, 6);
+
+    // Rows 0-5 are now flagged; the bookmark-only row 1 gained a flag, and
+    // rows 6-11 were outside the target.
+    assert_eq!(flagged(&store, id), 6);
+    assert_eq!(flagged(&store, id), flagged_from_db(&store, id));
+
+    assert_eq!(undo(&store, id), 6);
+    assert_eq!(flagged(&store, id), 2);
+    assert_eq!(flagged(&store, id), flagged_from_db(&store, id));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn failed_preview_token_leaves_annotations_unchanged() {
+    let _guard = undo_guard();
+    let (root, store, id, _ids) = setup(false);
+
+    let base = payload(id, "selection", None, Some(vec![0, 1]), "safe", None);
+    let preview = bulk_preview(&store, base.clone()).expect("preview failed");
+    let mut stale = base;
+    stale.preview_token = Some(preview.preview_token);
+
+    // The preview counted zero annotated rows; flagging row 1 changes the
+    // annotated count and therefore invalidates the token.
+    update_single(&store, id, 1, Some("safe"), None, None, None);
+    let before = annotations(&store, id);
+
+    let error = bulk_update(&store, stale).expect_err("stale token must fail");
+    assert!(
+        error.to_string().contains("Target changed; preview again."),
+        "unexpected error: {error}"
+    );
+    assert_eq!(annotations(&store, id), before, "failed batch must not write");
 
     let _ = fs::remove_dir_all(root);
 }

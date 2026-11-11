@@ -355,6 +355,36 @@ pub fn remove_flag(path: &Path, row_index: usize) -> Result<()> {
     Ok(())
 }
 
+/// Applies several annotation changes as one sled batch.
+///
+/// `None` removes the row's entry and `Some` upserts it. The batch is committed
+/// with a single `apply_batch` and a single flush, so a failure cannot leave
+/// only the rows processed before the failure modified.
+pub fn apply_flag_batch(path: &Path, changes: &[(usize, Option<FlagEntry>)]) -> Result<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let db = flags_db(&flags_db_path(path))?;
+    let mut batch = sled::Batch::default();
+    for (row_index, entry) in changes {
+        let key = encode_row_key(*row_index).to_vec();
+        match entry {
+            Some(entry) => {
+                let value = serde_json::to_vec(entry).with_context(|| {
+                    format!("failed to serialize flag entry for row {}", row_index)
+                })?;
+                batch.insert(key, value);
+            }
+            None => batch.remove(key),
+        }
+    }
+    db.apply_batch(batch)
+        .with_context(|| format!("failed to apply flag batch to {:?}", path))?;
+    db.flush()
+        .with_context(|| format!("failed to flush flags db {:?}", path))?;
+    Ok(())
+}
+
 pub fn count_flagged(path: &Path) -> Result<usize> {
     let db = flags_db(&flags_db_path(path))?;
     let mut count = 0;

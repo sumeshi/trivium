@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -11,7 +12,7 @@ use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome};
 use crate::models::FlagEntry;
 use crate::project_io::read_project_dataframe;
-use crate::storage::{count_flagged, load_flags, remove_flag, upsert_flag};
+use crate::storage::{apply_flag_batch, load_flag, load_flags};
 use crate::store::ProjectsStore;
 
 use super::query::{
@@ -58,22 +59,57 @@ pub struct BulkUndoPayload {
     pub project_id: Uuid,
 }
 
-/// 一括操作の Undo 層。プロセスごとに 1 層（最後の bulk_update のみ）。
+/// 一括操作の Undo 層。案件ごとに 1 層を保持し、復元が成功するまで消さない。
+#[derive(Clone)]
 struct BulkUndo {
-    project_id: Uuid,
     /// 実行前の状態（None = エントリ無し）
-    snapshot: Vec<(usize, Option<FlagEntry>)>,
+    previous: Vec<(usize, Option<FlagEntry>)>,
+    /// 実行後の状態（競合検出に使う）
+    applied: Vec<(usize, Option<FlagEntry>)>,
+    /// この操作で発行した revision。復元後に自分のエントリだけを消すために使う。
+    revision_after: u64,
 }
 
-fn undo_slot() -> &'static Mutex<Option<BulkUndo>> {
-    static SLOT: OnceLock<Mutex<Option<BulkUndo>>> = OnceLock::new();
-    SLOT.get_or_init(|| Mutex::new(None))
+fn undo_map() -> &'static Mutex<HashMap<Uuid, BulkUndo>> {
+    static MAP: OnceLock<Mutex<HashMap<Uuid, BulkUndo>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn lock_undo() -> Result<MutexGuard<'static, Option<BulkUndo>>, AppError> {
-    undo_slot()
+fn lock_undo() -> Result<MutexGuard<'static, HashMap<Uuid, BulkUndo>>, AppError> {
+    undo_map()
         .lock()
         .map_err(|_| AppError::Message("Bulk undo state is unavailable.".into()))
+}
+
+fn is_flagged(entry: &Option<FlagEntry>) -> bool {
+    entry
+        .as_ref()
+        .is_some_and(|entry| !entry.flag.trim().is_empty())
+}
+
+/// Recomputes a project's flagged count from a known baseline and the rows a
+/// bulk operation changed, without scanning every annotation.
+fn count_after(
+    baseline: usize,
+    before: &[(usize, Option<FlagEntry>)],
+    after: &[(usize, Option<FlagEntry>)],
+) -> usize {
+    let mut count = baseline as isize;
+    for ((_, before), (_, after)) in before.iter().zip(after.iter()) {
+        match (is_flagged(before), is_flagged(after)) {
+            (false, true) => count += 1,
+            (true, false) => count -= 1,
+            _ => {}
+        }
+    }
+    count.max(0) as usize
+}
+
+fn warn_count_failure(project_id: &Uuid, err: anyhow::Error) {
+    eprintln!(
+        "[bulk] annotations were saved but the flagged count for project {} could not be persisted: {:?}",
+        project_id, err
+    );
 }
 
 /// Opens the project frame, mirroring the other ops' metadata/read messages.
@@ -199,6 +235,9 @@ pub fn bulk_update(
     payload: BulkAnnotatePayload,
 ) -> Result<BulkApplied, AppError> {
     let (project_dir, df) = load_frame(store, &payload.project_id)?;
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()));
+    };
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
@@ -220,68 +259,91 @@ pub fn bulk_update(
         return Ok(BulkApplied { updated: 0 });
     }
 
-    let snapshot: Vec<(usize, Option<FlagEntry>)> = target
+    // The target was fixed above; compute every row's next entry in memory
+    // before touching the database so the batch contains the whole change.
+    let previous: Vec<(usize, Option<FlagEntry>)> = target
         .iter()
         .map(|&row_index| (row_index, flags.get(&row_index).cloned()))
         .collect();
+    let changes: Vec<(usize, Option<FlagEntry>)> = target
+        .iter()
+        .map(|&row_index| {
+            (
+                row_index,
+                apply_annotation_patch(flags.get(&row_index), &payload.patch),
+            )
+        })
+        .collect();
 
-    // 一括対象にも単行更新と同じ patch を適用する。省略したフィールドは
-    // 行ごとの既存値を維持し、全フィールドが空になった行だけ削除する。
-    for &row_index in &target {
-        let next = apply_annotation_patch(flags.get(&row_index), &payload.patch);
-        match next {
-            Some(entry) => {
-                upsert_flag(&flags_path, row_index, &entry).map_err(AppError::from)?
-            }
-            None => remove_flag(&flags_path, row_index).map_err(AppError::from)?,
-        }
-    }
+    apply_flag_batch(&flags_path, &changes).map_err(AppError::from)?;
 
     // The IOC outcome cache is independent of user flags (R5), so a bulk
     // update never invalidates it.
-    let flagged_records = count_flagged(&flags_path).map_err(AppError::from)?;
-    store
-        .update_flagged_records(&payload.project_id, flagged_records)
-        .map_err(AppError::from)?;
+    let flagged_records = count_after(meta.flagged_records, &previous, &changes);
+    if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
+        warn_count_failure(&payload.project_id, err);
+    }
 
-    *lock_undo()? = Some(BulkUndo {
-        project_id: payload.project_id,
-        snapshot,
-    });
+    let revision_after = store.next_revision(&payload.project_id);
+    lock_undo()?.insert(
+        payload.project_id,
+        BulkUndo {
+            previous,
+            applied: changes,
+            revision_after,
+        },
+    );
 
     Ok(BulkApplied {
         updated: target.len(),
     })
 }
 
-/// 直前の一括更新を 1 層だけ復元する。
+/// 案件ごとの直前の一括更新を 1 層だけ復元する。
 pub fn bulk_undo(store: &ProjectsStore, payload: BulkUndoPayload) -> Result<BulkApplied, AppError> {
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()));
+    };
     let undo = {
-        let mut slot = lock_undo()?;
-        match slot.as_ref() {
-            Some(state) if state.project_id == payload.project_id => slot.take(),
-            _ => None,
-        }
+        let map = lock_undo()?;
+        map.get(&payload.project_id).cloned()
     };
     let Some(undo) = undo else {
         return Err(AppError::Message("No bulk operation to undo.".into()));
     };
 
-    let (project_dir, _df) = load_frame(store, &payload.project_id)?;
-    let flags_path = project_dir.join("flags.json");
-    for (row_index, entry) in &undo.snapshot {
-        match entry {
-            Some(entry) => upsert_flag(&flags_path, *row_index, entry).map_err(AppError::from)?,
-            None => remove_flag(&flags_path, *row_index).map_err(AppError::from)?,
+    let flags_path = store.project_dir(&payload.project_id).join("flags.json");
+
+    // Validate every row before writing anything. A later single-row update
+    // must not be silently overwritten, and a conflict leaves the undo entry
+    // in place so the caller can retry after inspecting the row.
+    for (row_index, expected) in &undo.applied {
+        let current = load_flag(&flags_path, *row_index).map_err(AppError::from)?;
+        if current != *expected {
+            return Err(AppError::Message(
+                "Annotation changed since the bulk operation; undo would overwrite it.".into(),
+            ));
         }
     }
 
-    let flagged_records = count_flagged(&flags_path).map_err(AppError::from)?;
-    store
-        .update_flagged_records(&payload.project_id, flagged_records)
-        .map_err(AppError::from)?;
+    apply_flag_batch(&flags_path, &undo.previous).map_err(AppError::from)?;
+
+    let flagged_records = count_after(meta.flagged_records, &undo.applied, &undo.previous);
+    if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
+        warn_count_failure(&payload.project_id, err);
+    }
+
+    // Remove only the entry this call restored. Another bulk for the same
+    // project may have replaced it while the batch was being written.
+    let mut map = lock_undo()?;
+    if map
+        .get(&payload.project_id)
+        .is_some_and(|state| state.revision_after == undo.revision_after)
+    {
+        map.remove(&payload.project_id);
+    }
 
     Ok(BulkApplied {
-        updated: undo.snapshot.len(),
+        updated: undo.previous.len(),
     })
 }
