@@ -1029,7 +1029,10 @@ import type {
     <span class="row-jump-range">of {$totalFilteredRows}</span>
   </div>
 
-  <TimelinePanel />
+  <details class="filter-advanced">
+    <summary>Timeline</summary>
+    <TimelinePanel />
+  </details>
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
@@ -1037,5 +1040,5 @@ import type {
 
   <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')} />
 
-  <DataTable {columnWidths} />
+  <DataTable {columnWidths} on:notify={(e) => dispatch('notify', e.detail)} />
 </section>

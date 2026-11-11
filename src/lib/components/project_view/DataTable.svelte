@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import {
     rowsCache,
     pendingPages,
@@ -38,6 +38,7 @@
     largePages
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
+  import CellContextMenu from './CellContextMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
   import {
@@ -55,6 +56,22 @@
   const _normalizeFlag = normalizeFlag;
 
   export let columnWidths: Map<string, number> = new Map();
+  const dispatch = createEventDispatcher<{
+    notify: { message: string; tone: 'success' | 'error' };
+  }>();
+
+  type CellMenuState = {
+    projectId: string;
+    rowIndex: number;
+    columnId: string;
+    preview: string;
+    truncated: boolean;
+    row: CachedRow;
+    x: number;
+    y: number;
+  };
+
+  let cellMenu: CellMenuState | null = null;
   let virtualRows: VirtualRow[] = [];
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
@@ -139,6 +156,24 @@
   }
   $: loadedRowCount = $rowsCache.size;
   $: projectId = $projectDetail?.project.meta.id ?? '';
+  $: if (cellMenu && cellMenu.projectId !== projectId) {
+    cellMenu = null;
+  }
+
+  const openCellMenu = (event: MouseEvent, row: CachedRow, column: string) => {
+    event.preventDefault();
+    if (!projectId) return;
+    cellMenu = {
+      projectId,
+      rowIndex: row.row_index,
+      columnId: column,
+      preview: row.previewCache[column] ?? '',
+      truncated: row.cells?.[column]?.truncated === true,
+      row,
+      x: event.clientX,
+      y: event.clientY
+    };
+  };
 
   const buildVirtualRows = (
     start: number,
@@ -410,6 +445,10 @@
                         if (!item.row || !projectId) return;
                         _openCell(projectId, column, previewValue, item.row);
                       }}
+                      on:contextmenu={(event) => {
+                        if (!item.row) return;
+                        openCellMenu(event, item.row, column);
+                      }}
                       on:keydown={(event) => {
                         if (!item.row || !projectId) return;
                         _handleCellKeydown(
@@ -440,3 +479,13 @@
     </div>
   {/if}
 </section>
+
+{#if cellMenu}
+  {#key cellMenu}
+    <CellContextMenu
+      {...cellMenu}
+      on:close={() => (cellMenu = null)}
+      on:notify={(event) => dispatch('notify', event.detail)}
+    />
+  {/key}
+{/if}

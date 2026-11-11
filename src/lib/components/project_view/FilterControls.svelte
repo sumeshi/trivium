@@ -197,23 +197,47 @@
       {/if}
     </div>
   </div>
-  <div class="filter-ioc">
-    <button type="button" class="ghost" on:click={() => {
-      dispatch('iocManagerOpen');
-    }}>
-      IOC Rules
-    </button>
-  </div>
-  <ConditionEditor />
-  <StatsPanel />
-  <TimePanel />
-  <GroupingPanel />
-  <ColorRulesPanel />
-  <PresetControls />
-  <BulkControls on:refresh />
   <div class="filter-export">
     <button class="primary" on:click={() => dispatch('export')} disabled={$isExporting}>
       {$isExporting ? 'Exporting…' : 'Export CSV'}
     </button>
   </div>
+  <details class="filter-advanced">
+    <summary>Conditions</summary>
+    <ConditionEditor />
+  </details>
+  <details class="filter-advanced">
+    <summary>Column stats</summary>
+    <StatsPanel />
+  </details>
+  <details class="filter-advanced">
+    <summary>Time analysis</summary>
+    <TimePanel />
+  </details>
+  <details class="filter-advanced">
+    <summary>Grouping</summary>
+    <GroupingPanel />
+  </details>
+  <details class="filter-advanced">
+    <summary>Row colors</summary>
+    <ColorRulesPanel />
+  </details>
+  <details class="filter-advanced">
+    <summary>Presets</summary>
+    <PresetControls />
+  </details>
+  <details class="filter-advanced">
+    <summary>Bulk annotation</summary>
+    <BulkControls on:refresh />
+  </details>
+  <details class="filter-advanced">
+    <summary>IOC rules</summary>
+    <div class="filter-ioc">
+      <button type="button" class="ghost" on:click={() => {
+        dispatch('iocManagerOpen');
+      }}>
+        IOC Rules
+      </button>
+    </div>
+  </details>
 </section>

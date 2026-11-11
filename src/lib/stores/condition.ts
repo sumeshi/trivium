@@ -1,5 +1,9 @@
 import { derived, writable } from "svelte/store";
 import type { CompareOp, ConditionNode } from "../types";
+import {
+  appendFilterCondition,
+  type FilterConditionOp,
+} from "../conditionFilters";
 
 export const COMPARE_OPS: Array<{ value: CompareOp; label: string }> = [
   { value: "eq", label: "=" },
@@ -118,6 +122,18 @@ export function filterByValues(filters: Array<{ column: string; value: string }>
     collapsed: false,
     children,
   });
+}
+
+/**
+ * Adds an exact-match condition without replacing the current tree.
+ * Used by the table's cell context menu; the value stays structured.
+ */
+export function addFilterCondition(
+  column: string,
+  op: FilterConditionOp,
+  value: string
+): void {
+  conditionTree.update((root) => appendFilterCondition(root, column, op, value));
 }
 
 /** Replaces the editor with `column >= start AND column <= end`. */

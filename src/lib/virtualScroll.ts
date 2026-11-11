@@ -9,7 +9,7 @@
  */
 
 /** Height of one rendered row. Row height is presentation, not scroll scale. */
-export const ROW_HEIGHT = 56;
+export const ROW_HEIGHT = 32;
 
 /** Upper bound for the physical scroll range (pixels). */
 export const MAX_PHYSICAL_HEIGHT = 8_000_000;
