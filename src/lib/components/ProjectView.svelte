@@ -14,6 +14,7 @@
   import { listenToJobEvents } from '../backend';
   import { isCurrentQueryJob, isJobLimitError } from '../jobTracking';
   import { errorMessage } from '../errors';
+  import { buildExportArgs, exportFileName } from '../exportFlow';
   import './project-view.css';
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
@@ -854,10 +855,6 @@ import type {
     return requestPage(Math.floor(targetRow / PAGE_SIZE), true);
   };
 
-  const padNumber = (value: number) => value.toString().padStart(2, '0');
-  const formatTimestampForFilename = (date: Date) =>
-    `${date.getFullYear()}${padNumber(date.getMonth() + 1)}${padNumber(date.getDate())}-${padNumber(date.getHours())}${padNumber(date.getMinutes())}${padNumber(date.getSeconds())}`;
-
   const closeCell = () => {
     expandedCell.set(null);
   };
@@ -985,10 +982,7 @@ import type {
     }
     isExporting.set(true);
     try {
-      const baseName = projectDetail.project.meta.name || 'trivium-export.csv';
-      const stem = baseName.replace(/\.[^.]+$/, '');
-      const timestamp = formatTimestampForFilename(new Date());
-      const suggested = `${timestamp}_trivium_${stem}.csv`;
+      const suggested = exportFileName(projectDetail.project.meta.name);
       const selected = await save({
         filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
         defaultPath: suggested
@@ -996,21 +990,9 @@ import type {
       if (!selected) {
         return;
       }
-      const result = await backend.exportProject({
-        projectId: projectDetail.project.meta.id,
-        destination: selected,
-        scope: options.scope,
-        search: snapshot.search,
-        searchColumns: snapshot.searchColumns,
-        condition: snapshot.condition,
-        flagFilter: snapshot.flagFilter,
-        bookmarkedOnly: snapshot.bookmarkedOnly,
-        sortKey: snapshot.sortKey,
-        sortDirection: snapshot.sortDirection,
-        ...(options.scope === 'selected' ? { rowIndices: snapshot.rowIndices } : {}),
-        ...(options.useVisibleColumns ? { columns: snapshot.visibleColumns } : {}),
-        includeAnnotations: options.includeAnnotations
-      });
+      const result = await backend.exportProject(
+        buildExportArgs(projectDetail.project.meta.id, snapshot, options, selected)
+      );
       const warnings = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
       dispatch('notify', {
         message: `Exported ${result.rows} rows to CSV.${warnings}`,
