@@ -79,6 +79,7 @@ pub fn load(path: &Path) -> Result<ImportedData, AppError> {
         })
         .collect();
 
+    let row_count = records.len();
     let mut series: Vec<Series> = Vec::with_capacity(columns.len());
     for (column, pointer) in columns.iter().zip(column_order.iter()) {
         let values: Vec<Option<&Value>> = flattened_rows
@@ -89,17 +90,28 @@ pub fn load(path: &Path) -> Result<ImportedData, AppError> {
                     .map(|(_, value)| value)
             })
             .collect();
-        series.push(build_series(&column.id, &values)?);
+        series.push(build_series(&column.id, &values));
+    }
+    // A file made only of empty objects has no data columns. The internal row
+    // id keeps its record count instead of collapsing to zero rows.
+    if series.is_empty() {
+        let row_ids: Vec<i64> = (0..row_count).map(|idx| idx as i64).collect();
+        series.push(Series::new(INTERNAL_ROW_ID, row_ids));
     }
 
     let mut df = DataFrame::new(series)
         .map_err(|_| AppError::Message("Failed to build the dataset.".into()))?;
+    if df.height() != row_count {
+        return Err(AppError::Message(
+            "The JSONL record count changed while building the dataset.".into(),
+        ));
+    }
 
     let originals: Vec<String> = records.iter().map(Value::to_string).collect();
     df.with_column(Series::new(INTERNAL_ORIGINAL, originals))
         .map_err(|_| AppError::Message("Failed to store the original JSON records.".into()))?;
 
-    let row_ids: Vec<i64> = (0..df.height()).map(|idx| idx as i64).collect();
+    let row_ids: Vec<i64> = (0..row_count).map(|idx| idx as i64).collect();
     let row_id_series = Series::new(INTERNAL_ROW_ID, row_ids);
     df.with_column(row_id_series)
         .map_err(|_| AppError::Message("Failed to add row ids to the dataset.".into()))?;
@@ -125,43 +137,25 @@ fn flatten_object(value: &Value, prefix: &str, out: &mut Vec<(String, Value)>) {
     }
 }
 
-/// Builds a Series for one column, inferring Int64 / Float64 / Boolean / Utf8.
-fn build_series(name: &str, values: &[Option<&Value>]) -> Result<Series, AppError> {
-    let non_null: Vec<&Value> = values.iter().filter_map(|v| *v).collect();
-    let is_empty = non_null.is_empty();
-    if is_empty || non_null.iter().all(|v| v.is_i64()) {
-        let typed: Vec<Option<i64>> = values
-            .iter()
-            .map(|v| v.and_then(|value| value.as_i64()))
-            .collect();
-        return Ok(Series::new(name, typed));
-    }
-    if non_null.iter().all(|v| v.is_number()) {
-        let typed: Vec<Option<f64>> = values
-            .iter()
-            .map(|v| v.and_then(|value| value.as_f64()))
-            .collect();
-        return Ok(Series::new(name, typed));
-    }
-    if non_null.iter().all(|v| v.is_boolean()) {
-        let typed: Vec<Option<bool>> = values
-            .iter()
-            .map(|v| v.and_then(|value| value.as_bool()))
-            .collect();
-        return Ok(Series::new(name, typed));
-    }
+/// Builds a Utf8 Series for one column.
+///
+/// Numeric cells keep their source number text (`serde_json` arbitrary
+/// precision), booleans become `true`/`false`, arrays and objects stay JSON
+/// text in one cell, and null as well as an absent key stays a Polars null.
+fn build_series(name: &str, values: &[Option<&Value>]) -> Series {
     let typed: Vec<Option<String>> = values
         .iter()
-        .map(|v| v.map(value_to_string))
+        .map(|value| value.and_then(|value| value_to_cell(value)))
         .collect();
-    Ok(Series::new(name, typed))
+    Series::new(name, typed)
 }
 
-/// Stringifies a non-null JSON value for a Utf8 column.
-fn value_to_string(value: &Value) -> String {
+/// Converts a present JSON value into its display cell text. Null is kept as
+/// a Polars null, not an empty string.
+fn value_to_cell(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => text.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        other => Some(other.to_string()),
     }
 }

@@ -124,7 +124,7 @@ fn resolve_bulk_target(
                 &columns,
                 flags,
                 ioc_outcomes,
-            );
+            )?;
             Ok((target.filtered, target.annotated_filtered))
         }
         "selection" => {

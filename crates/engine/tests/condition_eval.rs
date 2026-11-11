@@ -165,71 +165,108 @@ fn contains_and_or_not_match_search_mask() {
 
     for (query, node) in cases {
         let mask = search_mask(&rows, query);
-        let evaluated: Vec<bool> = rows.iter().map(|cells| eval(&node, cells)).collect();
+        let evaluated: Vec<bool> = rows
+            .iter()
+            .map(|cells| eval(&node, cells).expect("eval"))
+            .collect();
         assert_eq!(evaluated, mask, "parity failed for {query}");
         let converted = search_to_node(query).unwrap_or_else(|| panic!("no node for {query}"));
-        let from_syntax: Vec<bool> = rows.iter().map(|cells| eval(&converted, cells)).collect();
+        let from_syntax: Vec<bool> = rows
+            .iter()
+            .map(|cells| eval(&converted, cells).expect("eval"))
+            .collect();
         assert_eq!(from_syntax, mask, "search syntax diverged for {query}");
     }
 }
 
 #[test]
-fn numeric_compare_prefers_i64_over_f64() {
+fn numeric_compare_uses_i128_and_rejects_decimals() {
+    // Integers compare exactly through i128; adjacent long integers never
+    // collapse into the same value.
     let exact = "1700000000123456789";
     let mut cells = HashMap::new();
     cells.insert(
         "n".to_string(),
         Value::Number(Number::from(1_700_000_000_123_456_789_i64)),
     );
-    assert!(eval(&condition("n", Op::Eq, &[exact], false), &cells));
-    assert!(eval(&condition("n", Op::Gt, &["1700000000123456788"], false), &cells));
-    assert!(!eval(&condition("n", Op::Gt, &[exact], false), &cells));
-    assert!(eval(&condition("n", Op::Ge, &[exact], false), &cells));
+    assert!(eval(&condition("n", Op::Eq, &[exact], false), &cells).expect("eval"));
+    assert!(eval(&condition("n", Op::Gt, &["1700000000123456788"], false), &cells).expect("eval"));
+    assert!(!eval(&condition("n", Op::Gt, &[exact], false), &cells).expect("eval"));
+    assert!(eval(&condition("n", Op::Ge, &[exact], false), &cells).expect("eval"));
 
     let mut text_cells = HashMap::new();
     text_cells.insert("n".to_string(), Value::String(exact.to_string()));
     assert!(eval(
         &condition("n", Op::Gt, &["1700000000123456788"], false),
         &text_cells
-    ));
+    )
+    .expect("eval"));
+
+    // u64 values above i64::MAX stay distinct.
+    let mut u64_cells = HashMap::new();
+    u64_cells.insert(
+        "n".to_string(),
+        Value::String("18446744073709551615".to_string()),
+    );
+    assert!(eval(
+        &condition("n", Op::Gt, &["18446744073709551614"], false),
+        &u64_cells
+    )
+    .expect("eval"));
+    assert!(!eval(
+        &condition("n", Op::Gt, &["18446744073709551615"], false),
+        &u64_cells
+    )
+    .expect("eval"));
+
+    // String equality keeps leading zeros meaningful.
     let mut id = HashMap::new();
     id.insert("id".to_string(), Value::String("001".to_string()));
-    assert!(!eval(&condition("id", Op::Eq, &["1"], false), &id));
+    assert!(!eval(&condition("id", Op::Eq, &["1"], false), &id).expect("eval"));
 
+    // Decimal spellings and values outside i128 are explicit errors, never a
+    // silent f64 comparison.
     let mut fraction = HashMap::new();
     fraction.insert("n".to_string(), Value::String("1.5".to_string()));
-    assert!(eval(&condition("n", Op::Gt, &["1.25"], false), &fraction));
-    assert!(eval(&condition("n", Op::Lt, &["2"], false), &fraction));
+    assert!(eval(&condition("n", Op::Gt, &["1.25"], false), &fraction).is_err());
+    assert!(eval(&condition("n", Op::Lt, &["2"], false), &fraction).is_err());
+
+    let mut huge = HashMap::new();
+    huge.insert(
+        "n".to_string(),
+        Value::String("170141183460469231731687303715884105728".to_string()),
+    );
+    assert!(eval(&condition("n", Op::Gt, &["0"], false), &huge).is_err());
 }
 
 #[test]
 fn regex_starts_with_and_group_edges() {
     let cells = row(&[("msg", "Alpha-Beacon")]);
-    assert!(eval(&condition("msg", Op::StartsWith, &["alpha"], false), &cells));
-    assert!(eval(&condition("msg", Op::EndsWith, &["beacon"], false), &cells));
-    assert!(eval(&condition("msg", Op::Regex, &["(?i)alpha-.*"], false), &cells));
-    assert!(!eval(&condition("msg", Op::Regex, &["["], false), &cells));
+    assert!(eval(&condition("msg", Op::StartsWith, &["alpha"], false), &cells).expect("eval"));
+    assert!(eval(&condition("msg", Op::EndsWith, &["beacon"], false), &cells).expect("eval"));
+    assert!(eval(&condition("msg", Op::Regex, &["(?i)alpha-.*"], false), &cells).expect("eval"));
+    assert!(!eval(&condition("msg", Op::Regex, &["["], false), &cells).expect("eval"));
     assert!(eval(
         &Node::Group(Group {
             kind: GroupKind::And,
             children: vec![],
         }),
         &cells
-    ));
+    ).expect("eval"));
     assert!(!eval(
         &Node::Group(Group {
             kind: GroupKind::Or,
             children: vec![],
         }),
         &cells
-    ));
+    ).expect("eval"));
 }
 
 #[test]
 fn datetime_ordering_compares_parsed_timestamps() {
     let cells = row(&[("ts", "2024-01-01T00:00:02")]);
-    assert!(eval(&condition("ts", Op::Ge, &["2024-01-01T00:00:01"], false), &cells));
-    assert!(eval(&condition("ts", Op::Le, &["2024-01-01T00:00:02"], false), &cells));
-    assert!(!eval(&condition("ts", Op::Gt, &["2024-01-01T00:00:02"], false), &cells));
-    assert!(eval(&condition("ts", Op::Lt, &["2024-01-02"], false), &cells));
+    assert!(eval(&condition("ts", Op::Ge, &["2024-01-01T00:00:01"], false), &cells).expect("eval"));
+    assert!(eval(&condition("ts", Op::Le, &["2024-01-01T00:00:02"], false), &cells).expect("eval"));
+    assert!(!eval(&condition("ts", Op::Gt, &["2024-01-01T00:00:02"], false), &cells).expect("eval"));
+    assert!(eval(&condition("ts", Op::Lt, &["2024-01-02"], false), &cells).expect("eval"));
 }

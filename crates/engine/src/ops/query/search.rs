@@ -5,6 +5,7 @@ use polars::prelude::*;
 use serde_json::Value;
 
 use crate::condition::{and_nodes, eval, search_to_node, Node};
+use crate::error::AppError;
 use crate::project_io::is_internal_column;
 use crate::search::{ensure_searchable_text, tokenize_search_query, SearchToken};
 use crate::storage::{load_searchable_cache, save_searchable_cache};
@@ -24,7 +25,7 @@ pub fn prepare_search(
     column_names: &[String],
     search: Option<&str>,
     condition: Option<&Node>,
-) -> SearchState {
+) -> Result<SearchState, AppError> {
     let search_cols: Vec<String> = requested_columns
         .map(|cols| cols.to_vec())
         .unwrap_or_else(|| column_names.to_vec());
@@ -78,21 +79,24 @@ pub fn prepare_search(
         (None, Some(condition)) => Some(condition),
         (None, None) => None,
     };
-    let search_mask = combined.map(|node| {
-        let joined = if has_terms {
-            searchable_text.clone().unwrap_or_default()
-        } else {
-            vec![String::new(); row_count]
-        };
-        eval_frame(df, &node, &joined)
-    });
+    let search_mask = match combined {
+        Some(node) => {
+            let joined = if has_terms {
+                searchable_text.clone().unwrap_or_default()
+            } else {
+                vec![String::new(); row_count]
+            };
+            Some(eval_frame(df, &node, &joined)?)
+        }
+        None => None,
+    };
 
-    SearchState {
+    Ok(SearchState {
         mask: search_mask,
         searchable_text,
         built: searchable_text_built,
         search_cols,
-    }
+    })
 }
 
 pub fn persist_search_cache(project_dir: &Path, state: &SearchState) {
@@ -108,7 +112,7 @@ pub fn persist_search_cache(project_dir: &Path, state: &SearchState) {
     }
 }
 
-fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Vec<bool> {
+fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Result<Vec<bool>, AppError> {
     let mut mask = vec![false; df.height()];
     for row_idx in 0..df.height() {
         let mut row: HashMap<String, Value> = HashMap::new();
@@ -125,9 +129,9 @@ fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Vec<bool> {
         if let Some(text) = joined.get(row_idx) {
             row.insert(String::new(), Value::String(text.clone()));
         }
-        mask[row_idx] = eval(node, &row);
+        mask[row_idx] = eval(node, &row)?;
     }
-    mask
+    Ok(mask)
 }
 
 fn cell_value(value: &AnyValue) -> Option<Value> {

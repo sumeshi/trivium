@@ -139,28 +139,20 @@ pub fn load(
         })
         .collect();
 
-    // Rebuild a well-formed CSV with unique id headers and let polars infer
-    // types exactly as before. Original cells are written by the csv crate, so
-    // quoting, embedded newlines, and escaping survive the round trip.
-    let mut stitched: Vec<u8> = Vec::new();
-    {
-        let mut writer = csv::WriterBuilder::new().from_writer(&mut stitched);
-        let ids: Vec<&str> = columns.iter().map(|column| column.id.as_str()).collect();
-        writer
-            .write_record(&ids)
-            .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
-        for record in &records {
-            writer
-                .write_record(record)
-                .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
-        }
-        writer
-            .flush()
-            .map_err(|e| AppError::Message(format!("Failed to prepare the dataset: {}", e)))?;
+    // Every display column is the original cell text as Utf8. Cell text is
+    // never parsed for storage, so leading zeros, padding, long integers, and
+    // datetime spellings keep their source representation. The csv reader has
+    // already resolved quoting, embedded newlines, and escaping.
+    let mut series: Vec<Series> = Vec::with_capacity(columns.len());
+    for column in &columns {
+        let values: Vec<&str> = records
+            .iter()
+            .map(|record| record.get(column.order).unwrap_or(""))
+            .collect();
+        series.push(Series::new(column.id.as_str(), values));
     }
-    let mut df = CsvReader::new(Cursor::new(stitched))
-        .finish()
-        .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
+    let mut df = DataFrame::new(series)
+        .map_err(|_| AppError::Message("Failed to build the dataset.".into()))?;
     if df.height() != records.len() {
         return Err(AppError::Message(
             "The CSV row count changed while building the dataset.".into(),

@@ -139,12 +139,18 @@ fn classify_text(text: &str) -> Option<ColumnKind> {
     if text.is_empty() {
         return None;
     }
-    if let Ok(value) = text.parse::<i64>() {
+    if let Ok(value) = text.parse::<i128>() {
         return Some(if text == value.to_string() {
             ColumnKind::Int
         } else {
             ColumnKind::String
         });
+    }
+    // Integer-looking text beyond i128 is not classified as a number: the
+    // numeric mode cannot compare it exactly, so it stays a string instead of
+    // being rounded through f64.
+    if looks_integer(text) {
+        return Some(ColumnKind::String);
     }
     if text.chars().any(|ch| ch.is_ascii_digit()) {
         if let Ok(value) = text.parse::<f64>() {
@@ -157,6 +163,14 @@ fn classify_text(text: &str) -> Option<ColumnKind> {
         return Some(ColumnKind::Datetime);
     }
     Some(ColumnKind::String)
+}
+
+fn looks_integer(text: &str) -> bool {
+    let digits = text
+        .strip_prefix('+')
+        .or_else(|| text.strip_prefix('-'))
+        .unwrap_or(text);
+    !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }
 
 pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {

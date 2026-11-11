@@ -441,10 +441,10 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     let literal = "c000001".to_string();
     let nested = "c000002".to_string();
     assert_eq!(loaded.initial_rows.len(), 3, "the empty object is one row");
-    assert_eq!(loaded.initial_rows[0].data.get(&literal), Some(&json!(1)));
-    assert_eq!(loaded.initial_rows[0].data.get(&nested), Some(&json!(2)));
-    assert_eq!(loaded.initial_rows[2].data.get(&literal), Some(&json!(3)));
-    assert_eq!(loaded.initial_rows[2].data.get(&nested), Some(&json!(4)));
+    assert_eq!(loaded.initial_rows[0].data.get(&literal), Some(&json!("1")));
+    assert_eq!(loaded.initial_rows[0].data.get(&nested), Some(&json!("2")));
+    assert_eq!(loaded.initial_rows[2].data.get(&literal), Some(&json!("3")));
+    assert_eq!(loaded.initial_rows[2].data.get(&nested), Some(&json!("4")));
 
     let collision = query(
         &store,
@@ -456,7 +456,7 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     );
     assert_eq!(collision.total_filtered_rows, 1);
     assert_eq!(collision.rows[0].row_index, 2);
-    assert_eq!(collision.rows[0].data.get(&nested), Some(&json!(4)));
+    assert_eq!(collision.rows[0].data.get(&nested), Some(&json!("4")));
 
     let sorted = query(
         &store,
@@ -476,7 +476,7 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
         .into_iter()
         .filter(|value| !value.is_null())
         .collect();
-    assert_eq!(sorted_non_null, vec![json!(4), json!(2)]);
+    assert_eq!(sorted_non_null, vec![json!("4"), json!("2")]);
 
     let records = read_original_records(&store.project_dir(&id)).expect("original records failed");
     assert_eq!(records[1], json!({}));

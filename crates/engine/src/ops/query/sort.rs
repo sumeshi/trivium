@@ -2,13 +2,12 @@ use polars::prelude::*;
 
 use crate::value_utils::anyvalue_to_search_string;
 
-/// Precomputed sort key for one row (P1). Comparison semantics are identical
-/// to the previous per-comparison conversion: integers compare exactly (F26),
-/// mixed int/float and number-vs-text comparisons go through `f64` with text
-/// ranked as +infinity, and nulls sort after numbers but before text.
+/// Precomputed sort key for one row (P1). Integers compare exactly through
+/// i128. Values outside i128 and decimal spellings are text keys, so a long
+/// integer is never rounded into another value's key. Text still ranks after
+/// numbers, and nulls sort after numbers but before text.
 enum SortKey {
-    Int(i64),
-    Float(f64),
+    Int(i128),
     Text(String),
     Missing,
 }
@@ -27,22 +26,10 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
     let Some(text) = normalized else {
         return SortKey::Missing;
     };
-    if let Ok(value) = text.parse::<i64>() {
+    if let Ok(value) = text.parse::<i128>() {
         return SortKey::Int(value);
     }
-    if let Ok(value) = text.parse::<f64>() {
-        return SortKey::Float(value);
-    }
     SortKey::Text(text)
-}
-
-fn numeric_rank(key: &SortKey) -> f64 {
-    match key {
-        SortKey::Int(value) => *value as f64,
-        SortKey::Float(value) => *value,
-        // Number-vs-text pairs previously ranked text as +infinity.
-        SortKey::Text(_) | SortKey::Missing => f64::INFINITY,
-    }
 }
 
 fn compare_keys(a: &SortKey, b: &SortKey) -> std::cmp::Ordering {
@@ -52,14 +39,14 @@ fn compare_keys(a: &SortKey, b: &SortKey) -> std::cmp::Ordering {
         // Text path: null sorts before text.
         (SortKey::Missing, SortKey::Text(_)) => Less,
         (SortKey::Text(_), SortKey::Missing) => Greater,
-        // Numeric path: null sorts after every number (previous +infinity rule).
+        // Numeric path: null sorts after every number.
         (SortKey::Missing, _) => Greater,
         (_, SortKey::Missing) => Less,
         (SortKey::Int(av), SortKey::Int(bv)) => av.cmp(bv),
         (SortKey::Text(av), SortKey::Text(bv)) => av.cmp(bv),
-        _ => numeric_rank(a)
-            .partial_cmp(&numeric_rank(b))
-            .unwrap_or(Equal),
+        // Number-vs-text pairs keep text ranked as +infinity.
+        (SortKey::Int(_), SortKey::Text(_)) => Less,
+        (SortKey::Text(_), SortKey::Int(_)) => Greater,
     }
 }
 

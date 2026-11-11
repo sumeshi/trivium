@@ -90,7 +90,7 @@ pub fn query_project_rows(
         &columns,
         &flags,
         &ioc_outcomes,
-    );
+    )?;
     let selected_indices: Vec<usize> = target
         .filtered
         .iter()
@@ -121,7 +121,7 @@ pub fn query_project_rows(
         }
     };
     for row in &mut rows {
-        row.color = matched_rule_color(&row.data, &color_rules);
+        row.color = matched_rule_color(&row.data, &color_rules)?;
     }
 
     Ok(QueryRowsResponse {

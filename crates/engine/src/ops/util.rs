@@ -98,11 +98,13 @@ pub fn ensure_column_text_cache<'a>(
 pub fn matched_rule_color(
     row: &HashMap<String, Value>,
     rules: &[ColorRule],
-) -> Option<String> {
-    rules
-        .iter()
-        .find(|rule| eval(&rule.condition, row))
-        .map(|rule| rule.color.clone())
+) -> Result<Option<String>, AppError> {
+    for rule in rules {
+        if eval(&rule.condition, row)? {
+            return Ok(Some(rule.color.clone()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn materialize_rows(

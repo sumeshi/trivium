@@ -295,9 +295,9 @@ fn nested_condition_matches_either_group() {
     assert_eq!(response.total_filtered_rows, 11);
     assert!(response.rows.iter().all(|row| {
         let user = row.data.get(&user_id).and_then(|value| value.as_str());
-        let event = row.data.get(&event_id).map(|value| value.to_string());
+        let event = row.data.get(&event_id).and_then(|value| value.as_str());
         matches!(
-            (user, event.as_deref()),
+            (user, event),
             (Some("alice"), Some("4624")) | (Some("bob"), Some("4688"))
         )
     }));
@@ -1187,7 +1187,7 @@ fn sort_and_pagination() {
     assert_eq!(r.total_filtered_rows, 20);
     // 4688 is the largest EventID; descending sort puts those first.
     for row in &r.rows {
-        assert_eq!(row.data[&event_id], serde_json::json!(4688));
+        assert_eq!(row.data[&event_id], serde_json::json!("4688"));
     }
 
     let r2 = ops::rows::query_project_rows(

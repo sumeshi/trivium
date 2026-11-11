@@ -66,7 +66,7 @@ pub fn export_project(
             &all_columns,
             &flags,
             &ioc_outcomes,
-        )
+        )?
         .filtered
         .into_iter()
         .map(|row_idx| row_idx as IdxSize)

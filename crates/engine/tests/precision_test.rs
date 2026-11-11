@@ -75,7 +75,12 @@ fn sort_search_and_export_keep_i64_max_precision() {
     let sorted_values: Vec<String> = response
         .rows
         .iter()
-        .map(|row| row.data[&event_id].to_string())
+        .map(|row| {
+            row.data[&event_id]
+                .as_str()
+                .expect("cell is stored as exact text")
+                .to_string()
+        })
         .collect();
     assert_eq!(
         sorted_values,

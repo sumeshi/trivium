@@ -411,14 +411,14 @@ fn int_point(series: &Series, idx: usize) -> Option<i128> {
         AnyValue::UInt16(value) => Some(i128::from(value)),
         AnyValue::UInt32(value) => Some(i128::from(value)),
         AnyValue::UInt64(value) => Some(i128::from(value)),
-        _ => canonical_i64(&value).map(i128::from),
+        _ => canonical_i128(&value),
     }
 }
 
-fn canonical_i64(value: &AnyValue) -> Option<i64> {
+fn canonical_i128(value: &AnyValue) -> Option<i128> {
     let text = anyvalue_to_search_string(value)?;
     let text = text.trim();
-    let parsed = text.parse::<i64>().ok()?;
+    let parsed = text.parse::<i128>().ok()?;
     (text == parsed.to_string()).then_some(parsed)
 }
 

@@ -78,7 +78,7 @@ pub fn build_report(
         &all_columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
-    );
+    )?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
     let bookmarked: Vec<bool> = (0..df.height())

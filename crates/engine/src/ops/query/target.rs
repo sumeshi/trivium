@@ -4,6 +4,7 @@ use std::path::Path;
 use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 
+use crate::error::AppError;
 use crate::ioc::IocRowOutcome;
 use crate::models::FlagEntry;
 use crate::project_io::is_internal_column;
@@ -68,7 +69,7 @@ pub fn resolve_target(
     all_columns: &[String],
     flags: &HashMap<usize, FlagEntry>,
     ioc_outcomes: &[IocRowOutcome],
-) -> ResolvedTarget {
+) -> Result<ResolvedTarget, AppError> {
     // An empty search scope is the same as "every data column".
     let search_columns = spec
         .search_columns
@@ -81,7 +82,7 @@ pub fn resolve_target(
         all_columns,
         spec.search.as_deref(),
         spec.condition.as_ref(),
-    );
+    )?;
     let ordered = ordered_row_indices(
         df,
         spec.sort_key.as_deref(),
@@ -106,11 +107,11 @@ pub fn resolve_target(
 
     persist_search_cache(project_dir, &search_state);
 
-    ResolvedTarget {
+    Ok(ResolvedTarget {
         filtered,
         annotated_filtered,
         annotated_total,
-    }
+    })
 }
 
 /// Stable JSON for the preview token. Field order is fixed by the struct

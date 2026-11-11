@@ -81,7 +81,7 @@ pub fn group_tree(
         &columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
-    );
+    )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);

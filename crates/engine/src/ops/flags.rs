@@ -90,7 +90,7 @@ pub fn update_flag(
     // Same failure-tolerant behavior as the query path: a broken color file
     // must not prevent a flag update from being saved.
     let color = match load_color_rules(&project_dir) {
-        Ok(rules) => matched_rule_color(&record, &rules.unwrap_or_default()),
+        Ok(rules) => matched_rule_color(&record, &rules.unwrap_or_default())?,
         Err(err) => {
             eprintln!(
                 "[colors] failed to load color rules for {:?}: {:?}",

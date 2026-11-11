@@ -112,7 +112,7 @@ fn missing_keys_become_null_across_column_union() {
 }
 
 #[test]
-fn numeric_and_boolean_columns_keep_their_types() {
+fn numeric_and_boolean_values_are_stored_as_exact_text() {
     let root = temp_root();
     let path = write_jsonl(
         &root,
@@ -128,21 +128,17 @@ fn numeric_and_boolean_columns_keep_their_types() {
     let event_id = imported.columns[0].id.clone();
     let score_id = imported.columns[1].id.clone();
     let ok_id = imported.columns[2].id.clone();
-    assert_eq!(
-        df.column(&event_id).expect("eventid").dtype(),
-        &DataType::Int64,
-        "all-integer columns must stay Int64"
-    );
-    assert_eq!(
-        df.column(&score_id).expect("score").dtype(),
-        &DataType::Float64,
-        "float columns must stay Float64"
-    );
-    assert_eq!(
-        df.column(&ok_id).expect("ok").dtype(),
-        &DataType::Boolean,
-        "all-boolean columns must stay Boolean"
-    );
+    // T09: values are stored exactly as text; kinds are metadata, not storage.
+    for id in [&event_id, &score_id, &ok_id] {
+        assert_eq!(
+            df.column(id).expect("column").dtype(),
+            &DataType::String,
+            "json scalars are kept as exact text"
+        );
+    }
+    assert_eq!(value_at(&df, &event_id, 0).get_str(), Some("4624"));
+    assert_eq!(value_at(&df, &score_id, 0).get_str(), Some("1.5"));
+    assert_eq!(value_at(&df, &ok_id, 1).get_str(), Some("false"));
 
     let _ = fs::remove_dir_all(root);
 }
