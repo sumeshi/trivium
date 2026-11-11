@@ -561,3 +561,75 @@ Unverified: IPC value DTOs and UI display/copy of long integers are T10;
 GUI paths remain unverified until T26.
 
 Next card: T10.
+
+## T10 — exact cell text and kind across the IPC boundary
+
+Recorded: 2026-11-11. Code commit `7c23031`.
+
+Changes:
+- `crates/engine/src/models.rs`: added `Cell { text: Option<String>, kind }`
+  and `ProjectRow.cells` (`#[serde(default)]`). The compatibility `data` field
+  is unchanged.
+- `crates/engine/src/value_utils.rs`: `CellColumns` infers the kind once per
+  column from the frame (never per cell) and maps it to `int` / `float` /
+  `string`. `build_cell` keeps the exact cell text from
+  `anyvalue_to_search_string`; integers are decimal strings regardless of
+  digit count. A null cell is `missing` when the row's `__original` object has
+  no key for the column's JSON Pointer, and `null` when the key exists with a
+  JSON null. CSV originals are arrays and legacy projects have no `__original`,
+  so those cells are never `missing`.
+- Page materialization (`ops/query/page.rs`, `ops/util.rs`) builds `cells` for
+  query pages, initial rows, surrounding rows, duplicate results, and the row
+  returned by a flag update. Column metadata comes from `ProjectColumns`, and
+  internal columns (`__rowid`, `__original`) are not included.
+- `src/lib/types.ts`: added `Cell` / `CellKind` and `ProjectRow.cells`.
+- `src/lib/ipcValues.ts` (new): pure `displayText`, `copyText`, and
+  `buildCellCaches`. Display keeps empty string blank, shows an explicit null
+  as `null`, and a missing key as `—`. Copy uses the source representation:
+  `null` copies as `null`, missing copies as an empty string; numbers are never
+  parsed.
+- `project_view/state.ts`: `normalizeRow` builds `displayCache` and a new
+  `copyCache` from `cells`; `CachedRow` carries both. `formatCell` remains but
+  is no longer used on the cell display path.
+- `DataTable.svelte`: renders `displayCache` without the old `|| '—'`
+  fallback, so `""` and missing stay distinct; `openCell` /
+  `handleCellKeydown` receive `copyCache` (the exact text).
+- `ExpandedCellDialog.svelte`: the field list and surrounding-row lines read
+  the cell display text, and Copy uses the exact value passed from the table
+  (`copyCache`).
+- `src/lib/ipcValues.test.ts` (new): reads IPC-shaped JSON for
+  `9007199254740993`, u64::MAX, null, missing, empty string, and bool cells,
+  and asserts display/copy stay exact (`Number("9007199254740993")` would be
+  `9007199254740992`). It also asserts table/detail (`displayText`) and
+  copy/filter (`copyText`) share the same exact string.
+- `package.json`: added `test:ui` (`node --test --experimental-strip-types`).
+  `tsconfig.json` excludes `src/**/*.test.ts`, because the Node test imports
+  the `.ts` module with an explicit extension.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| IPC cell test | `cargo test -p trivium-engine --test ipc_cells_test` | 1 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+The Rust test inspects `serde_json::to_value(&response)`, i.e. the same JSON
+shape the frontend receives, and checks `rows[0].cells` plus the
+`load_project` initial rows.
+
+### Unverified / deferred
+
+- GUI behaviour was not exercised. The real table, detail dialog, and
+  clipboard were not operated; the display/copy distinction is covered only by
+  the pure `ipcValues` test. Real-app confirmation remains for T26.
+- There is no cell-to-filter control in the current UI (it is scheduled for
+  T21), so the filter path is asserted through `copyText` rather than an actual
+  filter action.
+- Native Tauri compilation was not run here (GTK/GDK development libraries are
+  unavailable); `src-tauri` command signatures are unchanged.
+
+Next card: T11.
