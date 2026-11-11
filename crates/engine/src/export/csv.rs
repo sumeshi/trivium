@@ -79,11 +79,11 @@ pub fn export_project_with_job(
     let final_indices: Vec<IdxSize> = if payload.scope.as_deref() == Some("filtered") {
         resolve_target(
             &df,
-            &project_dir,
             &payload.spec,
             &all_columns,
             &flags,
             &ioc_outcomes,
+            job,
         )?
         .filtered
         .into_iter()

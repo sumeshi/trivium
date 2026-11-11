@@ -6,7 +6,7 @@ mod target;
 
 pub(crate) use ioc::final_flags;
 pub(crate) use page::{filtered_indices, materialize_page};
-pub(crate) use search::{persist_search_cache, prepare_search};
+pub(crate) use search::prepare_search;
 pub(crate) use sort::ordered_row_indices;
 pub use target::{
     data_columns, resolve_target, spec_token_json, QuerySpec, ResolvedTarget,
@@ -68,8 +68,8 @@ pub fn query_project_rows(
 
 /// [`query_project_rows`] with cancellation checkpoints and progress reporting.
 ///
-/// The search and sort stages are single library calls in T15, so cancellation
-/// is checked around them. Batch-level interruption is added by T18.
+/// Search evaluation prepares the query once and checks cancellation at each
+/// fixed-size batch boundary.
 pub fn query_project_rows_with_job(
     store: &ProjectsStore,
     payload: QueryRowsPayload,
@@ -103,11 +103,11 @@ pub fn query_project_rows_with_job(
     job.report_progress(1, Some(3), Some("Evaluating query".into()));
     let target = resolve_target(
         &df,
-        &project_dir,
         &payload.spec,
         &columns,
         &flags,
         &ioc_outcomes,
+        job,
     )?;
     job.check_cancelled()?;
     let selected_indices: Vec<usize> = target

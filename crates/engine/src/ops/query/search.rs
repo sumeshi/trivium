@@ -1,153 +1,190 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use polars::prelude::*;
 use serde_json::Value;
 
-use crate::condition::{and_nodes, eval, search_to_node, Node};
+use crate::condition::{and_nodes, search_tokens_to_node, Node, PreparedNode};
 use crate::error::AppError;
-use crate::project_io::is_internal_column;
-use crate::search::{ensure_searchable_text, tokenize_search_query, SearchToken};
-use crate::storage::{load_searchable_cache, save_searchable_cache};
-use crate::value_utils::anyvalue_to_search_string;
+use crate::jobs::JobContext;
+use crate::search::{push_searchable_value, tokenize_search_query, SearchToken};
+use crate::value_utils::{anyvalue_to_search_string, record_stringified_column};
+
+/// Fixed evaluation batch. Cancellation is checked at each boundary.
+const EVAL_BATCH_ROWS: usize = 1024;
 
 pub struct SearchState {
     pub mask: Option<Vec<bool>>,
-    pub searchable_text: Option<Vec<String>>,
-    pub built: bool,
-    pub search_cols: Vec<String>,
+}
+
+/// A query prepared once at the start of a search.
+///
+/// Preparation tokenizes the search string, builds the condition tree, compiles
+/// regexes, and resolves the columns the tree actually reads. Evaluation then
+/// touches only those columns, plus the joined search scope when an unscoped
+/// term exists.
+pub struct PreparedQuery {
+    node: Option<PreparedNode>,
+    required_columns: Vec<String>,
+    join_columns: Vec<String>,
+    needs_joined_text: bool,
+}
+
+impl PreparedQuery {
+    fn prepare(
+        column_names: &[String],
+        requested_columns: Option<&[String]>,
+        search: Option<&str>,
+        condition: Option<&Node>,
+    ) -> Result<Self, AppError> {
+        // An empty search scope is the same as "every data column".
+        let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
+        let search_columns = resolve_columns(
+            column_names,
+            requested_scope.unwrap_or(column_names),
+        )?;
+
+        let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
+        let tokens = search_raw.map(tokenize_search_query).unwrap_or_default();
+        let has_unscoped_terms = tokens.iter().any(|token| match token {
+            SearchToken::Term { col: None, text }
+            | SearchToken::QuotedTerm { col: None, text } => !text.is_empty(),
+            _ => false,
+        });
+        let search_node = search_tokens_to_node(&tokens);
+        let combined = match (search_node, condition.cloned()) {
+            (Some(search_node), Some(condition)) => Some(and_nodes(search_node, condition)),
+            (Some(search_node), None) => Some(search_node),
+            (None, Some(condition)) => Some(condition),
+            (None, None) => None,
+        };
+        let node = combined
+            .as_ref()
+            .map(PreparedNode::prepare)
+            .transpose()
+            .map_err(AppError::from)?;
+
+        let mut required_columns = Vec::new();
+        let mut needs_joined_text = false;
+        if let Some(node) = &node {
+            for column in node.columns() {
+                if column.is_empty() {
+                    needs_joined_text = true;
+                    continue;
+                }
+                let actual = resolve_column(column_names, column)?;
+                if !required_columns.iter().any(|known| known == actual) {
+                    required_columns.push(actual.to_string());
+                }
+            }
+        }
+
+        Ok(Self {
+            node,
+            required_columns,
+            join_columns: if has_unscoped_terms {
+                search_columns
+            } else {
+                Vec::new()
+            },
+            needs_joined_text,
+        })
+    }
+
+    fn evaluate(&self, df: &DataFrame, job: &JobContext) -> Result<Option<Vec<bool>>, AppError> {
+        let Some(node) = &self.node else {
+            return Ok(None);
+        };
+        let required_series = self.series(df, &self.required_columns)?;
+        let join_series = self.series(df, &self.join_columns)?;
+        let row_count = df.height();
+        let mut mask = vec![false; row_count];
+
+        let mut batch_start = 0;
+        while batch_start < row_count {
+            job.check_cancelled()?;
+            let batch_end = (batch_start + EVAL_BATCH_ROWS).min(row_count);
+            for row_idx in batch_start..batch_end {
+                let mut row: HashMap<String, Value> =
+                    HashMap::with_capacity(self.required_columns.len() + 1);
+                for (name, series) in &required_series {
+                    if let Ok(value) = series.get(row_idx) {
+                        if let Some(text) = anyvalue_to_search_string(&value) {
+                            record_stringified_column(name);
+                            row.insert((*name).to_string(), Value::String(text));
+                        }
+                    }
+                }
+                if self.needs_joined_text {
+                    let mut joined = String::new();
+                    for (name, series) in &join_series {
+                        if let Ok(value) = series.get(row_idx) {
+                            record_stringified_column(name);
+                            push_searchable_value(&mut joined, &value);
+                        }
+                    }
+                    row.insert(String::new(), Value::String(joined));
+                }
+                mask[row_idx] = node.eval(&row)?;
+            }
+            batch_start = batch_end;
+        }
+
+        Ok(Some(mask))
+    }
+
+    fn series<'a>(
+        &'a self,
+        df: &'a DataFrame,
+        columns: &'a [String],
+    ) -> Result<Vec<(&'a str, &'a Series)>, AppError> {
+        columns
+            .iter()
+            .map(|name| {
+                df.column(name.as_str())
+                    .map(|series| (name.as_str(), series))
+                    .map_err(|_| AppError::Message(format!("Unknown column: {}", name)))
+            })
+            .collect()
+    }
 }
 
 pub fn prepare_search(
     df: &DataFrame,
-    project_dir: &Path,
     requested_columns: Option<&[String]>,
     column_names: &[String],
     search: Option<&str>,
     condition: Option<&Node>,
+    job: &JobContext,
 ) -> Result<SearchState, AppError> {
-    let search_cols: Vec<String> = requested_columns
-        .map(|cols| cols.to_vec())
-        .unwrap_or_else(|| column_names.to_vec());
-    let row_count = df.height();
-    let cached_search = match load_searchable_cache(project_dir) {
-        Ok(cache) => cache,
-        Err(err) => {
-            eprintln!(
-                "[cache] failed to load searchable cache for {:?}: {:?}",
-                project_dir, err
-            );
-            None
-        }
-    };
-    let mut searchable_text: Option<Vec<String>> = cached_search
-        .filter(|cached| {
-            cached.columns == search_cols
-                && cached.text.len() == row_count
-                && cached.text.iter().any(|s| !s.is_empty())
-        })
-        .map(|cached| cached.text);
-    let mut searchable_text_built = false;
-
-    let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
-    let has_terms = search_raw.is_some_and(|query| {
-        tokenize_search_query(query).iter().any(|token| match token {
-            SearchToken::Term { text, .. } | SearchToken::QuotedTerm { text, .. } => !text.is_empty(),
-            _ => false,
-        })
-    });
-    if has_terms {
-        let column_series: HashMap<&str, &Series> =
-            df.get_columns().iter().map(|series| (series.name(), series)).collect();
-        let _ = ensure_searchable_text(
-            &mut searchable_text,
-            &mut searchable_text_built,
-            row_count,
-            &search_cols,
-            &column_series,
-        );
-    }
-
-    let search_node = if has_terms {
-        search_raw.and_then(search_to_node)
-    } else {
-        None
-    };
-    let combined = match (search_node, condition.cloned()) {
-        (Some(search_node), Some(condition)) => Some(and_nodes(search_node, condition)),
-        (Some(search_node), None) => Some(search_node),
-        (None, Some(condition)) => Some(condition),
-        (None, None) => None,
-    };
-    let search_mask = match combined {
-        Some(node) => {
-            let joined = if has_terms {
-                searchable_text.clone().unwrap_or_default()
-            } else {
-                vec![String::new(); row_count]
-            };
-            Some(eval_frame(df, &node, &joined)?)
-        }
-        None => None,
-    };
-
-    Ok(SearchState {
-        mask: search_mask,
-        searchable_text,
-        built: searchable_text_built,
-        search_cols,
-    })
+    let prepared = PreparedQuery::prepare(column_names, requested_columns, search, condition)?;
+    let mask = prepared.evaluate(df, job)?;
+    Ok(SearchState { mask })
 }
 
-pub fn persist_search_cache(project_dir: &Path, state: &SearchState) {
-    if state.built {
-        if let Some(ref built) = state.searchable_text {
-            if let Err(err) = save_searchable_cache(project_dir, &state.search_cols, built) {
-                eprintln!(
-                    "[cache] failed to persist searchable cache for {:?}: {:?}",
-                    project_dir, err
-                );
-            }
+fn resolve_columns(
+    column_names: &[String],
+    requested: &[String],
+) -> Result<Vec<String>, AppError> {
+    let mut resolved = Vec::new();
+    for column in requested {
+        let actual = resolve_column(column_names, column)?;
+        if !resolved.iter().any(|known| known == actual) {
+            resolved.push(actual.to_string());
         }
     }
+    Ok(resolved)
 }
 
-fn eval_frame(df: &DataFrame, node: &Node, joined: &[String]) -> Result<Vec<bool>, AppError> {
-    let mut mask = vec![false; df.height()];
-    for row_idx in 0..df.height() {
-        let mut row: HashMap<String, Value> = HashMap::new();
-        for series in df.get_columns() {
-            if is_internal_column(series.name()) {
-                continue;
-            }
-            if let Ok(value) = series.get(row_idx) {
-                if let Some(cell) = cell_value(&value) {
-                    row.insert(series.name().to_string(), cell);
-                }
-            }
-        }
-        if let Some(text) = joined.get(row_idx) {
-            row.insert(String::new(), Value::String(text.clone()));
-        }
-        mask[row_idx] = eval(node, &row)?;
+fn resolve_column<'a>(
+    column_names: &'a [String],
+    column: &str,
+) -> Result<&'a str, AppError> {
+    if let Some(name) = column_names.iter().find(|name| name.as_str() == column) {
+        return Ok(name.as_str());
     }
-    Ok(mask)
-}
-
-fn cell_value(value: &AnyValue) -> Option<Value> {
-    match value {
-        AnyValue::Null => None,
-        AnyValue::Int8(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::Int16(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::Int32(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::Int64(v) => Some(Value::from(*v)),
-        AnyValue::UInt8(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::UInt16(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::UInt32(v) => Some(Value::from(i64::from(*v))),
-        AnyValue::UInt64(v) => i64::try_from(*v)
-            .ok()
-            .map(Value::from)
-            .or_else(|| Some(Value::String(v.to_string()))),
-        _ => anyvalue_to_search_string(value).map(Value::String),
-    }
+    column_names
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case(column))
+        .map(String::as_str)
+        .ok_or_else(|| AppError::Message(format!("Unknown column: {}", column)))
 }

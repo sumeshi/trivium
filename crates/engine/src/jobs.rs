@@ -5,9 +5,9 @@
 //! worker, and forward [`JobProgress`] values to the frontend.
 //!
 //! Cancellation is cooperative. `check_cancelled` calls surround the heavy
-//! library calls, and CSV/JSON import checks every batch boundary. Search
-//! batches and export writing are still single calls; those checkpoints belong
-//! to T18/T23.
+//! library calls, CSV/JSON import checks every batch boundary, and search
+//! evaluation checks each fixed row batch. Export writing is still a single
+//! call; that checkpoint belongs to T23.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

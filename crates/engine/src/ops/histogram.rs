@@ -5,6 +5,7 @@ use crate::analysis::histogram::{histogram_series_ranged, Histogram, DEFAULT_BUC
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
+use crate::jobs::JobContext;
 use crate::project_io::{is_internal_column, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
@@ -65,11 +66,11 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         .map_err(|_| AppError::Message("Column not found.".into()))?;
     let search_state = prepare_search(
         &df,
-        &project_dir,
         payload.columns.as_deref(),
         &columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
+        &JobContext::none(),
     )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;

@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::annotation::{apply_annotation_patch, AnnotationPatch};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries, IocRowOutcome};
+use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::project_io::read_project_dataframe;
 use crate::storage::{apply_flag_batch, load_flag, load_flags};
@@ -139,7 +140,6 @@ fn annotated_count(final_flag_vec: &[String], row_ids: &[usize]) -> usize {
 /// - "selection" -> dedupe + ソートした row_indices（範囲外はエラー）
 fn resolve_bulk_target(
     df: &DataFrame,
-    project_dir: &Path,
     payload: &BulkAnnotatePayload,
     flags: &std::collections::HashMap<usize, FlagEntry>,
     ioc_outcomes: &[IocRowOutcome],
@@ -155,11 +155,11 @@ fn resolve_bulk_target(
             let columns = data_columns(df);
             let target = resolve_target(
                 df,
-                project_dir,
                 &payload.spec,
                 &columns,
                 flags,
                 ioc_outcomes,
+                &JobContext::none(),
             )?;
             Ok((target.filtered, target.annotated_filtered))
         }
@@ -211,7 +211,7 @@ fn resolve_and_token(
     let iocs = load_ioc_entries(project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(project_dir, df, &iocs);
     let (row_ids, annotated_filtered) =
-        resolve_bulk_target(df, project_dir, payload, &flags, &ioc_outcomes)?;
+        resolve_bulk_target(df, payload, &flags, &ioc_outcomes)?;
     let token = target_token(&payload.spec, &row_ids, annotated_filtered);
     Ok((row_ids, token))
 }
@@ -244,7 +244,7 @@ pub fn bulk_update(
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let (target, annotated_filtered) =
-        resolve_bulk_target(&df, &project_dir, &payload, &flags, &ioc_outcomes)?;
+        resolve_bulk_target(&df, &payload, &flags, &ioc_outcomes)?;
     let current_token = target_token(&payload.spec, &target, annotated_filtered);
 
     // A missing token is the same failure as a stale one: the caller did not

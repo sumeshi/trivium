@@ -9,7 +9,14 @@ pub fn search_to_node(input: &str) -> Option<Node> {
     if trimmed.is_empty() {
         return None;
     }
-    let tokens = tokenize_search_query(trimmed);
+    search_tokens_to_node(&tokenize_search_query(trimmed))
+}
+
+/// Converts already-tokenized search input into a condition tree.
+///
+/// Query preparation tokenizes the search string once and uses this entry point
+/// so the same tokens feed the prepared condition tree.
+pub fn search_tokens_to_node(tokens: &[SearchToken]) -> Option<Node> {
     let has_term = tokens.iter().any(|token| match token {
         SearchToken::Term { text, .. } | SearchToken::QuotedTerm { text, .. } => !text.is_empty(),
         _ => false,
@@ -17,7 +24,7 @@ pub fn search_to_node(input: &str) -> Option<Node> {
     if !has_term {
         return None;
     }
-    rpn_to_node(&to_rpn(&tokens))
+    rpn_to_node(&to_rpn(tokens))
 }
 
 pub fn and_nodes(left: Node, right: Node) -> Node {

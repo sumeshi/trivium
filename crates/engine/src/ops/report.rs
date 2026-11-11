@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::analysis::stats::{summarize_series, ColumnStats};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
+use crate::jobs::JobContext;
 use crate::models::{FlagEntry, ProjectMeta, ProjectRow};
 use crate::project_io::{read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
@@ -17,7 +18,7 @@ use crate::store::ProjectsStore;
 
 use super::query::{
     data_columns, filtered_indices, final_flags, materialize_page, ordered_row_indices,
-    persist_search_cache, prepare_search,
+    prepare_search,
 };
 use super::util::resolve_columns;
 
@@ -73,11 +74,11 @@ pub fn build_report(
 
     let search_state = prepare_search(
         &df,
-        &project_dir,
         payload.columns.as_deref(),
         &all_columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
+        &JobContext::none(),
     )?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
     let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
@@ -129,8 +130,6 @@ pub fn build_report(
                 .map(|series| summarize_series(column, series, 1))
         })
         .collect();
-
-    persist_search_cache(&project_dir, &search_state);
 
     let html = render_report(
         &meta,

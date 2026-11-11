@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::analysis::group::{add_row, finalize, GroupNode, GroupNodePartial, GroupTreeRow};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
+use crate::jobs::JobContext;
 use crate::project_io::read_project_dataframe;
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
@@ -76,11 +77,11 @@ pub fn group_tree(
 
     let search_state = prepare_search(
         &df,
-        &project_dir,
         payload.columns.as_deref(),
         &columns,
         payload.search.as_deref(),
         payload.condition.as_ref(),
+        &JobContext::none(),
     )?;
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;

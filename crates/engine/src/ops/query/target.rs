@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::ioc::IocRowOutcome;
+use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::project_io::is_internal_column;
 
 use super::ioc::final_flags;
 use super::page::filtered_indices;
-use super::search::{persist_search_cache, prepare_search};
+use super::search::prepare_search;
 use super::sort::ordered_row_indices;
 
 /// Shared query contract (GOAL.md §4).
@@ -64,11 +64,11 @@ pub fn data_columns(df: &DataFrame) -> Vec<String> {
 /// their output columns only after this returns.
 pub fn resolve_target(
     df: &DataFrame,
-    project_dir: &Path,
     spec: &QuerySpec,
     all_columns: &[String],
     flags: &HashMap<usize, FlagEntry>,
     ioc_outcomes: &[IocRowOutcome],
+    job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
     // An empty search scope is the same as "every data column".
     let search_columns = spec
@@ -77,11 +77,11 @@ pub fn resolve_target(
         .filter(|requested| !requested.is_empty());
     let search_state = prepare_search(
         df,
-        project_dir,
         search_columns,
         all_columns,
         spec.search.as_deref(),
         spec.condition.as_ref(),
+        job,
     )?;
     let ordered = ordered_row_indices(
         df,
@@ -104,8 +104,6 @@ pub fn resolve_target(
         .iter()
         .filter(|flag| !flag.trim().is_empty())
         .count();
-
-    persist_search_cache(project_dir, &search_state);
 
     Ok(ResolvedTarget {
         filtered,

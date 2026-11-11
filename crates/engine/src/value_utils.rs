@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use polars::prelude::{AnyValue, DataFrame};
 use serde_json::Value;
@@ -6,6 +7,44 @@ use serde_json::Value;
 use crate::analysis::{infer_column_kinds, ColumnKind};
 use crate::models::{Cell, ColumnMeta};
 use crate::project_io::INTERNAL_ORIGINAL;
+
+/// Test instrumentation: how many times each column was converted to text
+/// during condition/search evaluation.
+///
+/// This exists so tests can assert that a condition on one column does not
+/// stringify unrelated columns. Production code only records into it from the
+/// query evaluation path.
+static STRINGIFIED_COLUMNS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn stringified_columns() -> &'static Mutex<HashMap<String, u64>> {
+    STRINGIFIED_COLUMNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Records one test-instrumentation stringification for a column.
+pub fn record_stringified_column(column: &str) {
+    let mut counts = stringified_columns()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *counts.entry(column.to_string()).or_insert(0) += 1;
+}
+
+/// Test instrumentation: stringifications recorded for one column.
+pub fn stringified_column_count(column: &str) -> u64 {
+    stringified_columns()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(column)
+        .copied()
+        .unwrap_or(0)
+}
+
+/// Clears the test-instrumentation counters.
+pub fn reset_stringified_columns() {
+    stringified_columns()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
 
 pub fn anyvalue_to_json(value: &AnyValue) -> Value {
     match value {

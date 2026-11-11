@@ -245,7 +245,7 @@ fn regex_starts_with_and_group_edges() {
     assert!(eval(&condition("msg", Op::StartsWith, &["alpha"], false), &cells).expect("eval"));
     assert!(eval(&condition("msg", Op::EndsWith, &["beacon"], false), &cells).expect("eval"));
     assert!(eval(&condition("msg", Op::Regex, &["(?i)alpha-.*"], false), &cells).expect("eval"));
-    assert!(!eval(&condition("msg", Op::Regex, &["["], false), &cells).expect("eval"));
+    assert!(eval(&condition("msg", Op::Regex, &["["], false), &cells).is_err());
     assert!(eval(
         &Node::Group(Group {
             kind: GroupKind::And,
