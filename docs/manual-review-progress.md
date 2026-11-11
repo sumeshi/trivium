@@ -769,3 +769,85 @@ Regression coverage (`project_create_test.rs`):
   source after import.
 
 Next card: T13.
+
+## T13 — a single annotation update does not read project data
+
+Recorded: 2026-11-11. Code commit `390c0a1`.
+
+Changes:
+- `crates/engine/src/ops/flags.rs`: `update_flag` now returns
+  `UpdateFlagResponse { entry, revision, flagged_records }` instead of a
+  `ProjectRow`. It validates `row_index` against `meta.total_records`, reads
+  only the target row's annotation, applies the patch, and writes the entry.
+  The Parquet read, row materialization, cell building, and color evaluation
+  from the update path are gone.
+- The whole-project count is adjusted by the difference for the updated row
+  (flag empty → non-empty adds one, non-empty → empty removes one, anything
+  else keeps it). `count_flagged` is no longer called by `update_flag`; it
+  remains for full-count callers such as bulk updates.
+- `crates/engine/src/store.rs`: `ProjectsStore` keeps a process-local
+  `AtomicU64` per project. `next_revision` returns a monotonic revision for
+  successful annotation updates; it is not persisted, as the card allows.
+- `crates/engine/src/storage.rs`: annotation databases are cached per path in
+  `FLAGS_DBS` and shared through cloned `sled::Db` handles. Added
+  `load_flag(path, row_index)` for a direct `get`. `upsert_flag`,
+  `remove_flag`, `count_flagged`, and full `load_flags` use the cached handle;
+  `write_flags_to_db` (import staging and legacy migration) closes any cached
+  handle first so the database is not moved while open. `close_flags_db`
+  drops a project's handle, and `delete_project` calls it before removing the
+  directory. The sled key format and stored JSON are unchanged.
+- `crates/engine/src/project_io.rs`: `PROJECT_DATA_READS` increments in
+  `read_project_dataframe`. `project_data_reads()` and
+  `reset_project_data_reads()` are test instrumentation.
+- `src/lib/backend.ts`, `src/lib/types.ts`: `updateFlag` resolves to
+  `UpdateFlagResult` (`entry`, `revision`, `flaggedRecords`), with a new
+  `FlagEntry` type.
+- `src/lib/components/project_view/state.ts` and `MemoEditorDialog.svelte`:
+  successful updates apply the returned entry to the existing cached row
+  (flag, memo, tags, bookmark), leaving row data and cell caches intact.
+  `flaggedCount` takes the authoritative returned count; `filteredFlaggedCount`
+  keeps its existing local delta. T06's per-row request ordering still guards
+  stale successes and rollbacks.
+- Existing tests read `result.entry`. The color test now updates a row and
+  verifies the same color through the query path, because update no longer
+  returns row data.
+
+Regression coverage (`crates/engine/tests/annotation_update_test.rs`, 5 tests):
+- With a 20-row project, flag, memo, and bookmark updates each leave
+  `project_data_reads()` at 0 after a reset.
+- Two rows are annotated; updating one row's memo leaves the other row's
+  entry unchanged when read directly with `load_flag`.
+- In a 10-row project, three annotations report 3; adding a fourth reports 4,
+  clearing it reports 3, and adding only a memo keeps 3. Revisions increase on
+  every successful update.
+- `row_index == total_records` is rejected with `Row index out of range.` and
+  writes no entry.
+- After closing the flags handle and reopening `ProjectsStore` on the same
+  root, the entries and `flagged_records` remain.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New regression suite | `cargo test -p trivium-engine --test annotation_update_test` | 5 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- The GUI was not operated: the native Tauri app was not built in this
+  environment. The updated TypeScript stores compile and lint, but clicking a
+  flag or saving a memo in the real window is deferred to T26.
+- `delete_project` closes the annotation handle. Process shutdown does not
+  explicitly close all remaining handles yet; that lifetime and its
+  measurement belong to T20/T27, not this card.
+- Bulk annotation and undo still use full `load_flags`/`count_flagged`
+  scans and per-row opens/flushes. Atomic batches, undo conflict handling,
+  and worker movement were not started (T14 and later).
+- The revision is process-local by design; it resets when the process or
+  store is recreated.
+
+Next card: T14.
