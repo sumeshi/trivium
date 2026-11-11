@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::commands::job::run_job;
+use crate::commands::job::{run_blocking, run_job};
 use crate::state::AppState;
 use trivium_engine::jobs::JobKind;
 use trivium_engine::models::{LoadProjectResponse, ProjectSummary};
@@ -29,15 +29,20 @@ pub async fn create_project(
 
 /// Removes a project directory and clears related caches.
 #[tauri::command]
-pub fn delete_project(state: State<AppState>, request: ProjectRequest) -> Result<(), String> {
-    ops::projects::delete_project(&state.projects, request).map_err(String::from)
+pub async fn delete_project(
+    state: State<'_, AppState>,
+    request: ProjectRequest,
+) -> Result<(), String> {
+    let store = state.projects.clone();
+    run_blocking(move || ops::projects::delete_project(&store, request)).await
 }
 
 /// Loads project metadata, initial rows, IOC entries, and column metrics.
 #[tauri::command]
-pub fn load_project(
-    state: State<AppState>,
+pub async fn load_project(
+    state: State<'_, AppState>,
     request: ProjectRequest,
 ) -> Result<LoadProjectResponse, String> {
-    ops::projects::load_project(&state.projects, request).map_err(String::from)
+    let store = state.projects.clone();
+    run_blocking(move || ops::projects::load_project(&store, request)).await
 }

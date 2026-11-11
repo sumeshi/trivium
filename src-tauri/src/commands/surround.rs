@@ -1,14 +1,16 @@
 use tauri::State;
 
+use crate::commands::job::run_blocking;
 use crate::state::AppState;
 use trivium_engine::ops;
 use trivium_engine::ops::surround::{SurroundingRowsPayload, SurroundingRowsResponse};
 
 /// Rows around one anchor, ordered by a datetime column. Hidden columns stay in the row.
 #[tauri::command]
-pub fn surrounding_rows(
-    state: State<AppState>,
+pub async fn surrounding_rows(
+    state: State<'_, AppState>,
     payload: SurroundingRowsPayload,
 ) -> Result<SurroundingRowsResponse, String> {
-    ops::surround::surrounding_rows(&state.projects, payload).map_err(String::from)
+    let store = state.projects.clone();
+    run_blocking(move || ops::surround::surrounding_rows(&store, payload)).await
 }

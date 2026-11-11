@@ -1,14 +1,16 @@
 use tauri::State;
 
+use crate::commands::job::run_blocking;
 use crate::state::AppState;
 use trivium_engine::ops;
 use trivium_engine::ops::dupes::{DupesPayload, DupesResponse};
 
 /// Returns every row whose key is repeated, or every row whose key appears once.
 #[tauri::command]
-pub fn duplicate_rows(
-    state: State<AppState>,
+pub async fn duplicate_rows(
+    state: State<'_, AppState>,
     payload: DupesPayload,
 ) -> Result<DupesResponse, String> {
-    ops::dupes::duplicate_rows(&state.projects, payload).map_err(String::from)
+    let store = state.projects.clone();
+    run_blocking(move || ops::dupes::duplicate_rows(&store, payload)).await
 }

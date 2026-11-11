@@ -41,6 +41,22 @@ where
     result
 }
 
+/// Runs a heavy synchronous engine operation on the blocking pool.
+///
+/// Commands that are not cancellable (analysis panels, reports, cross-project
+/// search) still must not execute on the IPC/main thread while a large
+/// Parquet frame is read.
+pub(crate) async fn run_blocking<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AppError> + Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(work).await {
+        Ok(result) => result.map_err(String::from),
+        Err(error) => Err(format!("Background task failed: {}", error)),
+    }
+}
+
 /// Requests cancellation of one background job. Returns `false` when the ID is
 /// unknown or the job already finished.
 #[tauri::command]
