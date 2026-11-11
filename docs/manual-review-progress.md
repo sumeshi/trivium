@@ -2247,7 +2247,7 @@ debounce、フロントのページキャッシュ保持量はこの環境では
   T25 で通常経路から外れているため削除した。測る項目は import 3 回、
   案件再開、先頭表示 cold/warm、通常・sort 後ページ、初回検索、同一検索の
   再表示、フラグ保存、filtered/selected 出力、事前 cancel、結果IDキャッシュ、
-  案件 close 後のキャッシュ解放、`VmHWM`。短い操作は n=20、import と出力は
+  案件削除後のキャッシュ解放、`VmHWM`。短い操作は n=20、import と出力は
   n=3 で p95 を出さない。
 - 各 fixture は同じ bench バイナリの子プロセスで実行し、`VmHWM` を fixture
   ごとに分離した。補助コードは `crates/engine/src/bin/bench/support.rs`。
@@ -2269,7 +2269,8 @@ debounce、フロントのページキャッシュ保持量はこの環境では
   全 fixture で 0 回。結果IDキャッシュは同一 spec の 3 ページで resolve 1 回。
 - フラグ保存 20 回で `project_data_reads` は 0 回。p95 は最大 1.09ms。
 - 案件削除で結果IDキャッシュは 1 エントリ→0、0.763–15.259MiB→0MiB。
-  ただし close 後の VmHWM は下がらず、2M の VmRSS は 927.8MiB 残った。
+  ただし削除後の VmHWM は下がらず、2M の VmRSS は 927.8MiB 残った。
+  案件を閉じるだけの経路での解放と、import/再開の cold/warm 分離は未測定。
 - 2M のピーク RSS の主因は、案件再開の `load_project` 全列読み
   （再開後 973.0MiB）と出力の全列読み（出力後 1188.2MiB）。import 後は
   101.9MiB で、ストリーミング取込み自体は小さい。
@@ -2323,7 +2324,7 @@ completed cards found issues that later cards had not closed.
   names CSV/JSON/JSONL. The CSV delimiter default is now a comma, not
   auto-detection, matching `GOAL.md` §2.1.
 - **T12 source locations and registry**: every import writes an internal
-  `__source_record` column with the physical CSV/JSONL line or 1-based JSON
+  `__trivium_source_record` column with the physical CSV/JSONL line or 1-based JSON
   array element. `projects.json` is written through a temporary file and
   `fs::rename`; a failed registration is rolled back in memory and removes the
   temporary file.
@@ -2380,3 +2381,62 @@ CSV page projection without `__original` and JSON projection with it
   presence/type sidecar is needed.
 - `data` remains an in-process compatibility field used by engine tests and
   color/condition evaluation; it is no longer part of the IPC payload.
+
+## Post-review fixes — T21–T27
+
+Recorded: 2026-11-11, after the T21–T27 review.
+
+### Fixes
+
+- **T21 null/missing cell filter**: a `null` or `missing` cell has no string
+  value for `eq`/`ne`, and the condition evaluator intentionally treats null as
+  non-matching. The context menu now disables Filter in/out for those cells
+  with a tooltip instead of filtering on the display text `null` or `""`.
+- **T22 applied QuerySpec for bulk**: `appliedFilters` is a shared store set
+  when a query is applied. `BulkControls` builds its preview/update payload
+  from it, not from the live (possibly still-debouncing) inputs. “All rows”
+  uses the project metadata count so a loading result does not show `0`.
+- **T23 export feedback and scope**: export errors keep Tauri's plain-string
+  message, so the source-evidence rejection tells the user to choose another
+  name. The dialog opens only after the first page of the applied result has
+  returned; “All rows” uses `total_records`. A selected id outside the applied
+  result is now an explicit error instead of a silently smaller CSV.
+- **T24 view state safety**: `load_view_state` returns a status
+  (`ok`/`missing`/`unreadable`/`newer`). The frontend applies defaults but
+  disables autosave for unreadable/newer state and reports it; the engine also
+  refuses to replace a newer or corrupt file. Unknown saved search columns,
+  flag filter, sort key, and hidden columns produce a notice. Scrolling alone
+  now schedules the debounced view-state save.
+- **T24 metadata writes**: `update_hidden_columns`, `update_flagged_records`,
+  `update_ioc_applied_records`, and `remove` persist a replacement list before
+  committing it in memory. Startup migration uses the same atomic writer.
+- **T25 analysis scope**: column stats now accepts the flattened QuerySpec and
+  filters rows through the shared target resolver. Histogram and time analysis
+  accept `searchColumns` and `bookmarkedOnly`. The stats, time, and timeline
+  panels read `appliedFilters` rather than live inputs, so open panels describe
+  the table's current result.
+- **T26 acceptance status**: the IPC hidden-column check now inspects
+  `serde_json` output, and the display/copy/export comparison is marked as
+  mock/code-review because copy is not exercised on the T00 fixture.
+- **T27 measurement wording**: import is labelled cold, reopen is noted as an
+  unseparated 20-iteration run, and cache release is labelled as project
+  deletion; close/switch release and cold/warm import are explicitly
+  unmeasured.
+- **Internal column name**: the new source record column is
+  `__trivium_source_record`, reducing the chance that a legacy data column with
+  the generic `__source_record` name is mistaken for internal storage.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 33 passed, 0 failed |
+
+New coverage: panel scope (`panel_scope_test`), newer/corrupt view-state
+protection and warnings (`view_state_test`, `viewStateMapping.test`), failed
+metadata updates (`project_create_test`), selected export outside the result
+(`export_scope_test`), and IPC hidden-column absence (`manual_loop_test`).
