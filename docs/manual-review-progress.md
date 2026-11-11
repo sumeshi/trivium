@@ -1255,3 +1255,101 @@ Regression coverage (`crates/engine/tests/search_prepare_test.rs`, 5 tests):
   query path no longer reads or writes them.
 
 Next card: T19.
+
+## T19 — repeated page moves reuse the resolved row ids
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/ops/query/result_cache.rs` (new): process-local `ResultCache`
+  holding only original row ids (`Arc<Vec<usize>>`) and the two annotation
+  counts. It is an LRU with 2 entries and a 64 MiB total budget by default.
+  `estimated_bytes = ids.len() * size_of::<usize>() + 64`. A result whose own
+  estimate exceeds the budget is not stored, so a later request cannot report
+  a hit for it. `result_cache_stats()` returns entries, total/max bytes,
+  hits, misses, and evictions; `clear_result_cache()` is a test hook.
+- Cache key: project id + normalized `QuerySpec` JSON + `data.parquet`
+  length/mtime + an annotation token. Offset, limit, and output columns are not
+  part of the key. The normalized spec treats empty `searchColumns` as omitted,
+  blank search as absent, `flagFilter: "all"` as omitted,
+  `bookmarkedOnly: false` as omitted, an empty sort key as absent, and
+  `sortDirection: "asc"` as the default. These spellings already had the same
+  query meaning.
+- Annotation token: only flag-filter and bookmark-only specs include it. It is
+  the store's current annotation revision plus the IOC definition signature,
+  because a flag filter also reads IOC flags. Memo/tag changes therefore do not
+  invalidate a data-only result. Data revision comes from file metadata; when
+  it cannot be read, the result is not cached.
+- `crates/engine/src/ops/query/mod.rs`: a hit skips `resolve_target` (search and
+  sort), slices the cached ids for the requested offset/limit, reads only those
+  rows with `load_flag`, and materializes the page. A miss keeps the existing
+  full load + resolve path, then stores the ids. Project deletion removes that
+  project's entries (`ops::projects::delete_project`).
+- `crates/engine/src/ops/query/page.rs`: `materialize_page` now derives each
+  row's final flag from the page's own `FlagEntry` map (user flag wins, else IOC
+  flag) instead of being given a project-wide final-flag vector. Other callers
+  already pass the full map. This removes the all-row flag vector from the
+  query path.
+- `crates/engine/src/store.rs`: `current_revision` reads the annotation revision
+  without advancing it. `crates/engine/src/ops/query/target.rs`:
+  `resolve_count`/`reset_resolve_count` test hooks count `resolve_target` calls.
+- `crates/engine/src/ops/rows.rs`: re-exports the stats, clear, and counter
+  hooks so integration tests use the public engine crate.
+
+### Annotated count decision on a hit
+
+`annotated_total` is recomputed from `ProjectMeta::flagged_records` when the
+project has no IOC definitions; that count is already maintained by flag and
+bulk updates, so a flag change is reflected without re-resolving ids. When the
+result covers every row, `annotated_filtered` is set to that same total.
+
+For a filtered data-only result, `annotated_filtered` keeps the value from the
+miss. Recomputing it exactly would require loading every annotation, which is
+what this card removes from the hit path. `annotated_total`/`annotated_filtered`
+for projects with IOC definitions also keep the miss value. Consequence: after
+a flag or IOC change, a filtered data-only result can show a stale result-set
+annotated count until the spec or project changes. Ids and page rows remain
+correct because page annotations are re-read on every hit. This trades a stale
+secondary counter for not scanning the whole annotation DB on page moves.
+
+Regression coverage (`crates/engine/tests/query_cache_test.rs`, 6 tests; the
+test binary serializes on a mutex because the cache is process-local):
+- 60 rows, same sorted spec, pages at offset 0/20/40 with limit 20: one
+  `resolve_target` call, ids 0..59 with no gap or duplicate, 2 hits.
+- Changing the search returns the new row and does not mix the old id.
+- `flagFilter: "priority"` and `bookmarkedOnly` specs miss after `update_flag`;
+  the new matching row appears.
+- A data-only spec still hits after memo and flag updates; the hit reads the
+  page memo/flag and reports the updated full-result annotation count.
+- Three specs leave 2 entries with 1 eviction; the evicted spec is a miss.
+- Deleting a project drops its entries and bytes.
+- `result_cache.rs` unit tests inject small budgets to verify the oversized
+  result is not retained and the oldest entry is evicted at the total limit.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New cache tests | `cargo test -p trivium-engine --test query_cache_test` | 6 passed, 0 failed |
+| Cache unit tests | `cargo test -p trivium-engine --lib ops::query::result_cache` | 5 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- No wall-clock benchmark was run for a cache hit. The T27 page-move target
+  (p95 150 ms, no repeated search/sort) remains unmeasured; this card verifies
+  the call count and cache accounting, not latency.
+- The native GUI was not exercised.
+- A single cached entry still stores one `usize` per matching row. The 64 MiB
+  budget bounds it, but a 2M-row result is about 16 MiB and two such results
+  are within the configured budget; larger projects can bypass the cache.
+- The page query still reads the full `data.parquet` for the page and still
+  computes IOC outcomes for the full frame. Reading only the page's data is T20a.
+- T20a's page projection, frontend page cache, and cell previews were not
+  started.
+
+Next card: T20a.
