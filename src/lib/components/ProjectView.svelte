@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import DataTable from './project_view/DataTable.svelte';
@@ -863,18 +863,24 @@ import type {
           }
           totalRows.set(response.total_rows);
           totalFilteredRows.set(response.total_filtered_rows);
-          // The saved logical row was recorded against the result set, so apply
-          // it once the real filtered count is known (it may have shrunk).
-          if (pendingScrollRow !== null) {
-            const row = clampRow(pendingScrollRow, response.total_filtered_rows);
+          if (pendingScrollRow !== null || pendingScrollLeft !== null) {
+            const savedRow = pendingScrollRow;
+            const savedLeft = pendingScrollLeft;
             pendingScrollRow = null;
-            applyScrollOffset(row, response.total_filtered_rows);
-            rememberOffset(row);
-          }
-          if (pendingScrollLeft !== null && $bodyScrollEl) {
-            $bodyScrollEl.scrollLeft = pendingScrollLeft;
-            if ($headerScrollEl) $headerScrollEl.scrollLeft = $bodyScrollEl.scrollLeft;
             pendingScrollLeft = null;
+            // The spacer and column grid must have their restored dimensions
+            // before DOM scroll assignments, or the browser clamps them to 0.
+            await tick();
+            if (!isCurrentRequest() || destroyed) return;
+            if (savedRow !== null) {
+              const row = clampRow(savedRow, response.total_filtered_rows);
+              applyScrollOffset(row, response.total_filtered_rows);
+              rememberOffset(row);
+            }
+            if (savedLeft !== null && $bodyScrollEl) {
+              $bodyScrollEl.scrollLeft = savedLeft;
+              if ($headerScrollEl) $headerScrollEl.scrollLeft = $bodyScrollEl.scrollLeft;
+            }
           }
           // `flaggedCount` always means the whole project, never this page's slice.
           flaggedCount.set(response.annotated_total);

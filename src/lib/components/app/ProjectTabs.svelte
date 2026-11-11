@@ -1,11 +1,20 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
   import type { ProjectSummary } from '../../types';
 
   export let projects: ProjectSummary[] = [];
   export let selectedProjectId: string | null = null;
   const dispatch = createEventDispatcher<{ select: string; close: string }>();
   const label = (project: ProjectSummary) => project.meta.source_file_name || project.meta.name;
+  let tabList: HTMLDivElement;
+
+  const revealSelected = async (id: string | null, _projects: ProjectSummary[]) => {
+    await tick();
+    if (!id || id !== selectedProjectId) return;
+    const tab = tabList?.querySelector<HTMLElement>(`[id="project-tab-${id}"]`);
+    tab?.parentElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+  $: void revealSelected(selectedProjectId, projects);
 
   const navigate = (event: KeyboardEvent, index: number) => {
     if (event.key === 'Delete') {
@@ -25,7 +34,7 @@
 </script>
 
 {#if projects.length > 0}
-  <div class="project-tabs" role="tablist" aria-label="Open projects">
+  <div class="project-tabs" bind:this={tabList} role="tablist" aria-label="Open projects">
     {#each projects as project, index (project.meta.id)}
       <div class="project-tab" class:active={selectedProjectId === project.meta.id} role="presentation">
         <button

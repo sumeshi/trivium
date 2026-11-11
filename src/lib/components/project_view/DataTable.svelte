@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import {
     rowsCache,
     pendingPages,
@@ -83,11 +83,6 @@
   let virtualRows: VirtualRow[] = [];
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
-  let isSyncingHeaderScroll = false;
-  let isSyncingBodyScroll = false;
-  let scrollTimeout: number | null = null;
-  let releaseHeaderSyncFrame: number | null = null;
-  let releaseBodySyncFrame: number | null = null;
   let selectAllEl: HTMLInputElement | null = null;
 
   const resolveColumnWidth = (column: string) => {
@@ -225,40 +220,28 @@
     const target = event.currentTarget as HTMLDivElement;
     scrollTop.set(target.scrollTop);
     rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
-    
-    // Clear scroll timeout
-    if (scrollTimeout !== null) {
-      clearTimeout(scrollTimeout);
-    }
-    
-    // Execute scroll synchronization with debounce
-    scrollTimeout = setTimeout(() => {
-      if (isSyncingBodyScroll) {
-        isSyncingBodyScroll = false;
-        return;
-      }
-      if ($headerScrollEl && $headerScrollEl.scrollLeft !== target.scrollLeft) {
-        isSyncingHeaderScroll = true;
-        $headerScrollEl.scrollLeft = target.scrollLeft;
-        isSyncingHeaderScroll = false;
-      }
-      scrollTimeout = null;
-    }, 16); // 約60FPS
+    syncHeader(target.scrollLeft);
   };
 
-  const handleHeaderScroll = () => {
-    if (!$headerScrollEl || !$bodyScrollEl) return;
-    if (isSyncingHeaderScroll) {
-      isSyncingHeaderScroll = false;
-      return;
+  // The body owns horizontal position. Feeding delayed header scroll events
+  // back into it can undo a newer wheel gesture or a tab's restored position.
+  const syncHeader = (left: number) => {
+    if ($headerScrollEl && $headerScrollEl.scrollLeft !== left) {
+      $headerScrollEl.scrollLeft = left;
     }
-    const nextLeft = $headerScrollEl.scrollLeft;
-    if ($bodyScrollEl.scrollLeft !== nextLeft) {
-      isSyncingBodyScroll = true;
-      $bodyScrollEl.scrollLeft = nextLeft;
-      // Reset flag immediately for more reliable synchronization
-      isSyncingBodyScroll = false;
+  };
+
+  const focusColumn = (index: number) => {
+    if (!$bodyScrollEl || index === 0 || index >= distributedDataWidths.length) return;
+    const left = STICKY_COLUMNS_WIDTH + distributedDataWidths.slice(0, index).reduce((a, b) => a + b, 0);
+    const right = left + distributedDataWidths[index];
+    const stickyWidth = STICKY_COLUMNS_WIDTH + (distributedDataWidths[0] ?? 0);
+    if (left < $bodyScrollEl.scrollLeft + stickyWidth) {
+      $bodyScrollEl.scrollLeft = Math.max(0, left - stickyWidth);
+    } else if (right > $bodyScrollEl.scrollLeft + $bodyScrollEl.clientWidth) {
+      $bodyScrollEl.scrollLeft = right - $bodyScrollEl.clientWidth;
     }
+    syncHeader($bodyScrollEl.scrollLeft);
   };
 
   const forwardWheel = (event: WheelEvent) => {
@@ -276,6 +259,7 @@
       const previousLeft = $bodyScrollEl.scrollLeft;
       $bodyScrollEl.scrollLeft += event.deltaX;
       handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
+      syncHeader($bodyScrollEl.scrollLeft);
     }
     if (handled) {
       event.preventDefault();
@@ -302,16 +286,6 @@
     };
   });
 
-  onDestroy(() => {
-    if (releaseHeaderSyncFrame !== null) {
-      cancelAnimationFrame(releaseHeaderSyncFrame);
-      releaseHeaderSyncFrame = null;
-    }
-    if (releaseBodySyncFrame !== null) {
-      cancelAnimationFrame(releaseBodySyncFrame);
-      releaseBodySyncFrame = null;
-    }
-  });
 </script>
 
 <section class="table-wrapper">
@@ -340,7 +314,6 @@
       <div
         class="table-header-scroll"
         bind:this={$headerScrollEl}
-        on:scroll={handleHeaderScroll}
         on:wheel={forwardWheel}
       >
         <div
@@ -369,6 +342,7 @@
               class:stickyData={columnIndex === 0}
               class:sorted={$sortKey === column}
               on:click={() => _toggleSort(column)}
+              on:focus={() => focusColumn(columnIndex)}
               aria-pressed={$sortKey === column}
             >
               <span class="header-label">{$columnLabels.get(column) ?? column}</span>
