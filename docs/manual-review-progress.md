@@ -4,6 +4,17 @@ Plan: `GOAL.md` (2026-11-11). One card per commit; verification recorded per car
 Historical wording in TASKS.md (e.g. "no tests", "Tauri 1") is not evidence for the
 current tree.
 
+## Current status
+
+- T00–T27 are implemented and committed.
+- T26 (real native app verification) is still open: this environment cannot
+  build Tauri (missing GTK/Pango/WebKit development packages).
+- T27 has measurements for the engine paths, but WebView RSS, UI timing, and
+  mid-batch cancellation remain unmeasured. One target (2M peak RSS) was not
+  met.
+- Historical sections below are append-only records. Do not use their hand-
+  written counts as current; run the gates or read CI output.
+
 ## T00 — current state and minimal fixtures
 
 Recorded: 2026-11-11.
@@ -2466,3 +2477,66 @@ Verification after these fixes: `cargo test -p trivium-engine` all suites
 passed; `bash scripts/check_rust_size.sh` exit 0; `npm run lint` 0 errors;
 `npm run build` success; `npm run test:ui` 33 passed. Native Tauri compilation
 and the real GUI remain unverified in this environment.
+
+## Maintainability pass
+
+Recorded: 2026-11-11, after the manual-review acceptance work.
+
+### Build and developer workflow
+
+- The root `Cargo.lock` is now committed. `src-tauri/Cargo.lock` and the broad
+  `*.csv` ignore rule were removed; generated fixtures are ignored under
+  `/fixtures/`, and the T00 CSV fixture is tracked. This fixes a clean-clone
+  test failure.
+- CI runs `npm run test:ui`, `npm run lint:test`, `npm run build`, and
+  `cargo clippy -p trivium-engine --lib -- -D warnings`. Windows builds use
+  Node 22 and the workspace `target/release` path. Releases run on `v*` tags;
+  Windows uses NSIS and Linux keeps the deb bundle.
+- Shared Rust dependencies moved to `[workspace.dependencies]`. The duplicate
+  member `[profile.release]` was removed.
+- Unrelated npm dependencies (`@openai/codex`, unused ESLint packages, unused
+  JS opener plugin) were removed. UI tests now have a `tsconfig.test.json`.
+- README now describes CSV/JSON/JSONL, exact values, tags/bookmarks, search
+  scope, lazy analysis, and the current storage files. TASKS/validation carry
+  historical-plan banners.
+
+### Engine and IPC
+
+- Heavy analysis/report/cross-project Tauri commands run on the blocking pool
+  instead of the IPC thread.
+- Histogram and time analysis now use the shared `resolve_target` query path
+  instead of their own flag/bookmark/search pipeline.
+- Internal-column checks use the storage-version-aware helper in stats, time,
+  histogram, and cell lookup.
+- `FlagEntry::is_flagged` / `is_annotated` centralize annotation semantics.
+  The unused searchable-text cache API was removed; bulk undo entries are
+  dropped when a project is deleted.
+- A corrupt `projects.json` is preserved as a timestamped backup and the app
+  starts with an empty registry instead of failing to launch. Derived flagged
+  counts are rebuilt from the annotation database.
+- The final job progress report is emitted even inside the throttle window.
+
+### Frontend
+
+- `appliedFilters` is the single applied-query snapshot; the duplicate
+  `activeFilters` mirror was removed. `projectDetail`/`backend` stores sync
+  reactively with their props.
+- Dead table-layout/scroll duplication and unused picker state were removed
+  from `ProjectView.svelte`; DataTable owns table width and scroll sync.
+- `FlagFilterValue` has one definition; `importIocs` has its real return type;
+  unused stores and helpers were removed.
+
+### Remaining larger refactors (not done here)
+
+- Split `ProjectView.svelte` orchestration (page requests, view-state restore)
+  into testable modules.
+- Remove `ProjectRow.data` by migrating report/tests to `cells`; this would
+  stop building a second full value map per page.
+- Share a project-frame/cache abstraction across stats, histogram, time, group,
+  report, and bulk instead of each reading the full Parquet frame.
+- Consolidate the 40+ integration test binaries and their duplicated
+  `temp_root`/fixture helpers.
+- Replace the DOM `CustomEvent` sort trigger and unify condition-tree codecs.
+
+These are intentionally deferred because they are structural changes that need
+their own regression coverage, not drive-by edits.

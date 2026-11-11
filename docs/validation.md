@@ -1,5 +1,10 @@
 # Validation（Z3 全体チェック）
 
+> **Historical record (2026-11-10).** This document describes commit `0d63591`
+> and an older benchmark set. Current status is in
+> `docs/manual-review-progress.md`; current measurements are in
+> `docs/performance.md`. Do not treat the counts or timings below as current.
+
 - 実施日: 2026-11-10
 - 環境: WSL2 (Linux 6.18.58.1-microsoft-standard-WSL2)、Intel Core i5-12400F、メモリ 15GiB
 - 対象コミット: `develop` ブランチ、Z2 完了時点（`0d63591`）

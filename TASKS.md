@@ -1,5 +1,10 @@
 # Trivium — タスク分解（v2）
 
+> **Historical plan (2026-11-09).** This file is kept for history. The current
+> plan is `GOAL.md` and the current implementation status is
+> `docs/manual-review-progress.md`. Section 0 below describes the tree at
+> 2026-11-09 (no tests, no develop branch) and is not current.
+
 > 本書は「このチェックアウトで再現可能に進める」ための分解である。
 > 履歴上の実装報告（DuckDB/Tauri 2/HTTP API/Python SDK/E2E 96件等）は現ソースに存在しないため、
 > 完了条件として扱わない。

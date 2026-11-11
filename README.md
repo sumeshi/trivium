@@ -1,14 +1,14 @@
 # Trivium
 
-A desktop application for reviewing and triaging large CSV files.
+A desktop application for reviewing and triaging large CSV, JSON, and JSONL logs.
 
 ![Trivium Screenshot](screenshot.jpeg)
 
 ## Introduction
 
-Trivium is a desktop tool designed to help you work with CSV files that are too large to handle comfortably in standard spreadsheet programs. It provides a simple, efficient interface for filtering data, flagging important rows, and adding notes.
+Trivium is a desktop tool for reviewing CSV, JSON, and JSONL data that is too large or too structured for a spreadsheet. It provides a simple interface for filtering data, flagging important rows, and recording notes, tags, and bookmarks.
 
-Its core purpose is to make the process of manual data review and analysis faster and more manageable.
+Its core purpose is to make manual data review and analysis faster and easier to resume. Opening a file never assigns a risk level or marks a row as reviewed; the user makes those decisions.
 
 ## Download
 
@@ -24,19 +24,18 @@ This tool is primarily for anyone who needs to sift through large amounts of tab
 
 ## Key Features
 
-- **Efficient CSV Handling**: Imports large CSV files quickly by converting them into the efficient Parquet format.
-- **Virtualized Scrolling**: The interface remains fast and responsive, even with millions of rows.
+- **Efficient Import**: Opens CSV, JSON object/array, JSONL, and NDJSON files and stores the working copy as Parquet. CSV values keep their original text; JSON null, missing keys, and empty strings stay distinct.
+- **Virtualized Scrolling**: The interface remains responsive with millions of rows.
 - **Flag Rows**: Mark any row as `Safe`, `Suspicious`, or `Critical` with a single click.
-- **Add Memos**: Annotate rows with detailed notes and observations.
-- **IOC Rules**: Define "Indicators of Compromise" (or any custom) rules to automatically flag rows and tag memos based on content, streamlining initial analysis.
-- **Filtering & Sorting**: Instantly filter the view by flag status, search for text across all columns, and sort data by any column.
-- **Column Management**: Toggle the visibility of columns to focus on the data that matters.
-- **Data Export**: Export your work—including all flags and memos—back to a CSV file for use in other tools.
+- **Annotations**: Add memos, tags, and bookmarks independently. Clearing a flag does not clear the other annotations.
+- **Filtering & Sorting**: Filter by flag, bookmark, text search, or structured conditions, and sort by any data column.
+- **Column Management**: Hide columns for display without changing the default search scope.
+- **Selection & Bulk Annotation**: Select rows across pages by stable row id, annotate only the selection, the current result, or all rows, and undo the last bulk change.
+- **Data Export**: Export all rows, the current result, or selected rows to CSV, with optional `trivium-*` annotation columns.
 - **Condition Editor**: Build filters from nested AND/OR groups with per-column operators (`=`, `≠`, `>`, `<`, `≥`, `≤`, `contains`, `starts`, `ends`, `regex`, `in`), while the text search bar remains available.
-- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and row details with surrounding events. Back/forward navigation and per-project view state make it easy to move between filters.
-- **Bulk Annotation & Organization**: Annotate every matching row at once with undo, add tags and bookmarks, group rows hierarchically, and color rows with condition rules. Presets store a condition, column set, and sort order for reuse across projects.
-- **Project Comparison & Reports**: Search the same condition across projects, diff projects by key columns, and produce a self-contained HTML report.
-- **Flexible Import & Export**: Choose a delimiter, import UTF-16 files via BOM detection, and load JSONL with nested keys flattened to `a.b`. The source file's SHA-256 is kept in the project details, and exports can honor the current condition, visible columns, and sort order while preserving integer and nanosecond precision.
+- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and row details with surrounding events. Panels calculate only while open and use the applied query. Back/forward navigation and per-project view state make it easy to move between filters.
+- **Advanced Views**: Grouping, color rules, presets, cross-project search, diffs, and HTML reports remain available as auxiliary tools outside the basic manual-review flow.
+- **Flexible Import & Export**: Choose a CSV delimiter, import UTF-16 via BOM detection, and load JSON/JSONL with nested keys flattened using JSON Pointers. The source file name, format, size, and SHA-256 are kept in project metadata. Exports preserve integer text and can include tags and bookmarks as independent columns.
 
 ## Search Syntax
 
@@ -44,7 +43,7 @@ Trivium provides a fast, flexible text search with boolean operators and column 
 
 - Basic
   - Case-insensitive substring match
-  - Search runs across visible columns (toggling column visibility changes the search target)
+  - Search runs across all data columns by default. Hiding a column changes display only; it does not change the search scope.
 
 - Operators (no keywords; use symbols only)
   - AND: whitespace (implicit between adjacent terms)
@@ -72,12 +71,12 @@ Trivium provides a fast, flexible text search with boolean operators and column 
   - `eventid:4624 user:administrator` → scoped to `eventid` and `user`
   - `command:"powershell -enc"` → phrase in `command`
 
-- IOC rules
-  - IOC queries use the same syntax and semantics as the main search
+- Legacy IOC definitions
+  - IOC definitions use the same syntax and semantics as the main search, but they are preserved as old settings and are not evaluated automatically on import, page load, or export.
 
 Notes
-- Regular expressions are not supported.
-- Searching very large datasets is cached; the first run may build masks, subsequent runs are faster.
+- Regular expressions are not supported in the text search bar; `regex` remains available in structured conditions.
+- Repeated page and search requests reuse prepared work; the first full-column search can still take time on very large files.
 
 ### Structured Conditions
 
@@ -104,12 +103,11 @@ The condition editor builds a filter tree that the engine evaluates with the sam
 
 ## Getting Started
 
-1.  **Import Data**: Launch the app and click "Import CSV" from the sidebar to create a new project.
-2.  **Review & Flag**: Use the table view to inspect your data. Use the flag buttons (`✓`, `?`, `!`) on each row to categorize them.
-3.  **Add Memos**: Click the memo icon to add detailed notes to any row.
-4.  **Use Filters**: Use the search bar and flag filter at the top to narrow down the data.
-5.  **Configure IOCs**: Open the "IOC Rules" manager to set up rules that automatically flag data for you.
-6.  **Export**: When you're done, click the "Export Project" button to save your work as a new CSV file.
+1.  **Import Data**: Click "Import CSV / JSON / JSONL File" in the sidebar and select a file.
+2.  **Review & Flag**: Inspect rows in the table and use the flag buttons (`✓`, `?`, `!`) to record your judgment.
+3.  **Annotate**: Add a memo, tags, or a bookmark. These fields are independent.
+4.  **Narrow the View**: Use text search, flag/bookmark filters, column conditions, and sorting.
+5.  **Select & Export**: Select rows across pages if needed, then export all rows, the current result, or the selection as CSV.
 
 ## Building from Source
 
@@ -117,9 +115,9 @@ For developers who wish to build or modify the application.
 
 #### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or later)
+- [Node.js](https://nodejs.org/) (v22 or later; the UI tests use the built-in TypeScript stripping)
 - [Rust](https://www.rust-lang.org/tools/install) toolchain
-- [Tauri CLI setup](https://tauri.app/v1/guides/getting-started/prerequisites)
+- [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/)
 
 #### Development
 
@@ -149,13 +147,25 @@ npm run tauri build
   python3 scripts/gen_fixture.py --rows 1000 --seed 42 --out fixtures/basic.csv
   ```
 
-  It accepts `--rows N --seed N --out PATH --variant {ascii,utf16,wide}`. A fixed seed reproduces the same bytes; `utf16` writes a BOM-prefixed UTF-16LE file, and `wide` adds twelve extra columns.
+  It accepts `--rows N --seed N --out PATH --variant {ascii,utf16,wide,long}`. A fixed seed reproduces the same bytes; `utf16` writes a BOM-prefixed UTF-16LE file, `wide` adds twelve extra columns, and `long` adds many columns with long cells for the T27 benchmark.
 
 - `scripts/check_rust_size.sh` enforces the 500-line limit on Rust source files under `src-tauri/src` and `crates/engine/src`. It exits non-zero when a file exceeds the limit and runs as a quality gate in CI.
 
   ```bash
   bash scripts/check_rust_size.sh
   ```
+
+Quality gates used locally and in CI:
+
+```bash
+cargo test -p trivium-engine
+cargo clippy -p trivium-engine --lib -- -D warnings
+bash scripts/check_rust_size.sh
+npm run lint
+npm run lint:test
+npm run test:ui
+npm run build
+```
 
 Benchmark results are recorded in [docs/performance.md](docs/performance.md).
 
@@ -175,9 +185,11 @@ If you are using the **portable executable** (`.exe`), you may need to install t
 
 Projects are stored in the standard application data directory for your operating system.
 
-- `trivium/projects/<uuid>/data.parquet` - The imported data in Parquet format.
-- `trivium/projects/<uuid>/flags.json` - Row flags and memos.
-- `trivium/projects/<uuid>/iocs.json` - IOC rules for the project.
+- `trivium/projects/<uuid>/data.parquet` - The imported data and the original-record column.
+- `trivium/projects/<uuid>/flags.db` - Row flags, memos, tags, and bookmarks.
+- `trivium/projects/<uuid>/view_state.json` - Rebuildable per-project view settings.
+- `trivium/projects/<uuid>/iocs.json` - Legacy IOC definitions, retained but not evaluated automatically.
+- `trivium/projects.json` - The project list.
 - `trivium/projects.json` - General metadata for all projects.
 
 ---
