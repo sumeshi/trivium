@@ -2475,7 +2475,7 @@ metadata updates (`project_create_test`), selected export outside the result
 
 Verification after these fixes: `cargo test -p trivium-engine` all suites
 passed; `bash scripts/check_rust_size.sh` exit 0; `npm run lint` 0 errors;
-`npm run build` success; `npm run test:ui` 33 passed. Native Tauri compilation
+`npm run build` success; `npm run test:ui` 34 passed. Native Tauri compilation
 and the real GUI remain unverified in this environment.
 
 ## Maintainability pass
@@ -2491,7 +2491,8 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
 - CI runs `npm run test:ui`, `npm run lint:test`, `npm run build`, and
   `cargo clippy -p trivium-engine --lib -- -D warnings`. Windows builds use
   Node 22 and the workspace `target/release` path. Releases run on `v*` tags;
-  Windows uses NSIS and Linux keeps the deb bundle.
+  Windows uses NSIS and Linux keeps the deb bundle. A pull-request workflow
+  adds `cargo check -p trivium-desktop` on a GTK-enabled runner.
 - Shared Rust dependencies moved to `[workspace.dependencies]`. The duplicate
   member `[profile.release]` was removed.
 - Unrelated npm dependencies (`@openai/codex`, unused ESLint packages, unused
@@ -2518,6 +2519,8 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
   starts with an empty registry instead of failing to launch. Derived flagged
   counts are rebuilt from the annotation database.
 - The final job progress report is emitted even inside the throttle window.
+- Annotation/color/metric/IOC sidecar JSON uses one atomic temp-file helper.
+  `ProjectsStore::flags_path` replaces the repeated `flags.json` joins.
 
 ### Frontend
 
