@@ -3,6 +3,10 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import type { AnnotationPatch, BulkAnnotateArgs } from "../../backend";
   import {
+    buildBulkAnnotateArgs,
+    buildFlagMemoPatch,
+  } from "../../bulkAnnotation";
+  import {
     appliedFilters,
     appliedResultLoading,
     backend,
@@ -18,6 +22,7 @@
   let target: "selection" | "filtered" | "all" = "filtered";
   let flag: NonNullable<AnnotationPatch["flag"]> = FLAG_OPTIONS[0].value;
   let memo = "";
+  let clearMemo = false;
   let tagInput = "";
   let count: number | null = null;
   let previewToken: string | null = null;
@@ -38,27 +43,23 @@
   $: filteredResultLoading = target === "filtered" && $appliedResultLoading;
   $: canApplyTag = tagInput.trim().length > 0 && !selectedTargetEmpty;
 
-  const buildArgs = (patch: AnnotationPatch): BulkAnnotateArgs => ({
-    projectId,
-    target,
-    ...(target === "selection" ? { rowIndices: Array.from($selectedRowIds) } : {}),
-    // Use the applied QuerySpec, not the live inputs. The search box may still
-    // be waiting for its debounce while the table shows the previous result.
-    search: $appliedFilters.search.trim() || undefined,
-    searchColumns: $appliedFilters.searchColumns,
-    flagFilter: $appliedFilters.flag,
-    bookmarkedOnly: $appliedFilters.bookmarkedOnly,
-    sortKey: $sortKey,
-    sortDirection: $sortDirection,
-    condition: $appliedFilters.condition,
-    ...(previewToken ? { previewToken } : {}),
-    ...patch,
-  });
+  const buildArgs = (patch: AnnotationPatch): BulkAnnotateArgs =>
+    buildBulkAnnotateArgs({
+      projectId,
+      target,
+      selectedRowIds: Array.from($selectedRowIds),
+      // Use the applied QuerySpec, not the live inputs. The search box may
+      // still be waiting for its debounce while the table shows the previous
+      // result.
+      filters: $appliedFilters,
+      sortKey: $sortKey,
+      sortDirection: $sortDirection,
+      previewToken,
+      patch,
+    });
 
-  const flagMemoPatch = (): AnnotationPatch => ({
-    flag,
-    memo: memo.trim() ? memo : null,
-  });
+  const flagMemoPatch = (): AnnotationPatch =>
+    buildFlagMemoPatch({ flag, memo, clearMemo });
 
   const run = async (operation: "preview" | "apply" | "undo") => {
     if (!$backend || !projectId || busy || selectedTargetEmpty) {
@@ -160,7 +161,26 @@
     </select>
     <label class="condition-count">
       Memo
-      <input bind:value={memo} placeholder="Optional" aria-label="Bulk memo" />
+      <input
+        bind:value={memo}
+        placeholder="Leave unchanged"
+        aria-label="Bulk memo"
+        disabled={clearMemo}
+        on:input={() => (clearMemo = false)}
+      />
+    </label>
+    <label
+      class="condition-count memo-clear"
+      title="Send an explicit memo deletion for the target rows"
+    >
+      <input
+        type="checkbox"
+        bind:checked={clearMemo}
+        on:change={() => {
+          if (clearMemo) memo = "";
+        }}
+      />
+      Clear memo
     </label>
     <button
       type="button"

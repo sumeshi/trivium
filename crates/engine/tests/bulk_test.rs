@@ -418,6 +418,55 @@ fn bulk_clear_does_not_reveal_legacy_ioc_flags() {
 }
 
 #[test]
+fn bulk_flag_only_keeps_existing_memo_tags_and_bookmark() {
+    let _guard = undo_guard();
+    let (root, store, id, _ids) = setup(false);
+
+    update_single(
+        &store,
+        id,
+        0,
+        Some("suspicious"),
+        Some(Some("note")),
+        Some(vec!["pc", "gpu"]),
+        Some(true),
+    );
+    update_single(
+        &store,
+        id,
+        1,
+        Some("critical"),
+        Some(Some("second")),
+        Some(vec!["server"]),
+        Some(false),
+    );
+    let before = annotations(&store, id);
+
+    let applied = bulk_update(
+        &store,
+        previewed(
+            &store,
+            payload(id, "selection", None, Some(vec![0, 1]), "safe", None),
+        ),
+    )
+    .expect("bulk flag update failed");
+    assert_eq!(applied.updated, 2);
+
+    let after = annotations(&store, id);
+    assert_eq!(after[0].0, "safe");
+    assert_eq!(after[1].0, "safe");
+    assert_eq!(after[0].1, before[0].1, "row 0 memo changed");
+    assert_eq!(after[0].2, before[0].2, "row 0 tags changed");
+    assert_eq!(after[0].3, before[0].3, "row 0 bookmark changed");
+    assert_eq!(after[1].1, before[1].1, "row 1 memo changed");
+    assert_eq!(after[1].2, before[1].2, "row 1 tags changed");
+    assert_eq!(after[1].3, before[1].3, "row 1 bookmark changed");
+    assert_eq!(after[2], before[2], "an unselected row changed");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn bulk_clear_undo_restores_memo_tags_and_bookmark() {
     let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
