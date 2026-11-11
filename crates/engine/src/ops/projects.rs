@@ -12,13 +12,12 @@ use crate::{
     analysis::infer_column_kinds,
     error::AppError,
     import::csv,
-    import::json,
     import::jsonl,
     ioc::{apply_ioc_outcomes_to_rows, cached_ioc_outcomes, load_ioc_entries},
     jobs::JobContext,
     models::{ColumnMeta, FlagEntry, LoadProjectResponse, ProjectMeta, ProjectSummary},
     project_io::{
-        read_project_dataframe, write_project_dataframe, BatchDataWriter, ProjectColumns,
+        read_project_dataframe, BatchDataWriter, ProjectColumns,
     },
     storage::{
         clear_ioc_flag_cache, clear_searchable_cache, close_flags_db, compute_column_max_chars,
@@ -86,6 +85,31 @@ struct ImportedSource {
     total_records: usize,
     flags: HashMap<usize, FlagEntry>,
     column_max_chars: Option<HashMap<String, usize>>,
+}
+
+/// Streams JSON/JSONL records through the fixed schema from pass 1 and writes
+/// each bounded batch as its own Parquet row group.
+fn import_json_batches(
+    source: &Path,
+    parquet_path: &Path,
+    format: jsonl::RecordFormat,
+    job: &JobContext,
+) -> Result<ImportedSource, AppError> {
+    let importer =
+        jsonl::JsonImporter::open(source, format, jsonl::BatchLimits::default(), job)?;
+    let columns = importer.columns().to_vec();
+    let mut writer = BatchDataWriter::create(parquet_path, &columns).map_err(AppError::from)?;
+    let summary = importer.write_batches(job, |batch| {
+        writer.write_batch(batch).map_err(AppError::from)
+    })?;
+    writer.finish().map_err(AppError::from)?;
+
+    Ok(ImportedSource {
+        columns: summary.columns,
+        total_records: summary.rows,
+        flags: summary.flags,
+        column_max_chars: Some(summary.column_max_chars),
+    })
 }
 
 /// Copies the source into the staging directory while hashing the same bytes
@@ -176,8 +200,9 @@ pub fn create_project(
 
 /// [`create_project`] with cancellation checkpoints and progress reporting.
 ///
-/// CSV import checks cancellation at every batch boundary. JSON/JSONL still run
-/// as a single library call; T17 makes them interruptible.
+/// CSV import checks cancellation at every batch boundary. JSON/JSONL uses two
+/// passes: pass 1 collects the column set and pass 2 writes bounded batches,
+/// both observing cancellation.
 pub fn create_project_with_job(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
@@ -214,30 +239,18 @@ pub fn create_project_with_job(
     job.report_progress(1, Some(4), Some("Importing data".into()));
     let parquet_path = staging.path().join("data.parquet");
     let imported = match source_format {
-        "json" => {
-            let imported = json::load(&copied.path)?;
-            let mut df = imported.frame;
-            let total_records = df.height();
-            write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
-            ImportedSource {
-                columns: imported.columns,
-                total_records,
-                flags: imported.flags,
-                column_max_chars: None,
-            }
-        }
-        "jsonl" | "ndjson" => {
-            let imported = jsonl::load(&copied.path)?;
-            let mut df = imported.frame;
-            let total_records = df.height();
-            write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
-            ImportedSource {
-                columns: imported.columns,
-                total_records,
-                flags: imported.flags,
-                column_max_chars: None,
-            }
-        }
+        "json" => import_json_batches(
+            &copied.path,
+            &parquet_path,
+            jsonl::RecordFormat::Json,
+            job,
+        )?,
+        "jsonl" | "ndjson" => import_json_batches(
+            &copied.path,
+            &parquet_path,
+            jsonl::RecordFormat::JsonLines,
+            job,
+        )?,
         _ => {
             // CSV is parsed in bounded batches and written one row group at a
             // time. Neither the source bytes nor all records stay in memory.
