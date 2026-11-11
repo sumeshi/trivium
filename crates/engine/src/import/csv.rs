@@ -7,6 +7,7 @@ use polars::prelude::*;
 
 use crate::error::AppError;
 use crate::import::utf16::{detect_bom, Encoding, Utf16Reader};
+use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
 use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
@@ -80,10 +81,6 @@ pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> 
 }
 
 /// Internal column id assigned to a source column by its position.
-fn column_id(position: usize) -> String {
-    format!("c{:06}", position + 1)
-}
-
 /// Source column positions of the optional annotation side channel.
 #[derive(Clone, Copy, Debug, Default)]
 struct FlagColumns {
@@ -412,20 +409,6 @@ impl CsvImporter {
             column_max_chars: self.column_max_chars,
         }
     }
-}
-
-fn empty_frame(columns: &[ColumnMeta]) -> Result<DataFrame, AppError> {
-    let mut series: Vec<Series> = columns
-        .iter()
-        .map(|column| Series::new(column.id.as_str(), Vec::<String>::new()))
-        .collect();
-    series.push(Series::new(INTERNAL_ORIGINAL, Vec::<String>::new()));
-    series.push(Series::new(INTERNAL_ROW_ID, Vec::<i64>::new()));
-    series.push(Series::new(
-        INTERNAL_SOURCE_RECORD,
-        Vec::<i64>::new(),
-    ));
-    DataFrame::new(series).map_err(|_| AppError::Message("Failed to build the dataset.".into()))
 }
 
 /// Reads a whole CSV into one frame.

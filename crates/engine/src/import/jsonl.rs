@@ -6,6 +6,7 @@ use polars::prelude::*;
 
 use crate::error::AppError;
 use crate::import::json_source::{for_each_record, value_to_cell, visit_leaves};
+use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
 use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
@@ -44,11 +45,6 @@ impl BatchLimits {
             max_bytes: self.max_bytes.max(1),
         }
     }
-}
-
-/// Internal column id assigned to a source path by its first appearance.
-fn column_id(position: usize) -> String {
-    format!("c{:06}", position + 1)
 }
 
 /// Display label derived from an absolute JSON Pointer. The leading slash is
@@ -307,21 +303,6 @@ fn build_batch(
     series.push(Series::new(
         INTERNAL_SOURCE_RECORD,
         std::mem::take(source_records),
-    ));
-    DataFrame::new(series)
-        .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
-}
-
-fn empty_frame(columns: &[ColumnMeta]) -> Result<DataFrame, AppError> {
-    let mut series: Vec<Series> = columns
-        .iter()
-        .map(|column| Series::new(column.id.as_str(), Vec::<Option<String>>::new()))
-        .collect();
-    series.push(Series::new(INTERNAL_ORIGINAL, Vec::<String>::new()));
-    series.push(Series::new(INTERNAL_ROW_ID, Vec::<i64>::new()));
-    series.push(Series::new(
-        INTERNAL_SOURCE_RECORD,
-        Vec::<i64>::new(),
     ));
     DataFrame::new(series)
         .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
