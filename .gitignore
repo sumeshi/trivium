@@ -1,5 +1,6 @@
 dist/
 node_modules/
+__pycache__/
 *.tsbuildinfo
 src-tauri/target/
 .DS_Store

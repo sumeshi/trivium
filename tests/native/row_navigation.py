@@ -107,7 +107,10 @@ class WebView:
         element = wait_for(
             lambda: self.script(
                 "return [...document.querySelectorAll(arguments[0]+' button')]"
-                ".find(e=>e.textContent.trim()===arguments[1]&&!e.disabled&&e.getClientRects().length)??null;",
+                ".find(e=>(e.textContent.trim()===arguments[1]||e.getAttribute('aria-label')===arguments[1]"
+                "||e.title===({Go:'Find this original row within the current filtered and sorted result',"
+                "First:'First row in the current result',Last:'Last row in the current result'}[arguments[1]]))"
+                "&&!e.disabled&&e.getClientRects().length)??null;",
                 container, text,
             ), bool, f"enabled {text} button",
         )

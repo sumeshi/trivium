@@ -1,5 +1,9 @@
 # P0: original-row navigation and virtual scrolling
 
+> Historical P0 record. The subsequent UI/UX work fixes the scoped display-name
+> search, failed-query loading state and legacy Clippy issues listed below.
+> See [UI/UX validation](uiux-validation.md) for the current checks.
+
 Base: `develop` at `1dc950b2d3d6cf97a4eae64f107516a65b9f16f5`.
 
 ## Navigation contract
