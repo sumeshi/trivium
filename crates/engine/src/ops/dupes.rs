@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::analysis::dupes::matching_row_indices;
 use crate::error::AppError;
 use crate::models::ProjectRow;
-use crate::project_io::{is_internal_column, read_project_dataframe};
+use crate::project_io::{is_internal_column, read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -59,10 +59,10 @@ pub fn duplicate_rows(
             .map_err(|_| AppError::Message("Column not found.".into()))?;
         series.push(found);
     }
-    let data_columns = super::query::data_columns(&df);
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let indices = matching_row_indices(&series, payload.mode == DupeMode::Duplicates);
     Ok(DupesResponse {
-        rows: materialize_rows(&df, &data_columns, indices.into_iter(), &flags),
+        rows: materialize_rows(&df, project_columns.columns(), indices.into_iter(), &flags),
     })
 }

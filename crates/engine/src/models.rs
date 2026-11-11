@@ -60,10 +60,27 @@ pub struct ProjectSummary {
     pub meta: ProjectMeta,
 }
 
+/// One cell as the frontend should read it.
+///
+/// `text` is the exact source text (`None` for null/missing) and `kind` is the
+/// column-level type. Integers are always passed as decimal strings, so a long
+/// integer never travels through a JavaScript `Number`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Cell {
+    /// Exact display text. `None` for null/missing.
+    pub text: Option<String>,
+    /// "string" | "int" | "float" | "bool" | "null" | "missing"
+    pub kind: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectRow {
     pub row_index: usize,
     pub data: HashMap<String, Value>,
+    /// Exact per-column cell DTOs. `data` stays for compatibility; the UI reads
+    /// display, copy and filter values from `cells`.
+    #[serde(default)]
+    pub cells: HashMap<String, Cell>,
     pub flag: String,
     pub memo: Option<String>,
     pub tags: Vec<String>,

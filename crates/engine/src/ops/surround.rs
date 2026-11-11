@@ -5,7 +5,7 @@ use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::models::ProjectRow;
-use crate::project_io::{is_internal_column, read_project_dataframe};
+use crate::project_io::{is_internal_column, read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::anyvalue_to_json;
@@ -62,7 +62,7 @@ pub fn surrounding_rows(
     if payload.row_index >= df.height() {
         return Err(AppError::Message("Row not found.".into()));
     }
-    let columns = super::query::data_columns(&df);
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;
@@ -104,7 +104,7 @@ pub fn surrounding_rows(
     let rows = materialize_page(
         &df,
         &selected,
-        &columns,
+        project_columns.columns(),
         &flags,
         &final_flag_vec,
         &ioc_outcomes,

@@ -11,7 +11,7 @@ use crate::analysis::stats::{summarize_series, ColumnStats};
 use crate::error::AppError;
 use crate::ioc::{cached_ioc_outcomes, load_ioc_entries};
 use crate::models::{FlagEntry, ProjectMeta, ProjectRow};
-use crate::project_io::read_project_dataframe;
+use crate::project_io::{read_project_dataframe, ProjectColumns};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -104,10 +104,17 @@ pub fn build_report(
         .copied()
         .filter(|idx| is_annotated(*idx, &final_flag_vec, &flags))
         .collect();
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
+    let display_meta: Vec<_> = project_columns
+        .columns()
+        .iter()
+        .filter(|column| display_columns.contains(&column.id))
+        .cloned()
+        .collect();
     let annotated_rows = materialize_page(
         &df,
         &annotated_indices,
-        &display_columns,
+        &display_meta,
         &flags,
         &final_flag_vec,
         &ioc_outcomes,

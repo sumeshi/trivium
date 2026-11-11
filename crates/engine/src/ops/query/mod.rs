@@ -19,7 +19,7 @@ use crate::{
     error::AppError,
     ioc::{cached_ioc_outcomes, load_ioc_entries},
     models::ProjectRow,
-    project_io::read_project_dataframe,
+    project_io::{read_project_dataframe, ProjectColumns},
     storage::{load_color_rules, load_flags},
     store::ProjectsStore,
 };
@@ -73,6 +73,7 @@ pub fn query_project_rows(
 
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     let columns = data_columns(&df);
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
 
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
@@ -101,7 +102,7 @@ pub fn query_project_rows(
     let mut rows = page::materialize_page(
         &df,
         &selected_indices,
-        &columns,
+        project_columns.columns(),
         &flags,
         &ioc::final_flags(df.height(), &flags, &ioc_outcomes),
         &ioc_outcomes,

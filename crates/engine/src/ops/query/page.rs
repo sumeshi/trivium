@@ -5,7 +5,8 @@ use polars::prelude::*;
 
 use crate::error::AppError;
 use crate::ioc::IocRowOutcome;
-use crate::models::{FlagEntry, ProjectRow};
+use crate::models::{ColumnMeta, FlagEntry, ProjectRow};
+use crate::value_utils::{build_row_cells, CellColumns};
 
 use super::ioc::append_ioc_tags;
 use super::super::util::collect_row_record_from_series;
@@ -59,12 +60,14 @@ pub fn filtered_indices(
 pub fn materialize_page(
     df: &DataFrame,
     selected_indices: &[usize],
-    column_names: &[String],
+    columns: &[ColumnMeta],
     flags: &HashMap<usize, FlagEntry>,
     final_flag_vec: &[String],
     ioc_outcomes: &[IocRowOutcome],
     apply_ioc_tags: bool,
 ) -> Result<Vec<ProjectRow>, AppError> {
+    let column_names: Vec<String> = columns.iter().map(|column| column.id.clone()).collect();
+    let cell_columns = CellColumns::new(df, columns);
     let take_idx =
         UInt32Chunked::from_iter_values("take_idx", selected_indices.iter().map(|&idx| idx as u32));
     let taken_df = df
@@ -82,7 +85,9 @@ pub fn materialize_page(
 
     let mut rows = Vec::with_capacity(selected_indices.len());
     for (position, &row_idx) in selected_indices.iter().enumerate() {
-        let record = collect_row_record_from_series(&taken_series_map, column_names, position);
+        let record =
+            collect_row_record_from_series(&taken_series_map, &column_names, position);
+        let cells = build_row_cells(&taken_df, position, columns, &cell_columns);
         let user_memo = page_flags
             .get(&row_idx)
             .and_then(|e| e.memo.clone())
@@ -101,6 +106,7 @@ pub fn materialize_page(
         rows.push(ProjectRow {
             row_index: row_idx,
             data: record,
+            cells,
             flag: final_flag_vec[row_idx].clone(),
             memo: if final_memo.is_empty() {
                 None

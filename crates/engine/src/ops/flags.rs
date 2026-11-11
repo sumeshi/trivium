@@ -5,12 +5,13 @@ use crate::{
     annotation::{apply_annotation_patch, deserialize_double_option, AnnotationPatch},
     error::AppError,
     models::ProjectRow,
-    project_io::read_project_dataframe,
+    project_io::{read_project_dataframe, ProjectColumns},
     storage::{
         clear_searchable_cache, count_flagged, load_color_rules, load_flags, remove_flag,
         upsert_flag,
     },
     store::ProjectsStore,
+    value_utils::{build_row_cells, CellColumns},
 };
 
 use super::query::data_columns;
@@ -58,7 +59,7 @@ pub fn update_flag(
     store: &ProjectsStore,
     payload: UpdateFlagPayload,
 ) -> Result<ProjectRow, AppError> {
-    let Some(_) = store.find(&payload.project_id) else {
+    let Some(meta) = store.find(&payload.project_id) else {
         return Err(AppError::Message("Project not found.".into()).into());
     };
     let project_dir = store.project_dir(&payload.project_id);
@@ -86,6 +87,14 @@ pub fn update_flag(
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
     let column_names = data_columns(&df);
     let record = collect_row_record(&df, &column_names, payload.row_index);
+    let project_columns = ProjectColumns::from_meta(&meta, &df);
+    let cell_columns = CellColumns::new(&df, project_columns.columns());
+    let cells = build_row_cells(
+        &df,
+        payload.row_index,
+        project_columns.columns(),
+        &cell_columns,
+    );
 
     // Same failure-tolerant behavior as the query path: a broken color file
     // must not prevent a flag update from being saved.
@@ -103,6 +112,7 @@ pub fn update_flag(
     Ok(ProjectRow {
         row_index: payload.row_index,
         data: record,
+        cells,
         flag: next.as_ref().map(|entry| entry.flag.clone()).unwrap_or_default(),
         memo: next.as_ref().and_then(|entry| entry.memo.clone()),
         tags: next

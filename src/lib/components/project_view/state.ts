@@ -7,6 +7,7 @@ import type {
   LoadProjectResponse,
   ProjectRow,
 } from "../../types";
+import { buildCellCaches } from "../../ipcValues";
 import { FLAG_HINTS } from "../../skin";
 
 export const FLAG_OPTIONS = [
@@ -60,7 +61,10 @@ export const PREFETCH_PAGES = 1;
 
 export type CachedRow = ProjectRow & {
   memo: string;
+  /** Text rendered in the table/detail view (null/missing are distinguished). */
   displayCache: Record<string, string>;
+  /** Exact text copied and used as a filter value. */
+  copyCache: Record<string, string>;
 };
 
 export type VirtualRow = { position: number; row: CachedRow | null };
@@ -266,16 +270,13 @@ export function formatCell(value: unknown): string {
 }
 
 export function normalizeRow(incoming: ProjectRow): CachedRow {
-  const displayCache: Record<string, string> = {};
-  for (const [column, value] of Object.entries(incoming.data)) {
-    const formatted = formatCell(value);
-    displayCache[column] = formatted;
-  }
+  const { displayCache, copyCache } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
     flag: mapStoredFlag(incoming.flag) || "",
     memo: sanitizeMemoInput(incoming.memo ?? ""),
     displayCache,
+    copyCache,
   };
 }
 

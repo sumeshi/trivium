@@ -5,10 +5,10 @@
     backend,
     columnLabels,
     expandedCell,
-    formatCell,
     hiddenColumns,
     projectDetail,
   } from './state';
+  import { displayText } from '../../ipcValues';
 
   const dispatch = createEventDispatcher();
 
@@ -120,7 +120,7 @@
   }
 
   const rowLine = (row: ProjectRow) =>
-    detailColumns.map((name) => formatCell(row.data[name]) || '—').join('  ');
+    detailColumns.map((name) => displayText(row.cells?.[name])).join('  ');
 </script>
 
 {#if $expandedCell}
@@ -152,7 +152,7 @@
             <dt class:is-focus={name === focusColumn}>
               {$columnLabels.get(name) ?? name}{$hiddenColumns.has(name) ? ' (hidden)' : ''}
             </dt>
-            <dd>{row.displayCache[name] || '—'}</dd>
+            <dd>{row.displayCache[name] ?? ''}</dd>
           {/each}
         </dl>
         <div class="condition-toolbar">

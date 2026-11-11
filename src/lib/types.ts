@@ -28,9 +28,30 @@ export interface ProjectSummary {
 
 export type FlagSymbol = 'safe' | 'suspicious' | 'critical';
 
+export type CellKind =
+  | "string"
+  | "int"
+  | "float"
+  | "bool"
+  | "null"
+  | "missing";
+
+/**
+ * Exact cell value from the backend. `text` is the source text (`null` for
+ * null/missing); `kind` is the column-level type. Integers arrive as decimal
+ * strings so the UI never converts them through `Number`.
+ */
+export interface Cell {
+  text: string | null;
+  kind: CellKind;
+}
+
 export interface ProjectRow {
   row_index: number;
+  /** Compatibility copy of the row values. The UI reads `cells`. */
   data: Record<string, unknown>;
+  /** Exact display/copy cells, keyed by column id. */
+  cells: Record<string, Cell>;
   flag: string;
   memo?: string | null;
   tags: string[];

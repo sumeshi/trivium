@@ -219,7 +219,8 @@ pub fn load_project(
     };
 
     let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
-    let mut initial_rows = materialize_rows(&df, &columns, 0..page_limit, &flags);
+    let mut initial_rows =
+        materialize_rows(&df, project_columns.columns(), 0..page_limit, &flags);
     apply_ioc_outcomes_to_rows(&mut initial_rows, &ioc_outcomes);
 
     println!(

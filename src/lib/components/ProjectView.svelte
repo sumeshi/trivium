@@ -58,7 +58,6 @@
     normalizeFlag,
     normalizeRow,
     mapStoredFlag,
-    formatCell,
     FLAG_OPTIONS,
     FLAG_FILTER_OPTIONS,
     PRIORITY_FLAGS,

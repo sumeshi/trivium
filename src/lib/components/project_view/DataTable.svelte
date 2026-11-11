@@ -353,36 +353,39 @@
                   {/if}
                 </button>
                 {#each $visibleColumns as column, columnIndex}
-                  {@const cellValue = item.row ? item.row.displayCache[column] ?? '' : ''}
+                  {@const cellValue =
+                    item.row && column in item.row.displayCache
+                      ? item.row.displayCache[column]
+                      : null}
+                  {@const copyValue =
+                    item.row && column in item.row.copyCache
+                      ? item.row.copyCache[column]
+                      : ''}
                   <button
                     type="button"
                     class="cell"
                     class:sticky={columnIndex === 0}
                     class:stickyData={columnIndex === 0}
                     title={
-                      !item.row
+                      !item.row || cellValue === null
                         ? 'Loading…'
-                        : (item.row && !(column in item.row.displayCache))
-                          ? 'Loading…'
-                          : (cellValue || '—')
+                        : cellValue
                     }
                     on:click={() => {
                       if (!item.row) return;
-                      _openCell(column, cellValue, item.row);
+                      _openCell(column, copyValue, item.row);
                     }}
                     on:keydown={(event) => {
                       if (!item.row) return;
-                      _handleCellKeydown(event, column, cellValue, item.row);
+                      _handleCellKeydown(event, column, copyValue, item.row);
                     }}
                     disabled={!item.row}
                   >
                     <span class="cell-text">
-                      {#if !item.row}
-                        Loading…
-                      {:else if !(column in item.row.displayCache)}
+                      {#if !item.row || cellValue === null}
                         Loading…
                       {:else}
-                        {cellValue || '—'}
+                        {cellValue}
                       {/if}
                     </span>
                   </button>
