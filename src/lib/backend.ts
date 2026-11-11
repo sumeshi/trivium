@@ -39,6 +39,10 @@ export interface AnnotationPatch {
   memo?: string | null;
   /** `undefined` keeps the stored tags; `[]` clears them. */
   tags?: string[];
+  /** Tags appended without duplicates; `undefined` adds nothing. */
+  add_tags?: string[];
+  /** Tags removed after `tags`/`add_tags`; `undefined` removes nothing. */
+  remove_tags?: string[];
   /** `undefined` keeps the stored bookmark; `false` clears it. */
   bookmarked?: boolean;
 }
@@ -267,6 +271,12 @@ function annotationFields(
   }
   if (args.tags !== undefined) {
     fields.tags = args.tags;
+  }
+  if (args.add_tags !== undefined) {
+    fields.add_tags = args.add_tags;
+  }
+  if (args.remove_tags !== undefined) {
+    fields.remove_tags = args.remove_tags;
   }
   if (args.bookmarked !== undefined) {
     fields.bookmarked = args.bookmarked;

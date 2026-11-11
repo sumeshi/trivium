@@ -35,6 +35,7 @@ impl UpdateFlagPayload {
             memo: self.memo.clone(),
             tags: self.tags.clone(),
             bookmarked: self.bookmarked,
+            ..AnnotationPatch::default()
         }
     }
 }

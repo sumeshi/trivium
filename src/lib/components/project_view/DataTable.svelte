@@ -16,6 +16,7 @@
     tableWidth,
     ROW_HEIGHT,
     PAGE_SIZE,
+    SELECT_COL_WIDTH,
     INDEX_COL_WIDTH,
     FLAG_COL_WIDTH,
     MEMO_COL_WIDTH,
@@ -35,9 +36,14 @@
     openCell,
     handleCellKeydown,
     positionToRowIndex,
-    largePages
+    largePages,
+    selectedRowIds,
+    selectedCount,
+    selectVisibleRows,
+    toggleRowSelection
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
+  import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
@@ -80,6 +86,7 @@
   let scrollTimeout: number | null = null;
   let releaseHeaderSyncFrame: number | null = null;
   let releaseBodySyncFrame: number | null = null;
+  let selectAllEl: HTMLInputElement | null = null;
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -103,6 +110,7 @@
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: gridTemplate = [
+    `${SELECT_COL_WIDTH}px`,
     `${INDEX_COL_WIDTH}px`,
     `${FLAG_COL_WIDTH}px`,
     `${MEMO_COL_WIDTH}px`,
@@ -111,9 +119,10 @@
 
   // Set CSS variables to specify sticky column positions
   $: if (typeof document !== 'undefined') {
-    document.documentElement.style.setProperty('--sticky-flag', `${INDEX_COL_WIDTH}px`);
-    document.documentElement.style.setProperty('--sticky-memo', `${INDEX_COL_WIDTH + FLAG_COL_WIDTH}px`);
-    document.documentElement.style.setProperty('--sticky-data', `${INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH}px`);
+    document.documentElement.style.setProperty('--sticky-index', `${SELECT_COL_WIDTH}px`);
+    document.documentElement.style.setProperty('--sticky-flag', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH}px`);
+    document.documentElement.style.setProperty('--sticky-memo', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH}px`);
+    document.documentElement.style.setProperty('--sticky-data', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH}px`);
   }
 
   $: viewportRows = Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT);
@@ -205,6 +214,20 @@
   };
 
   $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex, $pendingPages);
+  // The header checkbox covers only rows that are rendered right now. Selecting
+  // the whole result set is the bulk panel's "Current results" scope instead.
+  $: visibleRowIds = virtualRows
+    .map((item) => item.row?.row_index)
+    .filter((rowIndex): rowIndex is number => rowIndex !== undefined);
+  $: headerState = headerSelectionState(visibleRowIds, $selectedRowIds);
+  $: if (selectAllEl) {
+    selectAllEl.indeterminate = headerState === 'some';
+  }
+
+  const toggleVisibleRows = () => {
+    if (visibleRowIds.length === 0) return;
+    selectVisibleRows(visibleRowIds, headerState !== 'all');
+  };
 
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
@@ -304,6 +327,7 @@
       {$totalFilteredRows} / {$totalRows} rows
     </span>
     <span>{$filteredFlaggedCount} flagged in results</span>
+    <span>{$selectedCount} selected</span>
   </div>
   {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">
@@ -321,6 +345,17 @@
           class="data-header"
           style={`grid-template-columns: ${gridTemplate}; width: ${effectiveTableWidth}px;`}
         >
+          <div class="header-cell sticky sticky-select">
+            <input
+              type="checkbox"
+              bind:this={selectAllEl}
+              checked={headerState === 'all'}
+              disabled={visibleRowIds.length === 0}
+              on:change={toggleVisibleRows}
+              aria-label="Select visible rows"
+              title="Select or clear the rows currently on screen"
+            />
+          </div>
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo">Memo</div>
@@ -366,6 +401,7 @@
                 }`}
               >
                 {#if largePage}
+                  <div class="cell select-cell sticky sticky-select" aria-hidden="true"></div>
                   <div class="cell index sticky sticky-index">{item.position + 1}</div>
                   {#if item.position % PAGE_SIZE === 0 || item.position === startIndex}
                     <div
@@ -378,6 +414,16 @@
                     <div class="large-page-blank" aria-hidden="true"></div>
                   {/if}
                 {:else}
+                  <div class="cell select-cell sticky sticky-select">
+                    {#if item.row}
+                      <input
+                        type="checkbox"
+                        checked={$selectedRowIds.has(item.row.row_index)}
+                        on:change={() => item.row && toggleRowSelection(item.row.row_index)}
+                        aria-label={`Select row ${item.row.row_index + 1}`}
+                      />
+                    {/if}
+                  </div>
                   <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
                   <div class="cell flag sticky sticky-flag">
                     {#if item.row}

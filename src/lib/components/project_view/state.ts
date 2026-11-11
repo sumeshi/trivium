@@ -10,6 +10,13 @@ import type {
 } from "../../types";
 import { buildCellCaches } from "../../ipcValues";
 import { estimatePageBytes, selectEvictions } from "../../pageCache";
+import {
+  emptySelection,
+  selectionAfterScopeChange,
+  setRowsSelected,
+  toggleRowId,
+} from "../../selection";
+import type { SelectionScope } from "../../selection";
 import { FLAG_HINTS } from "../../skin";
 import { ROW_HEIGHT, logicalRowAt } from "../../virtualScroll";
 
@@ -48,6 +55,7 @@ export const FLAG_FILTER_OPTIONS: Array<{
 
 export { ROW_HEIGHT };
 export const BUFFER = 8;
+export const SELECT_COL_WIDTH = 40;
 export const INDEX_COL_WIDTH = 80;
 export const FLAG_COL_WIDTH = 130;
 export const MEMO_COL_WIDTH = 200;
@@ -57,7 +65,7 @@ export const CHAR_PIXEL = 9;
 export const COLUMN_PADDING = 32;
 export const MAX_DATA_WIDTH = WIDTH_LIMIT_CHARS * CHAR_PIXEL + COLUMN_PADDING;
 export const STICKY_COLUMNS_WIDTH =
-  INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH;
+  SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH;
 
 export const PAGE_SIZE = 250;
 export const PREFETCH_PAGES = 1;
@@ -161,6 +169,48 @@ export const filteredFlaggedCount = writable(0);
 // Maps display position (offset + i) to backend row_index to preserve backend ordering
 export const positionToRowIndex = writable<Map<number, number>>(new Map());
 
+/**
+ * Explicit row selection, keyed by original row id. Row objects are never
+ * copied here, so page-cache eviction does not affect the selection.
+ */
+export const selectedRowIds = writable<Set<number>>(new Set());
+export const selectedCount = derived(selectedRowIds, (ids) => ids.size);
+let selectionScope: SelectionScope | null = null;
+
+export function toggleRowSelection(rowIndex: number): void {
+  selectedRowIds.update((selected) => toggleRowId(selected, rowIndex));
+}
+
+/** Selects or clears only the delivered rows (usually the rendered viewport). */
+export function selectVisibleRows(
+  rowIndices: readonly number[],
+  isSelected = true
+): void {
+  selectedRowIds.update((selected) =>
+    setRowsSelected(selected, rowIndices, isSelected)
+  );
+}
+
+export function clearSelection(): void {
+  selectedRowIds.set(emptySelection());
+}
+
+/**
+ * Ties the selection to a project and applied QuerySpec. A new project,
+ * filter, search scope, condition, or sort starts a new selection; page moves
+ * inside the same scope keep it.
+ */
+export function syncSelectionScope(
+  projectId: string | null,
+  specSignature: string
+): void {
+  const next: SelectionScope = { projectId, specSignature };
+  selectedRowIds.update((selected) =>
+    selectionAfterScopeChange(selected, selectionScope, next)
+  );
+  selectionScope = next;
+}
+
 export const expandedCell = writable<{
   projectId: string;
   /** Original row id, stable across page-cache eviction. */
@@ -177,8 +227,8 @@ export type MemoEditorTarget = {
   rowIndex: number;
   /**
    * Row snapshot taken when editing started, used as the rollback baseline.
-   * It is not part of the page cache and survives page eviction. The future
-   * selection state (T22) is kept in a separate store for the same reason.
+   * It is not part of the page cache and survives page eviction. The explicit
+   * selection (T22) is kept by row id in a separate store for the same reason.
    */
   row: CachedRow;
 };
@@ -253,7 +303,7 @@ export function touchPage(page: number): void {
 
 /**
  * Removes one page from every place it is cached: rows, display positions and
- * the loaded-page set. Annotation editor snapshots and the future selection
+ * the loaded-page set. Annotation editor snapshots and the row-id selection
  * store are intentionally not touched.
  */
 function dropPage(page: number): void {

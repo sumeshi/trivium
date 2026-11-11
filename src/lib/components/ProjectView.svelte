@@ -64,6 +64,7 @@
     PRIORITY_FLAGS,
     ROW_HEIGHT,
     BUFFER,
+    SELECT_COL_WIDTH,
     INDEX_COL_WIDTH,
     FLAG_COL_WIDTH,
     MEMO_COL_WIDTH,
@@ -82,7 +83,8 @@
     invalidateViewRequests,
     registerLoadedPage,
     resetPageCache,
-    touchPage
+    touchPage,
+    syncSelectionScope
   } from './project_view/state';
 import type {
     FlagFilterValue,
@@ -320,6 +322,7 @@ import type {
       condition: filters.condition,
     };
     lastAppliedFilters = buildFilterSignature(filters);
+    syncSelectionScope(detail.project.meta.id, lastAppliedFilters);
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
@@ -597,6 +600,7 @@ import type {
       condition: normalized.condition,
     };
     lastAppliedFilters = signature;
+    syncSelectionScope(projectDetail.project.meta.id, signature);
     filterRequestId += 1;
     pendingScrollRow = null;
     resetPaginationState();
@@ -642,6 +646,7 @@ import type {
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: gridTemplate = [
+    `${SELECT_COL_WIDTH}px`,
     `${INDEX_COL_WIDTH}px`,
     `${FLAG_COL_WIDTH}px`,
     `${MEMO_COL_WIDTH}px`,
@@ -663,10 +668,10 @@ import type {
   }
 
   $: firstDataColumn = $visibleColumns.length > 0 ? $visibleColumns[0] : null;
-  $: stickyFlagOffset = INDEX_COL_WIDTH;
-  $: stickyMemoOffset = INDEX_COL_WIDTH + FLAG_COL_WIDTH;
+  $: stickyFlagOffset = SELECT_COL_WIDTH + INDEX_COL_WIDTH;
+  $: stickyMemoOffset = stickyFlagOffset + FLAG_COL_WIDTH;
   $: stickyDataOffset = stickyMemoOffset + MEMO_COL_WIDTH;
-  $: stickyVariables = `--sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
+  $: stickyVariables = `--sticky-index:${SELECT_COL_WIDTH}px; --sticky-flag:${stickyFlagOffset}px; --sticky-memo:${stickyMemoOffset}px; --sticky-data:${stickyDataOffset}px;`;
 
   const padNumber = (value: number) => value.toString().padStart(2, '0');
   const formatTimestampForFilename = (date: Date) =>

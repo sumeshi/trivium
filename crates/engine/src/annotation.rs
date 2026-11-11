@@ -6,7 +6,8 @@ use crate::models::FlagEntry;
 ///
 /// A missing field keeps the stored value. An explicitly empty value clears it:
 /// `Some("")` for the flag, `Some(None)` or a blank string for the memo,
-/// `Some(vec![])` for tags, and `Some(false)` for the bookmark.
+/// `Some(vec![])` for tags, and `Some(false)` for the bookmark. Tags can also be
+/// changed one-directionally with `add_tags` and `remove_tags`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AnnotationPatch {
     /// `None` keeps the stored flag; `Some("")` clears it.
@@ -18,6 +19,13 @@ pub struct AnnotationPatch {
     /// `None` keeps the stored tags; `Some(vec![])` clears them.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Tags appended after any `tags` replacement. Existing tags are kept and
+    /// duplicates are not added.
+    #[serde(default)]
+    pub add_tags: Vec<String>,
+    /// Tags removed after any `tags` replacement and `add_tags` additions.
+    #[serde(default)]
+    pub remove_tags: Vec<String>,
     /// `None` keeps the stored bookmark state; `Some(false)` clears it.
     #[serde(default)]
     pub bookmarked: Option<bool>,
@@ -64,6 +72,14 @@ pub fn apply_annotation_patch(
     }
     if let Some(tags) = &patch.tags {
         entry.tags = tags.clone();
+    }
+    for tag in &patch.add_tags {
+        if !entry.tags.iter().any(|existing| existing == tag) {
+            entry.tags.push(tag.clone());
+        }
+    }
+    if !patch.remove_tags.is_empty() {
+        entry.tags.retain(|tag| !patch.remove_tags.contains(tag));
     }
     if let Some(bookmarked) = patch.bookmarked {
         entry.bookmarked = bookmarked;
@@ -154,6 +170,7 @@ mod tests {
             memo: Some(None),
             tags: Some(Vec::new()),
             bookmarked: Some(false),
+            ..AnnotationPatch::default()
         };
         assert_eq!(apply_annotation_patch(Some(&existing), &cleared), None);
         assert_eq!(apply_annotation_patch(None, &AnnotationPatch::default()), None);
