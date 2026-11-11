@@ -68,7 +68,7 @@ pub fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> 
             .with_context(|| format!("failed to prepare ioc dir {:?}", parent))?;
     }
     let data = serde_json::to_vec_pretty(entries).context("failed to serialize ioc entries")?;
-    fs::write(&path, data).with_context(|| format!("failed to write ioc file {:?}", path))
+    crate::storage::write_file_atomic(&path, &data)
 }
 
 pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {

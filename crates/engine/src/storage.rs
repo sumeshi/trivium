@@ -232,6 +232,21 @@ pub fn load_color_rules(project_dir: &Path) -> Result<Option<Vec<ColorRule>>> {
     Ok(Some(rules))
 }
 
+/// Writes a sidecar file through a sibling temporary file.
+pub fn write_file_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    let temp = path.with_extension(format!("tmp.{}", std::process::id()));
+    let result = fs::write(&temp, data)
+        .with_context(|| format!("failed to write temporary file {:?}", temp))
+        .and_then(|_| {
+            fs::rename(&temp, path)
+                .with_context(|| format!("failed to replace {:?} with {:?}", path, temp))
+        });
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
 /// Persists color rules as pretty JSON. Normalization belongs to the ops layer;
 /// this function is plain IO.
 pub fn save_color_rules(project_dir: &Path, rules: &[ColorRule]) -> Result<()> {
@@ -241,7 +256,7 @@ pub fn save_color_rules(project_dir: &Path, rules: &[ColorRule]) -> Result<()> {
             .with_context(|| format!("failed to prepare color rules dir {:?}", parent))?;
     }
     let data = serde_json::to_vec_pretty(rules).context("failed to serialize color rules")?;
-    fs::write(&path, data).with_context(|| format!("failed to write color rules {:?}", path))
+    write_file_atomic(&path, &data)
 }
 
 pub fn load_column_metrics(path: &Path) -> Result<Option<HashMap<String, usize>>> {
@@ -262,7 +277,7 @@ pub fn save_column_metrics(path: &Path, metrics: &HashMap<String, usize>) -> Res
     }
     let data = serde_json::to_vec_pretty(metrics)
         .with_context(|| format!("failed to serialize column metrics for {:?}", path))?;
-    fs::write(path, data).with_context(|| format!("failed to write column metrics file {:?}", path))
+    write_file_atomic(path, &data)
 }
 
 /// Number of leading rows used for the initial column-width estimate.
