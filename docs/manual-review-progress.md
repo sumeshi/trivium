@@ -1596,3 +1596,95 @@ when it is added it must reuse the fetched full value (or call `getCell`), never
   T20d and later.
 
 Next card: T20d.
+
+## T20d — reach first, middle and last rows in large results
+
+Recorded: 2026-11-11.
+
+### Change
+
+- `src/lib/virtualScroll.ts` (new) is the single place for the physical/logical
+  conversion: `ROW_HEIGHT`, `MAX_PHYSICAL_HEIGHT = 8_000_000`,
+  `physicalHeight`, `maxScrollTop`, `clampRow`, `logicalRowAt` and
+  `scrollTopForRow`.
+  - If `totalRows * ROW_HEIGHT <= 8,000,000`, the mapping is the identity
+    (physical top = row × `ROW_HEIGHT`).
+  - Otherwise the spacer is capped at 8,000,000px. The anchor row at a physical
+    `scrollTop` is `floor(scrollTop × totalRows / physicalHeight)`, and a row's
+    physical top is `floor(row × physicalHeight / totalRows)`. The last viewport
+    is bounded by `physicalHeight - viewportHeight`.
+- `DataTable.svelte`: the spacer uses `physicalHeight(effectiveTotalRows)`; the
+  displayed start uses `logicalRowAt(...) - BUFFER`; `offsetY` is the physical
+  top of that start row minus `scrollTop`. Row height itself is unchanged. The
+  end-of-result start is limited to `totalRows - ceil(viewport / ROW_HEIGHT)` so
+  a compressed scroll range cannot push the final row below the viewport.
+- `ProjectView.svelte`: page requests, prefetch ranges, history offsets and the
+  persisted position use the same `logicalRowAt` result. Added a row jump bar:
+  1-based row input with Go/Enter, First and Last. The target is clamped with
+  `clampRow` against `$totalFilteredRows`; every jump sets the physical scroll
+  position, records the logical row and requests the page containing that row.
+  The controls are disabled while the result count is 0.
+- `project_view/state.ts`: `ROW_HEIGHT` is re-exported from `virtualScroll.ts`;
+  `currentVisiblePage()` derives the current page from the logical row, so
+  page-cache eviction keeps protecting the page actually displayed.
+- `src/lib/viewState.ts`: `SavedView.logicalRow` is added. Saving writes the
+  result-relative row (also still in `offset` for history/backward compatibility).
+  Loading prefers `logicalRow`; old saves without it fall back to `offset`,
+  which already meant the row at the top of the viewport.
+- Project load applies the saved logical row again after the first page response
+  returns the real filtered count, clamps it to that count, and clears the
+  pending restore on any filter change.
+
+### Rounding semantics
+
+- Pixel positions are integers, so converting row → physical position →
+  logical row can differ by at most ±1 row for compressed results. The
+  round-trip test allows ±1; the three required 2M rows land exactly.
+- At the bottom of a compressed result, `logicalRowAt(maxScroll)` returns the
+  final row as the anchor so the last page is requested. The table separately
+  clamps its display start to the final viewport, so the last rows are rendered
+  without a blank spacer and without duplicate positions.
+- Row height in this tree is 56px (not 32px as the plan text describes). This
+  card keeps the existing height unchanged; changing it is T21's row-height
+  work, not part of T20d.
+
+### Tests
+
+`src/lib/virtualScroll.test.ts` (new, 6 tests):
+
+- 2M rows: physical height is exactly/at most 8,000,000px.
+- 2M rows: rows 0, 999,999 and 1,999,999 round-trip through
+  `scrollTopForRow`/`logicalRowAt` within ±1.
+- 1,000 rows: identity mapping (physical = row × `ROW_HEIGHT`).
+- Shrinking the result clamps an out-of-range row.
+- The final window contains the last row, has no duplicate positions and
+  belongs to the final backend page.
+- Empty results have no scroll range.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| UI tests | `npm run test:ui` | 16 passed, 0 failed (6 new; existing ipcValues/pageCache tests pass) |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+### Unverified / deferred
+
+- The native app/WebView was not exercised. Jumping to rows 1 / 1,000,000 /
+  2,000,000, the Last button and the final-page display are covered by the pure
+  mapping tests and static frontend checks only. Real 2M-row GUI confirmation is
+  T26.
+- No 2M-row performance, memory or scroll-latency measurement was taken; that
+  remains T27.
+- Rows inside the final compressed viewport other than the final row share a
+  physical position near the maximum scroll. The card's required first/middle/
+  last targets are exact; arbitrary-row targeting that close to the end is not
+  separately verified and is not claimed.
+- Mismatch between the plan's 32px row-height text and the current 56px tree is
+  left for T21 rather than changed here.
+
+Next card: T21.
+
