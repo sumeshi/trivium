@@ -48,6 +48,7 @@
   import CellContextMenu from './CellContextMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
+  import { rememberOffset } from '../../stores/viewHistory';
   import {
     logicalRowAt,
     maxScrollTop,
@@ -235,6 +236,7 @@
   const handleScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
     scrollTop.set(target.scrollTop);
+    rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
     
     // Clear scroll timeout
     if (scrollTimeout !== null) {
