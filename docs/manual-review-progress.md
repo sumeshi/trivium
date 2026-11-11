@@ -2067,3 +2067,92 @@ New `src/lib/viewStateMapping.test.ts` (5 tests):
 - T25 panel/IOC separation was not started.
 
 Next card: T25.
+
+
+## T25 — detach auxiliary analysis and automatic IOC evaluation
+
+Recorded: 2026-11-11.
+
+### Change
+
+- **Closed panels do not request data.** `ProjectView.svelte` binds the
+  Timeline `<details>` to an open flag and passes it to `TimelinePanel`;
+  `FilterControls.svelte` does the same for Column stats and Time analysis.
+  `StatsPanel`, `TimePanel`, and `TimelinePanel` accept `open` (default
+  `false`) and skip their reactive loads unless it is true. Closing a panel
+  increments the request ticket, so an already in-flight response is ignored.
+  Opening a panel runs the load with the current form/search/flag/condition
+  stores.
+- **Pure open gate.** `src/lib/panelRequest.ts` exposes
+  `shouldRequestPanel({ open, projectId, column })`; the three panels use it.
+  The helper has its own `node:test` coverage.
+- **Bounded value lists.** `analysis/stats.rs` caps the rare list at 20 values
+  (`RARE_VALUES`) in addition to the existing top-20 cap. `unique` still
+  reports the full distinct count, but the UI never receives every unique
+  value when many values are rare.
+- **Normal screens.** `FilterControls.svelte` no longer renders the Grouping
+  and Row colors sections. `GroupingPanel.svelte`, `ColorRulesPanel.svelte`,
+  the grouping engine code, and saved color rules are kept. The IOC section is
+  labelled `IOC rules (legacy)` and states that rows are not flagged
+  automatically. Presets, bulk annotation, and IOC definitions remain
+  available.
+- **Automatic IOC evaluation removed from normal operations.** `load_project`,
+  `query_project_rows`, `export_project`, bulk target resolution, the
+  histogram/time/group analyses, the HTML report, and surrounding rows now use
+  user flags only. `ops/query/target.rs` and the per-row helper use a new
+  `user_flags`; `Default`/memo handling no longer merges IOC flags or appends
+  `[tag]` tokens. `export/annotations.rs` writes only user flag, memo, tags,
+  and bookmark values.
+- **Legacy IOC settings.** `iocs.json`, `load_ioc_entries`, the IOC manager,
+  and IOC save/import/export are unchanged. `save_iocs` and `import_iocs` no
+  longer recalculate `ioc_applied_records`; the stored value is kept instead of
+  being overwritten with 0 or a newly evaluated count. Existing user
+  annotations are untouched, and no previous automatic flag is converted into
+  a user annotation.
+- **Evaluation code kept.** `ioc/evaluate.rs`, `cached_ioc_outcomes`,
+  `evaluate_iocs`, `calculate_ioc_applied_records`, and
+  `apply_ioc_outcomes_to_rows` remain for an explicit future operation.
+  `tests/ioc_incremental_test.rs` still exercises the evaluation and cache
+  directly.
+
+### Tests changed
+
+- `tests/ioc_parity.rs` is now
+  `query_export_and_load_show_user_annotations_only`: saving a legacy IOC
+  leaves flags, memos, and `ioc_applied_records` unchanged; load returns the
+  definitions but no automatic flags; query and export agree on user
+  annotations only.
+- `tests/smoke.rs`: `ioc_apply_and_query` became
+  `saving_iocs_does_not_flag_rows`; the export/re-import test asserts that a
+  saved IOC adds no tag or critical flag and that the manual annotation
+  survives.
+- `tests/bulk_test.rs`: the two IOC cases now assert that bulk update, undo,
+  and clear operate on user annotations only and do not reveal legacy IOC
+  flags.
+- `tests/report_test.rs`: report/query parity and the displayed
+  `IOC applied rows` value now reflect the preserved stored count.
+- New `tests/stats_limit_test.rs` pins the 20-value top and rare caps.
+- New `src/lib/panelRequest.test.ts` pins that a closed panel never requests
+  data.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | exit 0; all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 30 passed, 0 failed (2 new panel-gate tests) |
+
+### Unverified / deferred
+
+- The real Tauri GUI was not exercised. "Close all panels, type in the search
+  box, observe zero histogram/stats requests" and "open a project with saved
+  IOC definitions, observe no flags" are covered by the pure gate test,
+  engine tests, and code review only. Real-app confirmation is T26.
+- The desktop crate was not rebuilt in this environment; the engine and
+  frontend gates were run.
+- T26 acceptance work and T27 measurements were not started.
+
+Next card: T26.
