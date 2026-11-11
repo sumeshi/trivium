@@ -21,6 +21,7 @@ pub fn build_search_mask_boolean(
         match (col_opt.as_ref().map(|c| c.to_lowercase()), per_column) {
             (Some(col), Some(per_col)) => {
                 if let Some(col_texts) = per_col.get(&col) {
+                    #[allow(clippy::needless_range_loop)]
                     for i in 0..searchable_text.len() {
                         if let Some(t) = col_texts.get(i) {
                             if !t.is_empty() && t.contains(term) {
@@ -43,6 +44,7 @@ pub fn build_search_mask_boolean(
 
     // Evaluate per row
     let mut mask_out = vec![false; searchable_text.len()];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..searchable_text.len() {
         let mut stack: Vec<bool> = Vec::new();
         for tok in rpn {

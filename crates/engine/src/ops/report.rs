@@ -152,15 +152,11 @@ fn is_annotated(
     final_flag_vec: &[String],
     flags: &HashMap<usize, FlagEntry>,
 ) -> bool {
-    if !final_flag_vec[idx].trim().is_empty() {
-        return true;
-    }
-    flags
-        .get(&idx)
-        .and_then(|entry| entry.memo.as_deref())
-        .is_some_and(|memo| !memo.trim().is_empty())
+    !final_flag_vec[idx].trim().is_empty()
+        || flags.get(&idx).is_some_and(|entry| entry.is_annotated())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_report(
     meta: &ProjectMeta,
     search: Option<&str>,

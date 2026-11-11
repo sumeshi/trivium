@@ -207,7 +207,7 @@ fn merge_outcomes(
     mut old: Vec<InternalOutcome>,
     added: Vec<InternalOutcome>,
 ) -> Vec<InternalOutcome> {
-    for (target, new) in old.iter_mut().zip(added.into_iter()) {
+    for (target, new) in old.iter_mut().zip(added) {
         // Strictly greater only: on a tie the cached entry wins, matching the
         // full evaluation's definition-order-first rule.
         if severity_rank(&new.flag) > severity_rank(&target.flag) {

@@ -139,11 +139,10 @@ impl<R: Read> Read for Utf16Reader<R> {
         }
         let mut written = 0;
         while written < out.len() {
-            if self.output_pos >= self.output.len() {
-                if !self.decode_next_char()? {
+            if self.output_pos >= self.output.len()
+                && !self.decode_next_char()? {
                     break;
                 }
-            }
             let available = self.output.len() - self.output_pos;
             let amount = available.min(out.len() - written);
             out[written..written + amount]

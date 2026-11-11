@@ -79,10 +79,15 @@ fn lock_undo() -> Result<MutexGuard<'static, HashMap<Uuid, BulkUndo>>, AppError>
         .map_err(|_| AppError::Message("Bulk undo state is unavailable.".into()))
 }
 
+/// Drops the one-level undo entry when its project is deleted.
+pub(crate) fn forget_undo(project_id: &Uuid) {
+    if let Ok(mut map) = undo_map().lock() {
+        map.remove(project_id);
+    }
+}
+
 fn is_flagged(entry: &Option<FlagEntry>) -> bool {
-    entry
-        .as_ref()
-        .is_some_and(|entry| !entry.flag.trim().is_empty())
+    entry.as_ref().is_some_and(|entry| entry.is_flagged())
 }
 
 /// Recomputes a project's flagged count from a known baseline and the rows a

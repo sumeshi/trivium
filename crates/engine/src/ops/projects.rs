@@ -20,7 +20,7 @@ use crate::{
         read_project_dataframe, BatchDataWriter, ProjectColumns,
     },
     storage::{
-        clear_ioc_flag_cache, clear_searchable_cache, close_flags_db, compute_column_max_chars,
+        clear_ioc_flag_cache, close_flags_db, compute_column_max_chars,
         load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
     },
     store::ProjectsStore,
@@ -186,7 +186,7 @@ pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppEr
     for meta in metas {
         result.push(ProjectSummary { meta: meta.clone() });
     }
-    result.sort_by(|a, b| b.meta.created_at.cmp(&a.meta.created_at));
+    result.sort_by_key(|summary| std::cmp::Reverse(summary.meta.created_at));
     Ok(result)
 }
 
@@ -212,7 +212,7 @@ pub fn create_project_with_job(
     job.check_cancelled()?;
     let source_path = PathBuf::from(&payload.path);
     if !source_path.exists() {
-        return Err(AppError::Message("Selected file no longer exists.".into()).into());
+        return Err(AppError::Message("Selected file no longer exists.".into()));
     }
 
     let restore_annotations = payload.restore_annotations.unwrap_or(false);
@@ -291,7 +291,7 @@ pub fn create_project_with_job(
         flagged_records: imported
             .flags
             .values()
-            .filter(|entry| !entry.flag.trim().is_empty())
+            .filter(|entry| entry.is_flagged())
             .count(),
         ioc_applied_records: 0,
         source_sha256: Some(copied.sha256),
@@ -338,8 +338,7 @@ pub fn create_project_with_job(
         return Err(AppError::Message(format!(
             "Project directory already exists: {:?}",
             project_dir
-        ))
-        .into());
+        )));
     }
     fs::rename(staging.path(), &project_dir)
         .with_context(|| format!("failed to move staged project to {:?}", project_dir))
@@ -372,15 +371,10 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
     // still intact and can be opened; the previous order deleted the data
     // directory first and then left a listed but unreadable project.
     store.remove(&meta.id).map_err(AppError::from)?;
+    super::bulk::forget_undo(&meta.id);
     cache_remove_project(&meta.id);
     // Release the annotation database before removing its directory.
     close_flags_db(&project_dir);
-    if let Err(err) = clear_searchable_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear searchable cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
     if let Err(err) = clear_ioc_flag_cache(&project_dir) {
         eprintln!(
             "[cache] failed to clear IOC cache for {:?}: {:?}",
@@ -409,7 +403,7 @@ pub fn load_project(
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()).into());
+        return Err(AppError::Message("Project data file missing.".into()));
     }
 
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;

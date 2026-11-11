@@ -103,6 +103,8 @@ impl PreparedQuery {
         while batch_start < row_count {
             job.check_cancelled()?;
             let batch_end = (batch_start + EVAL_BATCH_ROWS).min(row_count);
+            // This index addresses several parallel column series and the mask.
+            #[allow(clippy::needless_range_loop)]
             for row_idx in batch_start..batch_end {
                 let mut row: HashMap<String, Value> =
                     HashMap::with_capacity(self.required_columns.len() + 1);

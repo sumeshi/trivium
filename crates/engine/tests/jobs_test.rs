@@ -128,8 +128,11 @@ fn progress_is_throttled_to_the_interval() {
     assert!(progress.report(4, Some(10), Some("half".into())));
     clock.store(399, Ordering::SeqCst);
     assert!(!progress.report(5, Some(10), None));
-    clock.store(400, Ordering::SeqCst);
-    assert!(progress.report(6, Some(10), None));
+    // The final report is emitted even inside the throttle window.
+    clock.store(410, Ordering::SeqCst);
+    assert!(progress.report(10, Some(10), Some("done".into())));
+    clock.store(420, Ordering::SeqCst);
+    assert!(!progress.report(9, Some(10), None));
 
     let values = emitted.lock().expect("emitted progress");
     assert_eq!(values.len(), 3);
@@ -137,7 +140,7 @@ fn progress_is_throttled_to_the_interval() {
     assert_eq!(values[0].kind, JobKind::Query);
     assert_eq!(values[1].done, 4);
     assert_eq!(values[1].message.as_deref(), Some("half"));
-    assert_eq!(values[2].done, 6);
+    assert_eq!(values[2].done, 10);
 }
 
 #[test]

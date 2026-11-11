@@ -312,10 +312,12 @@ impl ThrottledProgress {
     /// first report is always emitted.
     pub fn report(&mut self, done: u64, total: Option<u64>, message: Option<String>) -> bool {
         let now = (self.clock)();
-        let due = match self.last_emitted {
-            None => true,
-            Some(last) => now.saturating_sub(last) >= self.interval,
-        };
+        let final_report = total.is_some_and(|total| done >= total);
+        let due = final_report
+            || match self.last_emitted {
+                None => true,
+                Some(last) => now.saturating_sub(last) >= self.interval,
+            };
         if !due {
             return false;
         }

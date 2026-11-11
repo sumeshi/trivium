@@ -39,24 +39,45 @@ impl ProjectsStore {
         let mut projects: Vec<ProjectMeta> = if meta_path.exists() {
             let data = fs::read(&meta_path)
                 .with_context(|| format!("failed to read metadata file {:?}", meta_path))?;
-            serde_json::from_slice(&data)
-                .with_context(|| format!("failed to parse metadata file {:?}", meta_path))?
+            match serde_json::from_slice(&data) {
+                Ok(projects) => projects,
+                Err(err) => {
+                    // Keep the damaged file for recovery, but do not let one
+                    // bad metadata file prevent the application from starting.
+                    let backup = meta_path.with_extension(format!(
+                        "json.corrupt.{}.{}",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|duration| duration.as_secs())
+                            .unwrap_or(0)
+                    ));
+                    let _ = fs::rename(&meta_path, &backup);
+                    eprintln!(
+                        "[store] projects.json was unreadable ({err}); moved to {:?} and started empty",
+                        backup
+                    );
+                    Vec::new()
+                }
+            }
         } else {
             Vec::new()
         };
 
-        // Migrate existing project data (calculate if flagged_records is 0)
+        // Rebuild a missing derived count from the annotation database. This
+        // also covers projects migrated from the old flags.json format.
         let mut needs_save = false;
         for project in &mut projects {
             if project.flagged_records == 0 {
                 let project_dir = root_dir.join("projects").join(project.id.to_string());
                 let flags_path = project_dir.join("flags.json");
-                if flags_path.exists() {
-                    if let Ok(flags) = load_flags(&flags_path) {
-                        project.flagged_records = flags
-                            .values()
-                            .filter(|entry| !entry.flag.trim().is_empty())
-                            .count();
+                if let Ok(flags) = load_flags(&flags_path) {
+                    let count = flags
+                        .values()
+                        .filter(|entry| entry.is_flagged())
+                        .count();
+                    if count > 0 {
+                        project.flagged_records = count;
                         needs_save = true;
                     }
                 }

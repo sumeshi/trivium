@@ -93,13 +93,7 @@ pub fn apply_annotation_patch(
 }
 
 fn entry_is_empty(entry: &FlagEntry) -> bool {
-    entry.flag.trim().is_empty()
-        && entry
-            .memo
-            .as_deref()
-            .map_or(true, |memo| memo.trim().is_empty())
-        && entry.tags.is_empty()
-        && !entry.bookmarked
+    !entry.is_annotated()
 }
 
 #[cfg(test)]

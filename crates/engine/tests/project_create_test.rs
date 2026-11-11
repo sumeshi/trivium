@@ -144,6 +144,23 @@ fn successful_import_records_source_metadata_and_zero_based_row_ids() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn corrupt_registry_is_backed_up_and_the_store_still_starts() {
+    let root = temp_root();
+    fs::write(root.join("projects.json"), b"{ this is not json").expect("write corrupt registry");
+
+    let store = ProjectsStore::new(root.clone()).expect("startup must not fail");
+    assert!(store.all().is_empty());
+    let backup_exists = entries(&root).iter().any(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("projects.json.corrupt."))
+    });
+    assert!(backup_exists, "the damaged registry must be preserved");
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn metadata_write_failure_keeps_the_existing_registry_intact() {

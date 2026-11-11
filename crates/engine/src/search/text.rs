@@ -46,6 +46,8 @@ pub fn build_searchable_text(
     let mut searchable_text: Vec<String> = vec![String::new(); row_count];
     for col in search_cols {
         if let Some(series) = column_series.get(col.as_str()) {
+            // The index appends into the shared searchable_text row.
+            #[allow(clippy::needless_range_loop)]
             for row_idx in 0..row_count {
                 if let Ok(value) = series.get(row_idx) {
                     push_searchable_value(&mut searchable_text[row_idx], &value);

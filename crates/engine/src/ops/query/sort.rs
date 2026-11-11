@@ -19,8 +19,7 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
         .and_then(|v| anyvalue_to_search_string(&v))
         .map(|s| {
             s.trim()
-                .replace(',', "")
-                .replace('\u{00A0}', "")
+                .replace([',', '\u{00A0}'], "")
                 .to_lowercase()
         });
     let Some(text) = normalized else {

@@ -18,7 +18,6 @@ use crate::{
     value_utils::{anyvalue_to_json, value_display_length},
 };
 
-const SEARCHABLE_CACHE_KEY: &[u8] = b"searchable_cache";
 const IOC_FLAG_CACHE_KEY: &[u8] = b"ioc_flag_cache";
 
 /// One open sled handle per annotation database.
@@ -30,25 +29,6 @@ static FLAGS_DBS: OnceLock<Mutex<HashMap<PathBuf, Db>>> = OnceLock::new();
 
 fn flags_dbs() -> &'static Mutex<HashMap<PathBuf, Db>> {
     FLAGS_DBS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Cached searchable text, keyed by the column set it was built from and the
-/// row count.
-///
-/// Invalidation rules (B4):
-/// - the key is the set of search-target columns plus the row count; a change
-///   to either rebuilds the cache
-/// - `set_hidden_columns` clears it
-/// - IOC changes are irrelevant: searchable text does not depend on IOCs
-/// - deleting a project removes `project_dir` (including `cache.db`), so no
-///   per-cache clear is needed
-///
-/// A cache written by an older version (a bare `Vec<String>`) fails to
-/// deserialize and is treated as absent, forcing a rebuild.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchableCacheEntry {
-    pub columns: Vec<String>,
-    pub text: Vec<String>,
 }
 
 /// Cached IOC evaluation, keyed by the IOC set signature and the row count.
@@ -407,51 +387,11 @@ pub fn count_flagged(path: &Path) -> Result<usize> {
         let (_, value) = result.with_context(|| "failed to iterate flag entries for counting")?;
         let entry: FlagEntry = serde_json::from_slice(&value)
             .context("failed to parse flag entry while counting flagged rows")?;
-        if !entry.flag.trim().is_empty() {
+        if entry.is_flagged() {
             count += 1;
         }
     }
     Ok(count)
-}
-
-pub fn load_searchable_cache(project_dir: &Path) -> Result<Option<SearchableCacheEntry>> {
-    let db = open_cache_db(&cache_db_path(project_dir))?;
-    match db.get(SEARCHABLE_CACHE_KEY) {
-        Ok(Some(value)) => {
-            let cache: SearchableCacheEntry = serde_json::from_slice(&value)
-                .context("failed to deserialize searchable cache")?;
-            Ok(Some(cache))
-        }
-        Ok(None) => Ok(None),
-        Err(err) => Err(err).with_context(|| "failed to read searchable cache"),
-    }
-}
-
-pub fn save_searchable_cache(
-    project_dir: &Path,
-    columns: &[String],
-    text: &[String],
-) -> Result<()> {
-    let db = open_cache_db(&cache_db_path(project_dir))?;
-    let entry = SearchableCacheEntry {
-        columns: columns.to_vec(),
-        text: text.to_vec(),
-    };
-    let data = serde_json::to_vec(&entry).context("failed to serialize searchable cache")?;
-    db.insert(SEARCHABLE_CACHE_KEY, data)
-        .with_context(|| "failed to persist searchable cache")?;
-    db.flush()
-        .with_context(|| "failed to flush searchable cache db")?;
-    Ok(())
-}
-
-pub fn clear_searchable_cache(project_dir: &Path) -> Result<()> {
-    let db = open_cache_db(&cache_db_path(project_dir))?;
-    db.remove(SEARCHABLE_CACHE_KEY)
-        .with_context(|| "failed to clear searchable cache")?;
-    db.flush()
-        .with_context(|| "failed to flush searchable cache db")?;
-    Ok(())
 }
 
 pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<IocCacheEntry>> {

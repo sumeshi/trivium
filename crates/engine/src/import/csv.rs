@@ -443,11 +443,11 @@ pub fn load(
         .with_annotations(restore_annotations);
     let columns = importer.columns().to_vec();
     let mut frame: Option<DataFrame> = None;
-    while let Some(mut batch) = importer.next_batch(&job)? {
+    while let Some(batch) = importer.next_batch(&job)? {
         frame = Some(match frame {
             None => batch,
             Some(mut accumulated) => {
-                accumulated.vstack_mut(&mut batch).map_err(|_| {
+                accumulated.vstack_mut(&batch).map_err(|_| {
                     AppError::Message(
                         "The CSV row count changed while building the dataset.".into(),
                     )

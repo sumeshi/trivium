@@ -5,7 +5,7 @@ use crate::{
     annotation::{apply_annotation_patch, deserialize_double_option, AnnotationPatch},
     error::AppError,
     models::UpdateFlagResponse,
-    storage::{clear_searchable_cache, load_flag, remove_flag, upsert_flag},
+    storage::{load_flag, remove_flag, upsert_flag},
     store::ProjectsStore,
 };
 
@@ -53,10 +53,10 @@ pub fn update_flag(
     payload: UpdateFlagPayload,
 ) -> Result<UpdateFlagResponse, AppError> {
     let Some(meta) = store.find(&payload.project_id) else {
-        return Err(AppError::Message("Project not found.".into()).into());
+        return Err(AppError::Message("Project not found.".into()));
     };
     if payload.row_index >= meta.total_records {
-        return Err(AppError::Message("Row index out of range.".into()).into());
+        return Err(AppError::Message("Row index out of range.".into()));
     }
 
     let project_dir = store.project_dir(&payload.project_id);
@@ -64,11 +64,9 @@ pub fn update_flag(
     let existing = load_flag(&flags_path, payload.row_index).map_err(AppError::from)?;
     let was_flagged = existing
         .as_ref()
-        .is_some_and(|entry| !entry.flag.trim().is_empty());
+        .is_some_and(|entry| entry.is_flagged());
     let next = apply_annotation_patch(existing.as_ref(), &payload.annotation());
-    let is_flagged = next
-        .as_ref()
-        .is_some_and(|entry| !entry.flag.trim().is_empty());
+    let is_flagged = next.as_ref().is_some_and(|entry| entry.is_flagged());
 
     match &next {
         Some(entry) => upsert_flag(&flags_path, payload.row_index, entry).map_err(AppError::from)?,
@@ -105,23 +103,15 @@ pub fn update_flag(
     })
 }
 
-/// Persists the set of hidden columns for a project and resets search cache.
+/// Persists the set of hidden columns for a project.
 pub fn set_hidden_columns(
     store: &ProjectsStore,
     payload: HiddenColumnsPayload,
 ) -> Result<(), AppError> {
     let Some(_) = store.find(&payload.project_id) else {
-        return Err(AppError::Message("Project not found.".into()).into());
+        return Err(AppError::Message("Project not found.".into()));
     };
-    let project_dir = store.project_dir(&payload.project_id);
     store
         .update_hidden_columns(&payload.project_id, payload.hidden_columns)
-        .map_err(AppError::from)?;
-    if let Err(err) = clear_searchable_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear searchable cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
-    Ok(())
+        .map_err(AppError::from)
 }

@@ -109,7 +109,7 @@ impl JsonImporter {
                     order.push(pointer);
                 }
             }
-            if rows % PROGRESS_RECORD_INTERVAL == 0 {
+            if rows.is_multiple_of(PROGRESS_RECORD_INTERVAL) {
                 job.report_progress(rows as u64, None, Some("Scanning JSON".into()));
             }
             job.check_cancelled()?;

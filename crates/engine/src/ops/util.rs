@@ -78,6 +78,8 @@ pub fn ensure_column_text_cache<'a>(
     if !cache.contains_key(&key) {
         let mut col_vec: Vec<String> = vec![String::new(); row_count];
         if let Some(series) = column_series_lower.get(&key) {
+            // The index writes into one vector while reading a parallel series.
+            #[allow(clippy::needless_range_loop)]
             for row_idx in 0..row_count {
                 if let Ok(value) = series.get(row_idx) {
                     if let Some(text) = anyvalue_to_search_string(&value) {

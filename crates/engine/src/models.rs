@@ -220,6 +220,25 @@ pub struct FlagEntry {
     pub bookmarked: bool,
 }
 
+impl FlagEntry {
+    /// A row is flagged only by a non-empty flag. Memo/tag/bookmark-only rows
+    /// are annotated but not flagged.
+    pub fn is_flagged(&self) -> bool {
+        !self.flag.trim().is_empty()
+    }
+
+    /// True when any independent annotation field is present.
+    pub fn is_annotated(&self) -> bool {
+        self.is_flagged()
+            || self
+                .memo
+                .as_deref()
+                .is_some_and(|memo| !memo.trim().is_empty())
+            || !self.tags.is_empty()
+            || self.bookmarked
+    }
+}
+
 /// Result of a single-row annotation update.
 ///
 /// The updated row data is not included: the frontend already has it and

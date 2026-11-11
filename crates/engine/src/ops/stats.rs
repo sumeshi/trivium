@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::analysis::stats::{summarize_series, ColumnStats};
 use crate::error::AppError;
 use crate::jobs::JobContext;
-use crate::project_io::{is_internal_column, read_project_dataframe};
+use crate::project_io::{is_internal_column_for_version, read_project_dataframe};
 use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
@@ -33,12 +33,12 @@ pub fn column_stats(
     store: &ProjectsStore,
     payload: ColumnStatsPayload,
 ) -> Result<ColumnStats, AppError> {
-    if is_internal_column(&payload.column) {
-        return Err(AppError::Message("Column not found.".into()));
-    }
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    if is_internal_column_for_version(&payload.column, meta.storage_version) {
+        return Err(AppError::Message("Column not found.".into()));
+    }
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {

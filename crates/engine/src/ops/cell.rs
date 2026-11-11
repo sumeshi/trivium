@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::models::Cell;
 use crate::project_io::{
-    is_internal_column, read_page_rows_dataframe, read_project_schema_columns, ProjectColumns,
-    INTERNAL_ORIGINAL,
+    is_internal_column_for_version, read_page_rows_dataframe, read_project_schema_columns,
+    ProjectColumns, INTERNAL_ORIGINAL,
 };
 use crate::store::ProjectsStore;
 use crate::value_utils::{original_record_at, CellColumns};
@@ -57,12 +57,12 @@ pub fn get_cell(
     store: &ProjectsStore,
     payload: GetCellPayload,
 ) -> Result<GetCellResponse, AppError> {
-    if is_internal_column(&payload.column_id) {
-        return Err(AppError::Message("Column not found.".into()));
-    }
     let meta = store
         .find(&payload.project_id)
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
+    if is_internal_column_for_version(&payload.column_id, meta.storage_version) {
+        return Err(AppError::Message("Column not found.".into()));
+    }
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {

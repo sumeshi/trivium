@@ -97,7 +97,7 @@ pub fn query_project_rows_with_job(
     let project_dir = store.project_dir(&meta.id);
     let parquet_path = project_dir.join("data.parquet");
     if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()).into());
+        return Err(AppError::Message("Project data file missing.".into()));
     }
 
     job.report_progress(0, Some(3), Some("Reading project metadata".into()));
@@ -255,7 +255,7 @@ pub fn query_project_rows_with_job(
                 .filter(|idx| {
                     flags
                         .get(idx)
-                        .is_some_and(|entry| !entry.flag.trim().is_empty())
+                        .is_some_and(|entry| entry.is_flagged())
                 })
                 .count()
         };
