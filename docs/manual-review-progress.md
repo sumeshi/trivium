@@ -2537,6 +2537,32 @@ Recorded: 2026-11-11, after the manual-review acceptance work.
 - `FlagFilterValue` has one definition; `importIocs` has its real return type;
   unused stores and helpers were removed.
 
+## UI refresh
+
+Recorded: 2026-11-11.
+
+- The app now follows the OS color scheme on first launch and keeps the
+  existing light/dark override. Both palettes use a muted sage accent, warm
+  light neutrals, and an ink-dark theme instead of the previous indigo-heavy
+  surfaces.
+- Header: brand mark, project name, compact description/hash metadata, theme
+  toggle, and a labeled refresh action. The sidebar is a clean project drawer
+  with an import card, field labels, compact project cards, row/flag counts,
+  and icon-only delete.
+- Filter toolbar: compact flag/bookmark/search/columns/export row, explicit
+  search-scope chip, and advanced tools as small disclosure chips instead of a
+  wall of uppercase separators.
+- Table: 38px header, 32px data rows, subtle row tint and hover, sticky
+  columns without heavy shadows, circular flag controls with semantic selected
+  states, memo icon, mono data text, and a proper empty state.
+- Dialogs and context menus inherit the new tokens; the old table-layout
+  duplicate remains removed.
+- `screenshot.jpeg` was updated to the new table view.
+
+Browser rendering was checked with headless Chrome against the Vite dev server
+(shell) and a CSS/markup preview (table, light and dark). The real native Tauri
+window is still unverified because the GTK/WebKit dev packages are unavailable.
+
 ### Remaining larger refactors (not done here)
 
 - Split `ProjectView.svelte` orchestration (page requests, view-state restore)
