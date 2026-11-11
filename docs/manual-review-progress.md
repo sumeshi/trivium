@@ -1447,3 +1447,63 @@ Changes:
   not started.
 
 Next card: T20b.
+
+## T20b — bound the frontend page cache
+
+Recorded: 2026-11-11.
+
+Changes:
+- `src/lib/pageCache.ts` (new, Svelte-independent): `estimatePageBytes(rows)`
+  sums the rendered `displayCache`/`copyCache` text lengths plus a fixed
+  per-row overhead, and `selectEvictions(pages, current, maxPages, maxBytes)`
+  returns the pages to drop. The current page is protected from count/byte
+  eviction; a page whose own estimate exceeds the byte bound is always evicted
+  (even when current), which is how oversized pages are detected.
+- `src/lib/components/project_view/state.ts`: `PAGE_CACHE_MAX_PAGES = 5` and
+  `PAGE_CACHE_MAX_BYTES = 16 * 1024 * 1024` (not exported), a page access
+  clock, and `largePages`. `registerLoadedPage` stores a response, updates the
+  access order and evicts in one place; `dropPage` removes the page's rows,
+  its `positionToRowIndex` entries and its `loadedPages` entry together.
+  `touchPage` refreshes the access order for the visible/prefetch pages.
+  Page size stays 250 rows. `resetPageCache` is called with the existing
+  pagination reset so filter/project changes clear the bookkeeping.
+- `src/lib/components/ProjectView.svelte`: the response path calls
+  `registerLoadedPage` instead of updating the three collections separately.
+  `ensureRangeLoaded` touches the pages in range and does not automatically
+  retry a page recorded in `largePages`.
+- `src/lib/components/project_view/DataTable.svelte` and
+  `project-view.css`: a missing row whose page is in `largePages` shows
+  "Page too large to cache…" instead of "Loading…". Other missing rows keep the
+  existing loading state and are refetched by `ensureRangeLoaded` because their
+  page was removed from `loadedPages`.
+- Annotation editing remains independent of the page cache: `memoEditor`
+  keeps the original `rowIndex` and its row snapshot, and `saveMemo` uses the
+  backend with those values. A comment records that the future T22 selection
+  must be a separate store. Eviction never closes the memo dialog or fails a
+  save; if the row was evicted, the optimistic cache update is simply skipped.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| UI tests | `npm run test:ui` | 9 passed, 0 failed (5 new page-cache tests) |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+
+`package.json` now runs `node --test --experimental-strip-types
+src/lib/*.test.ts`, so the existing `ipcValues.test.ts` and the new
+`pageCache.test.ts` both run.
+
+### Unverified / deferred
+
+- The native GUI was not exercised, so large scrolling, returning to an evicted
+  position, and the "Page too large to cache" notice are only covered by the
+  pure-function tests and code inspection. GUI verification is T26.
+- The 16MiB bound is an estimate from retained cell strings, not a measured JS
+  heap. Actual memory use remains for T27.
+- No long-cell preview/full-cell fetch, giant-row navigation, or selection UI
+  was added; those are T20c/T20d/T22.
+
+Next card: T20c.
