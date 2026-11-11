@@ -815,6 +815,19 @@ button.primary:disabled {
   white-space: nowrap;
 }
 
+.large-page-notice {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.large-page-blank {
+  grid-column: 2 / -1;
+}
+
 .empty-rows {
   padding: 32px;
   text-align: center;

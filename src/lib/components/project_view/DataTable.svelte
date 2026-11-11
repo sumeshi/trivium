@@ -15,6 +15,7 @@
     scrollTop,
     tableWidth,
     ROW_HEIGHT,
+    PAGE_SIZE,
     INDEX_COL_WIDTH,
     FLAG_COL_WIDTH,
     MEMO_COL_WIDTH,
@@ -33,7 +34,8 @@
     editMemo,
     openCell,
     handleCellKeydown,
-    positionToRowIndex
+    positionToRowIndex,
+    largePages
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
   import { theme } from '../../theme';
@@ -298,98 +300,113 @@
         <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
           <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
             {#each virtualRows as item (item.position)}
+              {@const largePage = !item.row && $largePages.has(Math.floor(item.position / PAGE_SIZE))}
               <div
                 class="data-row"
                 class:alt-row={item.position % 2 === 1}
-                class:loading={!item.row}
+                class:loading={!item.row && !largePage}
                 style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
                   item.row?.color
                     ? ` background-color: ${displayRowColor(item.row.color, $theme)};`
                     : ''
                 }`}
               >
-                <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
-                <div class="cell flag sticky sticky-flag">
-                  {#if item.row}
-                    <div class="flag-buttons">
-                      {#each FLAG_OPTIONS as option}
-                        <button
-                          type="button"
-                          class:selected={item.row ? _normalizeFlag(item.row.flag) === option.value : false}
-                          class:flag-safe={option.value === 'safe'}
-                          class:flag-suspicious={option.value === 'suspicious'}
-                          class:flag-critical={option.value === 'critical'}
-                          on:click={() => item.row && _setFlag(item.row, option.value)}
-                        >
-                          {option.hint}
-                        </button>
-                      {/each}
+                {#if largePage}
+                  <div class="cell index sticky sticky-index">{item.position + 1}</div>
+                  {#if item.position % PAGE_SIZE === 0 || item.position === startIndex}
+                    <div
+                      class="cell large-page-notice"
+                      title="This page exceeds the page-cache byte limit and is not retained in memory."
+                    >
+                      Page too large to cache. Scroll to another page or narrow the results.
                     </div>
                   {:else}
-                    <div class="flag-buttons loading-placeholder">…</div>
+                    <div class="large-page-blank" aria-hidden="true"></div>
                   {/if}
-                </div>
-                <button
-                  class="cell memo-button sticky sticky-memo"
-                  on:click={() =>
-                    item.row &&
-                    $projectDetail &&
-                    _editMemo(item.row, $projectDetail.project.meta.id)}
-                  title={
-                    item.row
-                      ? item.row.memo && item.row.memo.trim().length
-                        ? item.row.memo
-                        : 'Add memo'
-                      : 'Loading…'
-                  }
-                  disabled={!item.row}
-                >
-                  {#if item.row && item.row.memo && item.row.memo.trim().length}
-                    <span class="memo-text">{item.row.memo}</span>
-                  {:else if item.row}
-                    <span class="memo-placeholder">Add memo</span>
-                  {:else}
-                    <span class="memo-placeholder">Loading…</span>
-                  {/if}
-                </button>
-                {#each $visibleColumns as column, columnIndex}
-                  {@const cellValue =
-                    item.row && column in item.row.displayCache
-                      ? item.row.displayCache[column]
-                      : null}
-                  {@const copyValue =
-                    item.row && column in item.row.copyCache
-                      ? item.row.copyCache[column]
-                      : ''}
+                {:else}
+                  <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
+                  <div class="cell flag sticky sticky-flag">
+                    {#if item.row}
+                      <div class="flag-buttons">
+                        {#each FLAG_OPTIONS as option}
+                          <button
+                            type="button"
+                            class:selected={item.row ? _normalizeFlag(item.row.flag) === option.value : false}
+                            class:flag-safe={option.value === 'safe'}
+                            class:flag-suspicious={option.value === 'suspicious'}
+                            class:flag-critical={option.value === 'critical'}
+                            on:click={() => item.row && _setFlag(item.row, option.value)}
+                          >
+                            {option.hint}
+                          </button>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="flag-buttons loading-placeholder">…</div>
+                    {/if}
+                  </div>
                   <button
-                    type="button"
-                    class="cell"
-                    class:sticky={columnIndex === 0}
-                    class:stickyData={columnIndex === 0}
+                    class="cell memo-button sticky sticky-memo"
+                    on:click={() =>
+                      item.row &&
+                      $projectDetail &&
+                      _editMemo(item.row, $projectDetail.project.meta.id)}
                     title={
-                      !item.row || cellValue === null
-                        ? 'Loading…'
-                        : cellValue
+                      item.row
+                        ? item.row.memo && item.row.memo.trim().length
+                          ? item.row.memo
+                          : 'Add memo'
+                        : 'Loading…'
                     }
-                    on:click={() => {
-                      if (!item.row) return;
-                      _openCell(column, copyValue, item.row);
-                    }}
-                    on:keydown={(event) => {
-                      if (!item.row) return;
-                      _handleCellKeydown(event, column, copyValue, item.row);
-                    }}
                     disabled={!item.row}
                   >
-                    <span class="cell-text">
-                      {#if !item.row || cellValue === null}
-                        Loading…
-                      {:else}
-                        {cellValue}
-                      {/if}
-                    </span>
+                    {#if item.row && item.row.memo && item.row.memo.trim().length}
+                      <span class="memo-text">{item.row.memo}</span>
+                    {:else if item.row}
+                      <span class="memo-placeholder">Add memo</span>
+                    {:else}
+                      <span class="memo-placeholder">Loading…</span>
+                    {/if}
                   </button>
-                {/each}
+                  {#each $visibleColumns as column, columnIndex}
+                    {@const cellValue =
+                      item.row && column in item.row.displayCache
+                        ? item.row.displayCache[column]
+                        : null}
+                    {@const copyValue =
+                      item.row && column in item.row.copyCache
+                        ? item.row.copyCache[column]
+                        : ''}
+                    <button
+                      type="button"
+                      class="cell"
+                      class:sticky={columnIndex === 0}
+                      class:stickyData={columnIndex === 0}
+                      title={
+                        !item.row || cellValue === null
+                          ? 'Loading…'
+                          : cellValue
+                      }
+                      on:click={() => {
+                        if (!item.row) return;
+                        _openCell(column, copyValue, item.row);
+                      }}
+                      on:keydown={(event) => {
+                        if (!item.row) return;
+                        _handleCellKeydown(event, column, copyValue, item.row);
+                      }}
+                      disabled={!item.row}
+                    >
+                      <span class="cell-text">
+                        {#if !item.row || cellValue === null}
+                          Loading…
+                        {:else}
+                          {cellValue}
+                        {/if}
+                      </span>
+                    </button>
+                  {/each}
+                {/if}
               </div>
             {/each}
           </div>

@@ -41,6 +41,7 @@
     rowsCache,
     pendingPages,
     loadedPages,
+    largePages,
     totalRows,
     totalFilteredRows,
     flaggedCount,
@@ -76,10 +77,12 @@
     PREFETCH_PAGES,
     currentProjectId,
     lastHiddenColumnsRef,
-    positionToRowIndex,
     viewGeneration,
     pendingPageKey,
-    invalidateViewRequests
+    invalidateViewRequests,
+    registerLoadedPage,
+    resetPageCache,
+    touchPage
   } from './project_view/state';
 import type {
     FlagFilterValue,
@@ -159,10 +162,10 @@ import type {
     rowsCache.set(new Map());
     pendingPages.set(new Set());
     loadedPages.set(new Set());
+    resetPageCache();
     totalRows.set(0);
     flaggedCount.set(0);
     filteredFlaggedCount.set(0);
-    positionToRowIndex.set(new Map());
   };
 
   const initializeColumnWidths = () => {
@@ -406,6 +409,12 @@ import type {
     const clampedLastPage = Math.min(lastPage, maxPageIndex);
     const generation = get(viewGeneration);
     for (let page = firstPage; page <= clampedLastPage; page += 1) {
+      // Keep the displayed range and its prefetch neighbours recent even when
+      // they are already cached, so eviction prefers pages scrolled away from.
+      touchPage(page);
+      if ($largePages.has(page)) {
+        continue;
+      }
       const pendingKey = pendingPageKey(generation, filterRequestId, page);
       if (!$loadedPages.has(page) && !$pendingPages.has(pendingKey)) {
         void requestPage(page);
@@ -470,24 +479,13 @@ import type {
         filteredFlaggedCount.set(response.annotated_filtered);
         emitSummary();
         const normalizedRows = response.rows.map((row) => normalizeRow(row));
-        rowsCache.update((cache) => {
-          const nextCache = new Map(cache);
-          normalizedRows.forEach((row) => {
-            nextCache.set(row.row_index, row);
-          });
-          return nextCache;
-        });
-        // Preserve backend order: map display positions to row_index
-        positionToRowIndex.update((m) => {
-          const next = new Map(m);
-          normalizedRows.forEach((row, i) => {
-            next.set(response.offset + i, row.row_index);
-          });
-          return next;
-        });
-        const nextLoaded = new Set($loadedPages);
-        nextLoaded.add(Math.floor(response.offset / PAGE_SIZE));
-        loadedPages.set(nextLoaded);
+        // Adds the page and evicts the least recently used pages in one place
+        // so rows, positions and loadedPages stay consistent.
+        registerLoadedPage(
+          Math.floor(response.offset / PAGE_SIZE),
+          response.offset,
+          normalizedRows
+        );
       })
       .catch((error) => {
         console.error(error);

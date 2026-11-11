@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "svelte-check --tsconfig ./tsconfig.json",
-    "test:ui": "node --test --experimental-strip-types src/lib/ipcValues.test.ts",
+    "test:ui": "node --test --experimental-strip-types src/lib/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
