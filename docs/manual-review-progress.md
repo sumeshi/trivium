@@ -1507,3 +1507,92 @@ src/lib/*.test.ts`, so the existing `ipcValues.test.ts` and the new
   was added; those are T20c/T20d/T22.
 
 Next card: T20c.
+
+## T20c — return cell previews and fetch full values on demand
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/models.rs` / `value_utils.rs`: a list `Cell` now carries
+  `truncated` and `length` (original character count, `null` for null/missing)
+  in addition to `text`/`kind`. `build_cell` keeps at most 256 characters
+  (`CELL_PREVIEW_CHARS`, counted by `char`) and `length` is computed before
+  truncation. `build_full_cell` returns the untruncated text for the new fetch
+  path. The Parquet source is never rewritten or truncated.
+- `crates/engine/src/ops/cell.rs` (new): `GetCellPayload { projectId,
+  rowIndex, columnId }`, `GetCellResponse { text, kind, truncated, length }`,
+  and `get_cell`. It validates the original row id against
+  `ProjectMeta.total_records`, accepts hidden data columns, rejects internal
+  and unknown columns, and reads only the requested column plus `__original`
+  through `read_page_rows_dataframe`. It never calls the all-column
+  `read_project_dataframe`. Re-exported from `ops/mod.rs` and `ops/rows.rs`.
+- `src-tauri/src/commands/cell.rs` (new): a thin synchronous `get_cell`
+  command (one row and one projected column do not need the job registry).
+  Registered in `commands/mod.rs` and `main.rs`.
+- `src/lib/backend.ts` / `types.ts`: `GetCellArgs`, `GetCellResult`, a
+  `getCell` backend method, and optional `truncated`/`length` on `Cell`.
+- `src/lib/ipcValues.ts`: the table display cache appends "…" when a cell is
+  truncated, so a preview is not presented as a complete value. `copyCache`
+  was renamed to `previewCache` to make its new role explicit; it is only an
+  initial hint for the detail dialog.
+- `src/lib/components/project_view/state.ts`: `expandedCell` carries
+  `projectId`, `rowIndex`, `columnId`, `preview`, and the row snapshot.
+  `openCell`/`handleCellKeydown` take the project and column ids. Page-cache
+  rows no longer retain the compatibility `data` object (`data: {}`), because
+  the UI reads `cells` and a full 1MiB `data` value would defeat the page-cache
+  byte bound.
+- `DataTable.svelte`: passes `projectId`, original row id, column id, and the
+  preview to the dialog.
+- `ExpandedCellDialog.svelte`: on open it calls `getCell` for the focused cell.
+  Loading shows "Loading full value…" and disables Copy; a failure shows
+  "Failed to load the full value." plus Retry; only the loaded full value is
+  copied. A request token discards responses after the target changes or the
+  dialog closes, and the full value is cleared on close. Other row fields keep
+  showing their list previews (with the ellipsis marker).
+- `crates/engine/tests/cell_preview_test.rs` (new): a 300,000-character CSV
+  cell is a 256-character page preview with `truncated = true` and
+  `length = 300000`; `get_cell` returns the exact full text; the full-read
+  counter stays 0 while the page-read counter increases; hidden columns still
+  work; null/missing/empty kinds match the page; internal/unknown columns and
+  out-of-range rows fail. `ipc_cells_test.rs` expectations were extended with
+  the new fields.
+
+### `data` field decision
+
+Page `ProjectRow.data` remains the untruncated compatibility map. Existing
+engine tests and callers read it, and the card keeps it unchanged. The
+constraint is that a page response (IPC payload) still contains the full text
+through `data` even though `cells` is a preview. The frontend drops `data`
+when normalizing a row, so retained page-cache memory is bounded by the
+previews; the transport size remains a T27 measurement item.
+
+### Filter in/out
+
+The current `ExpandedCellDialog` has no Filter in/out action. T21 owns that UI;
+when it is added it must reuse the fetched full value (or call `getCell`), never
+`previewCache`. This card leaves no preview-as-filter path in the code.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed (3 new cell-preview tests) |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 10 passed, 0 failed (1 new preview test) |
+
+### Unverified / deferred
+
+- `src-tauri` cannot be compiled in this environment. The command's `use`
+  paths and its registration in `commands/mod.rs` and `main.rs` were checked
+  with grep only; compilation is a CI verification item.
+- The native GUI was not exercised. Loading, error/Retry, close-release, and
+  the preview ellipsis are covered by code inspection and pure UI tests only;
+  GUI verification is T26.
+- The page IPC response still carries the full `data` map (see above). The
+  frontend does not retain it.
+- No giant-row spacer, logical scrolling, or selection UI was added; those are
+  T20d and later.
+
+Next card: T20d.
