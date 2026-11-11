@@ -694,3 +694,78 @@ Changes:
   option; no new JSON-specific UI settings were added.
 
 Next card: T12.
+
+## T12 — staged project creation survives failure and interruption
+
+Recorded: 2026-11-11. Code commit `ad4156e`.
+
+Changes:
+- `crates/engine/src/ops/projects.rs`: `create_project` copies the source into
+  a staging directory while computing SHA-256 with a fixed 64 KiB buffer. The
+  old `source_sha256` path (`File::open` + `read_to_end` + a second read by the
+  importer) is gone. The importer now parses the copied bytes, so the recorded
+  hash and the imported content are the same snapshot.
+- After the copy, the source path's size and modification time are checked
+  against the values from the opened file. A mismatch fails with
+  `Source file changed during import. Try again.` The source is only opened
+  read-only; it is never written, renamed, or moved.
+- `StagingDir` is an RAII guard that removes its directory on every exit path
+  (including a panic) and is disarmed only after the rename. `data.parquet` and
+  `flags.json` are written under `{store_root}/.staging/{uuid}`, the copied
+  source is removed, and the complete directory is renamed to
+  `projects/{uuid}`. `store.insert` runs only after the rename; if it fails,
+  the final directory is removed again.
+- `crates/engine/src/store.rs`: added `staging_root()` and `staging_dir(id)`
+  (`{store_root}/.staging/{uuid}`). Completed projects still live under the
+  unchanged `project_dir(id)`. `insert` now rolls its in-memory entry back
+  when `projects.json` cannot be persisted, so a failed registration is not
+  listed as a project before the directory is removed.
+- `crates/engine/src/models.rs`: `ProjectMeta` gained `#[serde(default)]`
+  `source_file_name`, `source_format` (`csv` / `json` / `jsonl` / `ndjson`),
+  and `source_size`. Legacy `projects.json` files deserialize with `None`.
+  Source record numbers stay in the existing zero-based `__rowid` column;
+  `total_records` remains the record count.
+- `src/lib/types.ts`: the corresponding optional `ProjectMeta` fields were
+  added for the IPC shape.
+- `crates/engine/tests/storage_v2_test.rs`: the two hand-built `ProjectMeta`
+  literals set the new fields to `None`.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New regression suite | `cargo test -p trivium-engine --test project_create_test` | 4 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+Regression coverage (`project_create_test.rs`):
+- Broken JSON and a CSV row with the wrong field count fail; `store.all()` stays
+  empty and neither `projects/` nor `.staging/` has an entry.
+- A successful CSV import records `source_file_name=events.csv`,
+  `source_format=csv`, the byte length as `source_size`, and a SHA-256 that
+  equals the digest of the source bytes. The source bytes are unchanged and the
+  staging directory is empty afterwards.
+- `__rowid` values are `0, 1, 2` for a 3-record import.
+- Importing the same JSONL input twice creates two projects with the same
+  hash and removes both staging directories.
+
+### Unverified / deferred
+
+- Killing the process in the middle of an import is not tested. The RAII guard
+  covers errors and panics in-process, but a hard process kill can leave a
+  `.staging/{uuid}` directory until cleanup exists in T16/T15. It is not a
+  completed project and is not listed in `store.all()`.
+- Detecting a source that changes during the copy is not tested; forcing the
+  timing would be flaky. The test fixes the contract that the metadata hash
+  equals the imported bytes, and the size/mtime re-check is covered by code
+  review only.
+- The GUI import path was not exercised (the native app was not built here).
+  `project_io.rs` needed no change: the read/write helpers already operate on
+  explicit paths.
+- `source_size` is the number of copied bytes; it is not re-read from the
+  source after import.
+
+Next card: T13.
