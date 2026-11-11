@@ -10,7 +10,7 @@ use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::anyvalue_to_json;
 
-use super::query::{final_flags, materialize_page};
+use super::query::materialize_page;
 
 /// `neighbors` takes `count` parsed rows before and after the anchor in time order.
 /// `window` takes parsed rows within `count` seconds of the anchor, inclusive.
@@ -100,13 +100,11 @@ pub fn surrounding_rows(
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
     let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     let ioc_outcomes = cached_ioc_outcomes(&project_dir, &df, &iocs);
-    let final_flag_vec = final_flags(df.height(), &flags, &ioc_outcomes);
     let rows = materialize_page(
         &df,
         &selected,
         project_columns.columns(),
         &flags,
-        &final_flag_vec,
         &ioc_outcomes,
         !iocs.is_empty(),
     )?;

@@ -28,6 +28,7 @@ use crate::{
 
 use sha2::{Digest, Sha256};
 
+use super::query::cache_remove_project;
 use super::util::{materialize_rows, DEFAULT_PAGE_SIZE};
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
@@ -380,6 +381,7 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
             .with_context(|| format!("failed to remove project dir {:?}", project_dir))
             .map_err(AppError::from)?;
     }
+    cache_remove_project(&meta.id);
     store.remove(&meta.id).map_err(AppError::from)?;
     Ok(())
 }

@@ -130,6 +130,17 @@ impl ProjectsStore {
             + 1
     }
 
+    /// Returns the current annotation revision without advancing it.
+    ///
+    /// A project with no in-process update yet reports revision 0.
+    pub fn current_revision(&self, id: &Uuid) -> u64 {
+        self.revisions
+            .lock()
+            .get(id)
+            .map(|revision| revision.load(Ordering::Relaxed))
+            .unwrap_or(0)
+    }
+
     pub fn remove(&self, id: &Uuid) -> Result<()> {
         let mut guard = self.inner.lock();
         guard.retain(|meta| &meta.id != id);

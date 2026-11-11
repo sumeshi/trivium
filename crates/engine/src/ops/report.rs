@@ -117,7 +117,6 @@ pub fn build_report(
         &annotated_indices,
         &display_meta,
         &flags,
-        &final_flag_vec,
         &ioc_outcomes,
         !iocs.is_empty(),
     )?;

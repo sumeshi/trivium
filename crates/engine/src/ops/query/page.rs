@@ -4,6 +4,7 @@ use anyhow::Error as AnyhowError;
 use polars::prelude::*;
 
 use crate::error::AppError;
+use crate::flags::normalize_flag_value;
 use crate::ioc::IocRowOutcome;
 use crate::models::{ColumnMeta, FlagEntry, ProjectRow};
 use crate::value_utils::{build_row_cells, CellColumns};
@@ -57,12 +58,33 @@ pub fn filtered_indices(
     (filtered_indices, annotated_filtered)
 }
 
+/// Final flag for one row: a non-empty user flag wins, otherwise the IOC flag.
+///
+/// Computing this from the page's own annotations keeps a cache hit from
+/// rebuilding a project-wide flag vector.
+fn final_flag_for(
+    row_idx: usize,
+    page_flags: &HashMap<usize, FlagEntry>,
+    ioc_outcomes: &[IocRowOutcome],
+) -> String {
+    let user_flag = page_flags
+        .get(&row_idx)
+        .map(|entry| normalize_flag_value(&entry.flag))
+        .unwrap_or_default();
+    if !user_flag.is_empty() {
+        return user_flag;
+    }
+    ioc_outcomes
+        .get(row_idx)
+        .map(|outcome| outcome.flag.clone())
+        .unwrap_or_default()
+}
+
 pub fn materialize_page(
     df: &DataFrame,
     selected_indices: &[usize],
     columns: &[ColumnMeta],
     flags: &HashMap<usize, FlagEntry>,
-    final_flag_vec: &[String],
     ioc_outcomes: &[IocRowOutcome],
     apply_ioc_tags: bool,
 ) -> Result<Vec<ProjectRow>, AppError> {
@@ -107,7 +129,7 @@ pub fn materialize_page(
             row_index: row_idx,
             data: record,
             cells,
-            flag: final_flag_vec[row_idx].clone(),
+            flag: final_flag_for(row_idx, &page_flags, ioc_outcomes),
             memo: if final_memo.is_empty() {
                 None
             } else {

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use polars::prelude::DataFrame;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,24 @@ use super::ioc::final_flags;
 use super::page::filtered_indices;
 use super::search::prepare_search;
 use super::sort::ordered_row_indices;
+
+/// Number of `resolve_target` calls since process start.
+///
+/// Test instrumentation only: repeated page requests for one result must not
+/// increment this.
+static RESOLVE_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Test hook: reads the `resolve_target` call counter.
+#[doc(hidden)]
+pub fn resolve_count() -> u64 {
+    RESOLVE_COUNT.load(Ordering::Relaxed)
+}
+
+/// Test hook: resets the `resolve_target` call counter.
+#[doc(hidden)]
+pub fn reset_resolve_count() {
+    RESOLVE_COUNT.store(0, Ordering::Relaxed);
+}
 
 /// Shared query contract (GOAL.md §4).
 ///
@@ -70,6 +89,7 @@ pub fn resolve_target(
     ioc_outcomes: &[IocRowOutcome],
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
+    RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
     // An empty search scope is the same as "every data column".
     let search_columns = spec
         .search_columns
