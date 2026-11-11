@@ -1187,3 +1187,71 @@ Regression coverage (`crates/engine/tests/json_streaming_test.rs`, 9 tests):
   are unchanged.
 
 Next card: T18.
+
+## T18 — search is prepared once and evaluates only required columns
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/ops/query/search.rs`: added `PreparedQuery`. It tokenizes
+  the search string once, converts those tokens into the condition tree,
+  compiles the tree once (`PreparedNode`), and resolves the explicit condition
+  and column-scope names to data columns before any row is evaluated. Unknown
+  condition columns, unknown scoped search columns, and unknown
+  `searchColumns` fail with `Unknown column: <name>` before evaluation.
+- Row evaluation now runs in fixed 1,024-row batches and checks
+  `JobContext::check_cancelled()` at each boundary. Each row builds a map with
+  only the columns its condition tree references. The joined, lowercased search
+  scope text is built per row only when an unscoped term exists.
+- `crates/engine/src/condition/eval.rs`: added `PreparedNode` with precompiled
+  `regex::Regex` values. The compatibility `eval(node, row)` entry point
+  prepares on each call, while query evaluation reuses the prepared tree.
+  Invalid regex patterns now return an error instead of silently evaluating
+  false; the existing `condition_eval` test was updated for this specified
+  behaviour change.
+- `crates/engine/src/search/text.rs`: extracted `push_searchable_value` so the
+  batched per-row join keeps exactly the `build_searchable_text` normalization
+  (lowercase, one space, skip null/empty).
+- Searchable-text cache: `prepare_search` no longer loads, clones, builds, or
+  saves the sled `SearchableCacheEntry`. The storage helpers remain for other
+  callers, but an unconditional display does not touch them.
+- `resolve_target` now receives `&JobContext`; the page query passes its job,
+  export passes its job, and bulk/report/group/histogram/time use
+  `JobContext::none()` so their behaviour is unchanged.
+- Test instrumentation only: `value_utils` records per-column stringification,
+  `condition::eval` counts regex compilations, and `search::text` counts full
+  searchable-text builds. These counters are documented as test hooks.
+
+Regression coverage (`crates/engine/tests/search_prepare_test.rs`, 5 tests):
+- 100 rows with one regex pattern compile the regex once.
+- A condition on `small` stringifies `small` 100 times and a 1 MiB `big` column
+  zero times.
+- An unconditional query builds no full searchable-text vector.
+- Unknown condition/search columns, unknown scoped terms, and an invalid regex
+  fail before evaluation.
+- A pre-cancelled query job returns `Cancelled.` over a 5,000-row fixture.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New search tests | `cargo test -p trivium-engine --test search_prepare_test` | 5 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | 182 passed, 0 failed, exit 0 |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- The native GUI was not exercised. Search input, cancel from the UI, and
+  progress delivery remain code-review checks.
+- Cancellation is checked before each batch. A single very large cell is still
+  stringified after the boundary check for its row; the response time depends
+  on that cell.
+- `sort` and `ordered_row_indices` remain whole-frame calls. Reusing results
+  across page moves and sort/page work is T19, not this card.
+- The searchable-text cache helpers are still present in `storage.rs` but the
+  query path no longer reads or writes them.
+
+Next card: T19.
