@@ -1353,3 +1353,97 @@ test binary serializes on a mutex because the cache is process-local):
   started.
 
 Next card: T20a.
+
+## T20a — read only the requested page and visible columns
+
+Recorded: 2026-11-11.
+
+Changes:
+- `crates/engine/src/project_io.rs`: added `PROJECT_FULL_READS` and
+  `PROJECT_PAGE_READS` (test instrumentation only) plus projection recorders.
+  `read_project_dataframe` increments the full-read counter;
+  `read_page_dataframe` increments the page-read counter. Added footer-only
+  helpers (`read_project_schema_columns`, `read_project_row_count`),
+  `read_project_columns` for resolver projections, `read_page_dataframe`, and
+  `read_page_rows_dataframe` for arbitrary original row ids. Added
+  `ProjectColumns::from_meta_and_names` so column metadata can be built from
+  the parquet schema without reading rows.
+- `crates/engine/src/ops/query/mod.rs`: an unconditional, unsorted page no
+  longer calls `resolve_target` or `read_project_dataframe`. It takes row ids
+  from the project row count, reads visible columns plus `__original` and
+  `__rowid`, loads flags for the page only, and uses `ProjectMeta` for the
+  no-IOC annotated count. With IOCs, the persisted IOC cache supplies the
+  project count and page outcomes; only a missing/stale cache falls back to a
+  projected all-data-column read.
+- A filtered or sorted miss reads a resolver projection (search scope,
+  condition columns, sort key, `__rowid`) for every row, resolves ids, then
+  reads the page projection separately. Display columns are not read for
+  resolution, and the resolver frame is not reused for materialization.
+- A cache hit (T19) reads only the selected page rows and page annotations.
+  Page rows are materialized in display order from an already page-sized
+  frame (`materialize_page_rows`).
+- The page projection is `visible = data_columns - hidden_columns` plus
+  `__original` when the file has it and `__rowid`. Columns referenced by color
+  rules are read only when rules exist, so hidden-column colors keep working;
+  they are used for color evaluation and are not returned as row data or cells.
+- `crates/engine/src/ioc/evaluate.rs`: added cache-only outcome helpers so a
+  page does not evaluate IOC definitions against a full frame when the
+  persisted IOC cache matches the current definitions and row count.
+- `crates/engine/tests/page_read_test.rs` (new, 4 tests): 100 rows,
+  unconditional pages 1/2/3 with `PROJECT_FULL_READS == 0`,
+  `PROJECT_PAGE_READS >= 3`, correct row ids and values; hidden column absent
+  from both the page projection and row cells; scoped search resolves with only
+  the search column (display-only column absent from the resolver projection);
+  descending sort keeps page order.
+- `crates/engine/tests/query_cache_test.rs`: the two T19 regressions that used
+  `QuerySpec::default()` now use a sorted data-only spec. T20a's unconditional
+  path intentionally does not resolve ids or create a result-cache entry, so
+  the T19 assertions needed a spec that still exercises the cache.
+
+### Parquet read decision
+
+- The premise that polars-io 0.40 depends on `parquet2` does not match this
+  `Cargo.lock`: polars 0.40 depends on `polars-parquet` 0.40, which depends on
+  `parquet-format-safe` 0.2.4. There is no `parquet2` package in the lock file,
+  so no duplicate `parquet2` dependency was added.
+- polars 0.40's `ParquetReader` exposes `with_columns` and `with_n_rows` but no
+  row offset and no row-group selection. Reading a chosen row-group range
+  through `polars-parquet` directly would require its deserializer API and a
+  direct dependency; that was not adopted in this card.
+- Adopted fallback for contiguous pages: `with_columns(projection)` +
+  `with_n_rows(offset + limit)` + in-memory `slice(offset, limit)`. For
+  arbitrary sorted/filtered ids: read the projected range from the smallest to
+  the largest selected id, then `take` the requested order.
+- Consequence: a page at a high offset still decodes the projected row groups
+  before it, and a random sort that spans the file can read the projected range
+  covering its page. No external sort, new database, or full all-column
+  `finish()` is used for a page. Latency was not measured here (T27).
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| New page tests | `cargo test -p trivium-engine --test page_read_test` | 4 passed, 0 failed |
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI value test | `npm run test:ui` | 4 passed, 0 failed |
+
+### Unverified / deferred
+
+- No wall-clock measurement of a random-sort page or a high-offset page was
+  taken. The T27 measurement remains the place for latency and memory results;
+  no engine switch was started.
+- The native GUI was not exercised.
+- Hidden columns are no longer present in page `ProjectRow.data`/`cells`.
+  `ExpandedCellDialog` still lists hidden columns and reads `row.cells`, so
+  those values will be blank until a dedicated detail/full-cell fetch (T20c).
+  This is a UI-visible consequence to verify in the app.
+- An unscoped full-text search still needs every data column, and an IOC cache
+  miss evaluates against every data column. Both remain column projections of
+  all data columns, not the all-column full frame.
+- Frontend page-cache limits, long-cell previews, and giant-row navigation were
+  not started.
+
+Next card: T20b.
