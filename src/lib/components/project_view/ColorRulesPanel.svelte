@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
   import { get } from "svelte/store";
   import type { ColorRule, CompareOp, ConditionNode } from "../../types";
@@ -96,7 +97,7 @@
       if (!alive) {
         return;
       }
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     } finally {
       if (alive) {
         saving = false;

@@ -10,6 +10,7 @@
   import { showToast } from './lib/utils/toast';
   import { initTheme } from './lib/theme';
   import { createProjectController } from './lib/stores/projects';
+  import { errorMessage } from './lib/errors';
 
   const backend: Backend = createBackend();
   const projectController = createProjectController(backend);
@@ -54,13 +55,7 @@
       console.error(error);
       // Tauri commands return Result<_, String>, so the line/record reason is
       // usually a plain string rather than an Error instance.
-      const message =
-        typeof error === 'string'
-          ? error
-          : error instanceof Error
-            ? error.message
-            : 'Failed to import file.';
-      showToast(message, 'error');
+      showToast(errorMessage(error, 'Failed to import file.'), 'error');
     }
   };
 

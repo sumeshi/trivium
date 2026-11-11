@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -122,7 +123,7 @@ import FlagSelect from './FlagSelect.svelte';
     } catch (error) {
       console.error(error);
       iocError =
-        error instanceof Error ? error.message : 'Failed to save IOC rules.';
+        errorMessage(error, 'Failed to save IOC rules.');
     } finally {
       isSavingIocs = false;
     }
@@ -157,7 +158,7 @@ import FlagSelect from './FlagSelect.svelte';
     } catch (error) {
       console.error(error);
       iocError =
-        error instanceof Error ? error.message : 'Failed to import IOC rules.';
+        errorMessage(error, 'Failed to import IOC rules.');
     } finally {
       isSavingIocs = false;
     }
@@ -184,7 +185,7 @@ import FlagSelect from './FlagSelect.svelte';
     } catch (error) {
       console.error(error);
       iocError =
-        error instanceof Error ? error.message : 'Failed to export IOC rules.';
+        errorMessage(error, 'Failed to export IOC rules.');
     }
   };
 </script>

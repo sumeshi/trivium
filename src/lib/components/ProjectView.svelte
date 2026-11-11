@@ -13,6 +13,7 @@
   import type { Backend } from '../backend';
   import { listenToJobEvents } from '../backend';
   import { isCurrentQueryJob, isJobLimitError } from '../jobTracking';
+  import { errorMessage } from '../errors';
   import './project-view.css';
   import { conditionPayload, conditionTree } from '../stores/condition';
   import { cloneTree } from '../viewState';
@@ -1019,13 +1020,10 @@ import type {
       console.error(error);
       // Tauri returns the engine error as a plain string; keep the actionable
       // message (for example, choosing another destination).
-      const message =
-        typeof error === 'string'
-          ? error
-          : error instanceof Error
-            ? error.message
-            : 'Failed to export CSV.';
-      dispatch('notify', { message, tone: 'error' });
+      dispatch('notify', {
+        message: errorMessage(error, 'Failed to export CSV.'),
+        tone: 'error'
+      });
     } finally {
       isExporting.set(false);
     }

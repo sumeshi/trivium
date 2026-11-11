@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
   import type { Backend } from "../../backend";
   import type { TimeAnalysis } from "../../types";
@@ -71,7 +72,7 @@
       if (!alive || ticket !== request) {
         return;
       }
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     }
   };
 

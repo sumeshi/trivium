@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { createEventDispatcher, onDestroy } from 'svelte';
   import type { GetCellResult } from '../../backend';
   import type { ProjectRow } from '../../types';
@@ -80,7 +81,7 @@
       if (!alive || ticket !== loadSeq) return;
       fullValue = null;
       fullState = 'error';
-      fullError = err instanceof Error ? err.message : String(err);
+      fullError = errorMessage(err);
     }
   };
 
@@ -170,7 +171,7 @@
     } catch (err) {
       if (!alive || ticket !== request) return;
       around = [];
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     }
   };
 

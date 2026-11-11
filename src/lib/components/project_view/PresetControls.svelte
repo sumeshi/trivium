@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { conditionPayload, conditionTree, presetCondition } from '../../stores/condition';
@@ -43,7 +44,7 @@
       notice = 'Preset saved.';
     } catch (err) {
       console.error(err);
-      error = err instanceof Error ? err.message : 'Failed to save preset.';
+      error = errorMessage(err, 'Failed to save preset.');
     } finally {
       busy = false;
     }
@@ -91,7 +92,7 @@
       }
     } catch (err) {
       console.error(err);
-      error = err instanceof Error ? err.message : 'Failed to apply preset.';
+      error = errorMessage(err, 'Failed to apply preset.');
     } finally {
       busy = false;
     }

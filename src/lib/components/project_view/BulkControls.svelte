@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { createEventDispatcher, onDestroy } from "svelte";
   import type { AnnotationPatch, BulkAnnotateArgs } from "../../backend";
   import {
@@ -91,7 +92,7 @@
       dispatch("refresh");
     } catch (err) {
       if (!alive) return;
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     } finally {
       if (alive) {
         busy = false;
@@ -131,7 +132,7 @@
       dispatch("refresh");
     } catch (err) {
       if (!alive) return;
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     } finally {
       if (alive) {
         busy = false;

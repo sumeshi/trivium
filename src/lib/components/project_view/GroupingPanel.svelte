@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from "../../errors";
   import { onDestroy } from "svelte";
   import type { Backend } from "../../backend";
   import type { ConditionNode, GroupTreeNode, GroupTreeResponse } from "../../types";
@@ -141,7 +142,7 @@
         return;
       }
       tree = null;
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     } finally {
       if (alive && ticket === request) {
         loading = false;
