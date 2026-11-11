@@ -139,6 +139,7 @@ fn resolve_bulk_target(
     df: &DataFrame,
     payload: &BulkAnnotatePayload,
     flags: &std::collections::HashMap<usize, FlagEntry>,
+    storage_version: u32,
 ) -> Result<(Vec<usize>, usize), AppError> {
     match payload.target.as_str() {
         "all" => {
@@ -148,7 +149,7 @@ fn resolve_bulk_target(
             Ok((row_ids, annotated))
         }
         "filtered" => {
-            let columns = data_columns(df);
+            let columns = data_columns(df, storage_version);
             let target = resolve_target(df, &payload.spec, &columns, flags, &JobContext::none())?;
             Ok((target.filtered, target.annotated_filtered))
         }
@@ -195,9 +196,11 @@ fn resolve_and_token(
     df: &DataFrame,
     project_dir: &Path,
     payload: &BulkAnnotatePayload,
+    storage_version: u32,
 ) -> Result<(Vec<usize>, String), AppError> {
     let flags = load_flags(&project_dir.join("flags.json")).map_err(AppError::from)?;
-    let (row_ids, annotated_filtered) = resolve_bulk_target(df, payload, &flags)?;
+    let (row_ids, annotated_filtered) =
+        resolve_bulk_target(df, payload, &flags, storage_version)?;
     let token = target_token(&payload.spec, &row_ids, annotated_filtered);
     Ok((row_ids, token))
 }
@@ -207,8 +210,12 @@ pub fn bulk_preview(
     store: &ProjectsStore,
     payload: BulkAnnotatePayload,
 ) -> Result<BulkCount, AppError> {
+    let Some(meta) = store.find(&payload.project_id) else {
+        return Err(AppError::Message("Project not found.".into()));
+    };
     let (project_dir, df) = load_frame(store, &payload.project_id)?;
-    let (target, preview_token) = resolve_and_token(&df, &project_dir, &payload)?;
+    let (target, preview_token) =
+        resolve_and_token(&df, &project_dir, &payload, meta.storage_version)?;
     Ok(BulkCount {
         count: target.len(),
         preview_token,
@@ -227,7 +234,8 @@ pub fn bulk_update(
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
 
-    let (target, annotated_filtered) = resolve_bulk_target(&df, &payload, &flags)?;
+    let (target, annotated_filtered) =
+        resolve_bulk_target(&df, &payload, &flags, meta.storage_version)?;
     let current_token = target_token(&payload.spec, &target, annotated_filtered);
 
     // A missing token is the same failure as a stale one: the caller did not
@@ -265,6 +273,7 @@ pub fn bulk_update(
     let flagged_records = count_after(meta.flagged_records, &previous, &changes);
     if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
         warn_count_failure(&payload.project_id, err);
+        store.set_flagged_records_override(&payload.project_id, flagged_records);
     }
 
     let revision_after = store.next_revision(&payload.project_id);
@@ -317,6 +326,7 @@ pub fn bulk_undo(store: &ProjectsStore, payload: BulkUndoPayload) -> Result<Bulk
     let flagged_records = count_after(meta.flagged_records, &undo.applied, &undo.previous);
     if let Err(err) = store.update_flagged_records(&payload.project_id, flagged_records) {
         warn_count_failure(&payload.project_id, err);
+        store.set_flagged_records_override(&payload.project_id, flagged_records);
     }
 
     // Remove only the entry this call restored. Another bulk for the same

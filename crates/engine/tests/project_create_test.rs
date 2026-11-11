@@ -8,7 +8,9 @@ use polars::prelude::AnyValue;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use trivium_engine::ops::projects::{create_project, CreateProjectPayload};
+use trivium_engine::ops::projects::{
+    create_project, delete_project, CreateProjectPayload, ProjectRequest,
+};
 use trivium_engine::project_io::read_project_dataframe;
 use trivium_engine::store::ProjectsStore;
 
@@ -213,6 +215,42 @@ fn failed_metadata_update_does_not_change_in_memory_state() {
             .hidden_columns
             .is_empty(),
         "a failed write must not commit the change in memory"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_delete_keeps_the_project_and_its_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
+    let path = write_file(&root, "events.csv", "id,msg\n1,first\n");
+    let summary = create_project(&store, payload(&path)).expect("create failed");
+    let project_dir = store.project_dir(&summary.meta.id);
+
+    let original_permissions = fs::metadata(&root).expect("root metadata").permissions();
+    let mut read_only = original_permissions.clone();
+    read_only.set_mode(0o555);
+    fs::set_permissions(&root, read_only).expect("make root read-only");
+    let result = delete_project(
+        &store,
+        ProjectRequest {
+            project_id: summary.meta.id,
+        },
+    );
+    fs::set_permissions(&root, original_permissions).expect("restore root permissions");
+
+    result.expect_err("delete must fail while the registry is read-only");
+    assert!(
+        store.find(&summary.meta.id).is_some(),
+        "a failed registry write must keep the project listed"
+    );
+    assert!(
+        project_dir.join("data.parquet").exists(),
+        "a failed registry write must keep the project directory"
     );
 
     let _ = fs::remove_dir_all(root);

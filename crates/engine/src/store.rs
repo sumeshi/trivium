@@ -25,6 +25,8 @@ pub struct ProjectsStore {
     /// Process-local annotation revisions. Durable state is the annotation DB;
     /// this counter only lets the frontend discard stale responses.
     revisions: Arc<Mutex<HashMap<Uuid, AtomicU64>>>,
+    /// Derived flagged counts that could not be persisted yet.
+    flagged_overrides: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl ProjectsStore {
@@ -71,11 +73,31 @@ impl ProjectsStore {
             meta_path,
             inner: Arc::new(Mutex::new(projects)),
             revisions: Arc::new(Mutex::new(HashMap::new())),
+            flagged_overrides: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
+    /// Counts that were committed to the annotation db but could not be
+    /// persisted in `projects.json`. They keep the current session and later
+    /// successful metadata writes from drifting; the next process recreates
+    /// them from the annotation db when needed.
+    pub fn set_flagged_records_override(&self, id: &Uuid, count: usize) {
+        self.flagged_overrides.lock().insert(*id, count);
+    }
+
+    fn apply_flagged_overrides(&self, projects: &mut [ProjectMeta]) {
+        let overrides = self.flagged_overrides.lock();
+        for meta in projects {
+            if let Some(count) = overrides.get(&meta.id) {
+                meta.flagged_records = *count;
+            }
+        }
+    }
+
     pub fn all(&self) -> Vec<ProjectMeta> {
-        self.inner.lock().clone()
+        let mut projects = self.inner.lock().clone();
+        self.apply_flagged_overrides(&mut projects);
+        projects
     }
 
     pub fn insert(&self, project: ProjectMeta) -> Result<()> {
@@ -99,6 +121,7 @@ impl ProjectsStore {
     ) -> Result<()> {
         let mut guard = self.inner.lock();
         let mut next = guard.clone();
+        self.apply_flagged_overrides(&mut next);
         let Some(meta) = next.iter_mut().find(|meta| &meta.id == id) else {
             return Ok(());
         };
@@ -113,7 +136,11 @@ impl ProjectsStore {
     }
 
     pub fn update_flagged_records(&self, id: &Uuid, flagged_records: usize) -> Result<()> {
-        self.update_meta(id, |meta| meta.flagged_records = flagged_records)
+        let result = self.update_meta(id, |meta| meta.flagged_records = flagged_records);
+        if result.is_ok() {
+            self.flagged_overrides.lock().remove(id);
+        }
+        result
     }
 
     pub fn update_ioc_applied_records(&self, id: &Uuid, count: usize) -> Result<()> {
@@ -147,19 +174,26 @@ impl ProjectsStore {
     pub fn remove(&self, id: &Uuid) -> Result<()> {
         let mut guard = self.inner.lock();
         let mut next = guard.clone();
+        self.apply_flagged_overrides(&mut next);
         next.retain(|meta| &meta.id != id);
         self.persist_locked(&next)?;
         *guard = next;
         self.revisions.lock().remove(id);
+        self.flagged_overrides.lock().remove(id);
         Ok(())
     }
 
     pub fn find(&self, id: &Uuid) -> Option<ProjectMeta> {
-        self.inner
+        let mut meta = self
+            .inner
             .lock()
             .iter()
             .find(|meta| &meta.id == id)
-            .cloned()
+            .cloned()?;
+        if let Some(count) = self.flagged_overrides.lock().get(id) {
+            meta.flagged_records = *count;
+        }
+        Some(meta)
     }
 
     pub fn project_dir(&self, id: &Uuid) -> PathBuf {

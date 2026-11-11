@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
-use crate::project_io::is_internal_column;
+use crate::project_io::is_internal_column_for_version;
 
 use super::ioc::user_flags;
 use super::page::filtered_indices;
@@ -67,10 +67,10 @@ pub struct ResolvedTarget {
 }
 
 /// Data columns in frame order, excluding internal storage columns.
-pub fn data_columns(df: &DataFrame) -> Vec<String> {
+pub fn data_columns(df: &DataFrame, storage_version: u32) -> Vec<String> {
     df.get_column_names()
         .into_iter()
-        .filter(|name| !is_internal_column(name))
+        .filter(|name| !is_internal_column_for_version(name, storage_version))
         .map(|name| name.to_string())
         .collect()
 }

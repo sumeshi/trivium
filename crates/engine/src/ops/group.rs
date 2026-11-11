@@ -69,7 +69,7 @@ pub fn group_tree(
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns = data_columns(&df);
+    let columns = data_columns(&df, meta.storage_version);
     let resolved = resolve_columns(&df, &requested, "group columns")?;
     let group_series: Vec<Option<&Series>> =
         resolved.iter().map(|name| df.column(name).ok()).collect();

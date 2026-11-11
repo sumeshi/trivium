@@ -441,10 +441,11 @@ import type {
     if (engineState) {
       saved = viewStateToSavedView(engineState, detail.columns);
       if (!saved) {
-        // Do not replace an unreadable condition tree with an empty filter
-        // without telling the user.
+        // The JSON parsed but the condition tree is invalid. Keep the original
+        // file instead of replacing it with the defaults shown on screen.
+        viewStateWritable = false;
         dispatch('notify', {
-          message: 'Saved view settings could not be restored. Showing the default view.',
+          message: 'Saved view settings could not be restored. The file is kept; changes in this session will not overwrite it.',
           tone: 'error',
         });
       } else {
@@ -1123,15 +1124,11 @@ import type {
     if (!projectDetail) {
       return;
     }
-    // The displayed result counts lag the applied QuerySpec until the first
-    // page of a new result returns. Do not open a dialog whose counts and
-    // export target disagree.
-    const firstPageKey = pendingPageKey(
-      get(viewGeneration),
-      filterRequestId,
-      0
-    );
-    if ($pendingPages.has(firstPageKey)) {
+    // The displayed result counts lag the applied QuerySpec until a page of
+    // the new result returns. Do not open a dialog whose counts and export
+    // target disagree. This covers a scrolled position too, where the first
+    // request is not page 0.
+    if ($appliedResultLoading) {
       dispatch('notify', {
         message: 'Wait for the current query to finish before exporting.',
         tone: 'error'

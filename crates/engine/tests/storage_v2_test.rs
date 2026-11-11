@@ -16,7 +16,9 @@ use trivium_engine::models::{ColumnMeta, ProjectMeta};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::projects::{load_project, ProjectRequest};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
-use trivium_engine::project_io::{read_original_records, write_project_dataframe};
+use trivium_engine::project_io::{
+    is_internal_column_for_version, read_original_records, write_project_dataframe,
+};
 use trivium_engine::store::ProjectsStore;
 
 fn temp_root() -> PathBuf {
@@ -373,4 +375,19 @@ fn legacy_project_loads_with_synthesized_column_metadata() {
     assert_eq!(rows.total_filtered_rows, 1);
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn source_record_names_are_internal_only_for_the_new_storage_format() {
+    // The transitional T12 name is internal for version 2 projects but stays a
+    // data column in an old project that genuinely used that header.
+    assert!(!is_internal_column_for_version("__source_record", 0));
+    assert!(is_internal_column_for_version("__source_record", 2));
+    assert!(is_internal_column_for_version(
+        "__trivium_source_record",
+        2
+    ));
+    // The original internal names are reserved in every version.
+    assert!(is_internal_column_for_version("__rowid", 0));
+    assert!(is_internal_column_for_version("__original", 0));
 }

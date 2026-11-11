@@ -93,6 +93,9 @@ pub fn update_flag(
             "[flags] failed to persist the flagged count for {}: {:?}",
             payload.project_id, err
         );
+        // Keep the derived count correct for this session. The annotation DB
+        // remains authoritative, and a later successful write persists it.
+        store.set_flagged_records_override(&payload.project_id, flagged_records);
     }
 
     Ok(UpdateFlagResponse {

@@ -2440,3 +2440,29 @@ New coverage: panel scope (`panel_scope_test`), newer/corrupt view-state
 protection and warnings (`view_state_test`, `viewStateMapping.test`), failed
 metadata updates (`project_create_test`), selected export outside the result
 (`export_scope_test`), and IPC hidden-column absence (`manual_loop_test`).
+
+### Follow-up regression fixes
+
+- Export now blocks while any page of a newly applied result is loading
+  (`appliedResultLoading`), including a search applied from a scrolled
+  position where the requested page is not page 0.
+- A failed flagged-count write keeps a process-local override, so the next
+  update starts from the correct baseline. A later successful update persists
+  the right count; the annotation database remains authoritative.
+- `delete_project` removes the registry entry before the project directory.
+  A metadata write failure now leaves a fully openable project instead of a
+  listed project whose data directory is already gone.
+- A view state whose JSON parses but whose condition tree is invalid now
+  disables autosave, like the unreadable/newer status; the original file is not
+  replaced by defaults.
+- `__source_record` (the transitional T12 internal name) is treated as internal
+  only for storage version 2+. Legacy projects with a real data column of that
+  name keep it in display, search, and export. New imports use
+  `__trivium_source_record`.
+- Bulk target counts show `…` while the applied result is loading, and the
+  Preview/Apply/tag actions are disabled until the counts match the target.
+
+Verification after these fixes: `cargo test -p trivium-engine` all suites
+passed; `bash scripts/check_rust_size.sh` exit 0; `npm run lint` 0 errors;
+`npm run build` success; `npm run test:ui` 33 passed. Native Tauri compilation
+and the real GUI remain unverified in this environment.

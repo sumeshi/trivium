@@ -244,9 +244,17 @@ fn metadata_write_failure_does_not_report_the_annotation_as_unsaved() {
     );
     assert_eq!(
         store.find(&id).expect("project").flagged_records,
-        0,
-        "a failed metadata write must not commit the derived count in memory"
+        1,
+        "the derived count override must keep the session correct even though \
+         the metadata file was not written"
     );
+
+    // A later update starts from the override and persists the right count
+    // once the registry is writable again.
+    let second = update(&store, id, 1, Some("critical"), None, None, None)
+        .expect("second annotation must be saved");
+    assert_eq!(second.flagged_records, 2);
+    assert_eq!(store.find(&id).expect("project").flagged_records, 2);
 
     let _ = fs::remove_dir_all(root);
 }

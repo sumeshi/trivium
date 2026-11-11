@@ -27,7 +27,8 @@ use crate::{
     jobs::JobContext,
     models::{ColumnMeta, ProjectRow},
     project_io::{
-        is_internal_column, read_page_dataframe, read_page_rows_dataframe, read_project_columns,
+        is_internal_column_for_version, read_page_dataframe, read_page_rows_dataframe,
+        read_project_columns,
         read_project_row_count, read_project_schema_columns, ProjectColumns, INTERNAL_ORIGINAL,
         INTERNAL_ROW_ID,
     },
@@ -104,7 +105,7 @@ pub fn query_project_rows_with_job(
     let total_rows = read_project_row_count(&parquet_path).map_err(AppError::from)?;
     let columns: Vec<String> = schema_columns
         .iter()
-        .filter(|name| !is_internal_column(name))
+        .filter(|name| !is_internal_column_for_version(name, meta.storage_version))
         .cloned()
         .collect();
     let has_row_id = schema_columns.iter().any(|name| name == INTERNAL_ROW_ID);

@@ -368,6 +368,11 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
         return Ok(());
     };
     let project_dir = store.project_dir(&meta.id);
+    // Remove the registry entry first. If that write fails, the project is
+    // still intact and can be opened; the previous order deleted the data
+    // directory first and then left a listed but unreadable project.
+    store.remove(&meta.id).map_err(AppError::from)?;
+    cache_remove_project(&meta.id);
     // Release the annotation database before removing its directory.
     close_flags_db(&project_dir);
     if let Err(err) = clear_searchable_cache(&project_dir) {
@@ -387,8 +392,6 @@ pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<
             .with_context(|| format!("failed to remove project dir {:?}", project_dir))
             .map_err(AppError::from)?;
     }
-    cache_remove_project(&meta.id);
-    store.remove(&meta.id).map_err(AppError::from)?;
     Ok(())
 }
 

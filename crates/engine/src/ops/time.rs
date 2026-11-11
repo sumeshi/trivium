@@ -73,7 +73,7 @@ pub fn time_analysis(
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns = super::query::data_columns(&df);
+    let columns = super::query::data_columns(&df, meta.storage_version);
     let series = df
         .column(&payload.column)
         .map_err(|_| AppError::Message("Column not found.".into()))?;

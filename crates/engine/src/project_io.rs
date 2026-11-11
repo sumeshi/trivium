@@ -25,11 +25,25 @@ pub const INTERNAL_ORIGINAL: &str = "__original";
 /// later review can point back to the original record even when blank lines or
 /// embedded newlines make the row id differ from the source location.
 pub const INTERNAL_SOURCE_RECORD: &str = "__trivium_source_record";
+/// Name used by early T12 imports before the internal column was renamed.
+/// Only projects with the new storage format can contain it as an internal
+/// column; a legacy project's data column with this name stays data.
+pub const LEGACY_INTERNAL_SOURCE_RECORD: &str = "__source_record";
 
 /// Internal columns are never part of the data column list, search scope,
 /// output columns, or analysis inputs.
 pub fn is_internal_column(name: &str) -> bool {
     name == INTERNAL_ROW_ID || name == INTERNAL_ORIGINAL || name == INTERNAL_SOURCE_RECORD
+}
+
+/// Version-aware internal check for paths that know the project storage
+/// format. `__source_record` was the first T12 internal name; it is internal
+/// only for storage version 2+ so a legacy data column with that name survives.
+pub fn is_internal_column_for_version(name: &str, storage_version: u32) -> bool {
+    if name == LEGACY_INTERNAL_SOURCE_RECORD {
+        return storage_version >= 2;
+    }
+    is_internal_column(name)
 }
 
 /// Number of [`read_project_dataframe`] calls since process start.
@@ -299,21 +313,21 @@ impl ProjectColumns {
     /// columns. Legacy projects derive ids and labels from them.
     pub fn from_meta_and_names(meta: &ProjectMeta, names: &[String]) -> Self {
         if meta.columns.is_empty() {
-            return Self::from_names(names);
+            return Self::from_names(names, meta.storage_version);
         }
         let columns = meta
             .columns
             .iter()
-            .filter(|column| !is_internal_column(&column.id))
+            .filter(|column| !is_internal_column_for_version(&column.id, meta.storage_version))
             .cloned()
             .collect();
         Self { columns }
     }
 
-    fn from_names(names: &[String]) -> Self {
+    fn from_names(names: &[String], storage_version: u32) -> Self {
         let columns = names
             .iter()
-            .filter(|name| !is_internal_column(name))
+            .filter(|name| !is_internal_column_for_version(name, storage_version))
             .enumerate()
             .map(|(order, name)| ColumnMeta {
                 id: name.to_string(),

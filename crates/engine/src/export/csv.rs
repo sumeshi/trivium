@@ -14,7 +14,7 @@ use crate::{
     jobs::JobContext,
     models::{FlagEntry, ProjectMeta},
     ops::query::{data_columns, ordered_row_indices, resolve_target},
-    project_io::{is_internal_column, read_project_dataframe, ProjectColumns},
+    project_io::{is_internal_column_for_version, read_project_dataframe, ProjectColumns},
     storage::load_flags,
     store::ProjectsStore,
 };
@@ -99,7 +99,7 @@ pub fn export_project_with_job(
     let flags_path = project_dir.join("flags.json");
     let flags = load_flags(&flags_path).map_err(AppError::from)?;
     let project_columns = ProjectColumns::from_meta(&meta, &df);
-    let all_columns = data_columns(&df);
+    let all_columns = data_columns(&df, meta.storage_version);
 
     job.report_progress(1, Some(3), Some("Resolving export rows".into()));
     let scope = payload.scope.as_deref().unwrap_or("filtered");
@@ -122,7 +122,7 @@ pub fn export_project_with_job(
     let internal_columns: Vec<String> = df
         .get_column_names()
         .iter()
-        .filter(|name| is_internal_column(name))
+        .filter(|name| is_internal_column_for_version(name, meta.storage_version))
         .map(|name| name.to_string())
         .collect();
     for internal in internal_columns {
