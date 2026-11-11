@@ -2301,3 +2301,82 @@ debounce、フロントのページキャッシュ保持量はこの環境では
 
 Next card: T26 の実機確認を完了し、その後 T27 の未測定項目を実アプリ環境で
 補完する。
+
+## Post-review fixes — T10–T20c
+
+Recorded: 2026-11-11, after T00–T27 were committed. Independent review of the
+completed cards found issues that later cards had not closed.
+
+### Fixes
+
+- **T10 per-cell kinds**: `value_utils.rs` now reads the JSON source record for
+  each cell. `"123"` stays `string`, `123` is `int`, booleans are `bool`,
+  arrays/objects keep their own kinds, and mixed columns carry the type of each
+  record. `CellKind` in `types.ts` includes `array`/`object`.
+- **T10/T20c IPC payload**: `ProjectRow.data` is `#[serde(skip_serializing)]`.
+  Pages carry only the preview `cells`, not a second full copy of every value.
+  The page projection omits `__original` for CSV imports (their originals are
+  string arrays and have no null/missing classification); JSON pages still read
+  it for per-cell kinds.
+- **T11 import UI**: the dialog lists uppercase extensions as well as lowercase
+  ones, import errors are read from Tauri's string rejection, and the sidebar
+  names CSV/JSON/JSONL. The CSV delimiter default is now a comma, not
+  auto-detection, matching `GOAL.md` §2.1.
+- **T12 source locations and registry**: every import writes an internal
+  `__source_record` column with the physical CSV/JSONL line or 1-based JSON
+  array element. `projects.json` is written through a temporary file and
+  `fs::rename`; a failed registration is rolled back in memory and removes the
+  temporary file.
+- **T13 annotation DTO and legacy flags**: `src-tauri/commands/flags.rs`
+  returns `UpdateFlagResponse` (it still returned `ProjectRow`). `load_flag`
+  migrates a legacy `flags.json` before opening the annotation db, so an update
+  before `load_project` cannot hide old annotations. A metadata count write
+  failure is logged but does not turn an already committed annotation into a
+  reported failure.
+- **T14/T19 revision and counts**: bulk undo bumps the annotation revision, so
+  flag/bookmark-filtered result caches are invalidated. Cached data-only
+  results retain their row ids but refresh `annotated_filtered` when the
+  annotation revision changed.
+- **T15/T18 job control**: the desktop emits `trivium:job-finished`; the UI
+  tracks query job ids, cancels them when a new query is applied or the project
+  changes, and unsubscribes on destroy. Page requests are limited to two
+  in-flight queries and retry a bounded number of times when import/export
+  holds the engine slots, so a rejected prefetch is not left unloaded.
+
+### Verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Engine tests | `cargo test -p trivium-engine` | all suites passed, 0 failed |
+| Rust size guard | `bash scripts/check_rust_size.sh` | exit 0 |
+| Frontend lint | `npm run lint` | svelte-check: 0 errors / 0 warnings |
+| Frontend build | `npm run build` | success |
+| UI tests | `npm run test:ui` | 32 passed, 0 failed |
+
+New regression coverage: per-cell JSON kinds and mixed columns
+(`ipc_cells_test`), source locations for CSV/JSONL/JSON (`import_ids_test`,
+`project_create_test`), atomic registry failure (`project_create_test`),
+legacy flag migration and metadata write failure (`annotation_update_test`),
+filtered counts after flags and undo after bulk updates (`query_cache_test`),
+CSV page projection without `__original` and JSON projection with it
+(`page_read_test`), and job-limit/current-project tracking (`jobTracking.test`).
+
+### Unverified / remaining limits
+
+- The native Tauri crate still cannot be compiled here (GTK/Pango/WebKit
+  development packages are missing); the `update_flag` signature fix and the
+  new job event were checked by source inspection only. CI's Linux job remains
+  the native compile check.
+- The real GUI was not exercised. Job cancellation at a batch boundary,
+  repeated search typing, and the page retry after an import/export slot
+  conflict are covered by the pure job test and code inspection only (T26).
+- A hard kill between the staging rename and the registry insert can still
+  leave an unregistered project directory. It is not listed as a project and
+  cannot be opened; automatic deletion was not added because doing so on a
+  damaged registry could remove evidence.
+- JSON pages still read `__original` for null/missing/type restoration; this
+  was not removed because it is the only exact source for those distinctions.
+  T27's transport measurement remains the place to decide whether a compact
+  presence/type sidecar is needed.
+- `data` remains an in-process compatibility field used by engine tests and
+  color/condition evaluation; it is no longer part of the IPC payload.
