@@ -533,3 +533,31 @@ Unverified: GUI import paths are not exercised (T26); value/type preservation
 for long integers and CSV raw strings is refined in T09.
 
 Next card: T09.
+
+## T09 — exact CSV/JSON values
+
+Changes:
+- CSV import stores every cell as the original text (`Utf8`); kinds are derived
+  metadata, so `00123`, padding, datetimes, and long integers are not rewritten.
+- JSONL scalars are stored as exact text: numbers keep their source spelling
+  (`serde_json` now uses `arbitrary_precision`), bools become `true`/`false`,
+  `null` and missing keys stay null, and `""` stays an empty string. Arrays stay
+  in one cell; an empty object still counts as one record.
+- Condition numeric comparisons use i128 only and return an explicit error for
+  decimal spellings or values outside i128 (`eval` now returns `Result`).
+  Equality/text operators still work on the original strings.
+- Sorting uses i128 keys; values outside i128 fall back to text order instead of
+  being rounded through f64.
+- Analysis (histogram/time/stats) keeps working by parsing the text values.
+
+Verification:
+- `cargo test -p trivium-engine`: 29 test binaries green, including the new
+  `value_preservation_test` (4 tests) and updated `condition_eval` /
+  `precision_test` / `smoke` / `jsonl_test` expectations.
+- `bash scripts/check_rust_size.sh` exit 0; `npm run lint` 0 errors;
+  `npm run build` success.
+
+Unverified: IPC value DTOs and UI display/copy of long integers are T10;
+GUI paths remain unverified until T26.
+
+Next card: T10.
