@@ -746,6 +746,9 @@ button.primary:disabled {
   position: relative;
   width: max-content;
   min-width: 100%;
+  /* Overscan must not enlarge the capped physical scroll range. Unlike
+     hidden, clip does not create a new scroll container for sticky columns. */
+  overflow: clip;
 }
 
 .virtual-inner {

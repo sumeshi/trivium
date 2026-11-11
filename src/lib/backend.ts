@@ -201,6 +201,19 @@ export interface QueryProjectRowsArgs extends QuerySpec {
   limit?: number;
 }
 
+export interface LocateProjectRowArgs extends QuerySpec {
+  projectId: string;
+  /** Original zero-based row ID, independent of result order. */
+  rowIndex: number;
+}
+
+export interface LocateProjectRowResponse {
+  /** Zero-based position in the current result, or null when excluded. */
+  position: number | null;
+  total_rows: number;
+  total_filtered_rows: number;
+}
+
 export interface QueryProjectRowsResponse {
   rows: ProjectRow[];
   annotated_total: number;
@@ -269,6 +282,7 @@ export interface Backend {
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse>;
+  locateProjectRow(args: LocateProjectRowArgs): Promise<LocateProjectRowResponse>;
   getCell(args: GetCellArgs): Promise<GetCellResult>;
   groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse>;
   bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount>;
@@ -434,6 +448,10 @@ class NativeBackend implements Backend {
         condition: args.condition,
       },
     });
+  }
+
+  locateProjectRow(args: LocateProjectRowArgs): Promise<LocateProjectRowResponse> {
+    return invoke("locate_project_row", { payload: args });
   }
 
   getCell(args: GetCellArgs): Promise<GetCellResult> {

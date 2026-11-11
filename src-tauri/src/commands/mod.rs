@@ -39,7 +39,7 @@ pub use job::{active_jobs, cancel_job};
 pub use preset::{load_preset, save_preset};
 pub use projects::{create_project, delete_project, list_projects, load_project};
 pub use report::build_report;
-pub use rows::query_project_rows;
+pub use rows::{locate_project_row, query_project_rows};
 pub use rules::{color_rules, save_color_rules};
 pub use stats::column_stats;
 pub use surround::surrounding_rows;

@@ -52,8 +52,7 @@
   import {
     logicalRowAt,
     maxScrollTop,
-    physicalHeight,
-    scrollTopForRow
+    virtualWindow
   } from '../../virtualScroll';
 
   const _toggleSort = toggleSort;
@@ -128,29 +127,18 @@
     document.documentElement.style.setProperty('--sticky-data', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH}px`);
   }
 
-  $: viewportRows = Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT);
-  $: visibleCount = viewportRows + BUFFER * 2;
   // The applied QuerySpec result is the only source for the table's row count.
   $: effectiveTotalRows = $totalFilteredRows;
-  // Leave enough rows to fill the viewport; the scroll offset alone cannot
-  // position the final row inside a compressed scroll range.
-  $: maxStart = Math.max(0, effectiveTotalRows - viewportRows);
-  // The physical scroll position is mapped to a logical row in one place so
-  // the displayed start and the page offsets use the same result position.
-  $: anchorRow = logicalRowAt(
+  $: windowGeometry = virtualWindow(
     $scrollTop,
     effectiveTotalRows,
-    $viewportHeight
+    $viewportHeight,
+    BUFFER
   );
-  $: startIndex = Math.min(
-    maxStart,
-    Math.max(0, anchorRow - BUFFER)
-  );
-  $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
-  // Rows keep the fixed ROW_HEIGHT; only the spacer height is scaled.
-  $: offsetY =
-    scrollTopForRow(startIndex, effectiveTotalRows, $viewportHeight) - $scrollTop;
-  $: totalHeight = physicalHeight(effectiveTotalRows);
+  $: startIndex = windowGeometry.start;
+  $: endIndex = windowGeometry.end;
+  $: offsetY = windowGeometry.innerTop;
+  $: totalHeight = windowGeometry.height;
   // A filter can shrink the result set while the viewport is near the old end.
   // Pull both the store and the scroll element back inside the new physical
   // range so the space below the last row is not left as a blank spacer. Wait
@@ -401,7 +389,7 @@
         on:wheel={forwardWheel}
       >
         <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
-          <div class="virtual-inner" style={`transform: translateY(${offsetY}px);`}>
+          <div class="virtual-inner" style={`top: ${offsetY}px;`}>
             {#each virtualRows as item (item.position)}
               {@const largePage = !item.row && $largePages.has(Math.floor(item.position / PAGE_SIZE))}
               <div
@@ -416,7 +404,7 @@
               >
                 {#if largePage}
                   <div class="cell select-cell sticky sticky-select" aria-hidden="true"></div>
-                  <div class="cell index sticky sticky-index">{item.position + 1}</div>
+                  <div class="cell index sticky sticky-index" aria-label="Original row not loaded">…</div>
                   {#if item.position % PAGE_SIZE === 0 || item.position === startIndex}
                     <div
                       class="cell large-page-notice"
@@ -438,7 +426,7 @@
                       />
                     {/if}
                   </div>
-                  <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : item.position + 1}</div>
+                  <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : '…'}</div>
                   <div class="cell flag sticky sticky-flag">
                     {#if item.row}
                       <div class="flag-buttons">

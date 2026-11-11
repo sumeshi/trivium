@@ -30,6 +30,7 @@ fn main() {
             delete_project,
             load_project,
             query_project_rows,
+            locate_project_row,
             get_cell,
             cancel_job,
             active_jobs,

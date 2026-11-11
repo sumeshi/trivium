@@ -101,7 +101,8 @@ import type {
     clampRow,
     logicalRowAt,
     maxScrollTop,
-    scrollTopForRow
+    scrollTopForRow,
+    virtualWindow
   } from '../virtualScroll';
 
   export let projectDetail: LoadProjectResponse;
@@ -130,7 +131,9 @@ import type {
   let applyingHistory = false;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
-  let gotoRowInput = '';
+  let gotoRowInput: number | undefined;
+  let locatingRow = false;
+  let rowLookupSequence = 0;
   let timelineOpen = false;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let applyingProjectId: string | null = null;
@@ -309,7 +312,8 @@ import type {
     }
   };
 
-  const scrollToRow = (row: number) => {
+  // This helper accepts a RESULT position. Go resolves an original # first.
+  const scrollToRow = (row: number, center = false) => {
     if (!initialized) {
       return;
     }
@@ -319,26 +323,85 @@ import type {
     }
     const target = clampRow(row, total);
     pendingScrollRow = null;
-    applyScrollOffset(target, total);
-    rememberOffset(target);
+    const topRow = center
+      ? Math.max(0, target - Math.floor(get(viewportHeight) / ROW_HEIGHT / 2))
+      : target;
+    applyScrollOffset(topRow, total);
+    rememberOffset(rowOffset());
     void requestPage(Math.floor(target / PAGE_SIZE));
   };
 
-  const jumpToEnteredRow = () => {
-    if (gotoRowInput.trim() === '') {
+  const navigationQuery = () => ({
+    projectId: get(currentProjectId),
+    search: get(search).trim(),
+    searchColumns: [...get(searchColumns)],
+    condition: structuredClone(get(conditionPayload)),
+    flagFilter: get(flagFilter),
+    bookmarkedOnly: get(bookmarkedOnly),
+    sortKey: get(sortKey),
+    sortDirection: get(sortDirection),
+  });
+
+  const jumpToEnteredRow = async () => {
+    if (!initialized || locatingRow || get(appliedResultLoading) || filterTimeout !== null) {
       return;
     }
-    const parsed = Number(gotoRowInput);
-    if (!Number.isFinite(parsed)) {
+    const number = gotoRowInput;
+    const total = get(totalRows);
+    if (number === undefined || !Number.isSafeInteger(number) || number < 1 || number > total) {
+      dispatch('notify', {
+        message: `Enter an original row number from 1 to ${total.toLocaleString()}.`,
+        tone: 'error',
+      });
       return;
     }
-    // The input is 1-based; the result rows are 0-based.
-    scrollToRow(Math.floor(parsed) - 1);
+    const query = navigationQuery();
+    const projectId = query.projectId;
+    if (!projectId) return;
+    const signature = JSON.stringify(query);
+    const generation = get(viewGeneration);
+    const filterVersion = filterRequestId;
+    const sequence = ++rowLookupSequence;
+    const isCurrent = () => !destroyed && sequence === rowLookupSequence &&
+      generation === get(viewGeneration) && filterVersion === filterRequestId &&
+      filterTimeout === null && !get(appliedResultLoading) &&
+      signature === JSON.stringify(navigationQuery());
+
+    locatingRow = true;
+    await acquirePageSlot();
+    try {
+      if (!isCurrent()) return;
+      const result = await backend.locateProjectRow({ ...query, projectId, rowIndex: number - 1 });
+      if (!isCurrent()) return;
+      if (result.position === null) {
+        dispatch('notify', {
+          message: `Row ${number.toLocaleString()} is not in the current filtered result.`,
+          tone: 'error',
+        });
+        return;
+      }
+      // Centering avoids clipping a target at the top when a compressed
+      // physical scroll position is rounded to an integer device pixel.
+      scrollToRow(result.position, true);
+    } catch (error) {
+      if (isCurrent()) dispatch('notify', { message: errorMessage(error), tone: 'error' });
+    } finally {
+      releasePageSlot();
+      if (sequence === rowLookupSequence) locatingRow = false;
+    }
   };
 
-  const jumpToFirstRow = () => scrollToRow(0);
+  const jumpToFirstRow = () => {
+    rowLookupSequence += 1;
+    locatingRow = false;
+    scrollToRow(0);
+  };
 
-  const jumpToLastRow = () => scrollToRow(Math.max(0, get(totalFilteredRows) - 1));
+  const jumpToLastRow = () => {
+    rowLookupSequence += 1;
+    locatingRow = false;
+    scrollToRow(Math.max(0, get(totalFilteredRows) - 1));
+  };
 
   const applyProjectDetail = async (detail: LoadProjectResponse, _resetScroll: boolean) => {
     // Any response from the previous project or screen must be ignored from here on.
@@ -632,22 +695,17 @@ import type {
     schedulePersist();
   }
 
-  $: viewportRows = Math.ceil(($viewportHeight || ROW_HEIGHT) / ROW_HEIGHT);
-  $: visibleCount = viewportRows + BUFFER * 2;
   // Keep in sync with DataTable: the applied QuerySpec result is the only
   // source for the active row count, including bookmark-only filtering.
   $: effectiveTotalRows = $totalFilteredRows;
-  $: maxStart = Math.max(0, effectiveTotalRows - viewportRows);
-  $: anchorRow = logicalRowAt(
+  $: windowGeometry = virtualWindow(
     $scrollTop,
     effectiveTotalRows,
-    $viewportHeight
+    $viewportHeight,
+    BUFFER
   );
-  $: startIndex = Math.min(
-    maxStart,
-    Math.max(0, anchorRow - BUFFER)
-  );
-  $: endIndex = Math.min(effectiveTotalRows, startIndex + visibleCount);
+  $: startIndex = windowGeometry.start;
+  $: endIndex = windowGeometry.end;
   $: ensureRangeLoaded(startIndex, endIndex);
   $: if ($bodyScrollEl && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
     $bodyScrollEl.scrollTop = $scrollTop;
@@ -1124,21 +1182,23 @@ import type {
 <section class="project-view">
   <FilterControls on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={() => dispatch('refresh')} />
 
-  <div class="row-jump" role="group" aria-label="Go to result row">
+  <div class="row-jump" role="group" aria-label="Go to original row">
     <label class="row-jump-field">
-      <span>Row</span>
+      <span>Row #</span>
       <input
         type="number"
         min="1"
-        max={Math.max(1, $totalFilteredRows)}
+        max={Math.max(1, $totalRows)}
         step="1"
-        placeholder={`1–${$totalFilteredRows}`}
+        placeholder={`1–${$totalRows}`}
+        aria-label="Original row number"
+        title="Original row number shown in the # column"
         bind:value={gotoRowInput}
-        disabled={$totalFilteredRows === 0}
+        disabled={!initialized || $totalRows === 0}
         on:keydown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
-            jumpToEnteredRow();
+            void jumpToEnteredRow();
           }
         }}
       />
@@ -1147,15 +1207,17 @@ import type {
       type="button"
       class="ghost"
       on:click={jumpToEnteredRow}
-      disabled={$totalFilteredRows === 0}
+      title="Find this original row within the current filtered and sorted result"
+      disabled={!initialized || $totalRows === 0 || $appliedResultLoading || filterTimeout !== null || locatingRow}
     >
-      Go
+      {locatingRow ? 'Go…' : 'Go'}
     </button>
     <button
       type="button"
       class="ghost"
       on:click={jumpToFirstRow}
-      disabled={$totalFilteredRows === 0}
+      title="First row in the current result"
+      disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       First
     </button>
@@ -1163,11 +1225,12 @@ import type {
       type="button"
       class="ghost"
       on:click={jumpToLastRow}
-      disabled={$totalFilteredRows === 0}
+      title="Last row in the current result"
+      disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       Last
     </button>
-    <span class="row-jump-range">of {$totalFilteredRows}</span>
+    <span class="row-jump-range">of {$totalRows.toLocaleString()} original rows</span>
   </div>
 
   <details class="filter-advanced" bind:open={timelineOpen}>

@@ -1,4 +1,5 @@
 mod ioc;
+mod locate;
 mod page;
 mod page_read;
 mod result_cache;
@@ -9,6 +10,9 @@ mod target;
 use std::collections::HashMap;
 
 pub(crate) use ioc::user_flags;
+pub use locate::{
+    locate_project_row, locate_project_row_with_job, LocateRowPayload, LocateRowResponse,
+};
 pub(crate) use page::materialize_page;
 pub(crate) use result_cache::cache_remove_project;
 pub use result_cache::{clear_result_cache, result_cache_stats, ResultCacheStats};
