@@ -1,5 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use chrono::Utc;
@@ -23,11 +24,108 @@ use crate::{
 };
 
 use sha2::{Digest, Sha256};
-use std::io::Read;
 
 use super::util::{materialize_rows, DEFAULT_PAGE_SIZE};
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
+/// Fixed-size streaming buffer. The whole source is never held in memory just
+/// to compute the hash.
+const HASH_BUFFER_SIZE: usize = 64 * 1024;
+/// Name of the copied source inside the staging directory. The parsers read
+/// these bytes, so the hash and the parsed content are the same snapshot.
+const STAGED_SOURCE_FILE: &str = "source";
+
+/// Removes an in-progress staging directory on every exit path, including a
+/// panic. It is disarmed only after the completed directory has been renamed
+/// into place.
+struct StagingDir {
+    path: PathBuf,
+    keep: bool,
+}
+
+impl StagingDir {
+    fn create(path: PathBuf) -> Result<Self, AppError> {
+        fs::create_dir_all(&path)
+            .with_context(|| format!("failed to create staging dir {:?}", path))
+            .map_err(AppError::from)?;
+        Ok(Self { path, keep: true })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn disarm(&mut self) {
+        self.keep = false;
+    }
+}
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        if self.keep {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+struct CopiedSource {
+    path: PathBuf,
+    sha256: String,
+    size: u64,
+}
+
+/// Copies the source into the staging directory while hashing the same bytes
+/// with a fixed-size buffer. The source itself is opened read-only and is
+/// never modified or moved.
+fn copy_source_and_hash(source: &Path, destination: &Path) -> Result<CopiedSource, AppError> {
+    let mut input = File::open(source)
+        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
+    let before = input
+        .metadata()
+        .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;
+
+    let mut output = File::create(destination).map_err(|e| {
+        AppError::Message(format!("Failed to create temporary import file: {}", e))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; HASH_BUFFER_SIZE];
+    let mut size = 0u64;
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
+        if read == 0 {
+            break;
+        }
+        output
+            .write_all(&buffer[..read])
+            .map_err(|e| AppError::Message(format!("Failed to write temporary import file: {}", e)))?;
+        hasher.update(&buffer[..read]);
+        size += read as u64;
+    }
+    drop(output);
+
+    // Detect a source that changed between the copy start and end. The parser
+    // reads the copied bytes, so a changed source must not be recorded as the
+    // imported snapshot.
+    let after = fs::metadata(source)
+        .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;
+    let modified_changed = match (before.modified(), after.modified()) {
+        (Ok(before), Ok(after)) => before != after,
+        _ => false,
+    };
+    if before.len() != after.len() || size != before.len() || modified_changed {
+        return Err(AppError::Message(
+            "Source file changed during import. Try again.".into(),
+        ));
+    }
+
+    Ok(CopiedSource {
+        path: destination.to_path_buf(),
+        sha256: format!("{:x}", hasher.finalize()),
+        size,
+    })
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProjectPayload {
@@ -53,18 +151,6 @@ pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppEr
     Ok(result)
 }
 
-/// Computes the lowercase hex SHA-256 digest of a file's bytes.
-fn source_sha256(path: &std::path::Path) -> Result<String, AppError> {
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
 /// Creates a new project from a CSV, JSON, JSONL, or NDJSON file and persists
 /// metadata plus optional flags.
 pub fn create_project(
@@ -83,25 +169,30 @@ pub fn create_project(
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
-    let imported = match extension.as_deref() {
-        Some("json") => json::load(&source_path)?,
-        Some("jsonl") | Some("ndjson") => jsonl::load(&source_path)?,
+    let source_format = match extension.as_deref() {
+        Some("json") => "json",
+        Some("jsonl") => "jsonl",
+        Some("ndjson") => "ndjson",
+        _ => "csv",
+    };
+
+    let project_id = Uuid::new_v4();
+    let mut staging = StagingDir::create(store.staging_dir(&project_id))?;
+    let copied = copy_source_and_hash(&source_path, &staging.path().join(STAGED_SOURCE_FILE))?;
+
+    // Parse the copied snapshot, not the source path, so the hash recorded in
+    // metadata always covers the bytes that were actually imported.
+    let imported = match source_format {
+        "json" => json::load(&copied.path)?,
+        "jsonl" | "ndjson" => jsonl::load(&copied.path)?,
         _ => csv::load(
-            &source_path,
+            &copied.path,
             csv::build_delimiter(payload.delimiter.as_deref())?,
             restore_annotations,
         )?,
     };
     let mut df = imported.frame;
     let imported_flags = imported.flags;
-
-    let project_id = Uuid::new_v4();
-    let project_dir = store.project_dir(&project_id);
-    if !project_dir.exists() {
-        fs::create_dir_all(&project_dir)
-            .with_context(|| format!("failed to create project dir {:?}", project_dir))
-            .map_err(AppError::from)?;
-    }
 
     let metadata = ProjectMeta {
         id: project_id,
@@ -117,7 +208,12 @@ pub fn create_project(
             .filter(|entry| !entry.flag.trim().is_empty())
             .count(),
         ioc_applied_records: 0,
-        source_sha256: Some(source_sha256(&source_path)?),
+        source_sha256: Some(copied.sha256),
+        source_file_name: source_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string()),
+        source_format: Some(source_format.to_string()),
+        source_size: Some(copied.size),
         hidden_columns: Vec::new(),
         // New projects always use internal column ids and the `__original`
         // record column. Legacy version 0 projects are only read.
@@ -125,17 +221,38 @@ pub fn create_project(
         columns: imported.columns,
     };
 
-    let parquet_path = project_dir.join("data.parquet");
+    let parquet_path = staging.path().join("data.parquet");
     write_project_dataframe(&parquet_path, &mut df).map_err(AppError::from)?;
 
-    let flags_path = project_dir.join("flags.json");
+    let flags_path = staging.path().join("flags.json");
     if !imported_flags.is_empty() {
         save_flags(&flags_path, &imported_flags).map_err(AppError::from)?;
     }
 
-    store
-        .insert(metadata.clone())
+    // The copied input is not part of the project. Remove it before the
+    // completed staging directory is renamed into place.
+    fs::remove_file(&copied.path)
+        .map_err(|e| AppError::Message(format!("Failed to remove temporary import file: {}", e)))?;
+
+    let project_dir = store.project_dir(&project_id);
+    if project_dir.exists() {
+        return Err(AppError::Message(format!(
+            "Project directory already exists: {:?}",
+            project_dir
+        ))
+        .into());
+    }
+    fs::rename(staging.path(), &project_dir)
+        .with_context(|| format!("failed to move staged project to {:?}", project_dir))
         .map_err(AppError::from)?;
+    staging.disarm();
+
+    // Register the project only after its data, metadata, and directory are
+    // complete. If registration fails, do not leave a project-looking folder.
+    if let Err(err) = store.insert(metadata.clone()) {
+        let _ = fs::remove_dir_all(&project_dir);
+        return Err(AppError::from(err));
+    }
 
     Ok(ProjectSummary { meta: metadata })
 }

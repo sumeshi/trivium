@@ -47,6 +47,16 @@ pub struct ProjectMeta {
     pub ioc_applied_records: usize,
     #[serde(default)]
     pub source_sha256: Option<String>,
+    /// Original file name as selected by the user. Legacy projects and
+    /// hand-built fixtures have none.
+    #[serde(default)]
+    pub source_file_name: Option<String>,
+    /// `csv`, `json`, `jsonl`, or `ndjson` when known.
+    #[serde(default)]
+    pub source_format: Option<String>,
+    /// Size of the imported bytes. The recorded hash covers the same bytes.
+    #[serde(default)]
+    pub source_size: Option<u64>,
     pub hidden_columns: Vec<String>,
     /// 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
     #[serde(default)]

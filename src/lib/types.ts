@@ -17,6 +17,9 @@ export interface ProjectMeta {
   flagged_records: number;
   ioc_applied_records: number;
   source_sha256?: string | null;
+  source_file_name?: string | null;
+  source_format?: "csv" | "json" | "jsonl" | "ndjson" | string | null;
+  source_size?: number | null;
   hidden_columns: string[];
   storage_version?: number;
   columns?: ColumnMeta[];

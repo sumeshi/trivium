@@ -68,7 +68,13 @@ impl ProjectsStore {
     pub fn insert(&self, project: ProjectMeta) -> Result<()> {
         let mut guard = self.inner.lock();
         guard.push(project);
-        self.persist_locked(&guard)
+        if let Err(err) = self.persist_locked(&guard) {
+            // Registration failed; do not leave the project visible in memory
+            // while the caller removes its directory.
+            guard.pop();
+            return Err(err);
+        }
+        Ok(())
     }
 
     pub fn update_hidden_columns(&self, id: &Uuid, hidden_columns: Vec<String>) -> Result<()> {
@@ -111,6 +117,17 @@ impl ProjectsStore {
 
     pub fn project_dir(&self, id: &Uuid) -> PathBuf {
         self.root_dir.join("projects").join(id.to_string())
+    }
+
+    /// Root of the per-import staging area. Completed projects are renamed
+    /// into `projects/` from here, so a failed import leaves no project dir.
+    pub fn staging_root(&self) -> PathBuf {
+        self.root_dir.join(".staging")
+    }
+
+    /// Staging directory for one in-progress import.
+    pub fn staging_dir(&self, id: &Uuid) -> PathBuf {
+        self.staging_root().join(id.to_string())
     }
 
     fn persist_locked(&self, guard: &[ProjectMeta]) -> Result<()> {
