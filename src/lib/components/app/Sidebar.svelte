@@ -16,7 +16,7 @@
   export let canCreateProject: boolean;
 
   $: selectedFormat = pendingFileName.split('.').at(-1)?.toLowerCase() ?? '';
-  $: csvSettingsRelevant = !pendingFileName || selectedFormat === 'csv';
+  $: csvSettingsRelevant = selectedFormat === 'csv';
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
 
   const truncateText = (text: string, length: number) => {
@@ -70,7 +70,7 @@
     <section class="import-panel">
       <div class="import-heading">
         <h3>Open a data file</h3>
-        <p id="import-formats">CSV · JSON · JSONL / NDJSON</p>
+        <p id="import-formats">CSV / JSON / JSONL / NDJSON</p>
       </div>
       <button class="button choose-file full" disabled={creating}
         aria-describedby="import-formats" on:click={() => dispatch('pickCsv')}>
@@ -97,27 +97,23 @@
             disabled={creating}
           />
         </label>
-        <label class="field">
-          <span>CSV delimiter</span>
-          <select
-            aria-label="CSV delimiter"
-            value={pendingDelimiter === ',' ? '' : pendingDelimiter}
-            on:change={handleDelimiterChange}
-            disabled={creating || !csvSettingsRelevant}
-            aria-describedby="csv-import-help"
-          >
-            <option value="">Comma , (default)</option>
-            <option value={'\t'}>Tab</option>
-            <option value=";">Semicolon ;</option>
-            <option value="|">Pipe |</option>
-          </select>
-        </label>
+        {#if csvSettingsRelevant}
+          <label class="field">
+            <span>CSV delimiter</span>
+            <select
+              aria-label="CSV delimiter"
+              value={pendingDelimiter === ',' ? '' : pendingDelimiter}
+              on:change={handleDelimiterChange}
+              disabled={creating}
+            >
+              <option value="">Comma , (default)</option>
+              <option value={'\t'}>Tab</option>
+              <option value=";">Semicolon ;</option>
+              <option value="|">Pipe |</option>
+            </select>
+          </label>
+        {/if}
       </div>
-      <p class="import-help" id="csv-import-help">
-        {csvSettingsRelevant
-          ? 'CSV uses its first row as column names. Choose the separator used by your file.'
-          : 'CSV separator settings do not apply to JSON or JSONL files.'}
-      </p>
 
       <button
         class="button primary full"
@@ -126,7 +122,7 @@
       >
         {creating ? 'Importing…' : 'Import and open'}
       </button>
-      <p class="import-help">Creates a saved investigation you can reopen from Recent. Your source file stays unchanged.</p>
+      <p class="import-help">Source file is opened read-only.</p>
     </section>
 
     <section class="project-section">
@@ -169,7 +165,7 @@
                 </div>
                 {#if project.meta.source_sha256}
                   <div class="project-hash" title={`SHA-256: ${project.meta.source_sha256}`}>
-                    <span>SHA-256</span><code>{shortSha(project.meta.source_sha256)}</code>
+                    <code>{shortSha(project.meta.source_sha256)}</code>
                   </div>
                 {/if}
                 {#if project.meta.description}
@@ -189,10 +185,10 @@
                   dispatch('deleteProject', project.meta.id);
                 }}
                 aria-label={`Delete ${project.meta.name}`}
-                title="Delete project"
+                title={`Delete ${project.meta.name}`}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" />
                 </svg>
               </button>
             </li>
@@ -505,8 +501,15 @@
   }
 
   .delete-button {
-    flex: 0 0 30px;
-    width: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    line-height: 1;
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;

@@ -15,15 +15,14 @@
 
   $: meta = projectDetail?.project.meta;
   $: fileName = meta?.source_file_name || meta?.name || '';
+  $: sourcePath = meta?.source_path || '';
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
 
-  const copySha = async () => {
-    const sha = meta?.source_sha256;
-    if (!sha) return;
+  const copyText = async (value: string, label: string) => {
     let copied = false;
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(sha);
+        await navigator.clipboard.writeText(value);
         copied = true;
       }
     } catch {
@@ -33,7 +32,7 @@
     if (!copied) {
       const input = document.createElement('textarea');
       const focused = document.activeElement;
-      input.value = sha;
+      input.value = value;
       input.style.position = 'fixed';
       input.style.opacity = '0';
       document.body.append(input);
@@ -47,9 +46,12 @@
         if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
       }
     }
-    copyMessage = copied ? 'SHA-256 copied' : 'Could not copy SHA-256';
+    copyMessage = copied ? `${label} copied` : `Could not copy ${label}`;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copyMessage = ''; }, 2400);
+  };
+  const copySha = async () => {
+    if (meta?.source_sha256) await copyText(meta.source_sha256, 'SHA-256');
   };
 
   const closeOutside = (event: MouseEvent) => {
@@ -90,7 +92,7 @@
         <span class="brand-name">Trivium</span>
         {#if meta}
           <span class="brand-slash" aria-hidden="true">/</span>
-          <span class="project-title" title={fileName}>{fileName}</span>
+          <span class="project-title" title={sourcePath || fileName}>{fileName}</span>
         {/if}
         {#if meta?.source_sha256}
           <button
@@ -139,6 +141,15 @@
           </svg>
           Reload saved project
         </button>
+        {#if sourcePath}
+          <button type="button" class="menu-action" title={sourcePath}
+            on:click={() => { menuOpen = false; void copyText(sourcePath, 'Source path'); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V3H3v13h5" />
+            </svg>
+            Copy source path
+          </button>
+        {/if}
         {#if meta?.description}
           <p class="project-description">{meta.description}</p>
         {/if}
