@@ -40,6 +40,7 @@
     --flag-suspicious-selected-fg: var(--warning);
     --flag-critical-selected-bg: var(--danger-soft);
     --flag-critical-selected-fg: var(--danger);
+    --bookmark-row-strength: 5%;
     --bookmark: #8a6515;
     --bookmark-soft: color-mix(in srgb, var(--bookmark) 3%, var(--surface));
     --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
@@ -65,10 +66,7 @@
   [data-theme="dark"],
   [data-theme="yozora"],
   [data-theme="tasogare"],
-  [data-theme="sumi"],
   [data-theme="tsukimi"],
-  [data-theme="midnight"],
-  [data-theme="mauve"],
   [data-theme="trivium"] {
     color-scheme: dark;
     --positive: #81d0a5;
@@ -87,6 +85,19 @@
     --rule-blue: #26364f;
     --rule-purple: #362c4a;
     --rule-pink: #472a3b;
+  }
+
+  /* Neutral Light and Dark need clearer selection feedback than the pastels. */
+  [data-theme="light"],
+  [data-theme="dark"] {
+    --bookmark-row-strength: 10%;
+    --bookmark-soft: color-mix(in srgb, var(--bookmark) 10%, var(--surface));
+    --flag-safe-selected-bg: color-mix(in srgb, var(--positive) 24%, var(--surface));
+    --flag-suspicious-selected-bg: color-mix(in srgb, var(--warning) 24%, var(--surface));
+    --flag-critical-selected-bg: color-mix(in srgb, var(--danger) 24%, var(--surface));
+    --flag-safe-selected-border: color-mix(in srgb, var(--positive) 40%, var(--surface));
+    --flag-suspicious-selected-border: color-mix(in srgb, var(--warning) 40%, var(--surface));
+    --flag-critical-selected-border: color-mix(in srgb, var(--danger) 40%, var(--surface));
   }
 
   /* Dark retains its neutral surfaces; only selected flags use softer fills. */
@@ -153,12 +164,12 @@
     --fg: #20252d;
     --muted: #56616f;
     --surface: #ffffff;
-    --surface-weak: #fffbdc;
+    --surface-weak: #fff4df;
     --surface-soft: #fcfcfd;
-    --surface-strong: #fff3ac;
-    --border: #e6db9b;
-    --border-strong: #9b8520;
-    --accent: #7e6505;
+    --surface-strong: #ffe1aa;
+    --border: #e9d0a8;
+    --border-strong: #aa7e42;
+    --accent: #8a5d16;
     --accent-soft: var(--surface-weak);
   }
 
@@ -204,111 +215,72 @@
     --accent-soft: var(--surface-weak);
   }
 
-  [data-theme="midnight"] {
-    --bg: #080f1d;
-    --fg: #e8eefb;
-    --muted: #abbdd7;
-    --surface: #0d182b;
-    --surface-weak: #14263f;
-    --surface-soft: #101f35;
-    --surface-strong: #1d3351;
-    --overlay: rgba(6, 12, 24, 0.92);
-    --border: #344c6b;
-    --border-strong: #607f9f;
-    --accent: #a6c8f4;
-    --accent-contrast: #0a1424;
-  }
-
-  [data-theme="mauve"] {
-    --bg: #191925;
-    --fg: #eeeaf9;
-    --muted: #bfb8d2;
-    --surface: #222235;
-    --surface-weak: #2d2c45;
-    --surface-soft: #27263d;
-    --surface-strong: #3b3856;
-    --overlay: rgba(18, 17, 29, 0.91);
-    --border: #4d4b6d;
-    --border-strong: #82779e;
-    --accent: #c6aff2;
-    --accent-contrast: #221b36;
-  }
-
-  /* Night sky, dusk, ink and moonlight: quiet natural dark palettes. */
+  /* Lightened grey-blue and dusk surfaces, followed by the purple Tsukimi. */
   [data-theme="yozora"] {
-    --bg: #0e1625;
-    --fg: #e4ebf7;
-    --muted: #a7b8d0;
-    --surface: #151f32;
-    --surface-weak: #1d2b43;
-    --surface-soft: #19263b;
-    --surface-strong: #293b56;
-    --border: #3a4e6c;
-    --border-strong: #7085a4;
-    --accent: #b2b9ed;
-    --accent-contrast: #141a2b;
+    --bg: #1d2430;
+    --fg: #e7edf5;
+    --muted: #bac5d5;
+    --surface: #252d3a;
+    --surface-weak: #303a49;
+    --surface-soft: #2b3442;
+    --surface-strong: #3b4657;
+    --border: #485568;
+    --border-strong: #7f90aa;
+    --accent: #b7c1df;
+    --accent-contrast: #1c2433;
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
   [data-theme="tasogare"] {
-    --bg: #211b23;
-    --fg: #f2e7e9;
-    --muted: #c5afb8;
-    --surface: #2a222d;
-    --surface-weak: #362c39;
-    --surface-soft: #302732;
-    --surface-strong: #453747;
-    --border: #5d4b61;
-    --border-strong: #948094;
-    --accent: #e1b1aa;
-    --accent-contrast: #2c2025;
-    --overlay: rgba(12, 13, 18, 0.9);
-  }
-
-  [data-theme="sumi"] {
-    --bg: #151717;
-    --fg: #e8ede8;
-    --muted: #adb8ad;
-    --surface: #1c2020;
-    --surface-weak: #282e2c;
-    --surface-soft: #232826;
-    --surface-strong: #343c38;
-    --border: #48524c;
-    --border-strong: #7b8c80;
-    --accent: #b4c5b7;
-    --accent-contrast: #1c2520;
+    --bg: #282228;
+    --fg: #f2e9ee;
+    --muted: #cdbbc7;
+    --surface: #322a32;
+    --surface-weak: #3e343d;
+    --surface-soft: #392f38;
+    --surface-strong: #4a3e47;
+    --border: #665363;
+    --border-strong: #a18b9a;
+    --accent: #d9bac7;
+    --accent-contrast: #30252d;
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
   [data-theme="tsukimi"] {
-    --bg: #1e1c19;
-    --fg: #f2ede2;
-    --muted: #c1b7a5;
-    --surface: #27241f;
-    --surface-weak: #332f27;
-    --surface-soft: #2d2923;
-    --surface-strong: #413a2f;
-    --border: #584f40;
-    --border-strong: #8e7f64;
-    --accent: #decd9d;
-    --accent-contrast: #28231b;
+    --bg: #22212f;
+    --fg: #eeeaf9;
+    --muted: #c9c0da;
+    --surface: #2b293d;
+    --surface-weak: #37344d;
+    --surface-soft: #312e44;
+    --surface-strong: #45405c;
+    --border: #5a536e;
+    --border-strong: #9785ad;
+    --accent: #cbb8ee;
+    --accent-contrast: #261f37;
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
-  /* The original navy palette remains available for saved selections. */
+  /* Near-black navy and blue-black panels follow the supplied Trivium reference. */
   [data-theme="trivium"] {
-    --bg: #0c111b;
-    --fg: #f3f4f6;
-    --muted: #aab6ca;
-    --surface: #111827;
-    --surface-weak: #19243a;
-    --surface-soft: #151e30;
-    --surface-strong: #22314a;
-    --overlay: rgba(8, 12, 22, 0.88);
-    --border: #34425b;
-    --border-strong: #63738e;
-    --accent: #a5b4fc;
-    --accent-contrast: #101525;
+    --bg: #050716;
+    --fg: #e8eaf2;
+    --muted: #9aa0b0;
+    --surface: #11111b;
+    --surface-weak: #181b29;
+    --surface-soft: #10131f;
+    --surface-strong: #1f2434;
+    --overlay: rgba(3, 5, 15, 0.94);
+    --border: #262938;
+    --border-strong: #626a87;
+    --accent: #879de9;
+    --accent-contrast: #0d1225;
+    --flag-safe-selected-bg: color-mix(in srgb, var(--positive) 22%, var(--surface));
+    --flag-suspicious-selected-bg: color-mix(in srgb, var(--warning) 22%, var(--surface));
+    --flag-critical-selected-bg: color-mix(in srgb, var(--danger) 22%, var(--surface));
+    --flag-safe-selected-border: color-mix(in srgb, var(--positive) 40%, var(--surface));
+    --flag-suspicious-selected-border: color-mix(in srgb, var(--warning) 40%, var(--surface));
+    --flag-critical-selected-border: color-mix(in srgb, var(--danger) 40%, var(--surface));
   }
 
   html,

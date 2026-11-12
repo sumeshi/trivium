@@ -4,7 +4,7 @@ import { isLightTheme, parseTheme } from "./themeModel.ts";
 import { displayRowColor, resolveConditionColor } from "./skin.ts";
 
 test("existing and new stored theme names are validated without coercion", () => {
-  for (const saved of ["light", "dark", "yukari", "midnight"]) {
+  for (const saved of ["light", "dark", "yukari", "yozora"]) {
     assert.equal(parseTheme(saved), saved);
   }
   for (const saved of [null, undefined, "", "auto", "unknown", {}, 1]) {
@@ -14,10 +14,10 @@ test("existing and new stored theme names are validated without coercion", () =>
 
 test("extra themes use the matching light/dark condition palette", () => {
   assert.ok(isLightTheme("yukari"));
-  assert.ok(!isLightTheme("midnight"));
+  assert.ok(!isLightTheme("yozora"));
   for (const name of ["red", "orange", "amber", "green", "teal", "blue", "purple", "pink"]) {
     assert.equal(resolveConditionColor(name, "yukari"), resolveConditionColor(name, "light"));
-    assert.equal(resolveConditionColor(name, "midnight"), resolveConditionColor(name, "dark"));
+    assert.equal(resolveConditionColor(name, "yozora"), resolveConditionColor(name, "dark"));
   }
   assert.equal(resolveConditionColor("unknown", "yukari"), null);
 });
@@ -87,7 +87,7 @@ test("neutral Light and the retained palettes keep their current names and disti
   assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
   assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
   for (const { value } of PASTEL_THEME_OPTIONS) assert.equal(isLightTheme(value), true);
-  assert.equal(isLightTheme("mauve"), false);
+  assert.equal(isLightTheme("tsukimi"), false);
   const palettes = new Set(PASTEL_THEME_OPTIONS.map(({ value }) => {
     const tokens = cssTokens(value);
     return colour(tokens, "bg") + colour(tokens, "accent");
@@ -105,7 +105,7 @@ test("old Light preferences migrate to Yukari while newly saved Light remains ne
   for (const old of ["light", '{"theme":"light"}', { theme: "light" }, { version: 1, theme: "light" }]) {
     assert.equal(parseSavedTheme(old), "yukari");
   }
-  for (const id of ["dark", "midnight", "mauve", "trivium"] as const) {
+  for (const id of ["dark", "yozora", "tasogare", "tsukimi", "trivium"] as const) {
     assert.equal(parseSavedTheme(id), id);
     assert.equal(parseSavedTheme({ theme: id }), id);
   }
@@ -157,7 +157,8 @@ test("flag meanings retain consistent colours and readable selected symbols in e
 
 
 test("retired choices map consistently without turning Paper into Yukari", () => {
-  const aliases = { fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light" } as const;
+  const aliases = { fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
+    sumi: "dark", midnight: "yozora", mauve: "tsukimi" } as const;
   for (const [retired, replacement] of Object.entries(aliases)) {
     assert.equal(THEME_OPTIONS.some(({ value }) => value === retired), false);
     assert.equal(parseTheme(retired), replacement);
@@ -181,12 +182,13 @@ test("colour stays on pastel headers and accents while main backgrounds remain w
   }
   const yellow = colour(cssTokens("kohaku"), "surface-strong");
   assert.equal(parseInt(yellow.slice(1, 3), 16), 255);
-  assert.ok(parseInt(yellow.slice(3, 5), 16) >= 240, "Kohaku is bright yellow rather than aged beige");
-  assert.ok(parseInt(yellow.slice(5, 7), 16) <= 220, "Kohaku retains its yellow hue");
+  const green = parseInt(yellow.slice(3, 5), 16), blue = parseInt(yellow.slice(5, 7), 16);
+  assert.ok(green >= 210 && green < 240 && blue >= 140 && blue < 195, "Kohaku uses warm amber rather than lemon yellow");
+  assert.ok(luminance(yellow) > .7, "Warm amber still stays bright on the white base");
 });
 
 test("new night palettes are dark and bookmarks remain a subtle surface tint", () => {
-  for (const name of ["yozora", "tasogare", "sumi", "tsukimi"] as const) {
+  for (const name of ["yozora", "tasogare", "tsukimi"] as const) {
     assert.equal(parseTheme(name), name);
     assert.equal(isLightTheme(name), false);
     assert.ok(luminance(colour(cssTokens(name), "bg")) < .03);
@@ -195,6 +197,38 @@ test("new night palettes are dark and bookmarks remain a subtle surface tint", (
     const tokens = cssTokens(value);
     const tinted = colour(tokens, "bookmark-soft");
     const base = colour(tokens, "surface");
-    assert.ok(contrast(tinted, base) < 1.1, `${value} bookmark tint must stay quiet`);
+    const stronger = value === "light" || value === "dark";
+    assert.equal(tokens.get("bookmark-row-strength"), stronger ? "10%" : "5%");
+    assert.ok(contrast(tinted, base) < (stronger ? 1.4 : 1.1), `${value} bookmark tint must remain moderate`);
   }
+});
+
+
+test("Light and Dark selections stand out while the approved pastel palettes stay unchanged", () => {
+  for (const name of ["light", "dark"] as const) {
+    const tokens = cssTokens(name);
+    for (const flag of ["safe", "suspicious", "critical"]) {
+      const fill = colour(tokens, `flag-${flag}-selected-bg`);
+      assert.ok(contrast(fill, colour(tokens, "surface")) > 1.25, `${name} ${flag} selection must be visible`);
+      assert.match(colour(tokens, `flag-${flag}-selected-border`), /^#[0-9a-f]{6}$/i);
+    }
+  }
+  const approved = { yukari: "#5948a5", sakura: "#923c6a", sora: "#346792", hisui: "#2a694d", toki: "#96424d", nagi: "#2e696d" };
+  for (const [name, accent] of Object.entries(approved)) {
+    const tokens = cssTokens(name);
+    assert.equal(colour(tokens, "accent"), accent);
+    assert.equal(tokens.get("flag-safe-selected-bg"), "var(--positive-soft)");
+    assert.equal(tokens.get("bookmark-row-strength"), "5%");
+  }
+});
+
+test("Trivium follows the near-black blue reference and Tsukimi inherits the purple palette", () => {
+  const trivium = cssTokens("trivium"), tsukimi = cssTokens("tsukimi");
+  assert.equal(colour(trivium, "bg"), "#050716");
+  assert.equal(colour(trivium, "surface"), "#11111b");
+  assert.equal(colour(trivium, "accent"), "#879de9");
+  assert.equal(colour(tsukimi, "accent"), "#cbb8ee");
+  assert.equal(parseSavedTheme("mauve"), "tsukimi");
+  assert.equal(parseSavedTheme("tsukimi"), "tsukimi");
+  assert.equal(parseSavedTheme({ version: 2, theme: "tsukimi" }), "tsukimi");
 });

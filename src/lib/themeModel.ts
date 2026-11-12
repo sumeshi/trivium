@@ -17,10 +17,7 @@ export const THEME_OPTIONS = [
   ...PASTEL_THEME_OPTIONS,
   { value: "yozora", label: "Yozora" },
   { value: "tasogare", label: "Tasogare" },
-  { value: "sumi", label: "Sumi" },
   { value: "tsukimi", label: "Tsukimi" },
-  { value: "midnight", label: "Midnight" },
-  { value: "mauve", label: "Mauve" },
   { value: "trivium", label: "Trivium" },
 ] as const;
 
@@ -32,6 +29,7 @@ export interface ThemePreference {
 
 const RETIRED_THEMES: Readonly<Record<string, Theme>> = {
   fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
+  sumi: "dark", midnight: "yozora", mauve: "tsukimi",
 };
 
 /** Retired names resolve to an offered choice; user selections stay canonical. */

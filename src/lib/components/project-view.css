@@ -706,7 +706,7 @@ button.primary:disabled {
 /* Keep the original rule colour visible beneath a quiet bookmark tint.
    Mix only opaque surfaces so frozen cells cannot reveal horizontally moving text. */
 .data-row.bookmarked {
-  --bookmarked-row-bg: color-mix(in srgb, var(--bookmark, #b58a24) 5%, var(--row-color, var(--row-base)));
+  --bookmarked-row-bg: color-mix(in srgb, var(--bookmark, #b58a24) var(--bookmark-row-strength, 5%), var(--row-color, var(--row-base)));
   --row-bg: var(--bookmarked-row-bg);
 }
 
@@ -930,16 +930,19 @@ button.primary:disabled {
 .flag-buttons button.flag-safe.selected {
   background: var(--flag-safe-selected-bg, var(--positive));
   color: var(--flag-safe-selected-fg, var(--flag-selected-text));
+  border-color: var(--flag-safe-selected-border, transparent);
 }
 
 .flag-buttons button.flag-suspicious.selected {
   background: var(--flag-suspicious-selected-bg, var(--warning));
   color: var(--flag-suspicious-selected-fg, var(--flag-selected-text));
+  border-color: var(--flag-suspicious-selected-border, transparent);
 }
 
 .flag-buttons button.flag-critical.selected {
   background: var(--flag-critical-selected-bg, var(--danger));
   color: var(--flag-critical-selected-fg, var(--flag-selected-text));
+  border-color: var(--flag-critical-selected-border, transparent);
 }
 
 .loading-placeholder {
