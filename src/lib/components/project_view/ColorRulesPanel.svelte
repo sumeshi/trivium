@@ -3,14 +3,15 @@
   import { onDestroy } from "svelte";
   import { get } from "svelte/store";
   import type { ColorRule, CompareOp, ConditionNode } from "../../types";
-  import { COMPARE_OPS } from "../../stores/condition";
+  import { COMPARE_OPS } from '../../stores/condition';
   import { theme } from "../../theme";
   import {
     CONDITION_COLORS,
     displayRowColor,
     resolveConditionColor,
   } from "../../skin";
-  import { backend, columnLabels, projectDetail } from "./state";
+  import { useWorkspace } from "../../workspaceContext";
+  const { backend, columnLabels, projectDetail } = useWorkspace();
 
   let rules: ColorRule[] = [];
   let column = "";

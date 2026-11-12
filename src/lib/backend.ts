@@ -1,7 +1,9 @@
+import type * as Wire from "./generated/engine";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites";
+import { queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions";
 import type {
   CellKind,
@@ -30,40 +32,32 @@ import type {
 
 export type { FlagFilterValue } from "./types";
 
-export interface CreateProjectArgs {
+/** Transport ownership never participates in query/result identity. */
+export interface RequestOwned {
+  requestId?: string;
+}
+
+export interface CreateProjectArgs extends RequestOwned {
   description?: string | null;
   path?: string;
   delimiter?: string | null;
 }
 
-export interface AnnotationPatch {
-  /** `undefined` keeps the stored flag; `""` clears it. */
+/** Partial updates preserve omitted fields; explicit memo null clears it. */
+export type AnnotationPatch = Partial<Omit<Wire.AnnotationPatch, "flag" | "tags" | "bookmarked">> & {
   flag?: "" | "safe" | "suspicious" | "critical";
-  /** `undefined` keeps the stored memo; `null` or `""` clears it. */
-  memo?: string | null;
-  /** `undefined` keeps the stored tags; `[]` clears them. */
   tags?: string[];
-  /** Tags appended without duplicates; `undefined` adds nothing. */
-  add_tags?: string[];
-  /** Tags removed after `tags`/`add_tags`; `undefined` removes nothing. */
-  remove_tags?: string[];
-  /** `undefined` keeps the stored bookmark; `false` clears it. */
   bookmarked?: boolean;
-}
+};
 
 export interface UpdateFlagArgs extends AnnotationPatch {
   projectId: string;
   rowIndex: number;
 }
 
-export interface UpdateFlagResult {
-  /** `null` when this update removed the row's last annotation. */
+export type UpdateFlagResult = Omit<Wire.UpdateFlagResponse, "entry"> & {
   entry: FlagEntry | null;
-  /** Process-local monotonic revision for the project. */
-  revision: number;
-  /** Whole-project annotated row count after the update. */
-  flaggedRecords: number;
-}
+};
 
 export interface HiddenColumnsArgs {
   projectId: string;
@@ -81,7 +75,7 @@ export interface SaveViewStateArgs {
 
 export type ExportScope = "all" | "filtered" | "selected";
 
-export interface ExportProjectArgs {
+export interface ExportProjectArgs extends RequestOwned {
   projectId: string;
   destination?: string;
   /** `"filtered"` (default) uses the query fields; `"selected"` intersects `rowIndices`. */
@@ -153,13 +147,13 @@ export interface ColorRulesResponse {
   rules: ColorRule[];
 }
 
-export interface ColumnStatsArgs extends QuerySpec {
+export interface ColumnStatsArgs extends QuerySpec, RequestOwned {
   projectId: string;
   column: string;
   rareMax?: number;
 }
 
-export interface HistogramArgs {
+export interface HistogramArgs extends RequestOwned {
   projectId: string;
   column: string;
   buckets?: number;
@@ -175,7 +169,7 @@ export interface HistogramArgs {
   focus?: boolean;
 }
 
-export interface SurroundingRowsArgs {
+export interface SurroundingRowsArgs extends RequestOwned {
   projectId: string;
   rowIndex: number;
   column: string;
@@ -183,7 +177,7 @@ export interface SurroundingRowsArgs {
   count: number;
 }
 
-export interface TimeAnalysisArgs {
+export interface TimeAnalysisArgs extends RequestOwned {
   projectId: string;
   column: string;
   gapSeconds?: number;
@@ -199,35 +193,22 @@ export interface TimeAnalysisArgs {
   condition?: ConditionNode | null;
 }
 
-export interface QueryProjectRowsArgs extends QuerySpec {
+export interface QueryProjectRowsArgs extends QuerySpec, RequestOwned {
   projectId: string;
   offset?: number;
   limit?: number;
 }
 
-export interface LocateProjectRowArgs extends QuerySpec {
+export interface LocateProjectRowArgs extends QuerySpec, RequestOwned {
   projectId: string;
   /** Original zero-based row ID, independent of result order. */
   rowIndex: number;
 }
 
-export interface LocateProjectRowResponse {
-  /** Zero-based position in the current result, or null when excluded. */
-  position: number | null;
-  total_rows: number;
-  total_filtered_rows: number;
-}
+export type LocateProjectRowResponse = Wire.LocateRowResponse;
+export type QueryProjectRowsResponse = Omit<Wire.QueryRowsResponse, "rows"> & { rows: ProjectRow[] };
 
-export interface QueryProjectRowsResponse {
-  rows: ProjectRow[];
-  annotated_total: number;
-  annotated_filtered: number;
-  total_rows: number;
-  total_filtered_rows: number;
-  offset: number;
-}
-
-export interface GetCellArgs {
+export interface GetCellArgs extends RequestOwned {
   projectId: string;
   /** Original row id, independent of the current query result order. */
   rowIndex: number;
@@ -242,7 +223,7 @@ export interface GetCellResult {
   length: number | null;
 }
 
-export interface GroupTreeArgs {
+export interface GroupTreeArgs extends RequestOwned {
   projectId: string;
   groupColumns: string[];
   search?: string;
@@ -254,7 +235,7 @@ export interface GroupTreeArgs {
   condition?: ConditionNode | null;
 }
 
-export interface BulkAnnotateArgs extends AnnotationPatch {
+export interface BulkAnnotateArgs extends AnnotationPatch, RequestOwned {
   projectId: string;
   target: "selection" | "filtered" | "all";
   rowIndices?: number[];
@@ -269,7 +250,7 @@ export interface BulkAnnotateArgs extends AnnotationPatch {
   previewToken?: string;
 }
 
-export interface BulkUndoArgs {
+export interface BulkUndoArgs extends RequestOwned {
   projectId: string;
 }
 
@@ -278,7 +259,7 @@ export interface Backend {
   listProjects(): Promise<ProjectSummary[]>;
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
-  loadProject(projectId: string): Promise<LoadProjectResponse>;
+  loadProject(projectId: string, requestId?: string): Promise<LoadProjectResponse>;
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
   histogram(args: HistogramArgs): Promise<Histogram>;
   timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis>;
@@ -307,6 +288,7 @@ export interface Backend {
   exportProject(args: ExportProjectArgs): Promise<ExportResult>;
   /** Requests cancellation of one running job; `false` means it already ended. */
   cancelJob(jobId: number): Promise<boolean>;
+  cancelRequest(requestId: string): Promise<number>;
   /** Lists running background jobs. */
   activeJobs(): Promise<JobInfo[]>;
 }
@@ -340,6 +322,10 @@ function annotationFields(
   return fields;
 }
 
+function invokeOwned<T>(command: string, wire: Record<string, unknown>, owner: RequestOwned): Promise<T> {
+  return invoke<T>(command, { ...wire, requestId: owner.requestId });
+}
+
 class NativeBackend implements Backend {
   readonly isNative = true;
 
@@ -351,13 +337,13 @@ class NativeBackend implements Backend {
     if (!args.path) {
       return Promise.reject(new Error("Path is required to create a project."));
     }
-    return invoke("create_project", {
+    return invokeOwned("create_project", {
       payload: {
         path: args.path,
         description: args.description ?? null,
         delimiter: args.delimiter ?? null,
       },
-    });
+    }, args);
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -365,15 +351,17 @@ class NativeBackend implements Backend {
     forgetAnnotationVersion(projectId);
   }
 
-  async loadProject(projectId: string): Promise<LoadProjectResponse> {
-    await waitForHiddenColumnWrites(projectId);
+  async loadProject(projectId: string, requestId?: string): Promise<LoadProjectResponse> {
+    await Promise.all([waitForHiddenColumnWrites(projectId), waitForAnnotationWrites(projectId)]);
     return invoke("load_project", {
       request: { projectId: projectId },
+      metadataOnly: true,
+      requestId,
     });
   }
 
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats> {
-    return invoke("column_stats", {
+    return invokeOwned("column_stats", {
       payload: {
         projectId: args.projectId,
         column: args.column,
@@ -386,11 +374,11 @@ class NativeBackend implements Backend {
         sortKey: args.sortKey,
         sortDirection: args.sortDirection,
       },
-    });
+    }, args);
   }
 
   histogram(args: HistogramArgs): Promise<Histogram> {
-    return invoke("histogram", {
+    return invokeOwned("histogram", {
       payload: {
         projectId: args.projectId,
         column: args.column,
@@ -404,11 +392,11 @@ class NativeBackend implements Backend {
         range: args.range ?? null,
         focus: args.focus ?? false,
       },
-    });
+    }, args);
   }
 
   timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis> {
-    return invoke("time_analysis", {
+    return invokeOwned("time_analysis", {
       payload: {
         projectId: args.projectId,
         column: args.column,
@@ -423,11 +411,11 @@ class NativeBackend implements Backend {
         columns: args.columns ?? null,
         condition: args.condition ?? null,
       },
-    });
+    }, args);
   }
 
   surroundingRows(args: SurroundingRowsArgs): Promise<SurroundingRows> {
-    return invoke("surrounding_rows", {
+    return invokeOwned("surrounding_rows", {
       payload: {
         projectId: args.projectId,
         rowIndex: args.rowIndex,
@@ -435,13 +423,13 @@ class NativeBackend implements Backend {
         mode: args.mode,
         count: args.count,
       },
-    });
+    }, args);
   }
 
   queryProjectRows(
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse> {
-    return invoke("query_project_rows", {
+    return invokeOwned("query_project_rows", {
       payload: {
         projectId: args.projectId,
         search: args.search,
@@ -454,25 +442,26 @@ class NativeBackend implements Backend {
         sortDirection: args.sortDirection,
         condition: args.condition,
       },
-    });
+    }, args);
   }
 
   locateProjectRow(args: LocateProjectRowArgs): Promise<LocateProjectRowResponse> {
-    return invoke("locate_project_row", { payload: args });
+    const { requestId: _owner, ...payload } = args;
+    return invokeOwned("locate_project_row", { payload }, args);
   }
 
   getCell(args: GetCellArgs): Promise<GetCellResult> {
-    return invoke("get_cell", {
+    return invokeOwned("get_cell", {
       payload: {
         projectId: args.projectId,
         rowIndex: args.rowIndex,
         columnId: args.columnId,
       },
-    });
+    }, args);
   }
 
   groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse> {
-    return invoke("group_tree", {
+    return invokeOwned("group_tree", {
       payload: {
         projectId: args.projectId,
         search: args.search ?? null,
@@ -483,11 +472,11 @@ class NativeBackend implements Backend {
         condition: args.condition ?? null,
         groupColumns: args.groupColumns,
       },
-    });
+    }, args);
   }
 
   bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount> {
-    return invoke("bulk_preview", {
+    return invokeOwned("bulk_preview", {
       payload: {
         projectId: args.projectId,
         target: args.target,
@@ -502,38 +491,42 @@ class NativeBackend implements Backend {
         previewToken: args.previewToken ?? null,
         ...annotationFields(args),
       },
-    });
+    }, args);
   }
 
   async bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
-    const result = await invoke<BulkApplied>("bulk_update", {
-      payload: {
-        projectId: args.projectId,
-        target: args.target,
-        rowIndices: args.rowIndices ?? null,
-        search: args.search ?? null,
-        searchColumns: args.searchColumns ?? null,
-        flagFilter: args.flagFilter ?? null,
-        bookmarkedOnly: args.bookmarkedOnly ?? null,
-        sortKey: args.sortKey ?? null,
-        sortDirection: args.sortDirection ?? null,
-        condition: args.condition ?? null,
-        previewToken: args.previewToken ?? null,
-        ...annotationFields(args),
-      },
+    return queueAnnotationWrite(args.projectId, async () => {
+      const result = await invokeOwned<BulkApplied>("bulk_update", {
+        payload: {
+          projectId: args.projectId,
+          target: args.target,
+          rowIndices: args.rowIndices ?? null,
+          search: args.search ?? null,
+          searchColumns: args.searchColumns ?? null,
+          flagFilter: args.flagFilter ?? null,
+          bookmarkedOnly: args.bookmarkedOnly ?? null,
+          sortKey: args.sortKey ?? null,
+          sortDirection: args.sortDirection ?? null,
+          condition: args.condition ?? null,
+          previewToken: args.previewToken ?? null,
+          ...annotationFields(args),
+        },
+      }, args);
+      markBulkAnnotationsChanged(args.projectId);
+      return result;
     });
-    markBulkAnnotationsChanged(args.projectId);
-    return result;
   }
 
   async bulkUndo(args: BulkUndoArgs): Promise<BulkApplied> {
-    const result = await invoke<BulkApplied>("bulk_undo", {
-      payload: {
-        projectId: args.projectId,
-      },
+    return queueAnnotationWrite(args.projectId, async () => {
+      const result = await invokeOwned<BulkApplied>("bulk_undo", {
+        payload: {
+          projectId: args.projectId,
+        },
+      }, args);
+      markBulkAnnotationsChanged(args.projectId);
+      return result;
     });
-    markBulkAnnotationsChanged(args.projectId);
-    return result;
   }
 
   saveIocs(args: SaveIocsArgs): Promise<void> {
@@ -604,15 +597,17 @@ class NativeBackend implements Backend {
   }
 
   async updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
-    const result = await invoke<UpdateFlagResult>("update_flag", {
-      payload: {
-        projectId: args.projectId,
-        row_index: args.rowIndex,
-        ...annotationFields(args),
-      },
+    return queueAnnotationWrite(args.projectId, async () => {
+      const result = await invoke<UpdateFlagResult>("update_flag", {
+        payload: {
+          projectId: args.projectId,
+          row_index: args.rowIndex,
+          ...annotationFields(args),
+        },
+      });
+      markAnnotationsChanged(args.projectId);
+      return result;
     });
-    markAnnotationsChanged(args.projectId);
-    return result;
   }
 
   setHiddenColumns(args: HiddenColumnsArgs): Promise<void> {
@@ -645,7 +640,7 @@ class NativeBackend implements Backend {
         new Error("Destination path is required to export a project.")
       );
     }
-    return invoke("export_project", {
+    return invokeOwned("export_project", {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
@@ -661,11 +656,15 @@ class NativeBackend implements Backend {
         rowIndices: args.rowIndices ?? null,
         includeAnnotations: args.includeAnnotations ?? true,
       },
-    });
+    }, args);
   }
 
   cancelJob(jobId: number): Promise<boolean> {
     return invoke("cancel_job", { jobId });
+  }
+
+  cancelRequest(requestId: string): Promise<number> {
+    return invoke("cancel_request_jobs", { requestId });
   }
 
   activeJobs(): Promise<JobInfo[]> {

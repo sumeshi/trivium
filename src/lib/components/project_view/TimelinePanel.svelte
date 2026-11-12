@@ -4,13 +4,22 @@
   import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { Histogram, HistogramBucket } from "../../types";
-  import { formatTimelineNanos, panTimelineRange, parseTimelineNanos, shortTimelineLabel, zoomTimelineRange } from "../../timelineRange";
+  import {
+    formatTimelineNanos, panTimelineRange, parseTimelineNanos, shortTimelineLabel,
+    zoomTimelineRange,
+  } from "../../timelineRange";
   import type { TimelineRange } from "../../timelineRange";
   import { requestTimelineHistogram } from "../../timelineRequests";
-  import { filterByRange } from "../../stores/condition";
+
   import { shouldRequestPanel } from "../../panelRequest";
-  import { annotationVersions, appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    appliedFilters, backend, columnLabels, projectDetail, filterByRange, createReadScope,
+  } = useWorkspace();
+
+  const reads = createReadScope();
 
   export let open = false;
 
@@ -42,6 +51,7 @@
 
   onDestroy(() => {
     destroyed = true;
+    reads.dispose();
     if (requestTimer !== null) clearTimeout(requestTimer);
     requestTimer = null;
     queued = null;
@@ -164,7 +174,8 @@
     try {
       const next = await requestTimelineHistogram(
         () => !destroyed && open && requests.isCurrent(ticket),
-        () => api.histogram({
+        () => reads.run("histogram", api, (requestId) => api.histogram({
+        requestId,
         projectId: activeProjectId,
         column: activeColumn,
         buckets: BUCKET_COUNT,
@@ -175,7 +186,7 @@
         flagFilter: spec.flag,
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
-      }));
+      })));
       if (!next || !requests.isCurrent(ticket)) {
         return;
       }
@@ -205,6 +216,7 @@
 
   const scheduleHistogram = (...args: Parameters<typeof loadHistogram>) => {
     requests.invalidate();
+    reads.cancelAll();
     if (requestTimer !== null) clearTimeout(requestTimer);
     const spec = args[4];
     queued = [args[0], args[1], args[2], args[3] ? { ...args[3] } : null,
@@ -231,6 +243,7 @@
     histogram = null;
     autoFocus = true;
     requests.invalidate();
+    reads.cancelAll();
     error = "";
     dragStart = null;
     dragEnd = null;
@@ -240,6 +253,7 @@
   $: if (!open) {
     // Ignore any response that was already in flight.
     requests.invalidate();
+    reads.cancelAll();
     if (requestTimer !== null) clearTimeout(requestTimer);
     requestTimer = null;
     queued = null;

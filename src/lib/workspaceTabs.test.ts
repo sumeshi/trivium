@@ -160,3 +160,22 @@ test("view saves stay ordered across tab instances and reopening waits for the f
   assert.deepEqual(calls, ["old", "new"]);
   assert.equal(reopened, true);
 });
+
+test("switching or closing a loading tab cancels only its owned native load", async () => {
+  const a = deferred<LoadProjectResponse>(), b = deferred<LoadProjectResponse>();
+  const cancelled: string[] = [], requests: string[] = [];
+  const { controller } = fixture({
+    loadProject: (id, requestId) => { requests.push(requestId!); return id === "a" ? a.promise : b.promise; },
+    cancelRequest: async (requestId) => { cancelled.push(requestId); return 1; },
+  });
+  const first = controller.selectProject("a");
+  const second = controller.selectProject("b");
+  assert.deepEqual(cancelled, [requests[0]]);
+  controller.dispose();
+  assert.deepEqual(cancelled, requests);
+  a.resolve(detail("a")); b.resolve(detail("b"));
+  await Promise.all([first, second]);
+  assert.equal(get(controller.state).projectDetail, null);
+  assert.equal(get(controller.state).isLoadingDetail, false);
+  assert.deepEqual(get(controller.state).openProjectIds, []);
+});

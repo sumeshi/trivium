@@ -9,98 +9,103 @@ import {
   withOffset,
   type History,
   type SavedView,
-} from "../viewState";
+} from "../viewState.ts";
 
 const STORAGE_PREFIX = "trivium:view:";
 
-export const canGoBack = writable(false);
-export const canGoForward = writable(false);
-export const historyRestore = writable<{
-  projectId: string | null;
-  tree: EditorGroup;
-  offset: number;
-  nonce: number;
-} | null>(null);
+/** History has the same lifetime as its investigation. */
+export function createViewHistory() {
+  const canGoBack = writable(false);
+  const canGoForward = writable(false);
+  const historyRestore = writable<{
+    projectId: string | null;
+    tree: EditorGroup;
+    offset: number;
+    nonce: number;
+  } | null>(null);
 
-let history: History = emptyHistory(
-  { type: "group", id: "root", kind: "and", collapsed: false, children: [] },
-  0
-);
-let nonce = 0;
-let historyProjectId: string | null = null;
+  let history: History = emptyHistory(
+    { type: "group", id: "root", kind: "and", collapsed: false, children: [] },
+    0
+  );
+  let nonce = 0;
+  let historyProjectId: string | null = null;
 
-/**
- * Bind the history to a project. A queued restore for the previous project is
- * dropped so it cannot be applied to the newly selected project.
- */
-export function setHistoryProject(projectId: string | null): void {
-  historyProjectId = projectId;
-  historyRestore.set(null);
-}
-
-function publish(): void {
-  canGoBack.set(history.index > 0);
-  canGoForward.set(history.index < history.entries.length - 1);
-}
-
-export function resetHistory(tree: EditorGroup, offset: number): void {
-  history = emptyHistory(tree, offset);
-  publish();
-}
-
-export function snapshotHistory(): History {
-  return structuredClone(history);
-}
-
-export function restoreHistory(snapshot: History): void {
-  history = structuredClone(snapshot);
-  historyRestore.set(null);
-  publish();
-}
-
-export function recordAppliedCondition(
-  previousOffset: number,
-  tree: EditorGroup,
-  nextOffset: number
-): void {
-  history = pushApplied(history, tree, previousOffset, nextOffset);
-  publish();
-}
-
-export function rememberOffset(offset: number): void {
-  history = withOffset(history, offset);
-}
-
-export function goBack(): void {
-  const next = stepBack(history);
-  if (!next) {
-    return;
+  /**
+   * Bind the history to a project. A queued restore for the previous project is
+   * dropped so it cannot be applied to the newly selected project.
+   */
+  function setHistoryProject(projectId: string | null): void {
+    historyProjectId = projectId;
+    historyRestore.set(null);
   }
-  history = next;
-  publish();
-  const entry = history.entries[history.index];
-  historyRestore.set({
-    projectId: historyProjectId,
-    tree: entry.condition,
-    offset: entry.offset,
-    nonce: ++nonce,
-  });
-}
 
-export function goForward(): void {
-  const next = stepForward(history);
-  if (!next) {
-    return;
+  function publish(): void {
+    canGoBack.set(history.index > 0);
+    canGoForward.set(history.index < history.entries.length - 1);
   }
-  history = next;
-  publish();
-  const entry = history.entries[history.index];
-  historyRestore.set({
-    projectId: historyProjectId,
-    tree: entry.condition,
-    offset: entry.offset,
-    nonce: ++nonce,
-  });
+
+  function resetHistory(tree: EditorGroup, offset: number): void {
+    history = emptyHistory(tree, offset);
+    publish();
+  }
+
+  function snapshotHistory(): History {
+    return structuredClone(history);
+  }
+
+  function restoreHistory(snapshot: History): void {
+    history = structuredClone(snapshot);
+    historyRestore.set(null);
+    publish();
+  }
+
+  function recordAppliedCondition(
+    previousOffset: number,
+    tree: EditorGroup,
+    nextOffset: number
+  ): void {
+    history = pushApplied(history, tree, previousOffset, nextOffset);
+    publish();
+  }
+
+  function rememberOffset(offset: number): void {
+    history = withOffset(history, offset);
+  }
+
+  function goBack(): void {
+    const next = stepBack(history);
+    if (!next) {
+      return;
+    }
+    history = next;
+    publish();
+    const entry = history.entries[history.index];
+    historyRestore.set({
+      projectId: historyProjectId,
+      tree: entry.condition,
+      offset: entry.offset,
+      nonce: ++nonce,
+    });
+  }
+
+  function goForward(): void {
+    const next = stepForward(history);
+    if (!next) {
+      return;
+    }
+    history = next;
+    publish();
+    const entry = history.entries[history.index];
+    historyRestore.set({
+      projectId: historyProjectId,
+      tree: entry.condition,
+      offset: entry.offset,
+      nonce: ++nonce,
+    });
+  }
+
+  return { canGoBack, canGoForward, historyRestore, setHistoryProject, resetHistory, snapshotHistory, restoreHistory, recordAppliedCondition, rememberOffset, goBack, goForward };
 }
 
 /**

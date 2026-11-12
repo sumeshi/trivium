@@ -12,11 +12,8 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
-import signal
-import subprocess
 import tempfile
 import time
 from typing import Any
@@ -24,6 +21,7 @@ from urllib.error import URLError
 import uuid
 
 from row_navigation import ELEMENT, WebView, free_port, open_project, wait_for
+from runtime import IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
@@ -75,16 +73,25 @@ class WorkspaceView(WebView):
           addEventListener('unhandledrejection',e=>window.__workspaceErrors.push(String(e.reason)));
           const original=window.fetch;
           const wrapped=(input,options,...rest)=>{
-            const name=typeof input==='string'&&input.startsWith('ipc://localhost/')
-              ?decodeURIComponent(new URL(input).pathname.slice(1)):'';
-            const promise=original.call(window,input,options,...rest);
-            if(!name||name.startsWith('plugin:')||name==='active_jobs')return promise;
+""" + IPC_COMMAND_JS + """
+            if(!name||name.startsWith('plugin:')||name==='active_jobs')return original.call(window,input,options,...rest);
             let args={};
             try{args=JSON.parse(typeof options.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
             const request=args?.payload??args?.request??{};
-            const entry={name,request,started:performance.now()};
+            const entry={name,request,requestId:args.requestId??null,
+              metadataOnly:args.metadataOnly??null,started:performance.now()};
             window.__workspaceIpc.push(entry);
             if(window.__workspaceIpc.length>2000)window.__workspaceIpc.shift();
+            const perform=()=>{entry.dispatched=true;return original.call(window,input,options,...rest);};
+            const before=window.__workspaceBeforeCommit;
+            let promise;
+            if(before&&!before.ready&&before.name===name&&before.projectId===request.projectId
+              &&(!('rowIndex' in before)||before.rowIndex===(request.row_index??request.rowIndex))){
+              before.ready=true;before.request=structuredClone(request);entry.dispatched=false;
+              promise=new Promise(resolve=>{let released=false;before.release=()=>{
+                if(released)return;released=true;resolve(perform());
+              };});
+            }else promise=perform();
             return promise.then(async response=>{
               const value=await response.clone().json();
               entry.elapsed_ms=performance.now()-entry.started;
@@ -209,11 +216,10 @@ class NativeApp:
         self.port, self.native_port = free_port(), free_port()
         while self.native_port == self.port:
             self.native_port = free_port()
-        environment = dict(os.environ, XDG_DATA_HOME=str(root / "data"), XDG_CONFIG_HOME=str(root / "config"),
-                           XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root), GSETTINGS_BACKEND="memory", NO_AT_BRIDGE="1")
+        environment = isolated_environment(root)
         self.log = (evidence / "driver.log").open("w")
-        self.driver = subprocess.Popen([args.driver, "--port", str(self.port), "--native-port", str(self.native_port),
-                                        "--native-driver", args.native_driver], env=environment, stdout=self.log, stderr=self.log, start_new_session=True)
+        self.driver = start_driver([args.driver, "--port", str(self.port), "--native-port", str(self.native_port),
+                                    "--native-driver", args.native_driver], environment, self.log)
         self.web = WorkspaceView(self.port)
         self.sessions: list[dict[str, Any]] = []
 
@@ -253,13 +259,7 @@ class NativeApp:
         try:
             self.end_session()
         finally:
-            if self.driver.poll() is None:
-                os.killpg(self.driver.pid, signal.SIGTERM)
-                try:
-                    self.driver.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(self.driver.pid, signal.SIGKILL)
-                    self.driver.wait(timeout=5)
+            stop_driver(self.driver)
             self.log.close()
 
 
@@ -669,6 +669,58 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
                       "held_old_query": held}
 
 
+
+def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Path, report: dict[str, Any]) -> None:
+    """Hold the native mutation before dispatch, then close and reopen its tab."""
+    source = root / f"pending-write-{uuid.uuid4().hex[:8]}.csv"
+    source.write_text("host,value\nalpha,one\nbeta,two\n", encoding="utf-8")
+    project = web.command("create_project", {"path": str(source)})
+    project_id = project["meta"]["id"]
+    open_project(web, project["meta"]["name"])
+    web.results(2)
+    web.script("window.__workspaceBeforeCommit={name:'update_flag',projectId:arguments[0],rowIndex:0,ready:false,release:null};", project_id)
+    try:
+        button = web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='1')?.querySelector('.flag-buttons button[aria-label=\"Safe\"]');")
+        web.tap(button)
+        wait_for(lambda: web.script("return window.__workspaceBeforeCommit.ready;"), bool, "annotation held before native dispatch")
+        held = next(entry for entry in reversed(web.trace()) if entry["name"] == "update_flag" and entry["request"].get("projectId") == project_id)
+        assert held["dispatched"] is False, held
+        uncommitted = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 1})
+        assert uncommitted["rows"][0]["flag"] == "" and uncommitted["annotated_total"] == 0, uncommitted
+        web.named(f"Close {source.name}")
+        wait_for(lambda: web.state()["active"], lambda value: value == f'project-tab-{data["id"]}', "other case activates while annotation is blocked")
+        web.applied(projectId=data["id"], search="never-present")
+        web.results(0)
+
+        # Select through the actual project menu without awaiting its close:
+        # the UI intentionally waits for this case's pending mutation first.
+        web.named("Open project menu")
+        web.named("Refresh projects", ".workspace-drawer")
+        card = wait_for(lambda: web.script("return [...document.querySelectorAll('.project-card')].find(e=>e.querySelector('.project-name')?.textContent.trim()===arguments[0])??null;", project["meta"]["name"]), bool, "pending case in saved project list")
+        before = len(web.trace())
+        web.click(card)
+        wait_for(lambda: web.state()["active"], lambda value: value == f"project-tab-{project_id}", "reopened pending case selected")
+        web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
+        time.sleep(.2)
+        assert web.script("return !document.querySelector('.project-view')&&document.querySelector('main')?.textContent.includes('Loading project');"), "The replacement case must wait instead of querying stale annotations"
+        assert not any(entry["name"] == "load_project" and entry["request"].get("projectId") == project_id for entry in web.trace()[before:]), "Pending annotation must settle before metadata-only native load is dispatched"
+        web.script("window.__workspaceBeforeCommit.release();delete window.__workspaceBeforeCommit;")
+        wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "project menu closes after annotation commit")
+        web.results(2)
+        wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='1')?.querySelector('.flag-safe.selected')!==null&&document.querySelector('.table-meta-right')?.textContent.trim()==='Flagged 1';"), bool, "reopened row and Flagged counter include the old tab's committed edit")
+        loaded = next(entry for entry in web.trace()[before:] if entry["name"] == "load_project" and entry["request"].get("projectId") == project_id)
+        assert loaded["metadataOnly"] is True and loaded["requestId"], loaded
+        saved = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 1})
+        assert saved["rows"][0]["flag"] == "safe" and saved["annotated_total"] == 1, saved
+        report["pending_annotation_reopen"] = {"held_before_native_dispatch": True, "different_case_independent": True,
+            "reopened_case_waited": True, "saved_flag": "safe", "flagged_count": 1,
+            "metadata_only_owned_load": True}
+        web.named(f"Close {source.name}")
+        web.results(0)
+    finally:
+        web.script("window.__workspaceBeforeCommit?.release?.();delete window.__workspaceBeforeCommit;")
+
+
 def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -> None:
     restored = []
     for theme in ["light", "dark", "paper", "midnight"]:
@@ -696,7 +748,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--driver", default=shutil.which("tauri-driver") or "/workspace/.trivium-tools/bin/tauri-driver")
-    parser.add_argument("--native-driver", default=shutil.which("WebKitWebDriver") or "/usr/bin/WebKitWebDriver")
+    parser.add_argument("--native-driver", default=native_driver_default())
     parser.add_argument("--output", type=Path, default=Path("target/native-workspace-ui"))
     args = parser.parse_args()
     args.binary.resolve(strict=True)
@@ -720,6 +772,7 @@ def main() -> None:
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
+                ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
                 ("four themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
                 print(f"CHECK: {name}", flush=True)
@@ -728,7 +781,7 @@ def main() -> None:
                 print(f"PASS: {name}", flush=True)
             assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
             errors = [entry for session in app.sessions + [app.web.diagnostics()] for entry in session["ipc"] if "error" in entry]
-            cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows"}]
+            cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows", "load_project", "locate_project_row", "get_cell", "surrounding_rows", "group_tree", "bulk_preview"}]
             assert all(entry in cancelled for entry in errors), errors
             report["cancelled_superseded_queries"] = len(cancelled)
             report["passed"] = True

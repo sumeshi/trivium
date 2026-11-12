@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
   import { createBackend } from './lib/backend';
   import type { Backend } from './lib/backend';
@@ -19,6 +19,11 @@
   const projectController = createProjectController(backend);
   const projectState = projectController.state;
   const canCreateProject = projectController.canCreateProject;
+
+  onDestroy(() => {
+    projectController.dispose();
+    sessions.clear();
+  });
 
   let sidebarOpen = true;
   let activeView: ProjectView | null = null;

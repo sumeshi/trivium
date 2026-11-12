@@ -7,8 +7,11 @@
   import { shouldRequestPanel } from "../../panelRequest";
   import { compactTimestamp } from "../../panelPresentation";
   import ValueCountList from "./ValueCountList.svelte";
-  import { annotationVersions, appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
+  import { useWorkspace } from "../../workspaceContext";
+  const { appliedFilters, backend, columnLabels, projectDetail, createReadScope } = useWorkspace();
+  const reads = createReadScope();
 
   export let open = false;
 
@@ -27,6 +30,7 @@
   const histogramRequests = createLatestRequest();
 
   onDestroy(() => {
+    reads.dispose();
     statsRequests.dispose();
     histogramRequests.dispose();
   });
@@ -41,6 +45,7 @@
     column = columns[0] ?? "";
   }
   $: if (!numeric) {
+    reads.cancel("histogram");
     histogramRequests.invalidate();
     histogram = null;
     histogramError = "";
@@ -53,6 +58,7 @@
     activeRareMax: number | null,
     spec: AppliedFilters
   ) => {
+    reads.cancel("stats");
     const ticket = statsRequests.next();
     stats = null;
     error = "";
@@ -63,7 +69,8 @@
     }
     statsLoading = true;
     try {
-      const next = await api.columnStats({
+      const next = await reads.run("stats", api, (requestId) => api.columnStats({
+        requestId,
         projectId: activeScope.projectId,
         column: activeColumn,
         rareMax: activeRareMax ?? 1,
@@ -74,7 +81,7 @@
         condition: spec.condition,
         sortKey: null,
         sortDirection: "asc",
-      });
+      }));
       if (!statsRequests.isCurrent(ticket)) {
         return;
       }
@@ -96,6 +103,7 @@
     activeBuckets: number | null,
     spec: AppliedFilters
   ) => {
+    reads.cancel("histogram");
     const ticket = histogramRequests.next();
     histogram = null;
     histogramError = "";
@@ -106,7 +114,8 @@
     }
     histogramLoading = true;
     try {
-      const next = await api.histogram({
+      const next = await reads.run("histogram", api, (requestId) => api.histogram({
+        requestId,
         projectId: activeScope.projectId,
         column: activeColumn,
         buckets: activeBuckets ?? 50,
@@ -115,7 +124,7 @@
         flagFilter: spec.flag,
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
-      });
+      }));
       if (!histogramRequests.isCurrent(ticket)) {
         return;
       }
@@ -131,6 +140,7 @@
   };
 
   $: if (!open) {
+    reads.cancelAll();
     // Ignore any response that was already in flight.
     statsRequests.invalidate();
     histogramRequests.invalidate();

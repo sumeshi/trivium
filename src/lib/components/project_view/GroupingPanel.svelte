@@ -4,9 +4,14 @@
   import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { ConditionNode, GroupTreeNode, GroupTreeResponse } from "../../types";
-  import { conditionPayload, filterByValues } from "../../stores/condition";
-  import { backend, columnLabels, flagFilter, projectDetail, search, visibleColumns } from "./state";
+
   import type { FlagFilterValue } from "./state";
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    backend, columnLabels, flagFilter, projectDetail, search, visibleColumns, conditionPayload,
+    filterByValues, createReadScope,
+  } = useWorkspace();
+  const reads = createReadScope();
 
   type FlatNode = {
     node: GroupTreeNode;
@@ -25,6 +30,7 @@
   let loadedProjectId = "";
 
   onDestroy(() => {
+    reads.dispose();
     requests.dispose();
   });
 
@@ -124,14 +130,15 @@
     loading = true;
     error = "";
     try {
-      const next = await api.groupTree({
+      const next = await reads.run("groups", api, (requestId) => api.groupTree({
+        requestId,
         projectId: activeProjectId,
         groupColumns,
         search: activeSearch.trim() || undefined,
         flagFilter: activeFlag,
         columns: activeColumns,
         condition: activeCondition,
-      });
+      }));
       if (!requests.isCurrent(ticket)) {
         return;
       }

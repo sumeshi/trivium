@@ -3,17 +3,10 @@
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { writeTextFile } from '@tauri-apps/plugin-fs';
-  import {
-    iocManagerOpen,
-    iocDraft,
-    backend,
-    projectDetail,
-    normalizeIocFlag,
-    FLAG_OPTIONS,
-    buildIocCsv,
-    escapeCsvValue,
-  } from './state';
+  import { normalizeIocFlag, FLAG_OPTIONS, buildIocCsv, escapeCsvValue } from './state';
   import type { IocEntry } from '../../types';
+  import { useWorkspace } from "../../workspaceContext";
+  const { iocManagerOpen, iocDraft, backend, projectDetail } = useWorkspace();
 import FlagSelect from './FlagSelect.svelte';
 
   const dispatch = createEventDispatcher();

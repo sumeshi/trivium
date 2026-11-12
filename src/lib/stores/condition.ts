@@ -3,7 +3,7 @@ import type { CompareOp, ConditionNode } from "../types";
 import {
   appendFilterCondition,
   type FilterConditionOp,
-} from "../conditionFilters";
+} from "../conditionFilters.ts";
 
 export const COMPARE_OPS: Array<{ value: CompareOp; label: string }> = [
   { value: "eq", label: "=" },
@@ -46,230 +46,238 @@ function rootGroup(): EditorGroup {
   return { type: "group", id: ROOT_ID, kind: "and", collapsed: false, children: [] };
 }
 
-export const conditionTree = writable<EditorGroup>(rootGroup());
+/** One editor tree per active investigation. */
+export function createConditionState() {
+  const conditionTree = writable<EditorGroup>(rootGroup());
 
-function leaf(column: string): EditorCondition {
-  return {
-    type: "condition",
-    id: crypto.randomUUID(),
-    column,
-    op: "contains",
-    value: "",
-    negated: false,
-  };
-}
-
-function groupNode(): EditorGroup {
-  return {
-    type: "group",
-    id: crypto.randomUUID(),
-    kind: "and",
-    collapsed: false,
-    children: [],
-  };
-}
-
-function mapNode(node: EditorNode, visit: (node: EditorNode) => EditorNode): EditorNode {
-  const next = visit(node);
-  if (next.type !== "group") {
-    return next;
-  }
-  return {
-    ...next,
-    children: next.children.map((child) => mapNode(child, visit)),
-  };
-}
-
-function edit(update: (root: EditorGroup) => EditorGroup): void {
-  conditionTree.update(update);
-}
-
-/** Replaces the editor with one `in` condition so a stats value filters the table. */
-export function filterByValue(column: string, value: string): void {
-  const row: EditorCondition = {
-    type: "condition",
-    id: crypto.randomUUID(),
-    column,
-    op: "in",
-    value,
-    exact: true,
-    negated: false,
-  };
-  conditionTree.set({
-    type: "group",
-    id: ROOT_ID,
-    kind: "and",
-    collapsed: false,
-    children: [row],
-  });
-}
-
-/** Replaces the editor with an AND of `in` conditions, one per grouping level. */
-export function filterByValues(filters: Array<{ column: string; value: string }>): void {
-  const children: EditorCondition[] = filters.map(({ column, value }) => ({
-    type: "condition",
-    id: crypto.randomUUID(),
-    column,
-    op: "in",
-    value,
-    exact: true,
-    negated: false,
-  }));
-  conditionTree.set({
-    type: "group",
-    id: ROOT_ID,
-    kind: "and",
-    collapsed: false,
-    children,
-  });
-}
-
-/**
- * Adds an exact-match condition without replacing the current tree.
- * Used by the table's cell context menu; the value stays structured.
- */
-export function addFilterCondition(
-  column: string,
-  op: FilterConditionOp,
-  value: string
-): void {
-  conditionTree.update((root) => appendFilterCondition(root, column, op, value));
-}
-
-/** Replaces the editor with `column >= start AND column <= end`. */
-export function filterByRange(column: string, start: string, end: string): void {
-  const bound = (op: "ge" | "le", value: string): EditorCondition => ({
-    type: "condition",
-    id: crypto.randomUUID(),
-    column,
-    op,
-    value,
-    exact: true,
-    negated: false,
-  });
-  conditionTree.set({
-    type: "group",
-    id: ROOT_ID,
-    kind: "and",
-    collapsed: false,
-    children: [bound("ge", start), bound("le", end)],
-  });
-}
-
-export function addCondition(groupId: string, column: string): void {
-  const child = leaf(column);
-  edit((root) => mapNode(root, (node) => {
-    if (node.type === "group" && node.id === groupId) {
-      return { ...node, children: [...node.children, child] };
-    }
-    return node;
-  }) as EditorGroup);
-}
-
-export function addGroup(groupId: string): void {
-  const child = groupNode();
-  edit((root) => mapNode(root, (node) => {
-    if (node.type === "group" && node.id === groupId) {
-      return { ...node, children: [...node.children, child] };
-    }
-    return node;
-  }) as EditorGroup);
-}
-
-export function removeNode(id: string): void {
-  if (id === ROOT_ID) {
-    return;
-  }
-  edit((root) => mapNode(root, (node) => {
-    if (node.type !== "group") {
-      return node;
-    }
-    return { ...node, children: node.children.filter((child) => child.id !== id) };
-  }) as EditorGroup);
-}
-
-export function moveNode(id: string, delta: -1 | 1): void {
-  if (id === ROOT_ID) {
-    return;
-  }
-  edit((root) => mapNode(root, (node) => {
-    if (node.type !== "group") {
-      return node;
-    }
-    const index = node.children.findIndex((child) => child.id === id);
-    const next = index + delta;
-    if (index < 0 || next < 0 || next >= node.children.length) {
-      return node;
-    }
-    const children = [...node.children];
-    const [item] = children.splice(index, 1);
-    children.splice(next, 0, item);
-    return { ...node, children };
-  }) as EditorGroup);
-}
-
-export function setGroupKind(id: string, kind: "and" | "or"): void {
-  edit((root) => mapNode(root, (node) => {
-    if (node.type === "group" && node.id === id) {
-      return { ...node, kind };
-    }
-    return node;
-  }) as EditorGroup);
-}
-
-export function toggleCollapsed(id: string): void {
-  edit((root) => mapNode(root, (node) => {
-    if (node.type === "group" && node.id === id) {
-      return { ...node, collapsed: !node.collapsed };
-    }
-    return node;
-  }) as EditorGroup);
-}
-
-export function patchCondition(id: string, patch: Partial<EditorCondition>): void {
-  edit((root) => mapNode(root, (node) => {
-    if (node.type === "condition" && node.id === id) {
-      return { ...node, ...patch, id: node.id, type: "condition" };
-    }
-    return node;
-  }) as EditorGroup);
-}
-
-function conditionValues(row: EditorCondition): string[] {
-  if (row.op === "in" && row.exact === true) {
-    return [row.value];
-  }
-  if (row.op === "in") {
-    return row.value
-      .split(",")
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
-  }
-  return [row.value];
-}
-
-function toNode(node: EditorNode): ConditionNode | null {
-  if (node.type === "condition") {
-    if (node.column.trim().length === 0) {
-      return null;
-    }
+  function leaf(column: string): EditorCondition {
     return {
-      column: node.column,
-      op: node.op,
-      values: conditionValues(node),
-      negated: node.negated,
+      type: "condition",
+      id: crypto.randomUUID(),
+      column,
+      op: "contains",
+      value: "",
+      negated: false,
     };
   }
-  const children = node.children
-    .map((child) => toNode(child))
-    .filter((child): child is ConditionNode => child != null);
-  if (children.length === 0) {
-    return null;
+
+  function groupNode(): EditorGroup {
+    return {
+      type: "group",
+      id: crypto.randomUUID(),
+      kind: "and",
+      collapsed: false,
+      children: [],
+    };
   }
-  if (children.length === 1) {
-    return children[0];
+
+  function mapNode(node: EditorNode, visit: (node: EditorNode) => EditorNode): EditorNode {
+    const next = visit(node);
+    if (next.type !== "group") {
+      return next;
+    }
+    return {
+      ...next,
+      children: next.children.map((child) => mapNode(child, visit)),
+    };
   }
-  return { kind: node.kind, children };
+
+  function edit(update: (root: EditorGroup) => EditorGroup): void {
+    conditionTree.update(update);
+  }
+
+  /** Replaces the editor with one `in` condition so a stats value filters the table. */
+  function filterByValue(column: string, value: string): void {
+    const row: EditorCondition = {
+      type: "condition",
+      id: crypto.randomUUID(),
+      column,
+      op: "in",
+      value,
+      exact: true,
+      negated: false,
+    };
+    conditionTree.set({
+      type: "group",
+      id: ROOT_ID,
+      kind: "and",
+      collapsed: false,
+      children: [row],
+    });
+  }
+
+  /** Replaces the editor with an AND of `in` conditions, one per grouping level. */
+  function filterByValues(filters: Array<{ column: string; value: string }>): void {
+    const children: EditorCondition[] = filters.map(({ column, value }) => ({
+      type: "condition",
+      id: crypto.randomUUID(),
+      column,
+      op: "in",
+      value,
+      exact: true,
+      negated: false,
+    }));
+    conditionTree.set({
+      type: "group",
+      id: ROOT_ID,
+      kind: "and",
+      collapsed: false,
+      children,
+    });
+  }
+
+  /**
+   * Adds an exact-match condition without replacing the current tree.
+   * Used by the table's cell context menu; the value stays structured.
+   */
+  function addFilterCondition(
+    column: string,
+    op: FilterConditionOp,
+    value: string
+  ): void {
+    conditionTree.update((root) => appendFilterCondition(root, column, op, value));
+  }
+
+  /** Replaces the editor with `column >= start AND column <= end`. */
+  function filterByRange(column: string, start: string, end: string): void {
+    const bound = (op: "ge" | "le", value: string): EditorCondition => ({
+      type: "condition",
+      id: crypto.randomUUID(),
+      column,
+      op,
+      value,
+      exact: true,
+      negated: false,
+    });
+    conditionTree.set({
+      type: "group",
+      id: ROOT_ID,
+      kind: "and",
+      collapsed: false,
+      children: [bound("ge", start), bound("le", end)],
+    });
+  }
+
+  function addCondition(groupId: string, column: string): void {
+    const child = leaf(column);
+    edit((root) => mapNode(root, (node) => {
+      if (node.type === "group" && node.id === groupId) {
+        return { ...node, children: [...node.children, child] };
+      }
+      return node;
+    }) as EditorGroup);
+  }
+
+  function addGroup(groupId: string): void {
+    const child = groupNode();
+    edit((root) => mapNode(root, (node) => {
+      if (node.type === "group" && node.id === groupId) {
+        return { ...node, children: [...node.children, child] };
+      }
+      return node;
+    }) as EditorGroup);
+  }
+
+  function removeNode(id: string): void {
+    if (id === ROOT_ID) {
+      return;
+    }
+    edit((root) => mapNode(root, (node) => {
+      if (node.type !== "group") {
+        return node;
+      }
+      return { ...node, children: node.children.filter((child) => child.id !== id) };
+    }) as EditorGroup);
+  }
+
+  function moveNode(id: string, delta: -1 | 1): void {
+    if (id === ROOT_ID) {
+      return;
+    }
+    edit((root) => mapNode(root, (node) => {
+      if (node.type !== "group") {
+        return node;
+      }
+      const index = node.children.findIndex((child) => child.id === id);
+      const next = index + delta;
+      if (index < 0 || next < 0 || next >= node.children.length) {
+        return node;
+      }
+      const children = [...node.children];
+      const [item] = children.splice(index, 1);
+      children.splice(next, 0, item);
+      return { ...node, children };
+    }) as EditorGroup);
+  }
+
+  function setGroupKind(id: string, kind: "and" | "or"): void {
+    edit((root) => mapNode(root, (node) => {
+      if (node.type === "group" && node.id === id) {
+        return { ...node, kind };
+      }
+      return node;
+    }) as EditorGroup);
+  }
+
+  function toggleCollapsed(id: string): void {
+    edit((root) => mapNode(root, (node) => {
+      if (node.type === "group" && node.id === id) {
+        return { ...node, collapsed: !node.collapsed };
+      }
+      return node;
+    }) as EditorGroup);
+  }
+
+  function patchCondition(id: string, patch: Partial<EditorCondition>): void {
+    edit((root) => mapNode(root, (node) => {
+      if (node.type === "condition" && node.id === id) {
+        return { ...node, ...patch, id: node.id, type: "condition" };
+      }
+      return node;
+    }) as EditorGroup);
+  }
+
+  function conditionValues(row: EditorCondition): string[] {
+    if (row.op === "in" && row.exact === true) {
+      return [row.value];
+    }
+    if (row.op === "in") {
+      return row.value
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+    }
+    return [row.value];
+  }
+
+  function toNode(node: EditorNode): ConditionNode | null {
+    if (node.type === "condition") {
+      if (node.column.trim().length === 0) {
+        return null;
+      }
+      return {
+        column: node.column,
+        op: node.op,
+        values: conditionValues(node),
+        negated: node.negated,
+      };
+    }
+    const children = node.children
+      .map((child) => toNode(child))
+      .filter((child): child is ConditionNode => child != null);
+    if (children.length === 0) {
+      return null;
+    }
+    if (children.length === 1) {
+      return children[0];
+    }
+    return { kind: node.kind, children };
+  }
+
+
+  const conditionPayload = derived(conditionTree, ($tree) => toNode($tree));
+
+  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, addCondition, addGroup, removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }
 
 const COMPARE_OP_SET = new Set<CompareOp>(COMPARE_OPS.map((option) => option.value));
@@ -343,5 +351,3 @@ export function presetCondition(node: unknown): EditorGroup | null {
     children: [converted],
   };
 }
-
-export const conditionPayload = derived(conditionTree, ($tree) => toNode($tree));

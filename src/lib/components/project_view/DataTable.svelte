@@ -1,47 +1,9 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import {
-    rowsCache,
-    pendingPages,
-    totalRows,
-    totalFilteredRows,
-    filteredFlaggedCount,
-    visibleColumns,
-    sortKey,
-    sortDirection,
-    bodyScrollEl,
-    headerScrollEl,
-    viewportHeight,
-    scrollTop,
-    scrollLeft,
-    tableWidth,
-    ROW_HEIGHT,
-    PAGE_SIZE,
-    SELECT_COL_WIDTH,
-    INDEX_COL_WIDTH,
-    FLAG_COL_WIDTH,
-    MEMO_COL_WIDTH,
-    STICKY_COLUMNS_WIDTH,
-    MIN_DATA_WIDTH,
-    MAX_DATA_WIDTH,
-    CHAR_PIXEL,
-    COLUMN_PADDING,
-    BUFFER,
-    projectDetail,
-    columnLabels,
-    toggleSort,
-    FLAG_OPTIONS,
-    normalizeFlag,
-    setFlag,
-    editMemo,
-    openCell,
-    handleCellKeydown,
-    positionToRowIndex,
-    largePages,
-    selectedRowIds,
-    selectedCount,
-    selectVisibleRows,
-    toggleRowSelection
+    ROW_HEIGHT, PAGE_SIZE, SELECT_COL_WIDTH, INDEX_COL_WIDTH, FLAG_COL_WIDTH, MEMO_COL_WIDTH,
+    STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, CHAR_PIXEL, COLUMN_PADDING, BUFFER,
+    FLAG_OPTIONS, normalizeFlag,
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
   import type { CellKind } from '../../types';
@@ -49,12 +11,20 @@
   import CellContextMenu from './CellContextMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
-  import { rememberOffset } from '../../stores/viewHistory';
+
   import {
     logicalRowAt,
     maxScrollTop,
     virtualWindow
   } from '../../virtualScroll';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    rowsCache, pendingPages, totalRows, totalFilteredRows, filteredFlaggedCount, visibleColumns,
+    sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
+    tableWidth, projectDetail, columnLabels, toggleSort, setFlag, editMemo, openCell,
+    handleCellKeydown, positionToRowIndex, largePages, selectedRowIds, selectedCount,
+    selectVisibleRows, toggleRowSelection, rememberOffset,
+  } = useWorkspace();
 
   const _toggleSort = toggleSort;
   const _setFlag = setFlag;

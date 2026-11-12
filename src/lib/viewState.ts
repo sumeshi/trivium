@@ -1,6 +1,6 @@
 import type { EditorGroup, EditorNode } from "./stores/condition";
 import type { FlagFilterValue } from "./types";
-import { savedViewFromUnknown } from "./viewStateMapping";
+import { savedViewFromUnknown } from "./viewStateMapping.ts";
 
 export interface HistoryEntry {
   condition: EditorGroup;

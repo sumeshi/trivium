@@ -1,18 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
-  import {
-    visibleColumns,
-    hiddenColumns,
-    search,
-    searchColumns,
-    flagFilter,
-    bookmarkedOnly,
-    isExporting,
-    projectDetail,
-    backend,
-    columnLabels,
-    FLAG_FILTER_OPTIONS
-  } from './state';
+  import { FLAG_FILTER_OPTIONS } from './state';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
@@ -23,7 +11,11 @@
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
   import TimelinePanel from './TimelinePanel.svelte';
-
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    visibleColumns, hiddenColumns, search, searchColumns, flagFilter, bookmarkedOnly,
+    isExporting, projectDetail, backend, columnLabels,
+  } = useWorkspace();
 
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;

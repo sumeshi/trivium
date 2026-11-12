@@ -1,17 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import {
-    memoEditor,
-    backend,
-    sanitizeMemoInput,
-    nextAnnotationRequest,
-    isLatestAnnotationRequest,
-    updateCachedRow,
-    applyAnnotationEntry,
-    flaggedCount,
-    currentProjectId,
-  } from './state';
+  import { sanitizeMemoInput, applyAnnotationEntry } from './state';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    memoEditor, backend, nextAnnotationRequest, isLatestAnnotationRequest, updateCachedRow,
+    flaggedCount, currentProjectId,
+  } = useWorkspace();
 
   const dispatch = createEventDispatcher();
 

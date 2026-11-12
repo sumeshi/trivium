@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { canGoBack, canGoForward, goBack, goForward } from "../../stores/viewHistory";
+  import { useWorkspace } from "../../workspaceContext";
+  const { canGoBack, canGoForward, goBack, goForward } = useWorkspace();
+
 </script>
 
 <div class="history-buttons" role="group" aria-label="Condition history">

@@ -6,8 +6,11 @@
   import type { TimeAnalysis } from "../../types";
   import { shouldRequestPanel } from "../../panelRequest";
   import TimeSpanList from "./TimeSpanList.svelte";
-  import { annotationVersions, appliedFilters, backend, columnLabels, projectDetail } from "./state";
+  import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
+  import { useWorkspace } from "../../workspaceContext";
+  const { appliedFilters, backend, columnLabels, projectDetail, createReadScope } = useWorkspace();
+  const reads = createReadScope();
 
   export let open = false;
 
@@ -26,6 +29,7 @@
   const requests = createLatestRequest();
 
   onDestroy(() => {
+    reads.dispose();
     requests.dispose();
   });
 
@@ -51,6 +55,7 @@
     activeBurstMin: number | null,
     spec: AppliedFilters
   ) => {
+    reads.cancelAll();
     const ticket = requests.next();
     analysis = null;
     error = "";
@@ -61,7 +66,8 @@
     }
     loading = true;
     try {
-      const next = await api.timeAnalysis({
+      const next = await reads.run("analysis", api, (requestId) => api.timeAnalysis({
+        requestId,
         projectId: activeScope.projectId,
         column: activeColumn,
         gapSeconds: activeGap ?? 60,
@@ -73,7 +79,7 @@
         flagFilter: spec.flag,
         bookmarkedOnly: spec.bookmarkedOnly,
         condition: spec.condition,
-      });
+      }));
       if (!requests.isCurrent(ticket)) {
         return;
       }
@@ -89,6 +95,7 @@
   };
 
   $: if (!open) {
+    reads.cancelAll();
     // Ignore any response that was already in flight.
     requests.invalidate();
     loading = false;

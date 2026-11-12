@@ -4,14 +4,13 @@
   import { createLatestRequest } from '../../latestRequest';
   import type { GetCellResult } from '../../backend';
   import type { ProjectRow } from '../../types';
-  import {
-    backend,
-    columnLabels,
-    expandedCell,
-    hiddenColumns,
-    projectDetail,
-  } from './state';
+
   import { copyText, displayText } from '../../ipcValues';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    backend, columnLabels, expandedCell, hiddenColumns, projectDetail, createReadScope,
+  } = useWorkspace();
+  const reads = createReadScope();
 
   const dispatch = createEventDispatcher();
 
@@ -33,6 +32,7 @@
   let retry = 0;
 
   onDestroy(() => {
+    reads.dispose();
     aroundRequests.dispose();
     cellRequests.dispose();
   });
@@ -67,11 +67,12 @@
     fullState = 'loading';
     fullError = '';
     try {
-      const result = await api.getCell({
+      const result = await reads.run("cell", api, (requestId) => api.getCell({
+        requestId,
         projectId: target.projectId,
         rowIndex: target.rowIndex,
         columnId: target.columnId,
-      });
+      }));
       // A response for a closed dialog or a different project/row/column is
       // stale even if it arrived successfully.
       if (!cellRequests.isCurrent(ticket)) return;
@@ -95,6 +96,9 @@
     loadedKey = fetchKey;
     void loadFullValue();
   } else if (!fetchKey) {
+    reads.cancelAll();
+    aroundRequests.invalidate();
+    around = null;
     loadedKey = '';
     cellRequests.invalidate();
     fullValue = null;
@@ -159,13 +163,14 @@
     around = null;
     error = '';
     try {
-      const next = await api.surroundingRows({
+      const next = await reads.run("around", api, (requestId) => api.surroundingRows({
+        requestId,
         projectId: activeProjectId,
         rowIndex,
         column,
         mode: activeMode,
         count: activeCount,
-      });
+      }));
       if (!aroundRequests.isCurrent(ticket)) return;
       around = next.rows;
     } catch (err) {
@@ -178,6 +183,7 @@
   $: if ($expandedCell && $backend && projectId && timeColumn && ready(count)) {
     void loadAround(projectId, $expandedCell.rowIndex, timeColumn, mode, count ?? 0);
   } else if ($expandedCell) {
+    reads.cancel("around");
     aroundRequests.invalidate();
     around = [];
     error = timeColumn ? '' : 'No datetime column.';

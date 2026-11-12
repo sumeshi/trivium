@@ -1,117 +1,36 @@
-export interface ColumnMeta {
-  /** Internal column id (`c000001` for new projects, the column name for legacy projects). */
-  id: string;
-  /** Display label. Not guaranteed to be unique. */
-  label: string;
-  /** Original CSV header or JSON Pointer. */
-  source: string;
-  order: number;
-}
+import type * as Wire from "./generated/engine";
 
-export interface ProjectMeta {
-  id: string;
-  name: string;
-  description?: string | null;
-  created_at: string;
-  total_records: number;
-  flagged_records: number;
-  ioc_applied_records: number;
-  source_sha256?: string | null;
-  source_file_name?: string | null;
-  source_format?: "csv" | "json" | "jsonl" | "ndjson" | string | null;
-  source_size?: number | null;
-  /** Absolute path of the evidence file when the project was created. */
-  source_path?: string | null;
-  hidden_columns: string[];
-  storage_version?: number;
-  columns?: ColumnMeta[];
-}
-
-export interface ProjectSummary {
-  meta: ProjectMeta;
-}
-
-export type FlagSymbol = 'safe' | 'suspicious' | 'critical';
-
-export type CellKind =
-  | "string"
-  | "int"
-  | "float"
-  | "bool"
-  | "array"
-  | "object"
-  | "null"
-  | "missing";
-
-/**
- * Cell value from the backend. In list responses `text` is a preview up to 256
- * characters; `truncated` and `length` describe the original value. `getCell`
- * returns the full text in the same shape. Integers arrive as decimal strings
- * so the UI never converts them through `Number`.
- */
-export interface Cell {
-  text: string | null;
-  kind: CellKind;
-  /** True when `text` is only the list preview. */
-  truncated?: boolean;
-  /** Original character count; `null`/absent for null and missing cells. */
-  length?: number | null;
-}
-
-export interface ProjectRow {
-  row_index: number;
-  /** Exact display/copy cells, keyed by column id. */
-  cells: Record<string, Cell>;
-  flag: string;
-  memo?: string | null;
-  tags: string[];
-  bookmarked: boolean;
-  color?: string | null;
-}
-
-/** Stored annotation for one row. */
-export interface FlagEntry {
-  flag: string;
-  memo?: string | null;
-  tags: string[];
-  bookmarked: boolean;
-}
-
+// Wire shapes are generated from Rust. These refinements express UI enums and
+// accept optional fields from older saved projects without changing the wire.
+export type ColumnMeta = Wire.ColumnMeta;
+type LegacyMetaFields = "description" | "source_sha256" | "source_file_name" |
+  "source_format" | "source_size" | "source_path" | "storage_version" | "columns";
+export type ProjectMeta = Omit<Wire.ProjectMeta, LegacyMetaFields> &
+  Partial<Pick<Wire.ProjectMeta, LegacyMetaFields>>;
+export type ProjectSummary = Omit<Wire.ProjectSummary, "meta"> & { meta: ProjectMeta };
+export type FlagSymbol = "safe" | "suspicious" | "critical";
+export type CellKind = "string" | "int" | "float" | "bool" | "array" | "object" | "null" | "missing";
+/** Source integers and timestamps stay in text, never JavaScript Number. */
+export type Cell = Omit<Wire.Cell, "kind" | "truncated" | "length"> &
+  Partial<Pick<Wire.Cell, "truncated" | "length">> & { kind: CellKind };
+export type ProjectRow = Omit<Wire.ProjectRow, "cells" | "memo" | "color"> &
+  Partial<Pick<Wire.ProjectRow, "memo" | "color">> & { cells: Record<string, Cell> };
+export type FlagEntry = Omit<Wire.FlagEntry, "memo"> & Partial<Pick<Wire.FlagEntry, "memo">>;
 export type FlagFilterSelection = FlagSymbol | "none";
-
-/** Legacy single values remain valid; new selections use pipe-separated tokens. */
-export type FlagFilterValue = "all" | "priority" | FlagFilterSelection
-  | `${FlagFilterSelection}|${string}`;
-
-/**
- * Shared query contract. `searchColumns` is the search scope, not the visible
- * columns: an empty array means every data column.
- */
-export type QuerySpec = {
-  search: string;
-  searchColumns: string[];
-  condition: ConditionNode | null;
-  flagFilter: FlagFilterValue;
-  bookmarkedOnly: boolean;
-  sortKey: string | null;
-  sortDirection: "asc" | "desc";
-};
-
-export interface IocEntry {
-  id?: string;
-  flag: FlagSymbol;
-  tag: string;
-  query: string;
-}
-
+/** Legacy single values remain readable; new combinations are pipe-separated. */
+export type FlagFilterValue = "all" | "priority" | FlagFilterSelection |
+  `${FlagFilterSelection}|${string}`;
+export type CompareOp = Wire.Op;
+export type ConditionLeaf = Wire.Condition;
+export type ConditionGroup = Wire.Group;
+export type ConditionNode = Wire.Node;
+/** Normalized UI query; omission/null remain supported in the wire input. */
+export type QuerySpec = { [K in keyof Required<Wire.QuerySpec>]:
+  K extends "condition" | "sortKey" ? Wire.QuerySpec[K] : NonNullable<Wire.QuerySpec[K]>
+} & { flagFilter: FlagFilterValue; sortDirection: "asc" | "desc" };
+export type IocEntry = Omit<Wire.IocEntry, "flag"> & { id?: string; flag: FlagSymbol };
 export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
-
-export interface ColorRule {
-  name: string;
-  condition: ConditionNode;
-  color: string;
-}
-
+export type ColorRule = Wire.ColorRule;
 export interface PresetData {
   name?: string | null;
   condition?: ConditionNode | null;
@@ -120,160 +39,39 @@ export interface PresetData {
   sortDirection: "asc" | "desc" | null;
   unknown_columns: string[];
 }
-
-export interface LoadProjectResponse {
+export type LoadProjectResponse = Omit<Wire.LoadProjectResponse,
+  "project" | "column_max_chars" | "column_kinds" | "iocs" | "initial_rows"> & {
   project: ProjectSummary;
-  /** Data column ids in source order. Legacy ids are the original column names. */
-  columns: string[];
-  /** Display/source metadata for `columns`. */
-  columns_meta: ColumnMeta[];
-  hidden_columns: string[];
   column_max_chars: Record<string, number>;
   column_kinds: Record<string, ColumnKind>;
   iocs: IocEntry[];
-  color_rules: ColorRule[];
   initial_rows: ProjectRow[];
-}
-
-/**
- * Rebuildable view settings stored per project by the engine. This is
- * independent from annotations: the UI can fall back to defaults when it is
- * missing or unreadable without hiding evidence or saved annotations.
- */
-/** Result of reading view state; `status` separates missing from unreadable. */
-export interface LoadViewStateResult {
-  state: ViewState | null;
-  status: "ok" | "missing" | "unreadable" | "newer";
-}
-
-export interface ViewState {
-  version: number;
-  search: string;
-  searchColumns: string[];
-  /** EditorGroup JSON; the engine stores it without interpreting it. */
+};
+export type ViewState = Omit<Wire.ViewState,
+  "condition" | "flagFilter" | "sortDirection" | "columnWidths"> & {
   condition: Record<string, unknown> | null;
   flagFilter: FlagFilterValue;
-  bookmarkedOnly: boolean;
-  sortKey: string | null;
   sortDirection: "asc" | "desc";
-  hiddenColumns: string[];
   columnWidths: Record<string, number>;
-  logicalRow: number;
-}
-
-export interface ValueCount {
-  value: string;
-  count: number;
-}
-
-export interface ColumnStats {
-  column: string;
-  kind: ColumnKind;
-  missing: number;
-  unique: number;
-  top: ValueCount[];
-  rare: ValueCount[];
-}
-
-export interface HistogramBucket {
-  start: string;
-  end: string;
-  end_inclusive: boolean;
-  count: number;
-  flags: { safe: number; suspicious: number; critical: number; unflagged: number };
-}
-
-export interface Histogram {
-  column: string;
-  kind: ColumnKind;
-  buckets: HistogramBucket[];
-  missing: number;
-  outside: number;
-  full_range: { min: string; max: string } | null;
-  auto_focused: boolean;
-}
-
-export interface TimeSpan {
-  start: string;
-  end: string;
-  count: number;
-}
-
-export interface TimeAnalysis {
-  column: string;
-  gaps: TimeSpan[];
-  sessions: TimeSpan[];
-  bursts: TimeSpan[];
-}
-
-export interface SurroundingRows {
-  rows: ProjectRow[];
-}
-
-export type CompareOp =
-  | "eq"
-  | "ne"
-  | "gt"
-  | "lt"
-  | "ge"
-  | "le"
-  | "contains"
-  | "startsWith"
-  | "endsWith"
-  | "regex"
-  | "in";
-
-export interface ConditionLeaf {
-  column: string;
-  op: CompareOp;
-  values: string[];
-  negated: boolean;
-}
-
-export interface ConditionGroup {
-  kind: "and" | "or";
-  children: ConditionNode[];
-}
-
-export type ConditionNode = ConditionLeaf | ConditionGroup;
-
-export interface GroupTreeNode {
+};
+export type LoadViewStateResult = Omit<Wire.ViewStateLoad, "state" | "status"> & {
+  state: ViewState | null;
+  status: "ok" | "missing" | "unreadable" | "newer";
+};
+export type ValueCount = Wire.ValueCount;
+export type ColumnStats = Omit<Wire.ColumnStats, "kind"> & { kind: ColumnKind };
+export type HistogramBucket = Wire.HistogramBucket;
+export type Histogram = Omit<Wire.Histogram, "kind"> & { kind: ColumnKind };
+export type TimeSpan = Wire.TimeSpan;
+export type TimeAnalysis = Wire.TimeAnalysis;
+export interface SurroundingRows { rows: ProjectRow[] }
+export type GroupTreeNode = Omit<Wire.GroupTreeNode, "value" | "children"> & {
   value: unknown;
-  label: string;
-  count: number;
   children: GroupTreeNode[];
-}
-
-export interface GroupTreeResponse {
-  columns: string[];
-  nodes: GroupTreeNode[];
-  total: number;
-}
-
-export interface BulkCount {
-  count: number;
-  previewToken: string;
-}
-
-export interface BulkApplied {
-  updated: number;
-}
-
-export type JobKind = "import" | "query" | "export";
-
-/** A background job reported by the desktop backend. */
-export interface JobInfo {
-  /** Monotonic process-local id; also the job generation. */
-  id: number;
-  kind: JobKind;
-  projectId: string | null;
-}
-
-/** A throttled background-job progress value. */
-export interface JobProgress {
-  id: number;
-  kind: JobKind;
-  done: number;
-  total: number | null;
-  message: string | null;
-}
+};
+export type GroupTreeResponse = Omit<Wire.GroupTreeResponse, "nodes"> & { nodes: GroupTreeNode[] };
+export type BulkCount = Wire.BulkCount;
+export type BulkApplied = Wire.BulkApplied;
+export type JobKind = Wire.JobKind;
+export type JobInfo = Wire.JobInfo;
+export type JobProgress = Wire.JobProgress;

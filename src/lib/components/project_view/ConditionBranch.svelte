@@ -1,17 +1,13 @@
 <script lang="ts">
   import type { CompareOp } from "../../types";
   import type { EditorNode } from "../../stores/condition";
-  import { columnLabels, projectDetail } from "./state";
-  import {
-    COMPARE_OPS,
-    addCondition,
-    addGroup,
-    moveNode,
-    patchCondition,
-    removeNode,
-    setGroupKind,
-    toggleCollapsed,
-  } from "../../stores/condition";
+
+  import { COMPARE_OPS } from '../../stores/condition';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    columnLabels, projectDetail, addCondition, addGroup, moveNode, patchCondition, removeNode,
+    setGroupKind, toggleCollapsed,
+  } = useWorkspace();
 
   export let node: EditorNode;
   export let columns: string[] = [];

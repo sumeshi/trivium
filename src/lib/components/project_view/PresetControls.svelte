@@ -2,8 +2,12 @@
   import { errorMessage } from "../../errors";
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
-  import { conditionPayload, conditionTree, presetCondition } from '../../stores/condition';
-  import { backend, hiddenColumns, projectDetail, sortDirection, sortKey } from './state';
+  import { presetCondition } from '../../stores/condition';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    conditionPayload, conditionTree, backend, hiddenColumns, projectDetail, sortDirection,
+    sortKey,
+  } = useWorkspace();
 
   let error = '';
   let notice = '';

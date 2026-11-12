@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::commands::job::{run_blocking, run_job};
+use crate::commands::job::{run_blocking, run_job_with_request};
 use crate::state::AppState;
 use trivium_engine::jobs::JobKind;
 use trivium_engine::models::{LoadProjectResponse, ProjectSummary};
@@ -19,9 +19,10 @@ pub async fn create_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     payload: CreateProjectPayload,
+    request_id: Option<String>,
 ) -> Result<ProjectSummary, String> {
     let store = state.projects.clone();
-    run_job(app, JobKind::Import, None, move |job| {
+    run_job_with_request(app, JobKind::Import, None, request_id, move |job| {
         ops::projects::create_project_with_job(&store, payload, &job)
     })
     .await
@@ -40,9 +41,20 @@ pub async fn delete_project(
 /// Loads project metadata, initial rows, IOC entries, and column metrics.
 #[tauri::command]
 pub async fn load_project(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     request: ProjectRequest,
+    metadata_only: Option<bool>,
+    request_id: Option<String>,
 ) -> Result<LoadProjectResponse, String> {
     let store = state.projects.clone();
-    run_blocking(move || ops::projects::load_project(&store, request)).await
+    let project_id = Some(request.project_id);
+    run_job_with_request(app, JobKind::Load, project_id, request_id, move |job| {
+        if metadata_only.unwrap_or(false) {
+            ops::projects::load_project_metadata_with_job(&store, request, &job)
+        } else {
+            ops::projects::load_project_with_job(&store, request, &job)
+        }
+    })
+    .await
 }

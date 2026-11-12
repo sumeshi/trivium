@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { TimeSpan } from "../../types";
   import { compactTimestamp, durationLabel, durationNanos, rankedSpans } from "../../panelPresentation";
-  import { filterByRange } from "../../stores/condition";
+  import { useWorkspace } from "../../workspaceContext";
+  const { filterByRange } = useWorkspace();
 
   export let column: string;
   export let spans: TimeSpan[] = [];

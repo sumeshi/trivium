@@ -1,4 +1,5 @@
 import { derived, get, writable } from "svelte/store";
+import { createOwnedRequests } from "../workspaceRequests.ts";
 import type { Backend } from "../backend";
 import type { LoadProjectResponse, ProjectSummary } from "../types";
 
@@ -19,6 +20,8 @@ export interface ProjectsState {
 
 export function createProjectController(backend: Backend) {
   // Only the active detail is retained; inactive tabs have IDs and UI snapshots.
+  let disposed = false;
+  const reads = createOwnedRequests();
   let detailGeneration = 0;
   let listGeneration = 0;
   const state = writable<ProjectsState>({
@@ -52,18 +55,22 @@ export function createProjectController(backend: Backend) {
   }
 
   async function loadProjects(force = false) {
+    if (disposed) return;
     if (get(state).projectsLoaded && !force) return;
     const generation = ++listGeneration;
     state.update((value) => ({ ...value, isLoadingProjects: true }));
     try {
       const projects = await backend.listProjects();
-      if (generation !== listGeneration) return;
+      if (disposed || generation !== listGeneration) return;
       const existing = new Set(projects.map((project) => project.meta.id));
       const current = get(state);
       const openProjectIds = current.openProjectIds.filter((id) => existing.has(id));
       const selectedExists = !!current.selectedProjectId && existing.has(current.selectedProjectId);
       const nextId = selectedExists ? current.selectedProjectId : openProjectIds[0] ?? null;
-      if (nextId !== current.selectedProjectId) detailGeneration += 1;
+      if (nextId !== current.selectedProjectId) {
+        detailGeneration += 1;
+        reads.cancelAll();
+      }
       state.update((value) => ({
         ...value, projects, openProjectIds, projectsLoaded: true, isLoadingProjects: false,
         selectedProjectId: nextId,
@@ -72,22 +79,23 @@ export function createProjectController(backend: Backend) {
       }));
       if (!selectedExists && nextId) await loadProjectDetail(nextId);
     } catch (error) {
-      if (generation !== listGeneration) return;
+      if (disposed || generation !== listGeneration) return;
       state.update((value) => ({ ...value, isLoadingProjects: false }));
       throw error;
     }
   }
 
   async function loadProjectDetail(projectId: string) {
+    if (disposed) return;
     const generation = ++detailGeneration;
     state.update((value) => ({
       ...value, selectedProjectId: projectId, projectDetail: null, isLoadingDetail: true,
       openProjectIds: value.openProjectIds.includes(projectId)
         ? value.openProjectIds : [...value.openProjectIds, projectId],
     }));
-    const isCurrent = () => generation === detailGeneration && get(state).selectedProjectId === projectId;
+    const isCurrent = () => !disposed && generation === detailGeneration && get(state).selectedProjectId === projectId;
     try {
-      const loaded = await backend.loadProject(projectId);
+      const loaded = await reads.run("detail", backend, (requestId) => backend.loadProject(projectId, requestId));
       if (!isCurrent()) return;
       // ProjectView intentionally fetches fresh pages. Keeping the import seed
       // here would retain another row payload without ever displaying it.
@@ -117,6 +125,7 @@ export function createProjectController(backend: Backend) {
       return;
     }
     detailGeneration += 1;
+    reads.cancelAll();
     const nextId = openProjectIds[Math.min(index, openProjectIds.length - 1)] ?? null;
     state.update((value) => ({
       ...value, openProjectIds, selectedProjectId: nextId,
@@ -141,8 +150,10 @@ export function createProjectController(backend: Backend) {
         path: current.pendingFilePath, description: current.pendingDescription || null,
         delimiter: current.pendingDelimiter,
       });
+      if (disposed) return summary;
       resetPending();
       await loadProjects(true);
+      if (disposed) return summary;
       // A user may have switched tabs while import was running. Its late
       // response may add the new tab, but must not replace that newer choice.
       state.update((value) => ({
@@ -153,6 +164,7 @@ export function createProjectController(backend: Backend) {
       state.update((value) => ({ ...value, creating: false }));
       return summary;
     } catch (error) {
+      if (disposed) throw error;
       state.update((value) => ({ ...value, creating: false }));
       throw error;
     }
@@ -182,7 +194,21 @@ export function createProjectController(backend: Backend) {
     });
   }
 
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    detailGeneration += 1;
+    listGeneration += 1;
+    reads.dispose();
+    state.update((value) => ({
+      ...value, projects: [], openProjectIds: [], selectedProjectId: null,
+      projectDetail: null, isLoadingProjects: false, isLoadingDetail: false,
+      pendingFilePath: null,
+    }));
+  }
+
   return {
+    dispose,
     state: { subscribe: state.subscribe }, canCreateProject, loadProjects,
     loadProjectDetail, selectProject, closeProject, refreshSelected, createProject,
     deleteProject, setPendingDescription, setPendingDelimiter, setPendingFile,

@@ -8,6 +8,8 @@
     "build": "vite build",
     "lint": "svelte-check --tsconfig ./tsconfig.json",
     "lint:test": "tsc -p tsconfig.test.json",
+    "contracts:check": "cargo run --locked -p trivium-engine --bin export_contracts -- --check",
+    "contracts:generate": "cargo run --locked -p trivium-engine --bin export_contracts",
     "test:ui": "node --test --experimental-strip-types src/lib/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"

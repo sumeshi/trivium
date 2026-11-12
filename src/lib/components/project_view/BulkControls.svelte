@@ -6,18 +6,14 @@
     buildBulkAnnotateArgs,
     buildFlagMemoPatch,
   } from "../../bulkAnnotation";
-  import {
-    appliedFilters,
-    appliedResultLoading,
-    backend,
-    projectDetail,
-    selectedCount,
-    selectedRowIds,
-    sortDirection,
-    sortKey,
-    totalFilteredRows,
-    FLAG_OPTIONS,
-  } from "./state";
+  import { FLAG_OPTIONS } from './state';
+  import { useWorkspace } from "../../workspaceContext";
+  const {
+    appliedFilters, appliedResultLoading, backend, projectDetail, selectedCount, selectedRowIds,
+    sortDirection, sortKey, totalFilteredRows, createReadScope,
+  } = useWorkspace();
+
+  const reads = createReadScope();
 
   let target: "selection" | "filtered" | "all" = "filtered";
   let flag: NonNullable<AnnotationPatch["flag"]> = FLAG_OPTIONS[0].value;
@@ -34,6 +30,7 @@
 
   onDestroy(() => {
     alive = false;
+    reads.dispose();
   });
 
   $: projectId = $projectDetail?.project.meta.id ?? "";
@@ -69,7 +66,9 @@
     error = "";
     try {
       if (operation === "preview") {
-        const result = await $backend.bulkPreview(buildArgs(flagMemoPatch()));
+        const api = $backend;
+        const args = buildArgs(flagMemoPatch());
+        const result = await reads.run("preview", api, (requestId) => api.bulkPreview({ ...args, requestId }));
         if (!alive) return;
         count = result.count;
         previewToken = result.previewToken;
@@ -117,7 +116,8 @@
       operation === "add" ? { add_tags: [tag] } : { remove_tags: [tag] };
     try {
       const args = buildArgs(patch);
-      const preview = await $backend.bulkPreview(args);
+      const api = $backend;
+      const preview = await reads.run("preview", api, (requestId) => api.bulkPreview({ ...args, requestId }));
       if (!alive) return;
       count = preview.count;
       previewToken = null;

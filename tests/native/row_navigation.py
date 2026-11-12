@@ -3,7 +3,7 @@
 Build with embedded assets, then run under Xvfb, for example:
   xvfb-run -a python3 tests/native/row_navigation.py --binary target/release/trivium-desktop
 
-Requires tauri-driver and WebKitWebDriver. Uses only Python's standard library.
+Requires tauri-driver and WebKitWebDriver (Linux) or matching msedgedriver (Windows). Uses only Python's standard library.
 Every input, project and annotation belongs to an isolated temporary profile.
 The session starts through tauri-driver; subsequent commands go directly to its
 owned WebKitWebDriver to avoid intermittent EOFs in tauri-driver's HTTP proxy.
@@ -20,15 +20,16 @@ import math
 import os
 from pathlib import Path
 import shutil
-import signal
 import socket
-import subprocess
 import tempfile
 import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import uuid
+
+
+from runtime import IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
@@ -203,8 +204,7 @@ class WebView:
           addEventListener('unhandledrejection',e=>window.__navigationErrors.push(String(e.reason)));
           const original=window.fetch;
           const wrapped=(input,options,...rest)=>{
-            const name=typeof input==='string'&&input.startsWith('ipc://localhost/')
-              ?decodeURIComponent(new URL(input).pathname.slice(1)):'';
+""" + IPC_COMMAND_JS + """
             const promise=original.call(window,input,options,...rest);
             if(!['query_project_rows','locate_project_row','create_project','load_project','export_project'].includes(name))
               return promise;
@@ -389,7 +389,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--driver", default=shutil.which("tauri-driver") or "/workspace/.trivium-tools/bin/tauri-driver")
-    parser.add_argument("--native-driver", default=shutil.which("WebKitWebDriver") or "/usr/bin/WebKitWebDriver")
+    parser.add_argument("--native-driver", default=native_driver_default())
     parser.add_argument("--rows", nargs="+", type=int, default=[5199, 2_000_000])
     parser.add_argument("--output", type=Path, default=Path("target/native-row-navigation"))
     args = parser.parse_args()
@@ -401,18 +401,15 @@ def main() -> None:
     report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "binary": str(binary), "results": []}
     with tempfile.TemporaryDirectory(prefix="trivium-native-navigation-") as temporary:
         root = Path(temporary)
-        environment = dict(os.environ, XDG_DATA_HOME=str(root / "data"), XDG_CONFIG_HOME=str(root / "config"),
-                           XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root),
-                           GSETTINGS_BACKEND="memory", NO_AT_BRIDGE="1")
+        environment = isolated_environment(root)
         port = free_port()
         native_port = free_port()
         while native_port == port:
             native_port = free_port()
         web = WebView(port)
         with (evidence / "driver.log").open("w") as log:
-            driver = subprocess.Popen([args.driver, "--port", str(port), "--native-port", str(native_port),
-                                       "--native-driver", args.native_driver], env=environment,
-                                      stdout=log, stderr=log, start_new_session=True)
+            driver = start_driver([args.driver, "--port", str(port), "--native-port", str(native_port),
+                                   "--native-driver", args.native_driver], environment, log)
             try:
                 def ready() -> bool:
                     if driver.poll() is not None:
@@ -427,7 +424,9 @@ def main() -> None:
                     "tauri:options": {"application": str(binary)}}}})
                 web.session = session["sessionId"]
                 web.origin = f"http://127.0.0.1:{native_port}"
-                report["webdriver_transport"] = "tauri-driver session, direct owned WebKitWebDriver commands"
+                report["webdriver_transport"] = "tauri-driver session, direct owned native WebDriver commands"
+                report["platform"] = os.name
+                report["native_driver"] = args.native_driver
                 web.request("POST", web.route("timeouts"), {"script": 600000, "pageLoad": 60000, "implicit": 0})
                 web.request("POST", web.route("window/rect"), {"width": 1280, "height": 827})
                 wait_for(lambda: web.script("return typeof window.__TAURI_INTERNALS__?.invoke==='function';"), bool, "Tauri IPC ready")
@@ -437,7 +436,7 @@ def main() -> None:
                     result = {"rows": rows, "passed": False}
                     report["results"].append(result)
                     scenario(web, root, rows, result, evidence)
-                    print(f"PASS: real Tauri/WebKit {rows:,} rows; source-number Go, First/Last, filtered descending scope and geometry", flush=True)
+                    print(f"PASS: real native Tauri {rows:,} rows; source-number Go, First/Last, filtered descending scope and geometry", flush=True)
                 report["passed"] = True
             except Exception as error:
                 report["passed"] = False
@@ -462,13 +461,7 @@ def main() -> None:
                         web.request("DELETE", f"/session/{web.session}")
                     except Exception:
                         pass
-                if driver.poll() is None:
-                    os.killpg(driver.pid, signal.SIGTERM)
-                    try:
-                        driver.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(driver.pid, signal.SIGKILL)
-                        driver.wait(timeout=5)
+                stop_driver(driver)
     print(f"Evidence: {evidence / 'report.json'}", flush=True)
 
 

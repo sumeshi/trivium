@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ValueCount } from "../../types";
-  import { filterByValue } from "../../stores/condition";
+  import { useWorkspace } from "../../workspaceContext";
+  const { filterByValue } = useWorkspace();
 
   export let column: string;
   export let items: ValueCount[] = [];

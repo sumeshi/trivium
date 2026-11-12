@@ -2,9 +2,12 @@
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import type { CellKind } from '../../types';
   import type { CachedRow } from './state';
-  import { backend, openCell, projectDetail } from './state';
-  import { addFilterCondition } from '../../stores/condition';
+
   import { copyText } from '../../ipcValues';
+  import { useWorkspace } from "../../workspaceContext";
+  const { backend, openCell, projectDetail, addFilterCondition, createReadScope } = useWorkspace();
+
+  const reads = createReadScope();
 
   export let projectId: string;
   export let rowIndex: number;
@@ -34,6 +37,7 @@
 
   onDestroy(() => {
     alive = false;
+    reads.dispose();
   });
 
   const close = () => dispatch('close');
@@ -84,7 +88,8 @@
       return null;
     }
     try {
-      const result = await api.getCell({ projectId, rowIndex, columnId });
+      const result = await reads.run("cell", api, (requestId) =>
+        api.getCell({ projectId, rowIndex, columnId, requestId }));
       if (!alive) return null;
       return copyText(result);
     } catch (error) {

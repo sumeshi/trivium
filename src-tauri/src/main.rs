@@ -33,6 +33,7 @@ fn main() {
             locate_project_row,
             get_cell,
             cancel_job,
+            cancel_request_jobs,
             active_jobs,
             save_iocs,
             import_iocs,

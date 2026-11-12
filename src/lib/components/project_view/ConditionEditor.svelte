@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { totalFilteredRows, projectDetail } from "./state";
-  import { conditionTree } from "../../stores/condition";
+
   import ConditionBranch from "./ConditionBranch.svelte";
+  import { useWorkspace } from "../../workspaceContext";
+  const { totalFilteredRows, projectDetail, conditionTree } = useWorkspace();
 
   $: columns = $projectDetail?.columns ?? [];
 </script>

@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::commands::job::run_job;
+use crate::commands::job::run_job_with_request;
 use crate::state::AppState;
 use trivium_engine::jobs::JobKind;
 use trivium_engine::ops;
@@ -16,10 +16,11 @@ pub async fn query_project_rows(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     payload: QueryRowsPayload,
+    request_id: Option<String>,
 ) -> Result<QueryRowsResponse, String> {
     let store = state.projects.clone();
     let project_id = Some(payload.project_id);
-    run_job(app, JobKind::Query, project_id, move |job| {
+    run_job_with_request(app, JobKind::Query, project_id, request_id, move |job| {
         ops::rows::query_project_rows_with_job(&store, payload, &job)
     })
     .await
@@ -31,10 +32,11 @@ pub async fn locate_project_row(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     payload: LocateRowPayload,
+    request_id: Option<String>,
 ) -> Result<LocateRowResponse, String> {
     let store = state.projects.clone();
     let project_id = Some(payload.project_id);
-    run_job(app, JobKind::Query, project_id, move |job| {
+    run_job_with_request(app, JobKind::Query, project_id, request_id, move |job| {
         ops::rows::locate_project_row_with_job(&store, payload, &job)
     })
     .await
