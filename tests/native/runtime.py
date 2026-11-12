@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from pathlib import Path
 import shutil
 import signal
 import socket
 import subprocess
 import time
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
+from urllib.parse import urlsplit
 
 
 def native_driver_default() -> str:
@@ -99,23 +101,48 @@ class ApplicationSession:
             self.close()
             raise
 
+    def _probe(self, port: int, endpoint: str, diagnostic: dict):
+        diagnostic[f"{endpoint}_http"] = None
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/json/{endpoint}", timeout=2) as response:
+                diagnostic[f"{endpoint}_http"] = response.status
+                value = json.load(response)
+            diagnostic.pop(f"{endpoint}_error", None)
+            return value
+        except HTTPError as error:
+            diagnostic[f"{endpoint}_http"] = error.code
+            diagnostic[f"{endpoint}_error"] = "HTTPError"
+        except (OSError, URLError, ValueError) as error:
+            reason = error.reason if isinstance(error, URLError) else error
+            diagnostic[f"{endpoint}_error"] = type(reason).__name__
+            number = getattr(reason, "winerror", None) or getattr(reason, "errno", None)
+            if isinstance(number, int):
+                diagnostic[f"{endpoint}_error_number"] = number
+        return None
+
     def _wait_for_debugging(self, port: int, timeout: float = 45) -> dict:
         deadline = time.monotonic() + timeout
+        diagnostic = {}
         while time.monotonic() < deadline:
             code = self.process.poll()
             if code is not None:
                 raise AssertionError(f"Native app exited with code {code} before WebView2 was ready; inspect application.log")
-            try:
-                with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as response:
-                    version = json.load(response)
-                with urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2) as response:
-                    pages = json.load(response)
-                if version.get("webSocketDebuggerUrl") and any(page.get("type") == "page" for page in pages):
-                    return version
-            except (OSError, URLError, ValueError):
-                pass
+            version = self._probe(port, "version", diagnostic)
+            pages = self._probe(port, "list", diagnostic)
+            if isinstance(version, dict):
+                browser = version.get("Browser", "")
+                diagnostic["browser"] = browser if isinstance(browser, str) and re.fullmatch(r"[A-Za-z0-9./ _-]{1,80}", browser) else "unrecognized"
+            if isinstance(pages, list):
+                diagnostic["target_count"] = len(pages)
+                diagnostic["target_types"] = sorted({
+                    target.get("type") if target.get("type") in {"page", "webview", "iframe", "worker", "service_worker", "background_page"} else "other"
+                    for target in pages if isinstance(target, dict)
+                })
+            if debuggable_webview(version, pages):
+                return version
             time.sleep(.05)
-        raise AssertionError(f"Native app did not publish a WebView2 debugging page within {timeout:g} seconds; inspect application.log")
+        details = json.dumps(diagnostic, sort_keys=True, separators=(",", ":"))
+        raise AssertionError(f"Native app did not publish a debuggable WebView2 target within {timeout:g} seconds; probes={details}; inspect application.log")
 
     def close(self) -> None:
         try:
@@ -126,6 +153,39 @@ class ApplicationSession:
             if self.log is not None:
                 self.log.close()
                 self.log = None
+
+
+def debuggable_webview(version, targets) -> bool:
+    """Attach uses an actual debuggable view; browser-level WebSocket is optional."""
+    if not isinstance(version, dict) or not isinstance(version.get("Browser"), str) or not version["Browser"]:
+        return False
+    if not isinstance(targets, list):
+        return False
+    return any(isinstance(target, dict) and target.get("type") in ("page", "webview")
+               and isinstance(target.get("webSocketDebuggerUrl"), str)
+               and urlsplit(target["webSocketDebuggerUrl"]).scheme in ("ws", "wss")
+               for target in targets)
+
+
+def emit_failure_annotation(error: Exception) -> None:
+    """Expose bounded startup/protocol evidence in CI, never full native logs."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    text = str(error)
+    if text.startswith(("Native app ", "Windows native checks ", "Selected WebView2 runtime ")):
+        message = text[:1800]
+    elif text.startswith("WebDriver ") and ": {" in text:
+        try:
+            value = json.loads(text[text.index(": {") + 2:])["value"]
+            message = f"Native WebDriver {value.get('error', 'failure')}: {value.get('message', '')}"[:1200]
+        except (ValueError, KeyError, TypeError):
+            message = "Native WebDriver request failed; inspect the native artifact report."
+    else:
+        message = f"Native smoke failed ({type(error).__name__}); inspect report.json and screenshots in the native artifact."
+    message = re.sub(r"(https?://)[^/@\s]+:[^/@\s]+@", r"\1<redacted>@", message)
+    message = re.sub(r"(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]+", "<redacted>", message)
+    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=Native smoke::{message}", flush=True)
 
 
 # Both are real Tauri transports. Windows WebView2 uses the HTTP host variant.

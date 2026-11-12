@@ -1,6 +1,8 @@
 """Test the WebView2 attach contract and owned process cleanup on any host."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import io
+from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import re
@@ -9,7 +11,7 @@ from threading import Thread
 import unittest
 from unittest.mock import patch
 
-from runtime import ApplicationSession, isolated_environment
+from runtime import ApplicationSession, isolated_environment, debuggable_webview, emit_failure_annotation
 
 
 class Process:
@@ -48,8 +50,8 @@ class RuntimeTests(unittest.TestCase):
 
             class Handler(BaseHTTPRequestHandler):
                 def do_GET(self):
-                    payload = ({'Browser': 'Edg/145.1.2.3', 'webSocketDebuggerUrl': 'ws://127.0.0.1/devtools/browser/test'}
-                               if self.path == '/json/version' else [{'type': 'page', 'url': 'http://tauri.localhost'}])
+                    payload = ({'Browser': 'Edg/145.1.2.3'}
+                               if self.path == '/json/version' else [{'type': 'webview', 'url': 'http://tauri.localhost', 'webSocketDebuggerUrl': 'ws://127.0.0.1/devtools/page/test'}])
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -98,6 +100,49 @@ class RuntimeTests(unittest.TestCase):
                     ApplicationSession(root / 'debug' / 'trivium.exe', isolated_environment(root), root, platform='nt')
                 stop.assert_called_once_with(process)
                 self.assertTrue((root / 'application.log').exists())
+
+    def test_attach_needs_a_view_websocket_but_not_a_browser_websocket(self):
+        version = {'Browser': 'Edg/145.1.2.3'}
+        for kind in ('page', 'webview'):
+            self.assertTrue(debuggable_webview(version, [{'type': kind, 'webSocketDebuggerUrl': 'ws://127.0.0.1/devtools/page/test'}]))
+        self.assertFalse(debuggable_webview(version, [{'type': 'worker', 'webSocketDebuggerUrl': 'ws://127.0.0.1/devtools/worker/test'}]))
+        self.assertFalse(debuggable_webview(version, [{'type': 'page'}]))
+        self.assertFalse(debuggable_webview({}, [{'type': 'page', 'webSocketDebuggerUrl': 'ws://127.0.0.1/devtools/page/test'}]))
+
+    def test_failure_annotation_is_bounded_escaped_and_omits_uncontrolled_logs(self):
+        with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                emit_failure_annotation(AssertionError('Native app failed100%\r\nnext'))
+            self.assertEqual(output.getvalue(), '::error title=Native smoke::Native app failed100%25%0D%0Anext\n')
+            output = io.StringIO()
+            with redirect_stdout(output):
+                emit_failure_annotation(RuntimeError('private output that must not be published'))
+            self.assertNotIn('private output', output.getvalue())
+
+    def test_timeout_reports_only_safe_probe_metadata(self):
+        app = object.__new__(ApplicationSession)
+        app.process = Process()
+
+        class Response(io.BytesIO):
+            status = 200
+
+        def endpoint(request, timeout):
+            value = ({'Browser': 'Edg/145.1.2.3', 'secret': 'never-print-this'}
+                     if request.endswith('/json/version') else
+                     [{'type': 'webview', 'url': 'http://private.invalid/?secret=never-print-this'}])
+            return Response(json.dumps(value).encode())
+
+        with patch('runtime.urlopen', side_effect=endpoint), patch('runtime.time.monotonic', side_effect=[0, .01, 1]), patch('runtime.time.sleep'):
+            with self.assertRaises(AssertionError) as failure:
+                app._wait_for_debugging(12345, timeout=1)
+        message = str(failure.exception)
+        self.assertIn('"version_http":200', message)
+        self.assertIn('"list_http":200', message)
+        self.assertIn('"target_count":1', message)
+        self.assertIn('"target_types":["webview"]', message)
+        self.assertNotIn('private.invalid', message)
+        self.assertNotIn('never-print-this', message)
 
     def test_windows_refuses_a_release_binary_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

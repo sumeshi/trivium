@@ -29,7 +29,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 
-from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
+from runtime import ApplicationSession, IPC_COMMAND_JS, emit_failure_annotation, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
@@ -441,6 +441,7 @@ def main() -> None:
                     print(f"PASS: real native Tauri {rows:,} rows; source-number Go, First/Last, filtered descending scope and geometry", flush=True)
                 report["passed"] = True
             except Exception as error:
+                emit_failure_annotation(error)
                 report["passed"] = False
                 report["error"] = str(error)
                 if web.session:
