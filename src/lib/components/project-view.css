@@ -709,6 +709,22 @@ button.primary:disabled {
   --row-bg: color-mix(in srgb, var(--accent) 5%, var(--row-color, var(--row-base)));
 }
 
+/* Keep the original rule colour visible beneath an unmistakable bookmark tint.
+   Mix only opaque surfaces so frozen cells cannot reveal horizontally moving text. */
+.data-row.bookmarked {
+  --row-base: var(--bookmark-soft, color-mix(in srgb, var(--bookmark, #b58a24) 18%, var(--surface)));
+  --bookmarked-row-bg: color-mix(in srgb, var(--bookmark, #b58a24) 18%, var(--row-color, var(--row-base)));
+  --row-bg: var(--bookmarked-row-bg);
+}
+
+.data-row.bookmarked:hover {
+  --row-bg: color-mix(in srgb, var(--accent) 5%, var(--bookmarked-row-bg));
+}
+
+.data-row.bookmarked > .select-cell {
+  box-shadow: inset 3px 0 0 var(--bookmark, #b58a24);
+}
+
 .data-row:last-child {
   border-bottom: none;
 }
@@ -896,15 +912,18 @@ button.primary:disabled {
 }
 
 .flag-buttons button.flag-safe.selected {
-  background: var(--positive);
+  background: var(--flag-safe-selected-bg, var(--positive));
+  color: var(--flag-safe-selected-fg, var(--flag-selected-text));
 }
 
 .flag-buttons button.flag-suspicious.selected {
-  background: var(--warning);
+  background: var(--flag-suspicious-selected-bg, var(--warning));
+  color: var(--flag-suspicious-selected-fg, var(--flag-selected-text));
 }
 
 .flag-buttons button.flag-critical.selected {
-  background: var(--danger);
+  background: var(--flag-critical-selected-bg, var(--danger));
+  color: var(--flag-critical-selected-fg, var(--flag-selected-text));
 }
 
 .loading-placeholder {
@@ -938,12 +957,24 @@ button.primary:disabled {
 
 .memo-icon {
   flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 10px;
+  color: currentColor;
 }
 
-.memo-icon.muted {
-  opacity: 0.35;
+.memo-button:not(.has-memo) {
+  color: color-mix(in srgb, var(--muted) 72%, var(--row-bg));
+}
+
+.memo-button.has-memo {
+  color: var(--fg);
+}
+
+.memo-button.has-memo .memo-icon {
+  color: var(--muted);
+}
+
+.memo-button:not(.has-memo):hover,
+.memo-button:not(.has-memo):focus-visible {
+  color: var(--muted);
 }
 
 .memo-text,
@@ -956,7 +987,7 @@ button.primary:disabled {
 }
 
 .memo-placeholder {
-  color: var(--muted);
+  color: inherit;
 }
 
 .cell {

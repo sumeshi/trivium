@@ -415,6 +415,7 @@
                 class="data-row"
                 class:alt-row={item.position % 2 === 1}
                 class:loading={!item.row && !largePage}
+                class:bookmarked={item.row?.bookmarked === true}
                 style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
                   item.row?.color
                     ? ` --row-color: ${displayRowColor(item.row.color, $theme)};`
@@ -445,7 +446,7 @@
                       />
                     {/if}
                   </div>
-                  <div class="cell index sticky sticky-index">{item.row ? item.row.row_index + 1 : '…'}</div>
+                  <div class="cell index sticky sticky-index" title={item.row?.bookmarked ? 'Bookmarked row' : undefined}>{item.row ? item.row.row_index + 1 : '…'}</div>
                   <div class="cell flag sticky sticky-flag">
                     {#if item.row}
                       <div class="flag-buttons">
@@ -470,6 +471,8 @@
                   </div>
                   <button
                     class="cell memo-button sticky sticky-memo"
+                    class:has-memo={Boolean(item.row?.memo?.trim())}
+                    aria-label={item.row?.memo?.trim() ? `Edit memo for row ${item.row.row_index + 1}: ${item.row.memo}` : item.row ? `Add memo for row ${item.row.row_index + 1}` : 'Loading memo'}
                     on:click={() =>
                       item.row &&
                       $projectDetail &&
@@ -484,10 +487,10 @@
                     disabled={!item.row}
                   >
                     {#if item.row && item.row.memo && item.row.memo.trim().length}
-                      <span class="memo-icon" aria-hidden="true">✎</span>
+                      <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
                       <span class="memo-text">{item.row.memo}</span>
                     {:else if item.row}
-                      <span class="memo-icon muted" aria-hidden="true">✎</span>
+                      <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
                       <span class="memo-placeholder">Add memo</span>
                     {:else}
                       <span class="memo-placeholder">Loading…</span>

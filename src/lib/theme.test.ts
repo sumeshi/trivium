@@ -34,7 +34,7 @@ test("existing saved row colours follow the selected theme without rewriting sto
 // Opaque row surfaces also prevent scrolling content from bleeding through a
 // pinned cell when the table uses these theme backgrounds.
 import { readFileSync } from "node:fs";
-import { DEFAULT_THEME, THEME_OPTIONS } from "./themeModel.ts";
+import { createThemePreference, DEFAULT_THEME, PASTEL_THEME_OPTIONS, parseSavedTheme, THEME_OPTIONS } from "./themeModel.ts";
 
 const stylesheet = readFileSync(new URL("../app.css", import.meta.url), "utf8");
 function cssTokens(themeName: string): Map<string, string> {
@@ -47,17 +47,22 @@ function cssTokens(themeName: string): Map<string, string> {
   }
   return values;
 }
-function colour(tokens: Map<string, string>, name: string): string {
-  let value = tokens.get(name) ?? "";
-  const visited = new Set<string>();
-  for (;;) {
-    const reference = /^var\(--([\w-]+)\)$/.exec(value);
-    if (!reference) return value;
-    assert.ok(!visited.has(reference[1]), `CSS token cycle: ${name}`);
-    visited.add(reference[1]);
-    value = tokens.get(reference[1]) ?? "";
-  }
+function colour(tokens: Map<string, string>, name: string, seen = new Set<string>()): string {
+  assert.ok(!seen.has(name), `CSS token cycle: ${name}`);
+  const visited = new Set([...seen, name]);
+  const value = tokens.get(name) ?? "";
+  const reference = /^var\(--([\w-]+)\)$/.exec(value);
+  if (reference) return colour(tokens, reference[1], visited);
+  const mix = /^color-mix\(in srgb, var\(--([\w-]+)\) ([\d.]+)%, var\(--([\w-]+)\)\)$/.exec(value);
+  if (!mix) return value;
+  const first = colour(tokens, mix[1], visited), second = colour(tokens, mix[3], visited);
+  const weight = Number(mix[2]) / 100;
+  return "#" + [1, 3, 5].map((offset) => Math.round(
+    parseInt(first.slice(offset, offset + 2), 16) * weight +
+    parseInt(second.slice(offset, offset + 2), 16) * (1 - weight),
+  ).toString(16).padStart(2, "0")).join("");
 }
+
 function luminance(hex: string): number {
   assert.match(hex, /^#[\da-f]{6}$/i, `Expected an opaque colour: ${hex}`);
   const channel = (offset: number) => {
@@ -75,15 +80,45 @@ function readable(tokens: Map<string, string>, foreground: string, background: s
   assert.ok(ratio >= minimum, `${context}: ${foreground}/${background} contrast ${ratio.toFixed(2)} < ${minimum}`);
 }
 
-test("first-run preference is the site-inspired Trivium theme and saved choices remain valid", () => {
-  assert.equal(DEFAULT_THEME, "trivium");
+test("neutral Light is the default and ten distinct pastel choices include the renamed Yukari", () => {
+  assert.equal(DEFAULT_THEME, "light");
+  assert.equal(PASTEL_THEME_OPTIONS.length, 10);
   for (const { value } of THEME_OPTIONS) assert.equal(parseTheme(value), value);
-  for (const saved of ["light", "dark", "paper", "midnight"]) {
-    assert.equal(parseTheme(saved) ?? DEFAULT_THEME, saved);
-  }
-  assert.equal(parseTheme(null) ?? DEFAULT_THEME, "trivium");
-  assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "trivium");
+  assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
+  assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
+  for (const { value } of PASTEL_THEME_OPTIONS) assert.equal(isLightTheme(value), true);
   assert.equal(isLightTheme("mauve"), false);
+  const palettes = new Set(PASTEL_THEME_OPTIONS.map(({ value }) => {
+    const tokens = cssTokens(value);
+    return colour(tokens, "bg") + colour(tokens, "accent");
+  }));
+  assert.equal(palettes.size, 10);
+  const yukari = cssTokens("yukari");
+  assert.equal(colour(yukari, "bg"), "#f2f5fa");
+  assert.equal(colour(yukari, "accent"), "#5948a5");
+  assert.notEqual(colour(cssTokens("light"), "bg"), colour(yukari, "bg"));
+  assert.notEqual(colour(cssTokens("light"), "accent"), colour(yukari, "accent"));
+  assert.equal(colour(cssTokens("dark"), "surface"), "#171c24");
+});
+
+test("old Light preferences migrate to Yukari while newly saved Light remains neutral", () => {
+  for (const old of ["light", '{"theme":"light"}', { theme: "light" }, { version: 1, theme: "light" }]) {
+    assert.equal(parseSavedTheme(old), "yukari");
+  }
+  for (const id of ["dark", "paper", "midnight", "mauve", "trivium"] as const) {
+    assert.equal(parseSavedTheme(id), id);
+    assert.equal(parseSavedTheme({ theme: id }), id);
+  }
+  for (const { value } of THEME_OPTIONS) {
+    const saved = createThemePreference(value);
+    assert.equal(saved.version, 2);
+    assert.equal(parseSavedTheme(saved), value);
+    assert.equal(parseSavedTheme(JSON.stringify(saved)), value);
+  }
+  for (const invalid of [null, [], {}, "bad json", { version: 3, theme: "light" },
+    { version: "2", theme: "light" }, { version: 2, theme: "unknown" }]) {
+    assert.equal(parseSavedTheme(invalid), null);
+  }
 });
 
 test("all themes keep ordinary, muted and input text readable on every opaque surface", () => {
@@ -96,6 +131,10 @@ test("all themes keep ordinary, muted and input text readable on every opaque su
     }
     readable(tokens, "accent-contrast", "accent", `${value} primary control`);
     readable(tokens, "accent-border", "surface", `${value} focus indicator`, 3);
+    readable(tokens, "border-strong", "surface", `${value} checkbox boundary`, 3);
+    readable(tokens, "bookmark", "bookmark-soft", `${value} bookmark`);
+    readable(tokens, "fg", "bookmark-soft", `${value} bookmarked row`);
+    readable(tokens, "muted", "bookmark-soft", `${value} bookmarked row hint`);
     assert.ok(!tokens.get("accent-soft")?.includes("transparent"));
   }
 });
@@ -104,12 +143,13 @@ test("flag meanings retain consistent colours and readable selected symbols in e
   const semantic = ["positive", "warning", "danger"];
   const dark = cssTokens("trivium"), light = cssTokens("light");
   const backgrounds = ["surface", "surface-weak", "surface-soft", "surface-strong",
-    "rule-red", "rule-orange", "rule-amber", "rule-green", "rule-teal", "rule-blue", "rule-purple", "rule-pink"];
+    "rule-red", "rule-orange", "rule-amber", "rule-green", "rule-teal", "rule-blue", "rule-purple", "rule-pink", "bookmark-soft"];
   for (const { value } of THEME_OPTIONS) {
     const tokens = cssTokens(value), family = isLightTheme(value) ? light : dark;
     for (const flag of semantic) {
       assert.equal(colour(tokens, flag), colour(family, flag), `${value} must preserve the ${flag} meaning`);
-      readable(tokens, "flag-selected-text", flag, `${value} selected flag`);
+      const key = flag === "positive" ? "safe" : flag === "warning" ? "suspicious" : "critical";
+      readable(tokens, `flag-${key}-selected-fg`, `flag-${key}-selected-bg`, `${value} soft selected flag`);
       for (const background of backgrounds) readable(tokens, flag, background, `${value} flag on row`);
     }
   }

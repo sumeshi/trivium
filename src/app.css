@@ -3,38 +3,45 @@
 @tailwind utilities;
 
 @layer base {
-  /* The first-run palette follows sumeshi.github.io's #0c111b navy,
-     off-white text and indigo links. Surfaces stay opaque for sticky cells.
-     Source: sumeshi/sumeshi.github.io@88b4e9d, src/app.css. */
+  /* Neutral Light is the first-run palette. Opaque surfaces keep fixed table
+     cells independent from the horizontally scrolling content below them. */
   :root,
-  [data-theme="trivium"] {
-    color-scheme: dark;
-    --bg: #0c111b;
-    --fg: #f3f4f6;
-    --muted: #aab6ca;
-    --surface: #111827;
-    --surface-weak: #19243a;
-    --surface-soft: #151e30;
-    --surface-strong: #22314a;
-    --overlay: rgba(8, 12, 22, 0.88);
-    --border: #34425b;
-    --border-strong: #63738e;
-    --hover: color-mix(in srgb, var(--fg) 6%, var(--surface));
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg: #f4f5f7;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #eef0f4;
+    --surface-soft: #fafbfc;
+    --surface-strong: #dfe3e9;
+    --overlay: rgba(238, 240, 245, 0.9);
+    --border: #c7ced7;
+    --border-strong: #828e9c;
+    --hover: color-mix(in srgb, var(--fg) 5%, var(--surface));
     --heading: var(--fg);
-    --accent: #a5b4fc;
-    --accent-contrast: #101525;
-    --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    --accent: #3e628d;
+    --accent-contrast: #ffffff;
+    --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--surface));
     --accent-border: var(--accent);
-    --positive: #81d0a5;
-    --positive-soft: color-mix(in srgb, var(--positive) 14%, var(--surface));
-    --warning: #f0c879;
-    --warning-soft: color-mix(in srgb, var(--warning) 14%, var(--surface));
-    --danger: #f29b9b;
-    --danger-soft: color-mix(in srgb, var(--danger) 14%, var(--surface));
-    --flag-selected-text: #111827;
+    --positive: #176345;
+    --positive-soft: color-mix(in srgb, var(--positive) 12%, var(--surface));
+    --warning: #80520b;
+    --warning-soft: color-mix(in srgb, var(--warning) 12%, var(--surface));
+    --danger: #a72840;
+    --danger-soft: color-mix(in srgb, var(--danger) 12%, var(--surface));
+    --flag-selected-text: #ffffff;
     --flag-safe-text: var(--positive);
     --flag-suspicious-text: var(--warning);
     --flag-critical-text: var(--danger);
+    --flag-safe-selected-bg: var(--positive-soft);
+    --flag-safe-selected-fg: var(--positive);
+    --flag-suspicious-selected-bg: var(--warning-soft);
+    --flag-suspicious-selected-fg: var(--warning);
+    --flag-critical-selected-bg: var(--danger-soft);
+    --flag-critical-selected-fg: var(--danger);
+    --bookmark: #8a6515;
+    --bookmark-soft: #fff5c8;
     --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
       Roboto, "Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Kaku Gothic ProN",
       "Hiragino Sans", "Microsoft YaHei", Arial, sans-serif;
@@ -43,6 +50,29 @@
     --radius-sm: 6px;
     --radius: 10px;
     --radius-lg: 14px;
+    --shadow-soft: 0 8px 24px rgba(31, 41, 55, 0.09);
+    --shadow-strong: 0 18px 48px rgba(31, 41, 55, 0.17);
+    --rule-red: #fbe4e4;
+    --rule-orange: #fbe9db;
+    --rule-amber: #faf1d5;
+    --rule-green: #e2f3e8;
+    --rule-teal: #dcf2f0;
+    --rule-blue: #e3ecfb;
+    --rule-purple: #ece6fb;
+    --rule-pink: #fbe4ef;
+  }
+
+  [data-theme="dark"],
+  [data-theme="midnight"],
+  [data-theme="mauve"],
+  [data-theme="trivium"] {
+    color-scheme: dark;
+    --positive: #81d0a5;
+    --warning: #f0c879;
+    --danger: #f29b9b;
+    --flag-selected-text: #111827;
+    --bookmark: #efcc7c;
+    --bookmark-soft: #393522;
     --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
     --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.42);
     --rule-red: #4a2b2f;
@@ -55,6 +85,7 @@
     --rule-pink: #472a3b;
   }
 
+  /* Dark retains its neutral surfaces; only selected flags use softer fills. */
   [data-theme="dark"] {
     --bg: #101318;
     --fg: #edf1f7;
@@ -70,9 +101,9 @@
     --accent-contrast: #111b2b;
   }
 
-  [data-theme="light"],
-  [data-theme="paper"] {
-    color-scheme: light;
+  /* Yukari preserves the former Light surfaces and purple accent. The other
+     pastel palettes give that family distinct, restrained Japanese colours. */
+  [data-theme="yukari"] {
     --bg: #f2f5fa;
     --fg: #202b3d;
     --muted: #4f5f74;
@@ -80,26 +111,126 @@
     --surface-weak: #e9eef6;
     --surface-soft: #f7f9fc;
     --surface-strong: #dce4f0;
-    --overlay: rgba(236, 241, 248, 0.88);
     --border: #c5cfdd;
     --border-strong: #8192ab;
-    --hover: color-mix(in srgb, var(--fg) 5%, var(--surface));
     --accent: #5948a5;
-    --accent-contrast: #ffffff;
-    --positive: #176345;
-    --warning: #80520b;
-    --danger: #a72840;
-    --flag-selected-text: #ffffff;
-    --shadow-soft: 0 8px 24px rgba(31, 41, 55, 0.09);
-    --shadow-strong: 0 18px 48px rgba(31, 41, 55, 0.17);
-    --rule-red: #fbe4e4;
-    --rule-orange: #fbe9db;
-    --rule-amber: #faf1d5;
-    --rule-green: #e2f3e8;
-    --rule-teal: #dcf2f0;
-    --rule-blue: #e3ecfb;
-    --rule-purple: #ece6fb;
-    --rule-pink: #fbe4ef;
+  }
+
+  [data-theme="sakura"] {
+    --bg: #fbf3f7;
+    --fg: #372c36;
+    --muted: #665568;
+    --surface: #fffafd;
+    --surface-weak: #f4e8ef;
+    --surface-soft: #fcf6fa;
+    --surface-strong: #ecdce7;
+    --border: #ddc6d5;
+    --border-strong: #a57b97;
+    --accent: #923c6a;
+  }
+
+  [data-theme="sora"] {
+    --bg: #f1f7fc;
+    --fg: #25364a;
+    --muted: #485e72;
+    --surface: #fbfdff;
+    --surface-weak: #e4eff8;
+    --surface-soft: #f5fafe;
+    --surface-strong: #d6e7f4;
+    --border: #bfd4e7;
+    --border-strong: #728ea7;
+    --accent: #285e8e;
+  }
+
+  [data-theme="kohaku"] {
+    --bg: #fcf6e9;
+    --fg: #383322;
+    --muted: #655c45;
+    --surface: #fffdf6;
+    --surface-weak: #f5ecd5;
+    --surface-soft: #fdf8ed;
+    --surface-strong: #eae0c4;
+    --border: #ddcda8;
+    --border-strong: #a08b54;
+    --accent: #835913;
+  }
+
+  [data-theme="hisui"] {
+    --bg: #f0f8f3;
+    --fg: #273b32;
+    --muted: #50675a;
+    --surface: #fafffc;
+    --surface-weak: #e1f0e7;
+    --surface-soft: #f4fbf7;
+    --surface-strong: #d5e7dd;
+    --border: #bfd8c9;
+    --border-strong: #6f9881;
+    --accent: #2a694d;
+  }
+
+  [data-theme="fuji"] {
+    --bg: #f5f2fb;
+    --fg: #342c43;
+    --muted: #63556f;
+    --surface: #fdfbff;
+    --surface-weak: #ece5f6;
+    --surface-soft: #f9f5fe;
+    --surface-strong: #e0d8ed;
+    --border: #cfc1df;
+    --border-strong: #9582ad;
+    --accent: #6b478d;
+  }
+
+  [data-theme="wakaba"] {
+    --bg: #f5f8ed;
+    --fg: #323b26;
+    --muted: #5b654a;
+    --surface: #fdfff8;
+    --surface-weak: #eaf0dc;
+    --surface-soft: #f8fbf0;
+    --surface-strong: #dfe7cc;
+    --border: #cad7b2;
+    --border-strong: #8c9a66;
+    --accent: #526a2d;
+  }
+
+  [data-theme="momiji"] {
+    --bg: #fbf2ee;
+    --fg: #432f29;
+    --muted: #70584e;
+    --surface: #fffaf7;
+    --surface-weak: #f5e6dc;
+    --surface-soft: #fdf5ef;
+    --surface-strong: #ecdacc;
+    --border: #dfc3b4;
+    --border-strong: #af8570;
+    --accent: #924b35;
+  }
+
+  [data-theme="toki"] {
+    --bg: #fff4f1;
+    --fg: #422d34;
+    --muted: #73555b;
+    --surface: #fffafa;
+    --surface-weak: #fae6e0;
+    --surface-soft: #fff7f4;
+    --surface-strong: #efd8d0;
+    --border: #e5c1bc;
+    --border-strong: #b4847f;
+    --accent: #96424d;
+  }
+
+  [data-theme="nagi"] {
+    --bg: #eff8f8;
+    --fg: #273a3c;
+    --muted: #4b6568;
+    --surface: #faffff;
+    --surface-weak: #dff0f0;
+    --surface-soft: #f3fbfb;
+    --surface-strong: #d0e5e5;
+    --border: #b8d4d5;
+    --border-strong: #6f979a;
+    --accent: #2e696d;
   }
 
   [data-theme="paper"] {
@@ -132,8 +263,6 @@
     --accent-contrast: #0a1424;
   }
 
-  /* A restrained pastel/mauve alternative inspired by Catppuccin's colour
-     families. Semantic flag colours remain shared with the other dark themes. */
   [data-theme="mauve"] {
     --bg: #191925;
     --fg: #eeeaf9;
@@ -147,6 +276,22 @@
     --border-strong: #82779e;
     --accent: #c6aff2;
     --accent-contrast: #221b36;
+  }
+
+  /* The original navy palette remains available for saved selections. */
+  [data-theme="trivium"] {
+    --bg: #0c111b;
+    --fg: #f3f4f6;
+    --muted: #aab6ca;
+    --surface: #111827;
+    --surface-weak: #19243a;
+    --surface-soft: #151e30;
+    --surface-strong: #22314a;
+    --overlay: rgba(8, 12, 22, 0.88);
+    --border: #34425b;
+    --border-strong: #63738e;
+    --accent: #a5b4fc;
+    --accent-contrast: #101525;
   }
 
   html,
@@ -177,6 +322,63 @@
 
   button {
     cursor: pointer;
+  }
+
+  /* Keep real checkbox inputs and their keyboard/screen-reader behaviour.
+     Appearance alone is themed, including the native indeterminate state. */
+  input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    vertical-align: middle;
+    flex-shrink: 0;
+    width: 14px;
+    min-width: 14px;
+    height: 14px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--accent-contrast);
+    cursor: pointer;
+    transition: background-color 100ms ease, border-color 100ms ease;
+  }
+
+  input[type="checkbox"]::before {
+    content: "";
+    display: block;
+    width: 9px;
+    height: 9px;
+    background: currentColor;
+    clip-path: polygon(10% 45%, 24% 31%, 43% 52%, 78% 13%, 94% 28%, 43% 86%);
+    transform: scale(0);
+  }
+
+  input[type="checkbox"]:checked,
+  input[type="checkbox"]:indeterminate {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  input[type="checkbox"]:checked::before { transform: scale(1); }
+
+  input[type="checkbox"]:indeterminate::before {
+    width: 8px;
+    height: 2px;
+    border-radius: 1px;
+    clip-path: none;
+    transform: scale(1);
+  }
+
+  input[type="checkbox"]:hover:not(:disabled) { border-color: var(--accent); }
+  input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 2px; }
+  input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  @media (forced-colors: active) {
+    input[type="checkbox"] { -webkit-appearance: auto; appearance: auto; accent-color: auto; }
+    input[type="checkbox"]::before { display: none; }
   }
 
   ::selection {

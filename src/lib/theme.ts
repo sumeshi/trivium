@@ -1,7 +1,7 @@
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
-import { DEFAULT_THEME, parseTheme } from "./themeModel.ts";
+import { createThemePreference, DEFAULT_THEME, parseSavedTheme, parseTheme } from "./themeModel.ts";
 import type { Theme } from "./themeModel";
 
 export { THEME_OPTIONS } from "./themeModel";
@@ -23,7 +23,7 @@ export async function initTheme() {
   const revision = ++themeRevision;
   let loaded: Theme | null = null;
   try {
-    loaded = parseTheme(localStorage.getItem(THEME_KEY));
+    loaded = parseSavedTheme(localStorage.getItem(THEME_KEY));
   } catch (_err) {
     // ignore
   }
@@ -33,8 +33,7 @@ export async function initTheme() {
       const base = await appLocalDataDir();
       const path = await join(base, THEME_FILE);
       const text = await readTextFile(path);
-      const data = JSON.parse(text) as { theme?: string };
-      loaded = parseTheme(data?.theme);
+      loaded = parseSavedTheme(text);
     } catch (_err) {
       // ignore (first run or not available)
     }
@@ -49,7 +48,7 @@ export async function initTheme() {
 
 function persistTheme(next: Theme): Promise<void> {
   try {
-    localStorage.setItem(THEME_KEY, next);
+    localStorage.setItem(THEME_KEY, JSON.stringify(createThemePreference(next)));
   } catch (_err) {
     // ignore
   }
@@ -59,7 +58,7 @@ function persistTheme(next: Theme): Promise<void> {
       const base = await appLocalDataDir();
       await mkdir(base, { recursive: true });
       const path = await join(base, THEME_FILE);
-      await writeTextFile(path, JSON.stringify({ theme: next }, null, 2));
+      await writeTextFile(path, JSON.stringify(createThemePreference(next), null, 2));
     } catch (_err) {
       // localStorage remains available when filesystem access is unavailable.
     }
