@@ -4,7 +4,7 @@ import { isLightTheme, parseTheme } from "./themeModel.ts";
 import { displayRowColor, resolveConditionColor } from "./skin.ts";
 
 test("existing and new stored theme names are validated without coercion", () => {
-  for (const saved of ["light", "dark", "paper", "midnight"]) {
+  for (const saved of ["light", "dark", "yukari", "midnight"]) {
     assert.equal(parseTheme(saved), saved);
   }
   for (const saved of [null, undefined, "", "auto", "unknown", {}, 1]) {
@@ -13,17 +13,17 @@ test("existing and new stored theme names are validated without coercion", () =>
 });
 
 test("extra themes use the matching light/dark condition palette", () => {
-  assert.ok(isLightTheme("paper"));
+  assert.ok(isLightTheme("yukari"));
   assert.ok(!isLightTheme("midnight"));
   for (const name of ["red", "orange", "amber", "green", "teal", "blue", "purple", "pink"]) {
-    assert.equal(resolveConditionColor(name, "paper"), resolveConditionColor(name, "light"));
+    assert.equal(resolveConditionColor(name, "yukari"), resolveConditionColor(name, "light"));
     assert.equal(resolveConditionColor(name, "midnight"), resolveConditionColor(name, "dark"));
   }
-  assert.equal(resolveConditionColor("unknown", "paper"), null);
+  assert.equal(resolveConditionColor("unknown", "yukari"), null);
 });
 
 test("existing saved row colours follow the selected theme without rewriting storage", () => {
-  for (const current of ["paper", "midnight"] as const) {
+  for (const current of ["sakura", "yozora"] as const) {
     assert.equal(displayRowColor("#fbe4e4", current), "var(--rule-red)");
     assert.equal(displayRowColor("#4a2b2f", current), "var(--rule-red)");
     assert.equal(displayRowColor("#123456", current), "#123456");
@@ -80,9 +80,9 @@ function readable(tokens: Map<string, string>, foreground: string, background: s
   assert.ok(ratio >= minimum, `${context}: ${foreground}/${background} contrast ${ratio.toFixed(2)} < ${minimum}`);
 }
 
-test("neutral Light is the default and ten distinct pastel choices include the renamed Yukari", () => {
+test("neutral Light and the retained palettes keep their current names and distinct accents", () => {
   assert.equal(DEFAULT_THEME, "light");
-  assert.equal(PASTEL_THEME_OPTIONS.length, 10);
+  assert.deepEqual(PASTEL_THEME_OPTIONS.map(({ value }) => value), ["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"]);
   for (const { value } of THEME_OPTIONS) assert.equal(parseTheme(value), value);
   assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
   assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
@@ -92,7 +92,7 @@ test("neutral Light is the default and ten distinct pastel choices include the r
     const tokens = cssTokens(value);
     return colour(tokens, "bg") + colour(tokens, "accent");
   }));
-  assert.equal(palettes.size, 10);
+  assert.equal(palettes.size, 7);
   const yukari = cssTokens("yukari");
   assert.equal(colour(yukari, "bg"), "#f2f5fa");
   assert.equal(colour(yukari, "accent"), "#5948a5");
@@ -105,7 +105,7 @@ test("old Light preferences migrate to Yukari while newly saved Light remains ne
   for (const old of ["light", '{"theme":"light"}', { theme: "light" }, { version: 1, theme: "light" }]) {
     assert.equal(parseSavedTheme(old), "yukari");
   }
-  for (const id of ["dark", "paper", "midnight", "mauve", "trivium"] as const) {
+  for (const id of ["dark", "midnight", "mauve", "trivium"] as const) {
     assert.equal(parseSavedTheme(id), id);
     assert.equal(parseSavedTheme({ theme: id }), id);
   }
@@ -152,5 +152,49 @@ test("flag meanings retain consistent colours and readable selected symbols in e
       readable(tokens, `flag-${key}-selected-fg`, `flag-${key}-selected-bg`, `${value} soft selected flag`);
       for (const background of backgrounds) readable(tokens, flag, background, `${value} flag on row`);
     }
+  }
+});
+
+
+test("retired choices map consistently without turning Paper into Yukari", () => {
+  const aliases = { fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light" } as const;
+  for (const [retired, replacement] of Object.entries(aliases)) {
+    assert.equal(THEME_OPTIONS.some(({ value }) => value === retired), false);
+    assert.equal(parseTheme(retired), replacement);
+    for (const saved of [retired, { theme: retired }, { version: 1, theme: retired }, { version: 2, theme: retired }]) {
+      assert.equal(parseSavedTheme(saved), replacement);
+      assert.equal(parseSavedTheme(JSON.stringify(saved)), replacement);
+    }
+  }
+  assert.equal(parseSavedTheme("light"), "yukari");
+  assert.equal(parseSavedTheme({ version: 2, theme: "light" }), "light");
+  assert.equal(parseTheme("__proto__"), null);
+});
+
+test("colour stays on pastel headers and accents while main backgrounds remain white", () => {
+  for (const name of ["sakura", "sora", "kohaku", "hisui", "toki", "nagi"]) {
+    const tokens = cssTokens(name);
+    assert.equal(colour(tokens, "bg"), "#ffffff", name);
+    assert.equal(colour(tokens, "surface"), "#ffffff", name);
+    assert.notEqual(colour(tokens, "surface-weak"), "#ffffff", `${name} header needs its pastel colour`);
+    assert.notEqual(colour(tokens, "surface-strong"), "#ffffff", `${name} strong surface needs its pastel colour`);
+  }
+  const yellow = colour(cssTokens("kohaku"), "surface-strong");
+  assert.equal(parseInt(yellow.slice(1, 3), 16), 255);
+  assert.ok(parseInt(yellow.slice(3, 5), 16) >= 240, "Kohaku is bright yellow rather than aged beige");
+  assert.ok(parseInt(yellow.slice(5, 7), 16) <= 220, "Kohaku retains its yellow hue");
+});
+
+test("new night palettes are dark and bookmarks remain a subtle surface tint", () => {
+  for (const name of ["yozora", "tasogare", "sumi", "tsukimi"] as const) {
+    assert.equal(parseTheme(name), name);
+    assert.equal(isLightTheme(name), false);
+    assert.ok(luminance(colour(cssTokens(name), "bg")) < .03);
+  }
+  for (const { value } of THEME_OPTIONS) {
+    const tokens = cssTokens(value);
+    const tinted = colour(tokens, "bookmark-soft");
+    const base = colour(tokens, "surface");
+    assert.ok(contrast(tinted, base) < 1.1, `${value} bookmark tint must stay quiet`);
   }
 });

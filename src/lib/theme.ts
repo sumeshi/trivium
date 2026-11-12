@@ -67,9 +67,10 @@ function persistTheme(next: Theme): Promise<void> {
 }
 
 export async function setTheme(next: Theme) {
-  if (!parseTheme(next)) return;
+  const selected = parseTheme(next);
+  if (!selected) return;
   themeRevision += 1;
-  applyThemeAttr(next);
-  theme.set(next);
-  await persistTheme(next);
+  applyThemeAttr(selected);
+  theme.set(selected);
+  await persistTheme(selected);
 }

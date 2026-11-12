@@ -7,9 +7,6 @@ export const PASTEL_THEME_OPTIONS = [
   { value: "sora", label: "Sora" },
   { value: "kohaku", label: "Kohaku" },
   { value: "hisui", label: "Hisui" },
-  { value: "fuji", label: "Fuji" },
-  { value: "wakaba", label: "Wakaba" },
-  { value: "momiji", label: "Momiji" },
   { value: "toki", label: "Toki" },
   { value: "nagi", label: "Nagi" },
 ] as const;
@@ -18,7 +15,10 @@ export const THEME_OPTIONS = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   ...PASTEL_THEME_OPTIONS,
-  { value: "paper", label: "Paper" },
+  { value: "yozora", label: "Yozora" },
+  { value: "tasogare", label: "Tasogare" },
+  { value: "sumi", label: "Sumi" },
+  { value: "tsukimi", label: "Tsukimi" },
   { value: "midnight", label: "Midnight" },
   { value: "mauve", label: "Mauve" },
   { value: "trivium", label: "Trivium" },
@@ -30,15 +30,20 @@ export interface ThemePreference {
   theme: Theme;
 }
 
-/** Parse a current UI choice. Saved preferences use their versioned parser. */
+const RETIRED_THEMES: Readonly<Record<string, Theme>> = {
+  fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
+};
+
+/** Retired names resolve to an offered choice; user selections stay canonical. */
 export function parseTheme(value: unknown): Theme | null {
+  if (typeof value !== "string") return null;
+  if (Object.hasOwn(RETIRED_THEMES, value)) return RETIRED_THEMES[value];
   return THEME_OPTIONS.some((option) => option.value === value) ? value as Theme : null;
 }
 
 function legacyTheme(value: unknown): Theme | null {
-  const parsed = parseTheme(value);
-  // The previous Light was the purple pastel now named Yukari.
-  return parsed === "light" ? "yukari" : parsed;
+  // Only the old Light name means Yukari; retired Paper now resolves to Light.
+  return value === "light" ? "yukari" : parseTheme(value);
 }
 
 /** Accept the old plain localStorage name and {theme} file without losing its palette. */
@@ -61,6 +66,6 @@ export function createThemePreference(value: Theme): ThemePreference {
 }
 
 export function isLightTheme(value: Theme): boolean {
-  return value === "light" || value === "paper" ||
+  return value === "light" ||
     PASTEL_THEME_OPTIONS.some((option) => option.value === value);
 }

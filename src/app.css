@@ -8,19 +8,19 @@
   :root,
   [data-theme="light"] {
     color-scheme: light;
-    --bg: #f4f5f7;
+    --bg: #f7f8fa;
     --fg: #20252d;
     --muted: #56616f;
     --surface: #ffffff;
-    --surface-weak: #eef0f4;
-    --surface-soft: #fafbfc;
-    --surface-strong: #dfe3e9;
+    --surface-weak: #f0f3f6;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #e7edf3;
     --overlay: rgba(238, 240, 245, 0.9);
     --border: #c7ced7;
     --border-strong: #828e9c;
     --hover: color-mix(in srgb, var(--fg) 5%, var(--surface));
     --heading: var(--fg);
-    --accent: #3e628d;
+    --accent: #526b82;
     --accent-contrast: #ffffff;
     --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--surface));
     --accent-border: var(--accent);
@@ -41,7 +41,7 @@
     --flag-critical-selected-bg: var(--danger-soft);
     --flag-critical-selected-fg: var(--danger);
     --bookmark: #8a6515;
-    --bookmark-soft: #fff5c8;
+    --bookmark-soft: color-mix(in srgb, var(--bookmark) 3%, var(--surface));
     --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
       Roboto, "Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Kaku Gothic ProN",
       "Hiragino Sans", "Microsoft YaHei", Arial, sans-serif;
@@ -63,6 +63,10 @@
   }
 
   [data-theme="dark"],
+  [data-theme="yozora"],
+  [data-theme="tasogare"],
+  [data-theme="sumi"],
+  [data-theme="tsukimi"],
   [data-theme="midnight"],
   [data-theme="mauve"],
   [data-theme="trivium"] {
@@ -72,7 +76,7 @@
     --danger: #f29b9b;
     --flag-selected-text: #111827;
     --bookmark: #efcc7c;
-    --bookmark-soft: #393522;
+    --bookmark-soft: color-mix(in srgb, var(--bookmark) 3%, var(--surface));
     --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
     --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.42);
     --rule-red: #4a2b2f;
@@ -101,8 +105,8 @@
     --accent-contrast: #111b2b;
   }
 
-  /* Yukari preserves the former Light surfaces and purple accent. The other
-     pastel palettes give that family distinct, restrained Japanese colours. */
+  /* Yukari is unchanged. The other pastels keep white backgrounds and reserve
+     their colour for headers, stronger surfaces and accents. */
   [data-theme="yukari"] {
     --bg: #f2f5fa;
     --fg: #202b3d;
@@ -117,135 +121,87 @@
   }
 
   [data-theme="sakura"] {
-    --bg: #fbf3f7;
-    --fg: #372c36;
-    --muted: #665568;
-    --surface: #fffafd;
-    --surface-weak: #f4e8ef;
-    --surface-soft: #fcf6fa;
-    --surface-strong: #ecdce7;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #fff0f6;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #f9e1ec;
     --border: #ddc6d5;
     --border-strong: #a57b97;
     --accent: #923c6a;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="sora"] {
-    --bg: #f1f7fc;
-    --fg: #25364a;
-    --muted: #485e72;
-    --surface: #fbfdff;
-    --surface-weak: #e4eff8;
-    --surface-soft: #f5fafe;
-    --surface-strong: #d6e7f4;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #edf6ff;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #dcecff;
     --border: #bfd4e7;
     --border-strong: #728ea7;
-    --accent: #285e8e;
+    --accent: #346792;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="kohaku"] {
-    --bg: #fcf6e9;
-    --fg: #383322;
-    --muted: #655c45;
-    --surface: #fffdf6;
-    --surface-weak: #f5ecd5;
-    --surface-soft: #fdf8ed;
-    --surface-strong: #eae0c4;
-    --border: #ddcda8;
-    --border-strong: #a08b54;
-    --accent: #835913;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #fffbdc;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #fff3ac;
+    --border: #e6db9b;
+    --border-strong: #9b8520;
+    --accent: #7e6505;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="hisui"] {
-    --bg: #f0f8f3;
-    --fg: #273b32;
-    --muted: #50675a;
-    --surface: #fafffc;
-    --surface-weak: #e1f0e7;
-    --surface-soft: #f4fbf7;
-    --surface-strong: #d5e7dd;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #eefaf3;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #dbf1e4;
     --border: #bfd8c9;
     --border-strong: #6f9881;
     --accent: #2a694d;
-  }
-
-  [data-theme="fuji"] {
-    --bg: #f5f2fb;
-    --fg: #342c43;
-    --muted: #63556f;
-    --surface: #fdfbff;
-    --surface-weak: #ece5f6;
-    --surface-soft: #f9f5fe;
-    --surface-strong: #e0d8ed;
-    --border: #cfc1df;
-    --border-strong: #9582ad;
-    --accent: #6b478d;
-  }
-
-  [data-theme="wakaba"] {
-    --bg: #f5f8ed;
-    --fg: #323b26;
-    --muted: #5b654a;
-    --surface: #fdfff8;
-    --surface-weak: #eaf0dc;
-    --surface-soft: #f8fbf0;
-    --surface-strong: #dfe7cc;
-    --border: #cad7b2;
-    --border-strong: #8c9a66;
-    --accent: #526a2d;
-  }
-
-  [data-theme="momiji"] {
-    --bg: #fbf2ee;
-    --fg: #432f29;
-    --muted: #70584e;
-    --surface: #fffaf7;
-    --surface-weak: #f5e6dc;
-    --surface-soft: #fdf5ef;
-    --surface-strong: #ecdacc;
-    --border: #dfc3b4;
-    --border-strong: #af8570;
-    --accent: #924b35;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="toki"] {
-    --bg: #fff4f1;
-    --fg: #422d34;
-    --muted: #73555b;
-    --surface: #fffafa;
-    --surface-weak: #fae6e0;
-    --surface-soft: #fff7f4;
-    --surface-strong: #efd8d0;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #fff1ee;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #fce1d9;
     --border: #e5c1bc;
     --border-strong: #b4847f;
     --accent: #96424d;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="nagi"] {
-    --bg: #eff8f8;
-    --fg: #273a3c;
-    --muted: #4b6568;
-    --surface: #faffff;
-    --surface-weak: #dff0f0;
-    --surface-soft: #f3fbfb;
-    --surface-strong: #d0e5e5;
+    --bg: #ffffff;
+    --fg: #20252d;
+    --muted: #56616f;
+    --surface: #ffffff;
+    --surface-weak: #edf9f9;
+    --surface-soft: #fcfcfd;
+    --surface-strong: #d9eeee;
     --border: #b8d4d5;
     --border-strong: #6f979a;
     --accent: #2e696d;
-  }
-
-  [data-theme="paper"] {
-    --bg: #f4f0e6;
-    --fg: #30352f;
-    --muted: #596255;
-    --surface: #fffdf7;
-    --surface-weak: #eee9dc;
-    --surface-soft: #f8f4ea;
-    --surface-strong: #e4decf;
-    --overlay: rgba(244, 240, 230, 0.9);
-    --border: #c9c2b2;
-    --border-strong: #918974;
-    --accent: #65509b;
-    --accent-contrast: #ffffff;
+    --accent-soft: var(--surface-weak);
   }
 
   [data-theme="midnight"] {
@@ -276,6 +232,67 @@
     --border-strong: #82779e;
     --accent: #c6aff2;
     --accent-contrast: #221b36;
+  }
+
+  /* Night sky, dusk, ink and moonlight: quiet natural dark palettes. */
+  [data-theme="yozora"] {
+    --bg: #0e1625;
+    --fg: #e4ebf7;
+    --muted: #a7b8d0;
+    --surface: #151f32;
+    --surface-weak: #1d2b43;
+    --surface-soft: #19263b;
+    --surface-strong: #293b56;
+    --border: #3a4e6c;
+    --border-strong: #7085a4;
+    --accent: #b2b9ed;
+    --accent-contrast: #141a2b;
+    --overlay: rgba(12, 13, 18, 0.9);
+  }
+
+  [data-theme="tasogare"] {
+    --bg: #211b23;
+    --fg: #f2e7e9;
+    --muted: #c5afb8;
+    --surface: #2a222d;
+    --surface-weak: #362c39;
+    --surface-soft: #302732;
+    --surface-strong: #453747;
+    --border: #5d4b61;
+    --border-strong: #948094;
+    --accent: #e1b1aa;
+    --accent-contrast: #2c2025;
+    --overlay: rgba(12, 13, 18, 0.9);
+  }
+
+  [data-theme="sumi"] {
+    --bg: #151717;
+    --fg: #e8ede8;
+    --muted: #adb8ad;
+    --surface: #1c2020;
+    --surface-weak: #282e2c;
+    --surface-soft: #232826;
+    --surface-strong: #343c38;
+    --border: #48524c;
+    --border-strong: #7b8c80;
+    --accent: #b4c5b7;
+    --accent-contrast: #1c2520;
+    --overlay: rgba(12, 13, 18, 0.9);
+  }
+
+  [data-theme="tsukimi"] {
+    --bg: #1e1c19;
+    --fg: #f2ede2;
+    --muted: #c1b7a5;
+    --surface: #27241f;
+    --surface-weak: #332f27;
+    --surface-soft: #2d2923;
+    --surface-strong: #413a2f;
+    --border: #584f40;
+    --border-strong: #8e7f64;
+    --accent: #decd9d;
+    --accent-contrast: #28231b;
+    --overlay: rgba(12, 13, 18, 0.9);
   }
 
   /* The original navy palette remains available for saved selections. */
