@@ -193,6 +193,13 @@ export type BulkCount = { count: number,
  */
 previewToken: string, };
 export type BulkApplied = { updated: number, };
+export type ValidateConditionValuesPayload = { kind: string, op: Op, values: Array<string>, };
+export type ConditionValueValidation = { valid: boolean, error: string | null,
+/**
+ * Decimal nanoseconds, never a JavaScript number or rewritten input.
+ */
+parsedNanos: string | null, };
+export type ConditionValuesValidation = { valid: boolean, hint: string | null, values: Array<ConditionValueValidation>, };
 export type JobKind = "import" | "query" | "export" | "load" | "analysis" | "mutation";
 export type JobInfo = { id: number, kind: JobKind, projectId: string | null,
 /**

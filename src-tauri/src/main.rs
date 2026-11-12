@@ -57,6 +57,7 @@ fn main() {
             color_rules,
             save_preset,
             load_preset,
+            validate_condition_values,
             load_view_state,
             save_view_state
         ])

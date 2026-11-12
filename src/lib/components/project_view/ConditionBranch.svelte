@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { CompareOp } from "../../types";
   import type { EditorNode } from "../../stores/condition";
+  import ConditionValueInput from "./ConditionValueInput.svelte";
 
   import { COMPARE_OPS } from '../../stores/condition';
   import { useWorkspace } from "../../workspaceContext";
   const {
-    columnLabels, projectDetail, addCondition, addGroup, moveNode, patchCondition, removeNode,
+    columnLabels, addCondition, addGroup, moveNode, patchCondition, removeNode,
     setGroupKind, toggleCollapsed,
   } = useWorkspace();
 
@@ -26,20 +27,7 @@
     }
   };
 
-  const valueInput = (column: string): { type: string; inputmode?: "numeric" | "decimal"; step?: string } => {
-    const kind = $projectDetail?.column_kinds?.[column];
-    // Integer text stays a string. type=number would round values above 2^53.
-    if (kind === "int") {
-      return { type: "text", inputmode: "numeric" };
-    }
-    if (kind === "float") {
-      return { type: "number", inputmode: "decimal", step: "any" };
-    }
-    if (kind === "datetime") {
-      return { type: "datetime-local", step: "1" };
-    }
-    return { type: "text" };
-  };
+
 </script>
 
 <div class="condition-branch" data-depth={depth}>
@@ -126,16 +114,7 @@
         />
         Not
       </label>
-      <input
-        class="condition-value"
-        type={node.exact ? "text" : valueInput(node.column).type}
-        inputmode={node.exact ? undefined : valueInput(node.column).inputmode}
-        step={node.exact ? undefined : valueInput(node.column).step}
-        value={node.value}
-        placeholder={node.op === "in" ? "a, b, c" : "Value"}
-        on:input={(event) => patchCondition(node.id, { value: event.currentTarget.value, exact: false })}
-        aria-label="Value"
-      />
+      <ConditionValueInput {node} />
       <div class="condition-actions">
       <button type="button" class="branch-icon" disabled={index === 0} on:click={() => moveNode(node.id, -1)} aria-label="Move condition up" title="Move condition up">
         <span aria-hidden="true">↑</span>
@@ -167,10 +146,10 @@
   .condition-connector { margin: 2px 0; color: var(--accent); font-size: 9px; line-height: 1.3; font-weight: 600; letter-spacing: .04em; }
   .condition-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 77px; align-items: center; gap: 4px; min-width: 0; }
   .condition-row select, .condition-row input { min-width: 0; width: 100%; height: 27px; padding: 0 6px; font-size: 11px; }
-  .condition-row .condition-value { grid-column: 1 / 3; }
+  .condition-row :global(.condition-value-input) { grid-column: 1 / 3; min-width: 0; }
   .condition-not { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 3px; padding-right: 4px; font-size: 10px; color: var(--muted); }
   .condition-not input { width: 12px; height: 12px; }
-  .condition-actions { display: flex; gap: 1px; justify-content: flex-end; }
+  .condition-actions { display: flex; align-self: start; gap: 1px; justify-content: flex-end; }
   .branch-icon, .group-add { display: inline-flex; align-items: center; justify-content: center; gap: 3px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 3px; color: var(--muted); background: transparent; font-size: 13px; }
   .branch-icon { flex: 0 0 24px; width: 24px; }
   .group-add { padding: 0 4px; font-size: 10px; }

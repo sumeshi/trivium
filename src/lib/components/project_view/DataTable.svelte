@@ -9,6 +9,7 @@
   import type { CellKind } from '../../types';
   import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
+  import ColumnContextMenu from './ColumnContextMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
 
@@ -23,7 +24,7 @@
     sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
     tableWidth, projectDetail, columnLabels, toggleSort, setFlag, editMemo, openCell,
     handleCellKeydown, positionToRowIndex, largePages, selectedRowIds, selectedCount,
-    selectVisibleRows, toggleRowSelection, rememberOffset,
+    selectVisibleRows, toggleRowSelection, rememberOffset, searchColumns,
   } = useWorkspace();
 
   const _toggleSort = toggleSort;
@@ -36,6 +37,7 @@
   export let columnWidths: Map<string, number> = new Map();
   const dispatch = createEventDispatcher<{
     notify: { message: string; tone: 'success' | 'error' };
+    columnRule: { columnId: string };
   }>();
 
   type CellMenuState = {
@@ -51,6 +53,7 @@
   };
 
   let cellMenu: CellMenuState | null = null;
+  let columnMenu: { columnId: string; x: number; y: number; trigger: HTMLElement } | null = null;
   let virtualRows: VirtualRow[] = [];
   let resizeObserver: ResizeObserver | null = null;
   let observedScrollEl: HTMLDivElement | null = null;
@@ -134,6 +137,7 @@
   const openCellMenu = (event: MouseEvent, row: CachedRow, column: string) => {
     event.preventDefault();
     if (!projectId) return;
+    columnMenu = null;
     cellMenu = {
       projectId,
       rowIndex: row.row_index,
@@ -145,6 +149,31 @@
       x: event.clientX,
       y: event.clientY
     };
+  };
+
+  const openColumnMenu = (event: MouseEvent | KeyboardEvent, columnId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const trigger = event.currentTarget as HTMLElement;
+    const rect = trigger.getBoundingClientRect();
+    cellMenu = null;
+    columnMenu = {
+      columnId, trigger,
+      x: event instanceof MouseEvent && event.clientX ? event.clientX : rect.left,
+      y: event instanceof MouseEvent && event.clientY ? event.clientY : rect.bottom,
+    };
+  };
+
+  const columnMenuKey = (event: KeyboardEvent, columnId: string) => {
+    if (event.key === 'ContextMenu' || event.key === 'ArrowDown' || (event.shiftKey && event.key === 'F10')) {
+      openColumnMenu(event, columnId);
+    }
+  };
+
+  const searchColumn = (columnId: string) => {
+    searchColumns.set([columnId]);
+    columnMenu = null;
+    document.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')?.focus();
   };
 
   const buildVirtualRows = (
@@ -337,23 +366,34 @@
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo">Memo</div>
           {#each $visibleColumns as column, columnIndex}
-            <button
-              type="button"
-              class="header-cell"
+            <div
+              class="header-cell column-heading"
               class:sticky={columnIndex === 0}
               class:stickyData={columnIndex === 0}
               class:sorted={$sortKey === column}
-              on:click={() => _toggleSort(column)}
-              on:focus={() => focusColumn(columnIndex)}
-              aria-pressed={$sortKey === column}
             >
-              <span class="header-label">{$columnLabels.get(column) ?? column}</span>
-              {#if $sortKey === column}
-                <span class="sort-indicator" aria-hidden="true">
-                  {$sortDirection === 'asc' ? '▲' : '▼'}
-                </span>
-              {/if}
-            </button>
+              <button type="button" class="column-sort"
+                on:click={() => _toggleSort(column)}
+                on:focus={() => focusColumn(columnIndex)}
+                on:contextmenu={(event) => openColumnMenu(event, column)}
+                on:keydown={(event) => columnMenuKey(event, column)}
+                aria-pressed={$sortKey === column}
+                title={`Sort by ${$columnLabels.get(column) ?? column}; right-click, Down or Shift+F10 for column actions`}>
+                <span class="header-label">{$columnLabels.get(column) ?? column}</span>
+                {#if $sortKey === column}
+                  <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
+                {/if}
+              </button>
+              <button type="button" class="column-actions-trigger"
+                tabindex="-1"
+                aria-label={`Actions for column ${$columnLabels.get(column) ?? column}`}
+                title={`Search or filter ${$columnLabels.get(column) ?? column}`}
+                aria-haspopup="menu" aria-expanded={columnMenu?.columnId === column}
+                on:click={(event) => openColumnMenu(event, column)}
+                on:focus={() => focusColumn(columnIndex)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+              </button>
+            </div>
           {/each}
         </div>
       </div>
@@ -537,5 +577,19 @@
       on:close={() => (cellMenu = null)}
       on:notify={(event) => dispatch('notify', event.detail)}
     />
+  {/key}
+{/if}
+
+{#if columnMenu}
+  {#key columnMenu}
+    <ColumnContextMenu columnId={columnMenu.columnId}
+      label={$columnLabels.get(columnMenu.columnId) ?? columnMenu.columnId}
+      x={columnMenu.x} y={columnMenu.y}
+      on:search={(event) => searchColumn(event.detail.columnId)}
+      on:rule={(event) => { columnMenu = null; dispatch('columnRule', event.detail); }}
+      on:close={(event) => {
+        if (event.detail.restoreFocus) columnMenu?.trigger.focus({ preventScroll: true });
+        columnMenu = null;
+      }} />
   {/key}
 {/if}

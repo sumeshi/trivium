@@ -155,7 +155,7 @@
 <svelte:window
   on:mousedown={handleWindowMouseDown}
   on:keydown={handleWindowKeydown}
-  on:scroll={handleWindowScroll}
+  on:scroll|capture={handleWindowScroll}
   on:resize={handleWindowResize}
 />
 

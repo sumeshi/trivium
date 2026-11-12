@@ -2,17 +2,20 @@
   import { errorMessage } from "../../errors";
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
-  import { presetCondition } from '../../stores/condition';
+  import { onDestroy } from 'svelte';
+  import { applyPresetView } from '../../presetView';
   import { useWorkspace } from "../../workspaceContext";
+  const workspace = useWorkspace();
   const {
-    conditionPayload, conditionTree, backend, hiddenColumns, projectDetail, sortDirection,
-    sortKey,
-  } = useWorkspace();
+    conditionPayload, backend, hiddenColumns, projectDetail, sortDirection, sortKey,
+  } = workspace;
 
   let error = '';
   let notice = '';
   let warning = '';
   let busy = false;
+  let destroyed = false;
+  onDestroy(() => { destroyed = true; });
 
   const clearMessages = () => {
     error = '';
@@ -24,6 +27,7 @@
     if (!$backend || !$projectDetail || busy) {
       return;
     }
+    const service = $backend, projectId = $projectDetail.project.meta.id;
     clearMessages();
     try {
       const stem = $projectDetail.project.meta.name.replace(/\.[^.]+$/, '') || 'trivium';
@@ -31,13 +35,13 @@
         filters: [{ name: 'Trivium preset', extensions: ['json'] }],
         defaultPath: `${stem}-preset.json`,
       });
-      if (!destination) {
+      if (!destination || destroyed) {
         return;
       }
       busy = true;
       const fileName = destination.split(/[\\/]/).pop() ?? '';
-      await $backend.savePreset({
-        projectId: $projectDetail.project.meta.id,
+      await service.savePreset({
+        projectId,
         name: fileName.replace(/\.json$/i, '') || null,
         condition: $conditionPayload,
         hiddenColumns: Array.from(get(hiddenColumns)),
@@ -58,37 +62,27 @@
     if (!$backend || !$projectDetail || busy) {
       return;
     }
+    const service = $backend, projectId = $projectDetail.project.meta.id;
+    const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
     try {
       const selected = await open({
         multiple: false,
         filters: [{ name: 'Trivium preset', extensions: ['json'] }],
       });
-      if (!selected) {
+      if (!selected || !isCurrent()) {
         return;
       }
       const source = Array.isArray(selected) ? selected[0] : selected;
       busy = true;
-      const preset = await $backend.loadPreset({
-        projectId: $projectDetail.project.meta.id,
+      const preset = await service.loadPreset({
+        projectId,
         source,
       });
-      const tree = presetCondition(preset.condition);
-      if (tree) {
-        conditionTree.set(tree);
-      }
-      hiddenColumns.set(new Set(preset.hiddenColumns));
-      const nextDirection = preset.sortDirection === 'desc' ? 'desc' : 'asc';
-      const sortChanged = get(sortKey) !== preset.sortKey || get(sortDirection) !== nextDirection;
-      sortKey.set(preset.sortKey);
-      sortDirection.set(nextDirection);
-      await $backend.setHiddenColumns({
-        projectId: $projectDetail.project.meta.id,
-        hiddenColumns: preset.hiddenColumns,
-      });
-      if (sortChanged) {
-        document.dispatchEvent(new CustomEvent('sortChanged'));
-      }
+      if (!isCurrent()) return;
+      applyPresetView(workspace, preset);
+      await service.setHiddenColumns({ projectId, hiddenColumns: preset.hiddenColumns });
+      if (!isCurrent()) return;
       if (preset.unknown_columns.length > 0) {
         warning = `Unknown columns: ${preset.unknown_columns.join(', ')}`;
       } else {
@@ -104,13 +98,15 @@
 </script>
 
 <div class="stats-panel">
+  <p class="condition-count preset-description">Save structured rules, visible columns and sort order as a reusable preset file.</p>
+  <p class="condition-count preset-description">Search text and flag/bookmark filters keep their current settings when you load a preset.</p>
   <div class="condition-toolbar">
     <span class="filter-label">Preset</span>
     <button type="button" class="ghost" on:click={savePreset} disabled={busy}>
-      Save preset
+      Save preset file
     </button>
     <button type="button" class="ghost" on:click={applyPreset} disabled={busy}>
-      Apply preset
+      Load preset file
     </button>
   </div>
   {#if error}

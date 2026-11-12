@@ -17,6 +17,7 @@ mod rules;
 mod stats;
 mod surround;
 mod time;
+mod value_validation;
 mod view;
 
 // Public command functions, re-exported for `generate_handler!` in main.rs
@@ -45,3 +46,5 @@ pub use stats::column_stats;
 pub use surround::surrounding_rows;
 pub use time::time_analysis;
 pub use view::{load_view_state, save_view_state};
+
+pub use value_validation::validate_condition_values;

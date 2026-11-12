@@ -1,58 +1,97 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { FLAG_FILTER_OPTIONS } from './state';
+  import { get } from 'svelte/store';
+  import { appendEmptyColumnRule } from '../../appliedFilterSummary';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
   import { errorMessage } from '../../errors';
   import ConditionEditor from './ConditionEditor.svelte';
+  import SearchControls from './SearchControls.svelte';
   import StatsPanel from './StatsPanel.svelte';
   import TimePanel from './TimePanel.svelte';
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
   import TimelinePanel from './TimelinePanel.svelte';
   import { useWorkspace } from "../../workspaceContext";
+  const workspace = useWorkspace();
   const {
-    visibleColumns, hiddenColumns, search, searchColumns, flagFilter, bookmarkedOnly,
-    isExporting, projectDetail, backend, columnLabels,
-  } = useWorkspace();
+    visibleColumns, hiddenColumns, flagFilter, bookmarkedOnly,
+    isExporting, projectDetail, backend, columnLabels, conditionTree,
+  } = workspace;
 
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
   let columnSearch = '';
 
+  const groups = [
+    { id: 'filters', label: 'Filters', first: 'conditions' },
+    { id: 'analysis', label: 'Analysis', first: 'stats' },
+    { id: 'annotations', label: 'Annotations', first: 'bulk' },
+  ] as const;
   const tools = [
-    { id: 'conditions', label: 'Conditions' },
-    { id: 'stats', label: 'Column stats' },
-    { id: 'time', label: 'Time analysis' },
-    { id: 'timeline', label: 'Timeline' },
-    { id: 'presets', label: 'Presets' },
-    { id: 'bulk', label: 'Bulk annotation' },
-    { id: 'iocs', label: 'IOC rules (legacy)' },
+    { id: 'conditions', label: 'Rules', group: 'filters' },
+    { id: 'presets', label: 'Presets', group: 'filters' },
+    { id: 'stats', label: 'Column stats', group: 'analysis' },
+    { id: 'time', label: 'Time analysis', group: 'analysis' },
+    { id: 'timeline', label: 'Timeline', group: 'analysis' },
+    { id: 'bulk', label: 'Bulk annotate', group: 'annotations' },
+    { id: 'iocs', label: 'IOC rules', group: 'annotations' },
   ] as const;
   type Tool = typeof tools[number]['id'];
+  type ToolGroup = typeof groups[number]['id'];
   let activeTool: Tool | null = null;
+  let rememberedTools: Partial<Record<ToolGroup, Tool>> = {};
   let drawerEl: HTMLDivElement | null = null;
   let drawerTrigger: HTMLButtonElement | null = null;
+  let searchControls: SearchControls | undefined;
+  $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
+  $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
+  $: categoryLabel = groups.find((group) => group.id === activeGroup)?.label ?? 'Tools';
 
   const closeTool = () => {
     activeTool = null;
     if (drawerTrigger?.isConnected) drawerTrigger.focus();
   };
-
-  const openTool = async (tool: Tool, event: MouseEvent) => {
-    if (activeTool === tool) {
-      closeTool();
-      return;
-    }
-    drawerTrigger = event.currentTarget as HTMLButtonElement;
-    flagMenuOpen = false;
-    columnsOpen = false;
+  const selectTool = async (tool: Tool, focusPanel = false) => {
     activeTool = tool;
+    const group = tools.find((entry) => entry.id === tool)!.group;
+    rememberedTools[group] = tool;
+    flagMenuOpen = columnsOpen = false;
+    searchControls?.close();
+    if (focusPanel) {
+      await tick();
+      drawerEl?.querySelector<HTMLButtonElement>('[aria-label="Close analysis panel"]')?.focus();
+    }
+  };
+  const openGroup = (group: typeof groups[number], event: MouseEvent) => {
+    if (activeGroup === group.id) { closeTool(); return; }
+    drawerTrigger = event.currentTarget as HTMLButtonElement;
+    void selectTool(rememberedTools[group.id] ?? group.first, true);
+  };
+  const moveToolTab = async (event: KeyboardEvent, current: Tool) => {
+    const index = categoryTools.findIndex((tool) => tool.id === current);
+    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!delta && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const target = event.key === 'Home' ? 0 : event.key === 'End' ? categoryTools.length - 1
+      : (index + delta + categoryTools.length) % categoryTools.length;
+    const tool = categoryTools[target];
+    await selectTool(tool.id);
     await tick();
-    drawerEl?.querySelector<HTMLButtonElement>('[aria-label="Close analysis panel"]')?.focus();
+    document.getElementById(`tool-tab-${tool.id}`)?.focus();
   };
 
+  export async function openRuleForColumn(columnId: string): Promise<void> {
+    if (!$projectDetail?.columns.includes(columnId)) return;
+    const result = appendEmptyColumnRule(get(conditionTree), columnId);
+    conditionTree.set(result.tree);
+    drawerTrigger = document.getElementById('tool-group-filters') as HTMLButtonElement | null;
+    await selectTool('conditions');
+    await tick();
+    drawerEl?.querySelector<HTMLInputElement>(`[data-condition-id="${result.ruleId}"]`)?.focus();
+  }
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
 
@@ -69,6 +108,7 @@
     flagMenuOpen = !flagMenuOpen;
     if (flagMenuOpen) {
       columnsOpen = false;
+      searchControls?.close();
     }
   };
 
@@ -115,6 +155,7 @@
     if (columnsOpen) columnPickerEl?.querySelector('button')?.focus();
     flagMenuOpen = false;
     columnsOpen = false;
+    searchControls?.close();
     if (activeTool) closeTool();
   };
 
@@ -178,19 +219,7 @@
       {/if}
     </div>
 
-    <label class="search-field">
-      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-        <circle cx="11" cy="11" r="7" />
-        <path d="m20 20-3.5-3.5" />
-      </svg>
-      <input placeholder="Search rows" aria-label="Search rows" title="Search rows"
-        bind:value={$search} type="search" />
-      <span class="scope-chip" title="Search scope">
-        {$searchColumns.length === 0
-          ? 'All columns'
-          : $searchColumns.map((column) => $columnLabels.get(column) ?? column).join(', ')}
-      </span>
-    </label>
+    <SearchControls bind:this={searchControls} on:open={() => { flagMenuOpen = columnsOpen = false; }} />
 
     <button
       type="button"
@@ -212,6 +241,7 @@
         class="tool-button"
         on:click={() => {
           flagMenuOpen = false;
+          searchControls?.close();
           columnsOpen = !columnsOpen;
         }}
         aria-expanded={columnsOpen}
@@ -256,40 +286,47 @@
       {/if}
     </div>
 
-    <button class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}>
+    <button type="button" class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}
+      aria-label={$isExporting ? 'Exporting rows' : 'Export rows'} title={$isExporting ? 'Exporting rows…' : 'Export rows to CSV'} aria-busy={$isExporting}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 4v11m0 0 4-4m-4 4-4-4M4 20h16" />
       </svg>
-      <span class="tool-label">{$isExporting ? 'Exporting…' : 'Export'}</span>
+
     </button>
   </div>
 
   <div class="advanced-row">
     <slot name="navigation" />
-    {#each tools as tool}
-      <button type="button" class="aux-trigger" class:active={activeTool === tool.id}
-        aria-label={`Open ${tool.label}`} title={`Open ${tool.label}`}
-        aria-controls="analysis-drawer" aria-expanded={activeTool === tool.id}
-        on:click={(event) => void openTool(tool.id, event)}>{tool.label}</button>
-    {/each}
+    <div class="tool-groups" role="group" aria-label="Investigation tools">
+      {#each groups as group}
+        <button type="button" class="aux-trigger" class:active={activeGroup === group.id}
+          id={`tool-group-${group.id}`} aria-label={`Open ${group.label}`} title={`Open ${group.label}`}
+          aria-controls="analysis-drawer" aria-expanded={activeGroup === group.id}
+          on:click={(event) => openGroup(group, event)}>{group.label}</button>
+      {/each}
+    </div>
   </div>
 
   {#if activeTool}
     <div class="analysis-drawer" id="analysis-drawer" role="dialog" aria-labelledby="analysis-tool-label"
       bind:this={drawerEl} tabindex="-1">
       <div class="analysis-head">
-        <span id="analysis-tool-label">Analysis tools</span>
-        <select aria-label="Analysis tool" bind:value={activeTool}>
-          {#each tools as tool}<option value={tool.id}>{tool.label}</option>{/each}
-        </select>
+        <span id="analysis-tool-label">{categoryLabel}</span>
+        <div class="analysis-tabs" role="tablist" aria-label={`${categoryLabel} tools`}>
+          {#each categoryTools as tool}
+            <button type="button" role="tab" id={`tool-tab-${tool.id}`} aria-selected={activeTool === tool.id}
+              tabindex={activeTool === tool.id ? 0 : -1} aria-controls="analysis-tool-content"
+              on:click={() => void selectTool(tool.id)} on:keydown={(event) => void moveToolTab(event, tool.id)}>{tool.label}</button>
+          {/each}
+        </div>
         <button type="button" class="analysis-close" aria-label="Close analysis panel"
-          title="Close analysis panel" on:click={closeTool}>
+          title="Close panel" on:click={closeTool}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path d="m6 6 12 12M18 6 6 18" />
+            <path d="m6 6 12 12M6 18 18 6" />
           </svg>
         </button>
       </div>
-      <div class="analysis-body">
+      <div class="analysis-body" id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
         {#if activeTool === 'conditions'}
           <ConditionEditor />
         {:else if activeTool === 'stats'}
@@ -304,7 +341,7 @@
           <BulkControls on:refresh />
         {:else}
           <div class="filter-ioc">
-            <p class="condition-count">Definitions are kept for reference; rows are not flagged automatically.</p>
+            <p class="condition-count">Save reusable IOC queries, flag labels and tags. Saving a definition does not change row annotations.</p>
             <button type="button" class="ghost" title="Manage saved IOC definitions" on:click={() => {
               closeTool(); dispatch('iocManagerOpen');
             }}>IOC Rules</button>
@@ -358,7 +395,14 @@
     border-bottom: 1px solid var(--border);
   }
   .analysis-head > span { color: var(--muted); font-size: 10.5px; }
-  .analysis-head select { flex: 1; min-width: 0; min-height: 27px; }
+  .analysis-tabs { display: flex; flex: 1; min-width: 0; gap: 3px; flex-wrap: wrap; }
+  .analysis-tabs button { border: 1px solid transparent; border-radius: 4px; padding: 4px 7px; background: transparent; color: var(--muted); font-size: 11px; }
+  .analysis-tabs button[aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--fg); }
+  .analysis-tabs button:hover { color: var(--fg); background: var(--surface-weak); }
+  .tool-groups { display: flex; align-items: center; gap: 3px; }
+  .export-button { width: 33px; min-width: 33px; padding: 0; justify-content: center; }
+  button:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
+
   .analysis-close {
     display: inline-flex;
     align-items: center;

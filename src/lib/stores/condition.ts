@@ -40,6 +40,25 @@ export interface EditorGroup {
 
 export type EditorNode = EditorCondition | EditorGroup;
 
+/** Newly added text-match rules stay inactive until their value is entered. */
+export function isIncompleteTextCondition(row: Pick<EditorCondition, "op" | "value">): boolean {
+  return row.value.length === 0
+    && (row.op === "contains" || row.op === "startsWith" || row.op === "endsWith");
+}
+
+export function conditionValues(row: EditorCondition): string[] {
+  if (row.op === "in" && row.exact === true) {
+    return [row.value];
+  }
+  if (row.op === "in") {
+    return row.value
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+  }
+  return [row.value];
+}
+
 const ROOT_ID = "root";
 
 function rootGroup(): EditorGroup {
@@ -237,22 +256,10 @@ export function createConditionState() {
     }) as EditorGroup);
   }
 
-  function conditionValues(row: EditorCondition): string[] {
-    if (row.op === "in" && row.exact === true) {
-      return [row.value];
-    }
-    if (row.op === "in") {
-      return row.value
-        .split(",")
-        .map((part) => part.trim())
-        .filter((part) => part.length > 0);
-    }
-    return [row.value];
-  }
 
   function toNode(node: EditorNode): ConditionNode | null {
     if (node.type === "condition") {
-      if (node.column.trim().length === 0) {
+      if (node.column.trim().length === 0 || isIncompleteTextCondition(node)) {
         return null;
       }
       return {

@@ -33,6 +33,9 @@ import type {
 export type { FlagFilterValue } from "./types";
 
 /** Transport ownership never participates in query/result identity. */
+export type ValidateConditionValuesArgs = Wire.ValidateConditionValuesPayload;
+export type ConditionValuesValidation = Wire.ConditionValuesValidation;
+
 export interface RequestOwned {
   requestId?: string;
 }
@@ -260,6 +263,7 @@ export interface Backend {
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string, requestId?: string): Promise<LoadProjectResponse>;
+  validateConditionValues(args: ValidateConditionValuesArgs): Promise<ConditionValuesValidation>;
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats>;
   histogram(args: HistogramArgs): Promise<Histogram>;
   timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis>;
@@ -358,6 +362,10 @@ class NativeBackend implements Backend {
       metadataOnly: true,
       requestId,
     });
+  }
+
+  validateConditionValues(args: ValidateConditionValuesArgs): Promise<ConditionValuesValidation> {
+    return invoke("validate_condition_values", { payload: args });
   }
 
   columnStats(args: ColumnStatsArgs): Promise<ColumnStats> {

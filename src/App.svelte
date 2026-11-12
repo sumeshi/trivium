@@ -59,7 +59,7 @@
         // spellings as well. The backend lowercases the extension again.
         filters: [
           {
-            name: 'CSV or JSON Files',
+            name: 'Data files (CSV, JSON, JSONL)',
             extensions: ['csv', 'CSV', 'json', 'JSON', 'jsonl', 'JSONL', 'ndjson', 'NDJSON']
           }
         ]

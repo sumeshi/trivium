@@ -254,7 +254,8 @@
   .toast {
     position: fixed;
     right: 20px;
-    bottom: 20px;
+    bottom: 44px;
+    pointer-events: none;
     z-index: 300;
     max-width: min(420px, calc(100vw - 40px));
     padding: 10px 14px;
