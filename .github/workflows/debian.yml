@@ -16,16 +16,22 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version-file: '.node-version'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Read pinned Rust toolchain
+        id: rust
+        shell: bash
+        run: echo "version=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: clippy,rustfmt
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -40,18 +46,19 @@ jobs:
       - name: Quality gates
         run: |
           bash scripts/check_rust_size.sh
-          cargo clippy -p trivium-engine --all-targets -- -D warnings
-          cargo test -p trivium-engine
+          cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
+          cargo test --locked -p trivium-engine
+          cargo run --locked -p trivium-engine --bin export_contracts -- --check
           npm run lint
           npm run lint:test
           npm run test:ui
           npm run build
 
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli
-
       - name: Build deb bundle
         run: npm run tauri build -- --bundles deb
+
+      - name: Build standalone CLI
+        run: cargo build --locked --release -p trivium-engine --bin trivium-cli
 
       - name: Generate SHA256SUMS
         run: |
@@ -68,4 +75,11 @@ jobs:
           path: |
             target/release/bundle/deb/*.deb
             target/release/bundle/deb/SHA256SUMS
+          retention-days: 3
+
+      - name: Upload standalone Linux CLI
+        uses: actions/upload-artifact@v5
+        with:
+          name: trivium-cli-linux-x86_64
+          path: target/release/trivium-cli
           retention-days: 3

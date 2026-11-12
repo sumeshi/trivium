@@ -1,6 +1,7 @@
 # UI/UX investigation workspace validation
 
-Starting revision: `develop` at `fbe3417` (the P0 navigation fix).
+Starting UI revision: `develop` at `fbe3417` (the P0 navigation fix).
+Architecture follow-up starts from `95ee777`.
 
 ## Implemented scope
 
@@ -17,14 +18,37 @@ Starting revision: `develop` at `fbe3417` (the P0 navigation fix).
 | Themes | Light / Dark / Paper / Midnight use CSS variables and persist across restart. Semantic flag colors stay consistent. |
 
 No cross-project timeline, import-time period restriction or automated risk
-classification was added. The storage and annotation formats are unchanged.
+classification was added. The architecture follow-up stores case metadata,
+annotations and view settings transactionally in each case's `project.sqlite`.
+Existing registry/annotation/settings files remain migration inputs and are
+preserved; public annotation and saved-view field semantics remain compatible.
 Multiselect flags use the existing string field (`safe|critical|none`); legacy
 `all`, `none` and `priority` remain compatible.
 
 ## Correctness and resource bounds
 
+- Each mounted investigation has its own controller and Svelte context. State,
+  bounded pages, query generations, original-ID navigation, conditions/history
+  and view persistence have separate modules. There is no module-global active
+  case store or document-wide sort event.
 - Inactive tabs retain control/selection/history snapshots, not loaded rows or
-  initial-page responses. View and column writes are ordered per project.
+  initial-page responses. Metadata-only case loading avoids transferring an
+  unused initial page. View and column writes are ordered per project. Case
+  loads also await pending annotation writes from disposed instances; writes
+  are ordered within their case and another case remains independent.
+- One controller disposal cancels owned read requests, drains pending page
+  waiters and releases rows, metadata, selected IDs and DOM references. Read
+  owners use a unique top-level IPC request ID for each operation, including
+  requests cancelled before native admission. Responses also check their case
+  and query generation. Closing an analysis tool cancels only its reads;
+  annotation mutations and exports may finish normally.
+- Go resolves the original one-based `#` to a result-relative position before
+  scrolling. First/Last cancel a superseded Go request without cancelling
+  independent page reads. Changes to live filters also cancel the old lookup.
+- Annotation observers establish their saved revision baseline before activation.
+  Reopening a previously edited case therefore cannot fabricate a bulk refresh
+  that cancels its first page or discards a pending saved scroll position.
+  The saved viewport remains authoritative through the DOM update.
 - Tab scroll restoration waits for the spacer/grid DOM update before assigning
   vertical or horizontal positions. The body owns horizontal scroll; the
   header follows it, without a second scrollbar that blocks WebKitGTK clicks.
@@ -49,19 +73,31 @@ Validated on Debian 13 with Node 24.22.1 and Rust 1.99.1:
 
 | Check | Result |
 | --- | --- |
-| Complete engine suite | 265 passed, 0 failed / ignored |
-| UI unit suite | 70 passed |
+| Complete engine suite | 336 successful executions including the migration subprocess; 0 failures |
+| UI unit suite | 90 passed |
 | Svelte and test TypeScript checks | Passed; 0 errors / 0 Svelte warnings |
 | Frontend and embedded-assets native builds | Passed |
 | Engine Clippy, all targets, `-D warnings` | Passed |
 | Rust 500-line guard and diff whitespace check | Passed |
 
+The frontend suite includes actual controller tests for independent case
+stores, delayed annotations after disposal, exact read cancellation, stale
+queued pages, out-of-order success/failure, disposed queues, failed queries,
+original-ID navigation with 5,199/2,000,000 rows, cancelled Go requests, stable
+save snapshots, read-only/newer view protection, late restores and annotation
+writes continuing across tab closure/reopening. Fake backend promises gate
+concurrency deterministically; native acceptance below checks
+actual Tauri transport and rendered behavior.
+
 ## Native application acceptance
 
-The final workspace run passed on the actual embedded-assets Tauri/WebKitGTK
-application: `target/native-workspace-ui/c46a2eff8828/report.json`.
-It exercised five native app sessions and 194 real IPC calls, with zero
-JavaScript/native errors, superseded-query cancellations or transport retries.
+The verified architecture workspace run passed on the actual embedded-assets
+Tauri/WebKitGTK application:
+`target/native-architecture-workspace-verified/20bea628f229/report.json`.
+It exercised five native app sessions and 227 real IPC calls, with zero
+JavaScript errors, native errors, superseded-query cancellation responses or
+transport retries. It includes the final annotation-baseline/scroll guard and
+the before-native-commit annotation reopening regression.
 
 | Scenario | Verified result |
 | --- | --- |
@@ -70,6 +106,7 @@ JavaScript/native errors, superseded-query cancellations or transport retries.
 | Analysis | Opening/closing tools preserves table height; closed tools start zero heavy requests. Dense focus shows 510/512 events and Outside 2; Show all restores 512. Every bucket's four category counts add up to its total; each category totals 128 in this fixture. |
 | Timeline interaction | Ten trusted wheel events coalesce into one histogram request. Actual zoom, pan and pointer drag produce exact nanosecond condition bounds. Changing Safe to Critical while the panel is open refreshes distribution even when Flagged is unchanged. |
 | Tabs | CSV/JSON switching preserves search, nested AND/OR, descending sort, 26 visible columns, vertical/horizontal position and selected original IDs 242/243. A successful old-tab query is held and released after switching; it cannot overwrite the new tab. Closing/reopening keeps projects and annotations. |
+| Pending annotation reopening | An actual Safe edit is held before native dispatch/commit. Closing that tab still allows a different case to load. Reopening the original case waits before issuing its owned metadata-only load; after release its row is Safe and Flagged is 1. |
 | Edge controls | Last-row flag changes and Add memo are clickable with 27 columns; a 320px overflowing tab strip supports actual pointer and Arrow-key navigation and reveals its selected tab. |
 | Themes | Light, Dark, Paper and Midnight each persist through an actual app close/relaunch; the saved theme file is checked. |
 
@@ -80,9 +117,9 @@ compact scroll arrows instead of a native scrollbar over their buttons.
 Final screenshots (including the default table, last row, restored tabs,
 focused/full timeline and all four themes) are beside the report.
 
-The P0 native regression was rerun against the same final UI binary:
-`target/native-row-navigation/71a5616dd94c/report.json`. Both 5,199 and 2,000,000
-rows passed original-ID Go, current-result First/Last, filtered descending
+The architecture P0 native regression passed:
+`target/native-architecture-navigation/a6c056ce42ce/report.json`. Both 5,199 and
+2,000,000 rows passed original-ID Go, current-result First/Last, filtered descending
 navigation, excluded/invalid-row notifications, fully visible targets,
 contiguous rows without duplicates/blank areas, the 8,000,000px spacer cap,
 annotations/export and stale-response handling. This run operates the actual

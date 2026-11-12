@@ -115,8 +115,8 @@ For developers who wish to build or modify the application.
 
 #### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v22 or later; the UI tests use the built-in TypeScript stripping)
-- [Rust](https://www.rust-lang.org/tools/install) toolchain
+- [Node.js](https://nodejs.org/) 24.22.1 (see `.node-version`; UI tests use built-in TypeScript stripping)
+- [Rust](https://www.rust-lang.org/tools/install) 1.99.1 (installed automatically by rustup from `rust-toolchain.toml`)
 - [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/)
 
 #### Development
@@ -168,6 +168,8 @@ npm run build
 ```
 
 Benchmark results are recorded in [docs/performance.md](docs/performance.md).
+See [the architecture](docs/architecture.md) for read paths and work ownership,
+and [automation](docs/automation.md) for the standalone JSONL CLI and Python example.
 
 ## Windows System Requirement: WebView2
 
@@ -185,12 +187,13 @@ If you are using the **portable executable** (`.exe`), you may need to install t
 
 Projects are stored in the standard application data directory for your operating system.
 
-- `trivium/projects/<uuid>/data.parquet` - The imported data and the original-record column.
-- `trivium/projects/<uuid>/flags.db` - Row flags, memos, tags, and bookmarks.
-- `trivium/projects/<uuid>/view_state.json` - Rebuildable per-project view settings.
-- `trivium/projects/<uuid>/iocs.json` - Legacy IOC definitions, retained but not evaluated automatically.
-- `trivium/projects.json` - The project list.
-- `trivium/projects.json` - General metadata for all projects.
+- `trivium/projects/<uuid>/data.parquet` — imported evidence, including exact original records.
+- `trivium/projects/<uuid>/project.sqlite` — case metadata, annotations, settings and durable bulk undo.
+- Older `projects.json`, `flags.db`, and JSON settings are migrated automatically and retained as backups. SQLite becomes authoritative after migration. An active legacy writer or damaged case produces an explicit error; see [storage and migration](docs/storage.md).
+
+The native UI opens cached metadata without decoding evidence rows. Table pages read only the required Parquet row groups. Polars remains the query and analysis engine; projected streaming operations and bounded external sorting keep exports from collecting a whole output frame.
+
+Rust-to-TypeScript wire types are generated in `src/lib/generated/engine.ts`. Run `npm run contracts:generate` after changing public DTOs, and `npm run contracts:check` before committing. Source integers and nanosecond timestamps remain strings on the wire.
 
 ---
 
