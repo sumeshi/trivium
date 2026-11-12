@@ -1,61 +1,47 @@
 export const DEFAULT_THEME = "light" as const;
 export const THEME_PREFERENCE_VERSION = 2 as const;
 
-export const PASTEL_THEME_OPTIONS = [
-  { value: "yukari", label: "Yukari" },
-  { value: "sakura", label: "Sakura" },
-  { value: "sora", label: "Sora" },
-  { value: "kohaku", label: "Kohaku" },
-  { value: "hisui", label: "Hisui" },
-  { value: "toki", label: "Toki" },
-  { value: "nagi", label: "Nagi" },
-] as const;
-
 export const THEME_OPTIONS = [
+  { value: "trivium", label: "Trivium" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
-  ...PASTEL_THEME_OPTIONS,
+  { value: "toki", label: "Toki" },
+  { value: "sakura", label: "Sakura" },
+  { value: "kohaku", label: "Kohaku" },
+  { value: "hisui", label: "Hisui" },
+  { value: "nagi", label: "Nagi" },
+  { value: "sora", label: "Sora" },
+  { value: "yukari", label: "Yukari" },
+  { value: "sumire", label: "Sumire" },
   { value: "yozora", label: "Yozora" },
+  { value: "shion", label: "Shion" },
   { value: "kasumi", label: "Kasumi" },
-  { value: "tsukimi", label: "Tsukimi" },
-  { value: "trivium", label: "Trivium" },
 ] as const;
 
 export type Theme = (typeof THEME_OPTIONS)[number]["value"];
+const PASTEL_THEME_IDS: ReadonlySet<Theme> = new Set([
+  "yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi",
+]);
+export const PASTEL_THEME_OPTIONS = THEME_OPTIONS.filter(({ value }) => PASTEL_THEME_IDS.has(value));
+
 export interface ThemePreference {
   version: typeof THEME_PREFERENCE_VERSION;
   theme: Theme;
 }
 
-const RETIRED_THEMES: Readonly<Record<string, Theme>> = {
-  fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
-  sumi: "dark", midnight: "yozora", mauve: "tsukimi", tasogare: "kasumi",
-};
-
-/** Retired names resolve to an offered choice; user selections stay canonical. */
+/** Only names currently offered by the application are accepted. */
 export function parseTheme(value: unknown): Theme | null {
-  if (typeof value !== "string") return null;
-  if (Object.hasOwn(RETIRED_THEMES, value)) return RETIRED_THEMES[value];
   return THEME_OPTIONS.some((option) => option.value === value) ? value as Theme : null;
 }
 
-function legacyTheme(value: unknown): Theme | null {
-  // Only the old Light name means Yukari; retired Paper now resolves to Light.
-  return value === "light" ? "yukari" : parseTheme(value);
-}
-
-/** Accept the old plain localStorage name and {theme} file without losing its palette. */
+/** Persisted settings use the current versioned record in both storage paths. */
 export function parseSavedTheme(value: unknown): Theme | null {
   let record = value;
   if (typeof record === "string") {
-    const name = legacyTheme(record);
-    if (name) return name;
     try { record = JSON.parse(record); } catch { return null; }
   }
-  if (typeof record === "string") return legacyTheme(record);
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;
   const saved = record as { version?: unknown; theme?: unknown };
-  if (saved.version === undefined || saved.version === 1) return legacyTheme(saved.theme);
   return saved.version === THEME_PREFERENCE_VERSION ? parseTheme(saved.theme) : null;
 }
 
@@ -64,6 +50,6 @@ export function createThemePreference(value: Theme): ThemePreference {
 }
 
 export function isLightTheme(value: Theme): boolean {
-  return value === "light" ||
-    PASTEL_THEME_OPTIONS.some((option) => option.value === value);
+  return value === "light" || value === "sumire" ||
+    PASTEL_THEME_IDS.has(value);
 }

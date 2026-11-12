@@ -82,12 +82,13 @@ function readable(tokens: Map<string, string>, foreground: string, background: s
 
 test("neutral Light and the retained palettes keep their current names and distinct accents", () => {
   assert.equal(DEFAULT_THEME, "light");
-  assert.deepEqual(PASTEL_THEME_OPTIONS.map(({ value }) => value), ["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"]);
+  assert.deepEqual(THEME_OPTIONS.map(({ value }) => value), ["trivium", "light", "dark", "toki", "sakura", "kohaku", "hisui", "nagi", "sora", "yukari", "sumire", "yozora", "shion", "kasumi"]);
+  assert.deepEqual(new Set(PASTEL_THEME_OPTIONS.map(({ value }) => value)), new Set(["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"]));
   for (const { value } of THEME_OPTIONS) assert.equal(parseTheme(value), value);
   assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
   assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
   for (const { value } of PASTEL_THEME_OPTIONS) assert.equal(isLightTheme(value), true);
-  assert.equal(isLightTheme("tsukimi"), false);
+  assert.equal(isLightTheme("shion"), false);
   const palettes = new Set(PASTEL_THEME_OPTIONS.map(({ value }) => {
     const tokens = cssTokens(value);
     return colour(tokens, "bg") + colour(tokens, "accent");
@@ -101,24 +102,22 @@ test("neutral Light and the retained palettes keep their current names and disti
   assert.equal(colour(cssTokens("dark"), "surface"), "#171c24");
 });
 
-test("old Light preferences migrate to Yukari while newly saved Light remains neutral", () => {
-  for (const old of ["light", '{"theme":"light"}', { theme: "light" }, { version: 1, theme: "light" }]) {
-    assert.equal(parseSavedTheme(old), "yukari");
-  }
-  for (const id of ["dark", "yozora", "kasumi", "tsukimi", "trivium"] as const) {
-    assert.equal(parseSavedTheme(id), id);
-    assert.equal(parseSavedTheme({ theme: id }), id);
-  }
+test("only current versioned settings restore a theme", () => {
   for (const { value } of THEME_OPTIONS) {
     const saved = createThemePreference(value);
     assert.equal(saved.version, 2);
     assert.equal(parseSavedTheme(saved), value);
     assert.equal(parseSavedTheme(JSON.stringify(saved)), value);
+    assert.equal(parseSavedTheme(value), null);
+    assert.equal(parseSavedTheme({ theme: value }), null);
+    assert.equal(parseSavedTheme({ version: 1, theme: value }), null);
   }
   for (const invalid of [null, [], {}, "bad json", { version: 3, theme: "light" },
     { version: "2", theme: "light" }, { version: 2, theme: "unknown" }]) {
     assert.equal(parseSavedTheme(invalid), null);
   }
+  assert.equal(parseSavedTheme({ version: 2, theme: "light" }), "light");
+  assert.equal(parseSavedTheme("light") ?? DEFAULT_THEME, "light");
 });
 
 test("all themes keep ordinary, muted and input text readable on every opaque surface", () => {
@@ -156,19 +155,16 @@ test("flag meanings retain consistent colours and readable selected symbols in e
 });
 
 
-test("retired choices map consistently without turning Paper into Yukari", () => {
-  const aliases = { fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
-    sumi: "dark", midnight: "yozora", mauve: "tsukimi", tasogare: "kasumi" } as const;
-  for (const [retired, replacement] of Object.entries(aliases)) {
-    assert.equal(THEME_OPTIONS.some(({ value }) => value === retired), false);
-    assert.equal(parseTheme(retired), replacement);
-    for (const saved of [retired, { theme: retired }, { version: 1, theme: retired }, { version: 2, theme: retired }]) {
-      assert.equal(parseSavedTheme(saved), replacement);
-      assert.equal(parseSavedTheme(JSON.stringify(saved)), replacement);
+test("removed names and old settings formats are rejected instead of being remapped", () => {
+  const removed = ["fuji", "wakaba", "momiji", "paper", "sumi", "midnight", "mauve", "tasogare", "tsukimi", "gin"];
+  for (const name of removed) {
+    assert.equal(THEME_OPTIONS.some(({ value }) => value === name), false);
+    assert.equal(parseTheme(name), null);
+    for (const saved of [name, { theme: name }, { version: 1, theme: name }, { version: 2, theme: name }]) {
+      assert.equal(parseSavedTheme(saved), null);
+      assert.equal(parseSavedTheme(JSON.stringify(saved)), null);
     }
   }
-  assert.equal(parseSavedTheme("light"), "yukari");
-  assert.equal(parseSavedTheme({ version: 2, theme: "light" }), "light");
   assert.equal(parseTheme("__proto__"), null);
 });
 
@@ -188,7 +184,7 @@ test("colour stays on pastel headers and accents while main backgrounds remain w
 });
 
 test("new night palettes are dark and bookmarks remain a subtle surface tint", () => {
-  for (const name of ["yozora", "kasumi", "tsukimi"] as const) {
+  for (const name of ["yozora", "kasumi", "shion"] as const) {
     assert.equal(parseTheme(name), name);
     assert.equal(isLightTheme(name), false);
     assert.ok(luminance(colour(cssTokens(name), "bg")) < .03);
@@ -222,13 +218,26 @@ test("Light and Dark selections stand out while the approved pastel palettes sta
   }
 });
 
-test("Trivium follows the near-black blue reference and Tsukimi inherits the purple palette", () => {
-  const trivium = cssTokens("trivium"), tsukimi = cssTokens("tsukimi");
+test("Trivium follows the near-black blue reference and Shion inherits the purple palette", () => {
+  const trivium = cssTokens("trivium"), shion = cssTokens("shion");
   assert.equal(colour(trivium, "bg"), "#050716");
   assert.equal(colour(trivium, "surface"), "#11111b");
   assert.equal(colour(trivium, "accent"), "#879de9");
-  assert.equal(colour(tsukimi, "accent"), "#cbb8ee");
-  assert.equal(parseSavedTheme("mauve"), "tsukimi");
-  assert.equal(parseSavedTheme("tsukimi"), "tsukimi");
-  assert.equal(parseSavedTheme({ version: 2, theme: "tsukimi" }), "tsukimi");
+  assert.equal(colour(shion, "accent"), "#cbb8ee");
+  assert.equal(parseSavedTheme({ version: 2, theme: "shion" }), "shion");
+});
+
+
+test("Sumire is an offered light neutral with restrained silver surfaces and dark accents", () => {
+  assert.equal(THEME_OPTIONS.find(({ value }) => value === "sumire")?.label, "Sumire");
+  assert.equal(parseTheme("sumire"), "sumire");
+  assert.equal(isLightTheme("sumire"), true);
+  const tokens = cssTokens("sumire");
+  const surface = colour(tokens, "surface");
+  const accent = colour(tokens, "accent");
+  const channels = (value: string) => [1, 3, 5].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
+  const silver = channels(surface), dark = channels(accent);
+  assert.ok(Math.max(...silver) - Math.min(...silver) < 12, "Sumire surfaces remain neutral silver");
+  assert.ok(luminance(surface) > .7 && luminance(accent) < .04, "Sumire pairs light silver with near-black controls");
+  assert.ok(Math.max(...dark) - Math.min(...dark) < 20, "Sumire accents avoid a strong colour cast");
 });

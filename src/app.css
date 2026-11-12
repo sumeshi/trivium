@@ -66,7 +66,7 @@
   [data-theme="dark"],
   [data-theme="yozora"],
   [data-theme="kasumi"],
-  [data-theme="tsukimi"],
+  [data-theme="shion"],
   [data-theme="trivium"] {
     color-scheme: dark;
     --positive: #81d0a5;
@@ -215,7 +215,7 @@
     --accent-soft: var(--surface-weak);
   }
 
-  /* Lightened night-blue and warm mist-grey surfaces, followed by purple Tsukimi. */
+  /* Lightened night-blue and warm mist-grey surfaces, followed by purple Shion. */
   [data-theme="yozora"] {
     --bg: #1d2430;
     --fg: #e7edf5;
@@ -246,7 +246,7 @@
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
-  [data-theme="tsukimi"] {
+  [data-theme="shion"] {
     --bg: #22212f;
     --fg: #eeeaf9;
     --muted: #c9c0da;
@@ -281,6 +281,22 @@
     --flag-safe-selected-border: color-mix(in srgb, var(--positive) 40%, var(--surface));
     --flag-suspicious-selected-border: color-mix(in srgb, var(--warning) 40%, var(--surface));
     --flag-critical-selected-border: color-mix(in srgb, var(--danger) 40%, var(--surface));
+  }
+
+  /* Silver-grey surfaces and near-black accents keep Sumire deliberately neutral. */
+  [data-theme="sumire"] {
+    --bg: #e6e8eb;
+    --fg: #1e2329;
+    --muted: #46505c;
+    --surface: #f5f6f7;
+    --surface-weak: #d7dadd;
+    --surface-soft: #eef0f2;
+    --surface-strong: #d5d9df;
+    --overlay: rgba(223, 226, 230, 0.92);
+    --border: #b0b7c1;
+    --border-strong: #6b7684;
+    --accent: #252b33;
+    --accent-contrast: #ffffff;
   }
 
   html,
