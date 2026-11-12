@@ -376,7 +376,7 @@
                 class:loading={!item.row && !largePage}
                 style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
                   item.row?.color
-                    ? ` background-color: ${displayRowColor(item.row.color, $theme)};`
+                    ? ` --row-color: ${displayRowColor(item.row.color, $theme)};`
                     : ''
                 }`}
               >

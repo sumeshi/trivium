@@ -43,6 +43,18 @@
   padding-top: 0;
 }
 
+.table-navigation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.table-navigation .history-buttons {
+  padding-right: 10px;
+  border-right: 1px solid var(--border);
+}
+
 .row-jump {
   display: flex;
   flex-wrap: wrap;
@@ -91,6 +103,7 @@
   height: 27px;
   min-width: 27px;
   padding: 0 6px;
+  gap: 4px;
   font-size: 11px;
 }
 
@@ -668,7 +681,8 @@ button.primary:disabled {
 }
 
 .data-row {
-  --row-bg: var(--surface);
+  --row-base: var(--surface);
+  --row-bg: var(--row-color, var(--row-base));
   display: grid;
   gap: 0;
   align-items: center;
@@ -683,16 +697,16 @@ button.primary:disabled {
 }
 
 .data-row.loading {
-  opacity: 0.55;
+  color: var(--muted);
 }
 
 .data-row:nth-child(2n),
 .data-row.alt-row {
-  --row-bg: var(--surface-soft);
+  --row-base: var(--surface-soft);
 }
 
 .data-row:hover {
-  --row-bg: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  --row-bg: color-mix(in srgb, var(--accent) 5%, var(--row-color, var(--row-base)));
 }
 
 .data-row:last-child {
@@ -734,6 +748,71 @@ button.primary:disabled {
   z-index: 10;
   background: var(--surface-weak);
   box-shadow: none;
+}
+
+/* Fixed cells must paint an opaque layer above the horizontally moving cells.
+   This deliberately outranks .cell and .cell:hover further below, including
+   loading rows; fading the whole row would make its fixed cells translucent. */
+.data-row > .sticky {
+  background: var(--row-bg);
+}
+
+.data-row > .sticky:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--row-bg));
+}
+
+.data-header > .column-heading:hover,
+.data-header > .column-heading.sorted {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-weak));
+  color: var(--fg);
+}
+
+.column-heading {
+  padding: 0;
+  min-width: 0;
+}
+
+.column-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 3px 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+}
+
+.column-actions-trigger {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  margin-right: 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.column-actions-trigger:hover,
+.column-actions-trigger[aria-expanded='true'] {
+  color: var(--fg);
+  background: var(--surface-strong);
+}
+
+.column-sort:focus-visible,
+.column-actions-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .sticky-select {
@@ -877,7 +956,7 @@ button.primary:disabled {
 }
 
 .memo-placeholder {
-  color: color-mix(in srgb, var(--muted) 60%, transparent);
+  color: var(--muted);
 }
 
 .cell {
