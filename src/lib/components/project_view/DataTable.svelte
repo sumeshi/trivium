@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import { frozenColumnLayout, horizontalScrollForColumn } from '../../frozenColumns';
+  import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from '../../frozenColumns';
   import { errorMessage } from '../../errors';
   import {
     ROW_HEIGHT, PAGE_SIZE, SELECT_COL_WIDTH, INDEX_COL_WIDTH, FLAG_COL_WIDTH, MEMO_COL_WIDTH,
@@ -63,6 +63,7 @@
   let observedScrollEl: HTMLDivElement | null = null;
   let horizontalScrollEl: HTMLDivElement | null = null;
   let selectAllEl: HTMLInputElement | null = null;
+  let focusedScrollingWidth: number | undefined;
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -83,6 +84,8 @@
   $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
   $: frozenLayout = frozenColumnLayout($projectDetail?.columns ?? [], $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
+  $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, STICKY_COLUMNS_WIDTH,
+    $tableWidth, $scrollLeft, focusedScrollingWidth);
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
@@ -304,6 +307,7 @@
 
   const focusColumn = (index: number) => {
     if (!$bodyScrollEl) return;
+    focusedScrollingWidth = frozenLayout.offsets.has($visibleColumns[index]) ? undefined : distributedDataWidths[index];
     $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
       frozenLayout, STICKY_COLUMNS_WIDTH, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
@@ -353,11 +357,16 @@
 
 </script>
 
-<section class="table-wrapper">
+<section class="table-wrapper" data-frozen-pan={frozenViewport.pan}
+  data-frozen-max-pan={frozenViewport.maxPan} data-frozen-reserve={frozenViewport.reserve}>
   <div class="table-meta">
     <div class="table-meta-left">
       <strong>{$totalFilteredRows.toLocaleString()}</strong>
       <span>of {$totalRows.toLocaleString()} rows</span>
+      {#if frozenViewport.overflow}
+        <span class="meta-dot">·</span>
+        <span class="frozen-overflow-hint" title="The frozen data columns are wider than the available space. Scroll horizontally or focus a column to reveal them; annotation columns stay fixed.">Wide frozen columns · scroll horizontally</span>
+      {/if}
       {#if $selectedCount > 0}
         <span class="meta-dot">·</span>
         <span><strong>{$selectedCount}</strong> selected</span>
@@ -407,7 +416,7 @@
               class:lastFrozenData={frozenLayout.lastColumn === column}
               data-column-id={column}
               data-frozen={frozenLayout.offsets.has(column)}
-              style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${frozenLayout.offsets.get(column)}px;` : undefined}
+              style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${(frozenLayout.offsets.get(column) ?? 0) - frozenViewport.pan}px;` : undefined}
               class:sorted={$sortKey === column}
             >
               <button type="button" class="column-sort"
@@ -551,7 +560,7 @@
                       class:lastFrozenData={frozenLayout.lastColumn === column}
                       data-column-id={column}
                       data-frozen={frozenLayout.offsets.has(column)}
-                      style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${frozenLayout.offsets.get(column)}px;` : undefined}
+                      style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${(frozenLayout.offsets.get(column) ?? 0) - frozenViewport.pan}px;` : undefined}
                       on:focus={() => focusColumn(columnIndex)}
                       title={
                         !item.row || cellValue === null

@@ -29,16 +29,59 @@ export function frozenColumnLayout(
   return { offsets, boundary, lastColumn, width };
 }
 
-/** Reveal a scrolling column beside the actual frozen prefix, including wide cells. */
+export interface FrozenViewport {
+  pan: number;
+  maxPan: number;
+  edge: number;
+  reserve: number;
+  overflow: boolean;
+}
+
+/** Oversized data prefixes pan beneath the always-fixed annotation columns. */
+export function frozenColumnViewport(
+  frozen: FrozenColumnLayout, visibleCount: number, annotationWidth: number,
+  viewport: number, current: number, focusedScrollingWidth?: number,
+): FrozenViewport {
+  const available = Math.max(0, viewport - annotationWidth);
+  const hasScrollingColumns = visibleCount > frozen.offsets.size;
+  const minimumReserve = hasScrollingColumns ? Math.min(80, available / 2) : 0;
+  const overflow = frozen.offsets.size > 0 && frozen.width > viewport - minimumReserve;
+  // A focus override only affects an already-oversized prefix; ordinary
+  // prefixes retain exactly the same fixed positions as before.
+  const reserve = hasScrollingColumns && overflow && focusedScrollingWidth !== undefined
+    ? Math.min(available, Math.max(minimumReserve, focusedScrollingWidth)) : minimumReserve;
+  const maxPan = overflow ? Math.max(0, frozen.width - (viewport - reserve)) : 0;
+  const pan = Math.min(Math.max(0, current), maxPan);
+  return { pan, maxPan, edge: frozen.width - pan, reserve, overflow };
+}
+
+/** Reveal a frozen or scrolling column without discarding the requested boundary. */
 export function horizontalScrollForColumn(
   index: number, visible: readonly string[], widths: readonly number[],
   frozen: FrozenColumnLayout, annotationWidth: number, current: number, viewport: number,
 ): number {
-  if (index < 0 || index >= visible.length || frozen.offsets.has(visible[index])) return current;
+  if (index < 0 || index >= visible.length) return current;
+  const isFrozen = frozen.offsets.has(visible[index]);
+  const geometry = frozenColumnViewport(frozen, visible.length, annotationWidth, viewport, current,
+    isFrozen ? undefined : widths[index]);
   const left = annotationWidth + widths.slice(0, index).reduce((sum, width) => sum + width, 0);
   const right = left + widths[index];
-  if (left < current + frozen.width || widths[index] > Math.max(0, viewport - frozen.width)) {
-    return Math.max(0, left - frozen.width);
+  if (isFrozen) {
+    if (!geometry.overflow) return current;
+    const targetRight = viewport - geometry.reserve;
+    const usableWidth = Math.max(0, targetRight - annotationWidth);
+    if (widths[index] > usableWidth || left - geometry.pan < annotationWidth) {
+      return Math.min(geometry.maxPan, Math.max(0, left - annotationWidth));
+    }
+    if (right - geometry.pan > targetRight) {
+      return Math.min(geometry.maxPan, Math.max(0, right - targetRight));
+    }
+    return current;
   }
-  return right > current + viewport ? Math.max(0, right - viewport) : current;
+  const edge = frozen.width - geometry.maxPan;
+  const position = Math.max(current, geometry.maxPan);
+  if (left < position + edge || widths[index] > Math.max(0, viewport - edge)) {
+    return Math.max(geometry.maxPan, left - edge, 0);
+  }
+  return right > position + viewport ? Math.max(geometry.maxPan, right - viewport, 0) : position;
 }

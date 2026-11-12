@@ -770,6 +770,8 @@ button.primary:disabled {
    loading rows; fading the whole row would make its fixed cells translucent. */
 .data-row > .sticky {
   background: var(--row-bg);
+  /* A newly frozen cell must not animate from its old transparent surface. */
+  transition: color 100ms ease;
 }
 
 .data-row > .sticky:hover {
@@ -848,6 +850,20 @@ button.primary:disabled {
 
 .stickyData {
   left: var(--sticky-data-left, var(--sticky-data));
+}
+
+/* An oversized frozen data prefix may pan under the fixed annotations. */
+.data-header .stickyData {
+  z-index: 9;
+}
+
+.data-row > .stickyData {
+  z-index: 3;
+}
+
+.frozen-overflow-hint {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .stickyData:not(.lastFrozenData)::after,

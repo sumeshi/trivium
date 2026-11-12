@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
-import { frozenColumnLayout, horizontalScrollForColumn } from "./frozenColumns.ts";
+import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from "./frozenColumns.ts";
 import { savedViewFromUnknown, savedViewToViewState, viewStateToSavedView, viewStateWarnings } from "./viewStateMapping.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 import { createWorkspaceView } from "./workspaceView.ts";
@@ -110,4 +110,61 @@ test("per-case pin state survives save/reload and tab copies without changing fi
   assert.equal(get(workspace.frozenThrough), "TimeCreated", "old presets preserve this new case preference");
   assert.equal(get(workspace.search), "keep query"); assert.deepEqual(get(workspace.searchColumns), ["message"]);
   workspace.dispose(); replacement.dispose();
+});
+
+
+test("oversized prefixes pan beneath fixed annotations and stop once a scrolling reserve fits", () => {
+  const visible = ["a", "b", "c", "timestamp", "next"];
+  const wideWidths = [450, 450, 450, 450, 170];
+  const layout = frozenColumnLayout(visible, visible, wideWidths, "timestamp", annotations);
+  const start = frozenColumnViewport(layout, visible.length, annotations, 1280, 0);
+  assert.deepEqual({ pan: start.pan, maxPan: start.maxPan, edge: start.edge, reserve: start.reserve, overflow: start.overflow },
+    { pan: 0, maxPan: 1050, edge: 2250, reserve: 80, overflow: true });
+  const midway = frozenColumnViewport(layout, visible.length, annotations, 1280, 400);
+  assert.equal(midway.pan, 400);
+  const settled = frozenColumnViewport(layout, visible.length, annotations, 1280, 1140);
+  assert.equal(settled.pan, 1050); assert.equal(settled.edge, 1200);
+  assert.equal(layout.offsets.get("timestamp")! - settled.pan, 750);
+  assert.equal(layout.offsets.size, 4, "panning never changes the requested frozen prefix");
+});
+
+test("keyboard focus reaches every oversized frozen column and the first scrolling header in full", () => {
+  const visible = ["a", "b", "c", "timestamp", "next"];
+  const wideWidths = [450, 450, 450, 450, 170];
+  const layout = frozenColumnLayout(visible, visible, wideWidths, "timestamp", annotations);
+  let scroll = 1140;
+  for (let index = 0; index < visible.length; index += 1) {
+    scroll = horizontalScrollForColumn(index, visible, wideWidths, layout, annotations, scroll, 1280);
+    const frozen = layout.offsets.has(visible[index]);
+    const geometry = frozenColumnViewport(layout, visible.length, annotations, 1280, scroll,
+      frozen ? undefined : wideWidths[index]);
+    const sourceLeft = annotations + wideWidths.slice(0, index).reduce((sum, width) => sum + width, 0);
+    const left = sourceLeft - (frozen ? geometry.pan : scroll);
+    assert.ok(left >= annotations, `column ${index} must be beside the fixed annotations`);
+    assert.ok(left + wideWidths[index] <= 1280, `column ${index} must be fully inside the viewport`);
+    if (!frozen) {
+      assert.ok(left >= geometry.edge);
+      assert.equal(geometry.reserve, 170, "the focused scrolling column gets enough space");
+    }
+  }
+  scroll = horizontalScrollForColumn(0, visible, wideWidths, layout, annotations, scroll, 1280);
+  const restored = frozenColumnViewport(layout, visible.length, annotations, 1280, scroll);
+  assert.equal(restored.reserve, 80); assert.equal(scroll, 0);
+});
+
+test("all-frozen prefixes still pan to their end and resizing restores ordinary fixed geometry", () => {
+  const visible = ["a", "b", "c", "timestamp"];
+  const wideWidths = [450, 450, 450, 450];
+  const layout = frozenColumnLayout(visible, visible, wideWidths, "timestamp", annotations);
+  const end = horizontalScrollForColumn(3, visible, wideWidths, layout, annotations, 0, 1280);
+  const small = frozenColumnViewport(layout, visible.length, annotations, 1280, end);
+  assert.equal(small.reserve, 0); assert.equal(small.pan, 970); assert.equal(small.edge, 1280);
+  assert.equal(layout.offsets.get("timestamp")! - small.pan + wideWidths[3], 1280);
+  const larger = frozenColumnViewport(layout, visible.length, annotations, 2600, end);
+  assert.equal(larger.overflow, false); assert.equal(larger.pan, 0);
+  assert.equal(layout.offsets.get("timestamp"), 1800);
+  assert.equal(layout.boundary, "timestamp");
+  const ordinary = frozenColumnLayout(columns, columns, widths, "TimeCreated", annotations);
+  assert.equal(frozenColumnViewport(ordinary, columns.length, annotations, 1280, 200, 900).pan, 0,
+    "focus reserves cannot move an ordinary fitting frozen prefix");
 });
