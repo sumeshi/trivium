@@ -4,6 +4,7 @@
   import { displayText } from '../../ipcValues';
   import { createRowDetails, detailCopyValue, detailFilterValue } from '../../rowDetails';
   import type { DetailField } from '../../rowDetails';
+  import type { GetCellResult } from '../../backend';
   import { useWorkspace } from '../../workspaceContext';
 
   const {
@@ -95,15 +96,13 @@
     return field?.state === 'loaded' ? field.value : undefined;
   };
   const labelFor = (column: string) => $columnLabels.get(column) ?? column;
-  const filterTip = (column: string) => {
-    const value = loadedValue(column);
+  const filterTip = (value: GetCellResult | undefined) => {
     if (!value) return 'Wait for the full field value.';
     if (value.kind === 'null') return 'Null cannot be used as an exact text filter.';
     if (value.kind === 'missing') return 'This field is missing; it has no filter value.';
     return 'Add this exact value to the current filters.';
   };
-  const copyTip = (column: string) => {
-    const value = loadedValue(column);
+  const copyTip = (value: GetCellResult | undefined) => {
     if (!value) return 'Wait for the full field value.';
     if (value.kind === 'missing') return 'This field is missing; there is no value to copy.';
     return value.kind === 'null' ? 'Copy null as the text null.' : 'Copy the full field value.';
@@ -171,17 +170,17 @@
         <dl class="row-fields">
           {#each detailColumns as column}
             {@const field = fields.get(column)}
-            {@const value = loadedValue(column)}
+            {@const value = field?.state === 'loaded' ? field.value : undefined}
             {@const label = labelFor(column)}
             <div class="row-detail-field" class:is-focus={column === $expandedCell.columnId} data-column-id={column}>
               <dt>
                 <span class="row-field-label">{label}{$hiddenColumns.has(column) ? ' (hidden)' : ''}</span>
                 <div class="row-field-actions">
-                  <button type="button" class="ghost" aria-label={`Copy ${label}`} title={copyTip(column)}
+                  <button type="button" class="ghost" aria-label={`Copy ${label}`} title={copyTip(value)}
                     disabled={detailCopyValue(value) === null} on:click={() => copyField(column)}>Copy</button>
-                  <button type="button" class="ghost" aria-label={`Filter in ${label}`} title={filterTip(column)}
+                  <button type="button" class="ghost" aria-label={`Filter in ${label}`} title={filterTip(value)}
                     disabled={detailFilterValue(value) === null} on:click={() => filterField(column, 'eq')}>Filter in</button>
-                  <button type="button" class="ghost" aria-label={`Filter out ${label}`} title={filterTip(column)}
+                  <button type="button" class="ghost" aria-label={`Filter out ${label}`} title={filterTip(value)}
                     disabled={detailFilterValue(value) === null} on:click={() => filterField(column, 'ne')}>Filter out</button>
                 </div>
               </dt>
