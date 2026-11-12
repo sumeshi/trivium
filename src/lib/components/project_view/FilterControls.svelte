@@ -208,17 +208,18 @@
         type="button"
         class="flag-trigger"
         class:open={flagMenuOpen}
+        class:filtered={selectedFlags.length > 0}
         on:click={toggleFlagMenu}
         aria-label={`Filter by flag: ${selectedFlagNames.join(', ') || 'All rows'}`}
-        title="Filter by flag; no selection shows all rows"
+        aria-pressed={selectedFlags.length > 0}
+        title={`Filter by flag: ${selectedFlagNames.join(', ') || 'All rows'}; no selection shows all rows`}
         aria-controls="flag-filter-menu"
         aria-expanded={flagMenuOpen}
       >
-        <span class="flag-label">Flags</span>
-        <span class="count-chip">{selectedFlags.length || 'All'}</span>
-        <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <path d="m6 9 6 6 6-6" />
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 21V4m0 0c4-3 10 3 14 0v11c-4 3-10-3-14 0" />
         </svg>
+        {#if selectedFlags.length > 0}<span class="flag-filter-indicator" aria-hidden="true"></span>{/if}
       </button>
       {#if flagMenuOpen}
         <div class="flag-menu" id="flag-filter-menu" role="group" aria-label="Flag filters">
@@ -423,7 +424,7 @@
   .analysis-tabs button { border: 1px solid transparent; border-radius: 4px; padding: 4px 7px; background: transparent; color: var(--muted); font-size: 11px; }
   .analysis-tabs button[aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--fg); }
   .analysis-tabs button:hover { color: var(--fg); background: var(--surface-weak); }
-  .tool-groups { display: flex; align-items: center; gap: 3px; }
+  .tool-groups { display: flex; align-items: center; gap: 3px; margin-left: 4px; padding-left: 9px; border-left: 1px solid var(--border); }
   .export-button { width: 33px; min-width: 33px; padding: 0; justify-content: center; }
   button:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 

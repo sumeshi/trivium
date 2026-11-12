@@ -727,8 +727,7 @@
   <div slot="navigation" class="table-navigation">
     <HistoryButtons />
     <div class="row-jump" role="group" aria-label="Original row navigation">
-    <label class="row-jump-field">
-      <span>Original row</span>
+    <div class="row-jump-field">
       <input
         type="number"
         min="1"
@@ -746,7 +745,7 @@
           }
         }}
       />
-    </label>
+    </div>
     <button
       type="button"
       class="ghost"
@@ -757,7 +756,6 @@
       disabled={!initialized || $totalRows === 0 || $appliedResultLoading || filterTimeout !== null || $locatingRow}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
-      <span>Go</span>
     </button>
     <button
       type="button"
@@ -768,7 +766,6 @@
       disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v14m13-14-7 7 7 7" /></svg>
-      <span>First</span>
     </button>
     <button
       type="button"
@@ -779,9 +776,7 @@
       disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5v14M6 5l7 7-7 7" /></svg>
-      <span>Last</span>
     </button>
-    <span class="row-jump-range">of {$totalRows.toLocaleString()}</span>
     </div>
   </div>
   </FilterControls>

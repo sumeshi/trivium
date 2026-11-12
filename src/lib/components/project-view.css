@@ -68,14 +68,7 @@
 
 .row-jump-field {
   display: flex;
-  flex-direction: row;
   align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  text-transform: none;
 }
 
 .row-jump-field input {
@@ -101,17 +94,10 @@
   align-items: center;
   justify-content: center;
   height: 27px;
+  width: 27px;
   min-width: 27px;
-  padding: 0 6px;
-  gap: 4px;
+  padding: 0;
   font-size: 11px;
-}
-
-.row-jump-range {
-  align-self: center;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-family: var(--font-mono);
 }
 
 .condition-editor,
@@ -360,12 +346,13 @@ button.primary:disabled {
 }
 
 .flag-trigger {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   height: 36px;
-  padding: 0 11px;
+  width: 33px;
+  padding: 0;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface-weak);
@@ -385,13 +372,20 @@ button.primary:disabled {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.flag-trigger .chevron {
-  color: var(--muted);
+.flag-trigger.filtered {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-.flag-label {
-  font-size: 12px;
-  font-weight: 500;
+.flag-filter-indicator {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .flag-menu {
