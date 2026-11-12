@@ -1,4 +1,4 @@
-# Trivium
+<h1 align="center"><img src="assets/branding/banner.png" alt="Trivium" width="720"></h1>
 
 A desktop application for reviewing and triaging large CSV, JSON, and JSONL logs.
 
@@ -29,11 +29,11 @@ This tool is primarily for anyone who needs to sift through large amounts of tab
 - **Flag Rows**: Mark any row as `Safe`, `Suspicious`, or `Critical` with a single click.
 - **Annotations**: Add memos, tags, and bookmarks independently. Clearing a flag does not clear the other annotations.
 - **Filtering & Sorting**: Filter by flag, bookmark, text search, or structured conditions, and sort by any data column.
-- **Column Management**: Hide columns for display without changing the default search scope.
+- **Column Management**: Hide columns or choose how many leading data columns stay pinned, independently from the search scope.
 - **Selection & Bulk Annotation**: Select rows across pages by stable row id, annotate only the selection, the current result, or all rows, and undo the last bulk change.
 - **Data Export**: Export all rows, the current result, or selected rows to CSV, with optional `trivium-*` annotation columns.
 - **Condition Editor**: Build filters from nested AND/OR groups with per-column operators (`=`, `≠`, `>`, `<`, `≥`, `≤`, `contains`, `starts`, `ends`, `regex`, `in`), while the text search bar remains available.
-- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and row details with surrounding events. Panels calculate only while open and use the applied query. Back/forward navigation and per-project view state make it easy to move between filters.
+- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and full row details. Time controls explain gaps, sessions, and bursts; panels calculate only while open and use the applied query. Back/forward navigation and per-project view state make it easy to move between filters.
 - **Advanced Views**: Grouping, color rules, presets, cross-project search, diffs, and HTML reports remain available as auxiliary tools outside the basic manual-review flow.
 - **Flexible Import & Export**: Choose a CSV delimiter, import UTF-16 via BOM detection, and load JSON/JSONL with nested keys flattened using JSON Pointers. The source file name, format, size, and SHA-256 are kept in project metadata. Exports preserve integer text and can include tags and bookmarks as independent columns.
 
