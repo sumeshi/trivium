@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use polars::prelude::{DataFrame, NamedFrom, Series};
+use polars::prelude::{NamedFrom, Series};
 
 use crate::{flags::normalize_flag_value, models::FlagEntry};
 
@@ -25,15 +25,11 @@ pub(crate) struct PlannedColumn {
 /// warning is returned so the UI can report the mapping.
 pub(crate) fn plan_annotation_columns(
     data_headers: &[String],
-    df: &DataFrame,
+    columns: &[String],
     warnings: &mut Vec<String>,
 ) -> Vec<PlannedColumn> {
     let mut used_headers: HashSet<String> = data_headers.iter().cloned().collect();
-    let mut used_internals: HashSet<String> = df
-        .get_column_names()
-        .iter()
-        .map(|name| name.to_string())
-        .collect();
+    let mut used_internals: HashSet<String> = columns.iter().cloned().collect();
     let mut planned = Vec::with_capacity(ANNOTATION_COLUMNS.len());
 
     for canonical in ANNOTATION_COLUMNS {
@@ -76,23 +72,23 @@ pub(crate) struct AnnotationSeries {
 /// Builds the independent annotation columns from user annotations only.
 /// Tags stay in `trivium-tags` and are never stored as memo text.
 pub(crate) fn build_annotations(
-    df: &DataFrame,
+    rows: &[usize],
     flags: &HashMap<usize, FlagEntry>,
 ) -> AnnotationSeries {
-    let mut safe = vec![0; df.height()];
-    let mut suspicious = vec![0; df.height()];
-    let mut critical = vec![0; df.height()];
-    let mut memo = vec![String::new(); df.height()];
-    let mut tags = vec![String::new(); df.height()];
-    let mut bookmarked = vec![0; df.height()];
+    let mut safe = vec![0; rows.len()];
+    let mut suspicious = vec![0; rows.len()];
+    let mut critical = vec![0; rows.len()];
+    let mut memo = vec![String::new(); rows.len()];
+    let mut tags = vec![String::new(); rows.len()];
+    let mut bookmarked = vec![0; rows.len()];
 
-    for i in 0..df.height() {
+    for (i, row) in rows.iter().enumerate() {
         let user_flag = flags
-            .get(&i)
+            .get(row)
             .map(|entry| normalize_flag_value(entry.flag.trim()))
             .unwrap_or_default();
         let final_memo = flags
-            .get(&i)
+            .get(row)
             .and_then(|entry| entry.memo.clone())
             .unwrap_or_default();
 
@@ -104,7 +100,7 @@ pub(crate) fn build_annotations(
         }
         memo[i] = final_memo;
 
-        if let Some(entry) = flags.get(&i) {
+        if let Some(entry) = flags.get(row) {
             tags[i] = entry.tags.join(";");
             bookmarked[i] = if entry.bookmarked { 1 } else { 0 };
         }

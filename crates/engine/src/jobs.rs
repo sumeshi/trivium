@@ -6,12 +6,12 @@
 //!
 //! Cancellation is cooperative. `check_cancelled` calls surround the heavy
 //! library calls, CSV/JSON import checks every batch boundary, and search
-//! evaluation checks each fixed row batch. Export writing is still a single
-//! call; that checkpoint belongs to T23.
+//! evaluation checks each fixed row batch. Heavy desktop work shares bounded
+//! async admission, including load, analysis, mutation and atomic exports.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+mod scheduler;
+
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -22,35 +22,52 @@ use crate::error::AppError;
 
 pub type JobId = u64;
 
-/// Maximum number of heavy jobs that may run at once. Import, query, and
-/// export all count against this limit.
+/// Maximum number of heavy jobs that may run at once across every command.
 pub const MAX_CONCURRENT_JOBS: usize = 2;
+/// Bound accepted waiting work as well as executing work.
+pub const MAX_QUEUED_JOBS: usize = 32;
+
+pub use scheduler::{
+    active_jobs, cancel_request_jobs, is_cancelled, queue_job, queue_job_with_request,
+    request_cancel, scheduler_stats, try_begin_job, JobGuard, SchedulerStats,
+};
 
 /// Minimum interval between two progress notifications from one job.
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum JobKind {
     Import,
     Query,
     Export,
+    Load,
+    Analysis,
+    Mutation,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct JobInfo {
+    #[ts(type = "number")]
     pub id: JobId,
     pub kind: JobKind,
     pub project_id: Option<Uuid>,
+    /// Transport-level ownership; never part of QuerySpec or result-cache keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct JobProgress {
+    #[ts(type = "number")]
     pub id: JobId,
     pub kind: JobKind,
+    #[ts(type = "number")]
     pub done: u64,
+    #[ts(type = "number | null")]
     pub total: Option<u64>,
     pub message: Option<String>,
 }
@@ -59,151 +76,10 @@ pub struct JobProgress {
 /// as a Tauri event.
 pub type ProgressFn = Arc<dyn Fn(JobProgress) + Send + Sync>;
 
-struct JobEntry {
-    info: JobInfo,
-    cancelled: Arc<AtomicBool>,
-}
-
-struct Registry {
-    next_id: JobId,
-    jobs: HashMap<JobId, JobEntry>,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self {
-            // IDs are monotonic for the process lifetime and act as the job
-            // generation: an old ID can never select a newer job.
-            next_id: 1,
-            jobs: HashMap::new(),
-        }
-    }
-}
-
-fn registry() -> &'static Mutex<Registry> {
-    static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(Registry::default()))
-}
-
-/// Creates a job entry or rejects the request when the concurrency limit is
-/// reached. Dropping the returned guard removes the entry.
-pub fn try_begin_job(kind: JobKind, project_id: Option<Uuid>) -> Result<JobGuard, AppError> {
-    let mut registry = registry().lock();
-    if registry.jobs.len() >= MAX_CONCURRENT_JOBS {
-        return Err(AppError::Message(
-            "Too many long-running operations. Wait for one to finish.".into(),
-        ));
-    }
-    let id = registry.next_id;
-    registry.next_id += 1;
-    let cancelled = Arc::new(AtomicBool::new(false));
-    registry.jobs.insert(
-        id,
-        JobEntry {
-            info: JobInfo {
-                id,
-                kind,
-                project_id,
-            },
-            cancelled: Arc::clone(&cancelled),
-        },
-    );
-    Ok(JobGuard {
-        id,
-        kind,
-        project_id,
-        cancelled,
-    })
-}
-
-/// Requests cancellation of one job. Returns `false` when the ID is unknown or
-/// the job has already finished, so a finished job cannot affect a newer one.
-pub fn request_cancel(id: JobId) -> bool {
-    let registry = registry().lock();
-    match registry.jobs.get(&id) {
-        Some(entry) => {
-            entry.cancelled.store(true, Ordering::SeqCst);
-            true
-        }
-        None => false,
-    }
-}
-
-/// Reports whether a live job has been asked to cancel.
-pub fn is_cancelled(id: JobId) -> bool {
-    registry()
-        .lock()
-        .jobs
-        .get(&id)
-        .map(|entry| entry.cancelled.load(Ordering::SeqCst))
-        .unwrap_or(false)
-}
-
-/// Lists active jobs ordered by ID.
-pub fn active_jobs() -> Vec<JobInfo> {
-    let registry = registry().lock();
-    let mut jobs: Vec<JobInfo> = registry
-        .jobs
-        .values()
-        .map(|entry| entry.info.clone())
-        .collect();
-    jobs.sort_by_key(|job| job.id);
-    jobs
-}
-
 /// The fixed error text the frontend uses to distinguish a cancelled job from
 /// a failure.
 pub fn cancelled_error() -> AppError {
     AppError::Message("Cancelled.".into())
-}
-
-/// Owns one active job entry. The entry is removed on drop, whether the job
-/// succeeded, failed, or panicked inside the blocking worker.
-pub struct JobGuard {
-    id: JobId,
-    kind: JobKind,
-    project_id: Option<Uuid>,
-    cancelled: Arc<AtomicBool>,
-}
-
-impl JobGuard {
-    pub fn id(&self) -> JobId {
-        self.id
-    }
-
-    pub fn kind(&self) -> JobKind {
-        self.kind
-    }
-
-    pub fn project_id(&self) -> Option<Uuid> {
-        self.project_id
-    }
-
-    pub fn info(&self) -> JobInfo {
-        JobInfo {
-            id: self.id,
-            kind: self.kind,
-            project_id: self.project_id,
-        }
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-
-    pub fn check_cancelled(&self) -> Result<(), AppError> {
-        if self.is_cancelled() {
-            Err(cancelled_error())
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Drop for JobGuard {
-    fn drop(&mut self) {
-        registry().lock().jobs.remove(&self.id);
-    }
 }
 
 /// Cooperative cancellation and throttled progress for an engine operation.

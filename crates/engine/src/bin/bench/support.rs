@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use trivium_engine::error::AppError;
 use trivium_engine::jobs::{request_cancel, try_begin_job, JobContext, JobKind};
 use trivium_engine::ops::export::{export_project_with_job, ExportProjectPayload};
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
+use trivium_engine::ops::rows::{
+    query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec,
+};
 use trivium_engine::store::ProjectsStore;
 
 pub const ITERATIONS: usize = 20;
@@ -22,13 +24,13 @@ pub struct Samples {
 
 impl Samples {
     pub fn new(label: &'static str) -> Self {
-        Self { label, values: Vec::new() }
+        Self {
+            label,
+            values: Vec::new(),
+        }
     }
 
-    pub fn record<T>(
-        &mut self,
-        job: impl FnOnce() -> Result<T, AppError>,
-    ) -> Result<T, AppError> {
+    pub fn record<T>(&mut self, job: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppError> {
         let started = Instant::now();
         let result = job()?;
         self.values.push(started.elapsed());
@@ -97,10 +99,7 @@ pub fn ms(duration: Duration) -> String {
     }
 }
 
-pub fn once<T>(
-    label: &str,
-    job: impl FnOnce() -> Result<T, AppError>,
-) -> Result<T, AppError> {
+pub fn once<T>(label: &str, job: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppError> {
     let started = Instant::now();
     let result = job()?;
     out(label, format!("n=1 {}", ms(started.elapsed())));

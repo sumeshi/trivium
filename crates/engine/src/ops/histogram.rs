@@ -1,15 +1,14 @@
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::analysis::histogram::{histogram_series_annotated, Histogram, DEFAULT_BUCKETS};
+use crate::analysis::histogram::{histogram_series_annotated_with_job, Histogram, DEFAULT_BUCKETS};
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::jobs::JobContext;
-use crate::project_io::{is_internal_column_for_version, read_project_dataframe};
-use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
-use super::query::{resolve_target, QuerySpec};
+use super::analysis_data::AnalysisSource;
+use super::query::QuerySpec;
 
 #[derive(Debug, Deserialize)]
 pub struct HistogramPayload {
@@ -50,24 +49,15 @@ fn default_buckets() -> u32 {
 
 /// Equal-width buckets for one numeric or datetime column over the filtered rows.
 pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<Histogram, AppError> {
-    let meta = store
-        .find(&payload.project_id)
-        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    if is_internal_column_for_version(&payload.column, meta.storage_version) {
-        return Err(AppError::Message("Column not found.".into()));
-    }
-    let project_dir = store.project_dir(&meta.id);
-    let parquet_path = project_dir.join("data.parquet");
-    if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()));
-    }
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns = super::query::data_columns(&df, meta.storage_version);
-    let series = df
-        .column(&payload.column)
-        .map_err(|_| AppError::Message("Column not found.".into()))?;
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let mut spec = QuerySpec {
+    histogram_with_job(store, payload, &JobContext::none())
+}
+
+pub fn histogram_with_job(
+    store: &ProjectsStore,
+    payload: HistogramPayload,
+    job: &JobContext,
+) -> Result<Histogram, AppError> {
+    let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -79,8 +69,12 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         sort_key: None,
         sort_direction: None,
     };
-    spec.resolve_search_labels(&meta.columns)?;
-    let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
+    let source = AnalysisSource::open(store, payload.project_id, &spec, job)?;
+    let projection = source.columns(std::slice::from_ref(&payload.column), "histogram")?;
+    let frame = source.read_columns(&projection, job)?;
+    let series = frame
+        .column(&projection[0])
+        .map_err(|error| AppError::Other(error.into()))?;
     let bucket_count = if payload.buckets == 0 {
         DEFAULT_BUCKETS
     } else {
@@ -90,14 +84,15 @@ pub fn histogram(store: &ProjectsStore, payload: HistogramPayload) -> Result<His
         .range
         .as_ref()
         .map(|range| (range.min.as_str(), range.max.as_str()));
-    histogram_series_annotated(
+    histogram_series_annotated_with_job(
         &payload.column,
         series,
-        &filtered,
+        &source.target.ids,
         bucket_count,
         range,
-        &flags,
+        &source.target.flags,
         payload.focus,
+        job,
     )
     .map_err(AppError::Message)
 }

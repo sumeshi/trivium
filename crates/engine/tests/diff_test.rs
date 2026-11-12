@@ -29,7 +29,13 @@ fn create_project(store: &ProjectsStore, path: &std::path::Path) -> Uuid {
     .id
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid, std::collections::HashMap<String, String>) {
+fn setup() -> (
+    PathBuf,
+    ProjectsStore,
+    Uuid,
+    Uuid,
+    std::collections::HashMap<String, String>,
+) {
     let root = std::env::temp_dir().join(format!("trivium-diff-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -125,7 +131,8 @@ fn diff_preserves_duplicate_counts() {
 fn diff_writes_csv_in_status_order() {
     let (root, store, id_a, id_b, ids) = setup();
     let destination = root.join("diff.csv");
-    diff_projects(&store, payload(id_a, id_b, &ids, Some(destination.clone()))).expect("diff failed");
+    diff_projects(&store, payload(id_a, id_b, &ids, Some(destination.clone())))
+        .expect("diff failed");
     assert!(destination.exists(), "diff CSV was not written");
 
     let mut reader = ReaderBuilder::new()
@@ -141,7 +148,13 @@ fn diff_writes_csv_in_status_order() {
     let proc_id = common::id(&ids, "proc");
     assert_eq!(
         headers,
-        vec!["status", "count_a", "count_b", user_id.as_str(), proc_id.as_str()]
+        vec![
+            "status",
+            "count_a",
+            "count_b",
+            user_id.as_str(),
+            proc_id.as_str()
+        ]
     );
 
     let rows: Vec<Vec<String>> = reader
@@ -182,5 +195,47 @@ fn diff_reports_missing_key_column() {
         "unexpected error: {error}"
     );
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn compound_keys_with_embedded_separators_remain_distinct() {
+    let root = std::env::temp_dir().join(format!("trivium-diff-separator-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let store = ProjectsStore::new(root.clone()).unwrap();
+    let a = root.join("a.jsonl");
+    let b = root.join("b.jsonl");
+    fs::write(&a, "{\"left\":\"a\\u0001b\",\"right\":\"c\"}\n").unwrap();
+    fs::write(&b, "{\"left\":\"a\",\"right\":\"b\\u0001c\"}\n").unwrap();
+    let id_a = create_project(&store, &a);
+    let id_b = create_project(&store, &b);
+    let ids = common::column_ids(&store, id_a);
+    let result = diff_projects(
+        &store,
+        DiffProjectsPayload {
+            project_id_a: id_a,
+            project_id_b: id_b,
+            key_columns: vec![common::id(&ids, "/left"), common::id(&ids, "/right")],
+            destination: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(result.entries.len(), 2);
+    assert_eq!(result.status_counts["only_a"], 1);
+    assert_eq!(result.status_counts["only_b"], 1);
+    assert_eq!(result.status_counts["same"], 0);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn diff_export_cannot_replace_either_source_evidence_file() {
+    let (root, store, id_a, id_b, ids) = setup();
+    for source in [root.join("a.csv"), root.join("b.csv")] {
+        let before = fs::read(&source).unwrap();
+        let error =
+            diff_projects(&store, payload(id_a, id_b, &ids, Some(source.clone()))).unwrap_err();
+        assert!(error.to_string().contains("source evidence"));
+        assert_eq!(fs::read(source).unwrap(), before);
+    }
     let _ = fs::remove_dir_all(root);
 }

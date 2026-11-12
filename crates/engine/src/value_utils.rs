@@ -22,10 +22,18 @@ fn stringified_columns() -> &'static Mutex<HashMap<String, u64>> {
 
 /// Records one test-instrumentation stringification for a column.
 pub fn record_stringified_column(column: &str) {
+    record_stringified_column_count(column, 1);
+}
+
+/// Batch recording keeps instrumentation allocation/locking out of hot loops.
+pub fn record_stringified_column_count(column: &str, count: u64) {
+    if count == 0 {
+        return;
+    }
     let mut counts = stringified_columns()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *counts.entry(column.to_string()).or_insert(0) += 1;
+    *counts.entry(column.to_string()).or_insert(0) += count;
 }
 
 /// Test instrumentation: stringifications recorded for one column.
@@ -262,8 +270,9 @@ pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
     let series = df.column(INTERNAL_ORIGINAL).ok()?;
     match series.get(row_idx).ok()? {
         AnyValue::Null => None,
-        other => anyvalue_to_search_string(&other)
-            .and_then(|text| serde_json::from_str(&text).ok()),
+        other => {
+            anyvalue_to_search_string(&other).and_then(|text| serde_json::from_str(&text).ok())
+        }
     }
 }
 

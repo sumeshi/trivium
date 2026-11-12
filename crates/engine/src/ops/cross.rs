@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::jobs::JobContext;
 use crate::models::ProjectRow;
 use crate::store::ProjectsStore;
 
-use super::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
+use super::rows::{query_project_rows_with_job, QueryRowsPayload, QuerySpec};
 
 #[derive(Debug, Deserialize)]
 pub struct CrossSearchPayload {
@@ -41,9 +42,19 @@ pub fn search_projects(
     store: &ProjectsStore,
     payload: CrossSearchPayload,
 ) -> Result<Vec<CrossSearchHit>, AppError> {
+    search_projects_with_job(store, payload, &JobContext::none())
+}
+
+pub fn search_projects_with_job(
+    store: &ProjectsStore,
+    payload: CrossSearchPayload,
+    job: &JobContext,
+) -> Result<Vec<CrossSearchHit>, AppError> {
+    job.check_cancelled()?;
     let mut hits = Vec::with_capacity(payload.project_ids.len());
     for project_id in payload.project_ids {
-        let response = query_project_rows(
+        job.check_cancelled()?;
+        let response = query_project_rows_with_job(
             store,
             QueryRowsPayload {
                 project_id,
@@ -59,6 +70,7 @@ pub fn search_projects(
                 offset: payload.offset,
                 limit: payload.limit,
             },
+            job,
         )?;
         hits.push(CrossSearchHit {
             project_id,

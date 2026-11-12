@@ -15,14 +15,16 @@ use trivium_engine::ops::bulk::{
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::iocs::SaveIocsPayload;
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
+use trivium_engine::ops::rows::{
+    query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec,
+};
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
 mod common;
 
-/// The undo layer is process-global, so tests sharing this binary must not
-/// interleave their bulk_update/bulk_undo pairs.
+/// Serialize the existing long mutation scenarios for stable test scheduling.
+/// Undo itself is durable and isolated inside each project database.
 static UNDO_LOCK: Mutex<()> = Mutex::new(());
 
 fn undo_guard() -> MutexGuard<'static, ()> {
@@ -52,7 +54,14 @@ fn write_fixture(root: &std::path::Path) -> PathBuf {
     path
 }
 
-fn setup(with_ioc: bool) -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
+fn setup(
+    with_ioc: bool,
+) -> (
+    PathBuf,
+    ProjectsStore,
+    Uuid,
+    std::collections::HashMap<String, String>,
+) {
     let root = std::env::temp_dir().join(format!("trivium-bulk-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -231,7 +240,10 @@ fn bulk_all_applies_and_undo_restores() {
 
     let applied = bulk_update(
         &store,
-        previewed(&store, payload(id, "all", None, None, "suspicious", Some("bulk"))),
+        previewed(
+            &store,
+            payload(id, "all", None, None, "suspicious", Some("bulk")),
+        ),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 12);
@@ -268,7 +280,14 @@ fn bulk_filter_matches_the_query_path() {
 
     let preview = bulk_preview(
         &store,
-        payload(id, "filtered", Some(&common::search(&ids, "user", "alice")), None, "suspicious", None),
+        payload(
+            id,
+            "filtered",
+            Some(&common::search(&ids, "user", "alice")),
+            None,
+            "suspicious",
+            None,
+        ),
     )
     .expect("preview failed");
     assert_eq!(preview.count, 6);
@@ -280,7 +299,17 @@ fn bulk_filter_matches_the_query_path() {
 
     let applied = bulk_update(
         &store,
-        previewed(&store, payload(id, "filtered", Some(&common::search(&ids, "user", "alice")), None, "suspicious", None)),
+        previewed(
+            &store,
+            payload(
+                id,
+                "filtered",
+                Some(&common::search(&ids, "user", "alice")),
+                None,
+                "suspicious",
+                None,
+            ),
+        ),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 6);
@@ -315,7 +344,10 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 
     let applied = bulk_update(
         &store,
-        previewed(&store, payload(id, "selection", None, Some(vec![1, 1, 4]), "safe", None)),
+        previewed(
+            &store,
+            payload(id, "selection", None, Some(vec![1, 1, 4]), "safe", None),
+        ),
     )
     .expect("bulk update failed");
     assert_eq!(applied.updated, 2);
@@ -539,7 +571,10 @@ fn undo_is_independent_per_project() {
     .expect("bulk update A failed");
     bulk_update(
         &store_b,
-        previewed(&store_b, payload(id_b, "all", None, None, "suspicious", None)),
+        previewed(
+            &store_b,
+            payload(id_b, "all", None, None, "suspicious", None),
+        ),
     )
     .expect("bulk update B failed");
 
@@ -591,7 +626,11 @@ fn undo_refuses_to_overwrite_a_later_update() {
             .contains("Annotation changed since the bulk operation; undo would overwrite it."),
         "unexpected error: {error}"
     );
-    assert_eq!(annotations(&store, id), before, "failed undo must not write");
+    assert_eq!(
+        annotations(&store, id),
+        before,
+        "failed undo must not write"
+    );
     assert_eq!(flagged_from_db(&store, id), 12);
 
     // The conflict leaves the undo entry in place, so a retry reports the same
@@ -669,7 +708,30 @@ fn failed_preview_token_leaves_annotations_unchanged() {
         error.to_string().contains("Target changed; preview again."),
         "unexpected error: {error}"
     );
-    assert_eq!(annotations(&store, id), before, "failed batch must not write");
+    assert_eq!(
+        annotations(&store, id),
+        before,
+        "failed batch must not write"
+    );
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn selection_preview_and_update_read_only_metadata_not_project_cells() {
+    let (root, store, id, _) = setup(false);
+    let mut selected = payload(id, "selection", None, Some(vec![2, 7]), "suspicious", None);
+    trivium_engine::project_io::reset_project_data_reads();
+    selected.preview_token = Some(
+        bulk_preview(&store, selected.clone())
+            .unwrap()
+            .preview_token,
+    );
+    assert_eq!(bulk_update(&store, selected).unwrap().updated, 2);
+    assert_eq!(
+        trivium_engine::project_io::project_data_reads(),
+        0,
+        "selection targets require metadata and selected annotations only"
+    );
+    fs::remove_dir_all(root).unwrap();
 }

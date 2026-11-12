@@ -90,17 +90,28 @@ impl KindFlags {
 }
 
 pub(crate) fn series_kind(series: &Series) -> ColumnKind {
+    series_kind_with_job(series, &crate::jobs::JobContext::none()).expect("uncancelled inference")
+}
+
+pub(crate) fn series_kind_with_job(
+    series: &Series,
+    job: &crate::jobs::JobContext,
+) -> Result<ColumnKind, crate::error::AppError> {
+    job.check_cancelled()?;
     if let Some(kind) = dtype_kind(series.dtype()) {
-        return kind;
+        return Ok(kind);
     }
     let mut flags = KindFlags::default();
     for idx in 0..series.len() {
+        if idx % 1024 == 0 {
+            job.check_cancelled()?;
+        }
         let Ok(value) = series.get(idx) else {
             continue;
         };
         flags.observe(&value);
     }
-    flags.finish()
+    Ok(flags.finish())
 }
 
 fn classify_any(value: &AnyValue) -> Option<ColumnKind> {

@@ -3,24 +3,24 @@ mod labels;
 mod locate;
 mod page;
 mod page_read;
+mod project_target;
 mod result_cache;
 mod search;
+mod singleflight;
 mod sort;
 mod target;
 
 use std::collections::HashMap;
 
-pub(crate) use ioc::user_flags;
 pub use locate::{
     locate_project_row, locate_project_row_with_job, LocateRowPayload, LocateRowResponse,
 };
-pub(crate) use page::materialize_page;
+pub(crate) use page::materialize_page_rows;
+pub use project_target::{resolve_project_target, ResolvedProjectTarget};
 pub(crate) use result_cache::cache_remove_project;
 pub use result_cache::{clear_result_cache, result_cache_stats, ResultCacheStats};
-pub(crate) use sort::ordered_row_indices;
 pub use target::{
-    data_columns, reset_resolve_count, resolve_count, resolve_target, spec_token_json, QuerySpec,
-    ResolvedTarget,
+    reset_resolve_count, resolve_count, resolve_target, spec_token_json, QuerySpec, ResolvedTarget,
 };
 
 use serde::{Deserialize, Serialize};
@@ -31,18 +31,16 @@ use crate::{
     jobs::JobContext,
     models::{ColumnMeta, ProjectRow},
     project_io::{
-        is_internal_column_for_version, read_page_dataframe, read_page_rows_dataframe,
-        read_project_columns,
-        read_project_row_count, read_project_schema_columns, ProjectColumns, INTERNAL_ORIGINAL,
-        INTERNAL_ROW_ID,
+        is_internal_column_for_version, read_page_dataframe_with_job,
+        read_page_rows_dataframe_with_job, read_project_row_count, read_project_schema_columns,
+        ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
     },
-    storage::load_flags,
+    storage::load_page_flag_snapshot,
     store::ProjectsStore,
 };
 
 use self::page_read::{
     apply_page_colors, collect_node_columns, is_unconditional_page, load_page_color_rules,
-    load_page_flags, resolution_projection,
 };
 use super::util::DEFAULT_PAGE_SIZE;
 
@@ -51,7 +49,8 @@ use super::util::DEFAULT_PAGE_SIZE;
 /// The flattened `spec` keeps the existing IPC keys (`search`,
 /// `searchColumns`, `flagFilter`, `bookmarkedOnly`, `sortKey`,
 /// `sortDirection`, `condition`) while sharing one resolution path.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ts_rs::TS)]
+#[ts(optional_fields = nullable)]
 pub struct QueryRowsPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
@@ -63,7 +62,7 @@ pub struct QueryRowsPayload {
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub struct QueryRowsResponse {
     pub rows: Vec<ProjectRow>,
     /// Annotated rows in the whole project (user flags only).
@@ -96,7 +95,8 @@ pub fn query_project_rows_with_job(
 ) -> Result<QueryRowsResponse, AppError> {
     job.check_cancelled()?;
     let meta = store
-        .find(&payload.project_id)
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
     payload.spec.resolve_search_labels(&meta.columns)?;
     let project_dir = store.project_dir(&meta.id);
@@ -172,13 +172,12 @@ pub fn query_project_rows_with_job(
         let start = offset.min(total_rows);
         let end = start.saturating_add(limit).min(total_rows);
         let row_ids: Vec<usize> = (start..end).collect();
-        let page_df = read_page_dataframe(&parquet_path, &page_projection, start, limit)
-            .map_err(AppError::from)?;
+        let page_df =
+            read_page_dataframe_with_job(&parquet_path, &page_projection, start, limit, job)
+                .map_err(AppError::from)?;
 
-        let (annotated_total, page_flags) = (
-            meta.flagged_records,
-            load_page_flags(&flags_path, &row_ids)?,
-        );
+        let (page_flags, annotated_total, _) =
+            load_page_flag_snapshot(&flags_path, &row_ids).map_err(AppError::from)?;
 
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
@@ -206,7 +205,8 @@ pub fn query_project_rows_with_job(
     // The annotation revision is part of the key only when the resolved ids
     // depend on annotations. Data-only results keep their ids but compare the
     // revision on a hit to refresh the result-internal annotated count.
-    let annotation_revision = store.current_revision(&meta.id);
+    let annotation_revision =
+        crate::storage::project_revision(&project_dir).map_err(AppError::from)?;
     let annotation_token = if result_cache::spec_depends_on_annotations(&payload.spec) {
         Some(annotation_revision.to_string())
     } else {
@@ -215,7 +215,10 @@ pub fn query_project_rows_with_job(
     let cache_key =
         result_cache::query_cache_key(meta.id, &payload.spec, &parquet_path, annotation_token);
 
-    if let Some(cached) = cache_key.as_ref().and_then(result_cache::cache_lookup) {
+    if let Some(cached) = cache_key
+        .as_ref()
+        .and_then(result_cache::cache_lookup_if_present)
+    {
         job.report_progress(1, Some(3), Some("Reusing query result".into()));
         let row_ids: Vec<usize> = cached
             .ids
@@ -224,80 +227,53 @@ pub fn query_project_rows_with_job(
             .take(limit)
             .copied()
             .collect();
-        let page_df = read_page_rows_dataframe(&parquet_path, &page_projection, &row_ids)
-            .map_err(AppError::from)?;
-        // Only the page's annotations are read on a hit; no project-wide flag
-        // or bookmark vector is rebuilt.
-        let page_flags = load_page_flags(&flags_path, &row_ids)?;
-        job.check_cancelled()?;
-        job.report_progress(2, Some(3), Some("Building page".into()));
-        let mut rows = page::materialize_page_rows(
-            &page_df,
-            &row_ids,
-            &visible_columns,
-            &page_flags,
-            &HashMap::new(),
-            false,
-        )?;
-        apply_page_colors(&mut rows, &page_df, &color_rules)?;
+        let (page_flags, annotated_total, page_revision) =
+            load_page_flag_snapshot(&flags_path, &row_ids).map_err(AppError::from)?;
+        // A concurrent annotation edit must not combine old membership/counts
+        // with new page flags. The shared snapshot resolver handles that case.
+        let membership_current = !result_cache::spec_depends_on_annotations(&payload.spec)
+            || page_revision == annotation_revision;
+        if membership_current
+            && (cached.ids.len() == total_rows || cached.annotation_revision == page_revision)
+        {
+            let page_df =
+                read_page_rows_dataframe_with_job(&parquet_path, &page_projection, &row_ids, job)
+                    .map_err(AppError::from)?;
+            job.check_cancelled()?;
+            job.report_progress(2, Some(3), Some("Building page".into()));
+            let mut rows = page::materialize_page_rows(
+                &page_df,
+                &row_ids,
+                &visible_columns,
+                &page_flags,
+                &HashMap::new(),
+                false,
+            )?;
+            apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
-        // `update_flag`, `update_annotation`, and bulk updates keep the
-        // project's flagged count current.
-        let annotated_total = meta.flagged_records;
-        // A result that contains every row has the same annotated count as the
-        // project. A filtered data-only result keeps its ids across annotation
-        // edits, so refresh its count from the stored flags only when the
-        // annotation revision changed. This is a count, not a re-search.
-        let annotated_filtered = if cached.ids.len() == total_rows {
-            annotated_total
-        } else if cached.annotation_revision == store.current_revision(&meta.id) {
-            cached.annotated_filtered
-        } else {
-            let flags = load_flags(&flags_path).map_err(AppError::from)?;
-            cached
-                .ids
-                .iter()
-                .filter(|idx| {
-                    flags
-                        .get(idx)
-                        .is_some_and(|entry| entry.is_flagged())
-                })
-                .count()
-        };
+            let annotated_filtered = if cached.ids.len() == total_rows {
+                annotated_total
+            } else {
+                cached.annotated_filtered
+            };
 
-        job.report_progress(3, Some(3), Some("Rows ready".into()));
-        return Ok(QueryRowsResponse {
-            rows,
-            annotated_total,
-            annotated_filtered,
-            total_rows,
-            total_filtered_rows: cached.ids.len(),
-            offset,
-        });
+            job.report_progress(3, Some(3), Some("Rows ready".into()));
+            return Ok(QueryRowsResponse {
+                rows,
+                annotated_total,
+                annotated_filtered,
+                total_rows,
+                total_filtered_rows: cached.ids.len(),
+                offset,
+            });
+        }
     }
 
-    let flags = load_flags(&flags_path).map_err(AppError::from)?;
-    job.report_progress(1, Some(3), Some("Evaluating query".into()));
-    // Resolution reads only the search scope, condition columns, sort key,
-    // and `__rowid`. Display columns are read again for the page, not here.
-    let resolve_projection = resolution_projection(&payload.spec, &columns, has_row_id);
-    let resolve_df =
-        read_project_columns(&parquet_path, &resolve_projection).map_err(AppError::from)?;
-    let target = resolve_target(&resolve_df, &payload.spec, &columns, &flags, job)?;
+    let target = resolve_project_target(store, payload.project_id, &payload.spec, job)?;
     job.check_cancelled()?;
-
-    let cached = result_cache::CachedResult::new(
-        target.filtered,
-        target.annotated_filtered,
-        target.annotated_total,
-        annotation_revision,
-    );
-    let filtered_ids = std::sync::Arc::clone(&cached.ids);
-    let annotated_filtered = cached.annotated_filtered;
-    let annotated_total = cached.annotated_total;
-    if let Some(key) = cache_key {
-        result_cache::cache_store(key, cached);
-    }
+    let filtered_ids = target.ids;
+    let annotated_filtered = target.annotated_filtered;
+    let annotated_total = target.annotated_total;
 
     let row_ids: Vec<usize> = filtered_ids
         .iter()
@@ -306,13 +282,13 @@ pub fn query_project_rows_with_job(
         .copied()
         .collect();
     job.report_progress(2, Some(3), Some("Building page".into()));
-    let page_df = read_page_rows_dataframe(&parquet_path, &page_projection, &row_ids)
+    let page_df = read_page_rows_dataframe_with_job(&parquet_path, &page_projection, &row_ids, job)
         .map_err(AppError::from)?;
     let mut rows = page::materialize_page_rows(
         &page_df,
         &row_ids,
         &visible_columns,
-        &flags,
+        &target.flags,
         &HashMap::new(),
         false,
     )?;

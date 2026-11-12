@@ -7,13 +7,23 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::{Context, Result};
 use polars::io::parquet::write::BatchedWriter;
 use polars::prelude::{
-    AnyValue, DataFrame, DataType, Field, NewChunkedArray, ParquetReader, ParquetWriter, Schema,
-    SerReader, UInt32Chunked,
+    AnyValue, DataFrame, DataType, Field, ParquetReader, ParquetWriter, Schema, SerReader,
 };
 use serde_json::Value;
 
 use crate::models::{ColumnMeta, ProjectMeta};
 use crate::value_utils::anyvalue_to_search_string;
+
+mod page;
+mod read_stats;
+mod reader;
+
+pub use page::{
+    read_page_dataframe, read_page_dataframe_with_job, read_page_rows_dataframe,
+    read_page_rows_dataframe_with_job,
+};
+pub use read_stats::{project_read_stats, reset_project_read_stats, ProjectReadStats};
+pub use reader::{ProjectBatch, ProjectBatchReader, PROJECT_BATCH_ROWS};
 
 /// Internal row id column. It is present in every storage version.
 pub const INTERNAL_ROW_ID: &str = "__rowid";
@@ -119,6 +129,7 @@ pub fn reset_project_data_reads() {
 /// Resets both full-read and page-read counters and their projections.
 /// Test-only.
 pub fn reset_project_read_counters() {
+    reset_project_read_stats();
     PROJECT_DATA_READS.store(0, Ordering::Relaxed);
     PROJECT_FULL_READS.store(0, Ordering::Relaxed);
     PROJECT_PAGE_READS.store(0, Ordering::Relaxed);
@@ -138,6 +149,19 @@ pub fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
     ParquetReader::new(File::open(path)?)
         .finish()
         .context("failed to read parquet file")
+}
+
+/// Legacy full-frame materialization with cooperative cancellation. Prefer a
+/// projected [`ProjectBatchReader`] for new consumers.
+pub fn read_project_dataframe_with_job(
+    path: &Path,
+    job: &crate::jobs::JobContext,
+) -> Result<DataFrame> {
+    job.check_cancelled()?;
+    PROJECT_DATA_READS.fetch_add(1, Ordering::Relaxed);
+    PROJECT_FULL_READS.fetch_add(1, Ordering::Relaxed);
+    let columns = read_project_schema_columns(path)?;
+    read_project_columns_with_job(path, &columns, job)
 }
 
 /// All column names in the file, including internal storage columns.
@@ -175,63 +199,22 @@ pub fn read_project_columns(path: &Path, columns: &[String]) -> Result<DataFrame
         .context("failed to read parquet columns")
 }
 
-/// Reads one contiguous page with a column projection.
-///
-/// polars 0.40's [`ParquetReader`] exposes `with_columns` and `with_n_rows`,
-/// but no row offset or row-group selection. This implementation therefore
-/// reads the projected column chunks for the row groups covering the first
-/// `offset + limit` rows, then drops the rows before `offset`. It never calls
-/// the all-column `finish()` used by [`read_project_dataframe`].
-///
-/// A single importer batch is one row group, so a page near the start avoids
-/// the later groups; a page in the last group still decodes the earlier
-/// projected groups. This is the documented fallback for this polars version.
-pub fn read_page_dataframe(
+/// Materialize a projected frame with cancellation between bounded batches.
+/// Streaming callers should consume [`ProjectBatchReader`] directly instead.
+pub fn read_project_columns_with_job(
     path: &Path,
     columns: &[String],
-    offset: usize,
-    limit: usize,
+    job: &crate::jobs::JobContext,
 ) -> Result<DataFrame> {
-    if limit == 0 {
-        return Ok(DataFrame::empty());
+    job.check_cancelled()?;
+    record_projection(last_column_read_projection_store(), columns);
+    let mut reader = ProjectBatchReader::open(path, columns)?;
+    let mut output = reader.empty_frame()?;
+    while let Some(batch) = reader.next_with_job(job) {
+        output.vstack_mut(&batch?.frame)?;
     }
-    PROJECT_PAGE_READS.fetch_add(1, Ordering::Relaxed);
-    record_projection(last_page_projection_store(), columns);
-    let end = offset.saturating_add(limit);
-    let df = ParquetReader::new(File::open(path)?)
-        .with_columns(Some(columns.to_vec()))
-        .with_n_rows(Some(end))
-        .finish()
-        .context("failed to read parquet page")?;
-    let start = offset.min(df.height());
-    Ok(df.slice(start as i64, limit))
-}
-
-/// Reads the requested original row ids into a page-sized frame in that order.
-///
-/// The rows are fetched as one range from the smallest to the largest id and
-/// then reordered in memory. This avoids materializing a full frame when the
-/// ids cluster, while a random sort that spans the file still reads the
-/// projected prefix range. The column projection is the same page projection
-/// used by [`read_page_dataframe`].
-pub fn read_page_rows_dataframe(
-    path: &Path,
-    columns: &[String],
-    row_indices: &[usize],
-) -> Result<DataFrame> {
-    let Some(min) = row_indices.iter().copied().min() else {
-        return Ok(DataFrame::empty());
-    };
-    let max = row_indices.iter().copied().max().unwrap_or(min);
-    let range = read_page_dataframe(path, columns, min, max - min + 1)?;
-    if range.height() == row_indices.len() && row_indices.iter().copied().eq(min..=max) {
-        return Ok(range);
-    }
-    let take_idx = UInt32Chunked::from_iter_values(
-        "take_idx",
-        row_indices.iter().map(|row| (row - min) as u32),
-    );
-    range.take(&take_idx).context("failed to select page rows")
+    job.check_cancelled()?;
+    Ok(output)
 }
 
 pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {

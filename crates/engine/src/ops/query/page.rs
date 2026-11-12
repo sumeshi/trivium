@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use anyhow::Error as AnyhowError;
 use polars::prelude::*;
 
 use crate::error::AppError;
@@ -13,12 +12,12 @@ use super::ioc::append_ioc_tags;
 
 /// Parse once per query population, rather than splitting a combination for
 /// every row. Unknown legacy values retain the old match-all fallback.
-struct FlagFilterMask(u8);
+pub(super) struct FlagFilterMask(u8);
 
 impl FlagFilterMask {
     const ALL: Self = Self(u8::MAX);
 
-    fn parse(filter: Option<&str>) -> Self {
+    pub(super) fn parse(filter: Option<&str>) -> Self {
         let filter = filter.unwrap_or("all").trim();
         match filter {
             "" | "all" => return Self::ALL,
@@ -38,17 +37,22 @@ impl FlagFilterMask {
         Self(mask)
     }
 
-    fn matches(&self, flag: &str) -> bool {
-        self.0 == Self::ALL.0
-            || self.0
-                & match flag {
-                    "safe" => 1,
-                    "suspicious" => 2,
-                    "critical" => 4,
-                    "" => 8,
-                    _ => 0,
-                }
-                != 0
+    pub(super) fn matches_population(&self, population: u8) -> bool {
+        self.0 == Self::ALL.0 || self.0 & population != 0
+    }
+}
+
+/// Match the persisted aliases without allocating a normalized String.
+pub(super) fn flag_population(flag: &str) -> u8 {
+    let flag = flag.trim();
+    if flag.eq_ignore_ascii_case("safe") || flag == "◯" {
+        1
+    } else if flag.eq_ignore_ascii_case("suspicious") || flag == "?" {
+        2
+    } else if flag.eq_ignore_ascii_case("critical") || flag == "✗" {
+        4
+    } else {
+        8
     }
 }
 
@@ -56,38 +60,6 @@ impl FlagFilterMask {
 /// unrestricted, while the UI can retain their distinct checkbox state.
 pub(super) fn is_unrestricted_flag_filter(filter: Option<&str>) -> bool {
     matches!(FlagFilterMask::parse(filter).0, 15 | u8::MAX)
-}
-
-pub fn filtered_indices(
-    ordered_indices: &[usize],
-    final_flag_vec: &[String],
-    bookmarked: &[bool],
-    bookmarked_only: Option<bool>,
-    flag_filter: Option<&str>,
-    search_mask: Option<&[bool]>,
-) -> (Vec<usize>, usize) {
-    let flag_filter = FlagFilterMask::parse(flag_filter);
-    let mut filtered_indices: Vec<usize> = Vec::with_capacity(ordered_indices.len());
-    for &idx in ordered_indices {
-        let ff = &final_flag_vec[idx];
-        if !flag_filter.matches(ff) {
-            continue;
-        }
-        if bookmarked_only == Some(true) && !bookmarked.get(idx).copied().unwrap_or(false) {
-            continue;
-        }
-        if let Some(mask) = search_mask {
-            if !mask[idx] {
-                continue;
-            }
-        }
-        filtered_indices.push(idx);
-    }
-    let annotated_filtered = filtered_indices
-        .iter()
-        .filter(|idx| !final_flag_vec[**idx].trim().is_empty())
-        .count();
-    (filtered_indices, annotated_filtered)
 }
 
 /// Final flag for one row: a non-empty user flag wins, otherwise the IOC flag.
@@ -170,41 +142,4 @@ pub fn materialize_page_rows(
         });
     }
     Ok(rows)
-}
-
-/// Materializes arbitrary rows from a full frame.
-///
-/// Report and surrounding-row views already hold a full frame; this keeps
-/// their behavior while the query page path passes an already page-sized
-/// frame to [`materialize_page_rows`].
-pub fn materialize_page(
-    df: &DataFrame,
-    selected_indices: &[usize],
-    columns: &[ColumnMeta],
-    flags: &HashMap<usize, FlagEntry>,
-    ioc_outcomes: &[IocRowOutcome],
-    apply_ioc_tags: bool,
-) -> Result<Vec<ProjectRow>, AppError> {
-    let take_idx =
-        UInt32Chunked::from_iter_values("take_idx", selected_indices.iter().map(|&idx| idx as u32));
-    let taken_df = df
-        .take(&take_idx)
-        .map_err(|err| AppError::from(AnyhowError::from(err)))?;
-    let page_ioc_outcomes: HashMap<usize, IocRowOutcome> = selected_indices
-        .iter()
-        .filter_map(|idx| {
-            ioc_outcomes
-                .get(*idx)
-                .cloned()
-                .map(|outcome| (*idx, outcome))
-        })
-        .collect();
-    materialize_page_rows(
-        &taken_df,
-        selected_indices,
-        columns,
-        flags,
-        &page_ioc_outcomes,
-        apply_ioc_tags,
-    )
 }

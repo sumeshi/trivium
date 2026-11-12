@@ -1,270 +1,186 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Result};
-use parking_lot::Mutex;
+use anyhow::{bail, Context, Result};
 use uuid::Uuid;
 
-use crate::{models::ProjectMeta, storage::load_flags};
+use crate::{
+    models::ProjectMeta,
+    storage::{self, PROJECT_DATABASE},
+};
 
-/// Cloneable handle to the shared project store. Cloning is cheap and shares
-/// the in-memory metadata and revision counters, so a background worker can
-/// own a copy without holding the Tauri state guard for the whole operation.
+/// A workspace contains portable project directories. The SQLite metadata in
+/// each directory is authoritative; there is no second mutable registry or
+/// process-wide collection of open annotation DBs.
 #[derive(Clone)]
 pub struct ProjectsStore {
     root_dir: PathBuf,
-    meta_path: PathBuf,
-    inner: Arc<Mutex<Vec<ProjectMeta>>>,
-    /// Process-local annotation revisions. Durable state is the annotation DB;
-    /// this counter only lets the frontend discard stale responses.
-    revisions: Arc<Mutex<HashMap<Uuid, AtomicU64>>>,
-    /// Derived flagged counts that could not be persisted yet.
-    flagged_overrides: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl ProjectsStore {
     pub fn new(root_dir: PathBuf) -> Result<Self> {
-        let projects_dir = root_dir.join("projects");
-        fs::create_dir_all(&projects_dir)
-            .with_context(|| format!("failed to create projects dir at {:?}", projects_dir))?;
+        fs::create_dir_all(root_dir.join("projects"))?;
+        let store = Self { root_dir };
+        store.migrate_legacy_registry()?;
+        store.try_all()?;
+        crate::ops::query::clear_result_cache();
+        Ok(store)
+    }
 
-        let meta_path = root_dir.join("projects.json");
-        let mut projects: Vec<ProjectMeta> = if meta_path.exists() {
-            let data = fs::read(&meta_path)
-                .with_context(|| format!("failed to read metadata file {:?}", meta_path))?;
-            match serde_json::from_slice(&data) {
-                Ok(projects) => projects,
-                Err(err) => {
-                    // Keep the damaged file for recovery, but do not let one
-                    // bad metadata file prevent the application from starting.
-                    let backup = meta_path.with_extension(format!(
-                        "json.corrupt.{}.{}",
-                        std::process::id(),
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|duration| duration.as_secs())
-                            .unwrap_or(0)
-                    ));
-                    let _ = fs::rename(&meta_path, &backup);
-                    eprintln!(
-                        "[store] projects.json was unreadable ({err}); moved to {:?} and started empty",
-                        backup
-                    );
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
-        };
-
-        // Rebuild a missing derived count from the annotation database. This
-        // also covers projects migrated from the old flags.json format.
-        let mut needs_save = false;
-        for project in &mut projects {
-            if project.flagged_records == 0 {
-                let project_dir = root_dir.join("projects").join(project.id.to_string());
-                let flags_path = project_dir.join("flags.json");
-                if let Ok(flags) = load_flags(&flags_path) {
-                    let count = flags
-                        .values()
-                        .filter(|entry| entry.is_flagged())
-                        .count();
-                    if count > 0 {
-                        project.flagged_records = count;
-                        needs_save = true;
+    fn migrate_legacy_registry(&self) -> Result<()> {
+        let path = self.root_dir.join("projects.json");
+        if !path.exists() {
+            return Ok(());
+        }
+        let bytes =
+            fs::read(&path).with_context(|| format!("failed to read legacy registry {path:?}"))?;
+        let projects: Vec<ProjectMeta> = match serde_json::from_slice(&bytes) {
+            Ok(projects) => projects,
+            Err(error) => {
+                let backup = self
+                    .root_dir
+                    .join(format!("projects.json.corrupt.{}", Uuid::new_v4()));
+                fs::copy(&path, &backup).context("failed to preserve corrupt legacy registry")?;
+                // Canonical cases can still be recovered without trusting the
+                // damaged legacy index, but never claim an old orphan is empty.
+                let dirs = fs::read_dir(self.root_dir.join("projects"))?;
+                let mut canonical = 0;
+                for entry in dirs {
+                    let entry = entry?;
+                    if !entry.file_type()?.is_dir() {
+                        continue;
+                    }
+                    if entry.path().join(PROJECT_DATABASE).exists()
+                        && storage::read_project_meta(&entry.path())?.is_some()
+                    {
+                        canonical += 1;
+                    } else {
+                        bail!("Legacy registry is unreadable ({error}); project directories remain unmigrated. Original and backup {backup:?} are preserved.");
                     }
                 }
+                if canonical == 0 {
+                    bail!("Legacy registry is unreadable ({error}); original and backup {backup:?} are preserved.");
+                }
+                eprintln!("[store] recovered {canonical} canonical cases; damaged legacy registry preserved at {backup:?}");
+                return Ok(());
+            }
+        };
+        for meta in projects {
+            let dir = self.project_dir(&meta.id);
+            // A deleted legacy case must not be recreated from the retained
+            // registry. A tombstone also prevents resurrection after failed IO.
+            if !dir.exists() || storage::project_was_registered(&dir)? {
+                continue;
+            }
+            storage::insert_project_meta(&dir, &meta)?;
+        }
+        Ok(())
+    }
+
+    pub fn try_all(&self) -> Result<Vec<ProjectMeta>> {
+        let mut projects = Vec::new();
+        for entry in fs::read_dir(self.root_dir.join("projects"))? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() || !entry.path().join(PROJECT_DATABASE).exists() {
+                continue;
+            }
+            if let Some(meta) = storage::read_project_meta(&entry.path()).with_context(|| {
+                format!(
+                    "cannot read saved case {:?}; its files were preserved",
+                    entry.path()
+                )
+            })? {
+                let folder = entry.file_name();
+                if folder.to_str() != Some(meta.id.to_string().as_str()) {
+                    bail!("Saved case metadata ID does not match its directory {:?}; files were preserved", entry.path());
+                }
+                projects.push(meta);
+            } else if !storage::project_was_registered(&entry.path())? {
+                eprintln!("[store] case {:?} has a settings database without registered metadata; preserving its files and skipping it", entry.path());
             }
         }
+        Ok(projects)
+    }
 
-        // Save migrated data
-        if needs_save {
-            write_metadata_atomic(&meta_path, &projects)?;
-        }
-
-        // Annotation revisions are process-local and restart at zero with a
-        // new store. Drop any previous query-result cache so a reopened
-        // project cannot hit a result keyed by the old revision.
-        crate::ops::query::clear_result_cache();
-
-        Ok(Self {
-            root_dir,
-            meta_path,
-            inner: Arc::new(Mutex::new(projects)),
-            revisions: Arc::new(Mutex::new(HashMap::new())),
-            flagged_overrides: Arc::new(Mutex::new(HashMap::new())),
+    /// Compatibility for existing callers; application entry points use the
+    /// checked variant so corruption is surfaced rather than presented empty.
+    pub fn all(&self) -> Vec<ProjectMeta> {
+        self.try_all().unwrap_or_else(|error| {
+            eprintln!("[store] {error:#}");
+            Vec::new()
         })
     }
 
-    /// Counts that were committed to the annotation db but could not be
-    /// persisted in `projects.json`. They keep the current session and later
-    /// successful metadata writes from drifting; the next process recreates
-    /// them from the annotation db when needed.
-    pub fn set_flagged_records_override(&self, id: &Uuid, count: usize) {
-        self.flagged_overrides.lock().insert(*id, count);
-    }
-
-    fn apply_flagged_overrides(&self, projects: &mut [ProjectMeta]) {
-        let overrides = self.flagged_overrides.lock();
-        for meta in projects {
-            if let Some(count) = overrides.get(&meta.id) {
-                meta.flagged_records = *count;
-            }
+    pub fn try_find(&self, id: &Uuid) -> Result<Option<ProjectMeta>> {
+        let metadata = storage::read_project_meta(&self.project_dir(id))?;
+        if metadata.as_ref().is_some_and(|meta| meta.id != *id) {
+            bail!("Saved case metadata ID does not match project {id}; files were preserved");
         }
-    }
-
-    pub fn all(&self) -> Vec<ProjectMeta> {
-        let mut projects = self.inner.lock().clone();
-        self.apply_flagged_overrides(&mut projects);
-        projects
-    }
-
-    pub fn insert(&self, project: ProjectMeta) -> Result<()> {
-        let mut guard = self.inner.lock();
-        guard.push(project);
-        if let Err(err) = self.persist_locked(&guard) {
-            // Registration failed; do not leave the project visible in memory
-            // while the caller removes its directory.
-            guard.pop();
-            return Err(err);
-        }
-        Ok(())
-    }
-
-    /// Applies one metadata change only after the replacement file is written.
-    /// A failed write leaves both the file and the in-memory list unchanged.
-    fn update_meta(
-        &self,
-        id: &Uuid,
-        update: impl FnOnce(&mut ProjectMeta),
-    ) -> Result<()> {
-        let mut guard = self.inner.lock();
-        let mut next = guard.clone();
-        self.apply_flagged_overrides(&mut next);
-        let Some(meta) = next.iter_mut().find(|meta| &meta.id == id) else {
-            return Ok(());
-        };
-        update(meta);
-        self.persist_locked(&next)?;
-        *guard = next;
-        Ok(())
-    }
-
-    pub fn update_hidden_columns(&self, id: &Uuid, hidden_columns: Vec<String>) -> Result<()> {
-        self.update_meta(id, |meta| meta.hidden_columns = hidden_columns)
-    }
-
-    pub fn update_flagged_records(&self, id: &Uuid, flagged_records: usize) -> Result<()> {
-        let result = self.update_meta(id, |meta| meta.flagged_records = flagged_records);
-        if result.is_ok() {
-            self.flagged_overrides.lock().remove(id);
-        }
-        result
-    }
-
-    pub fn update_ioc_applied_records(&self, id: &Uuid, count: usize) -> Result<()> {
-        self.update_meta(id, |meta| meta.ioc_applied_records = count)
-    }
-
-    /// Returns the next annotation revision for a project.
-    ///
-    /// Revisions are process-local and monotonic; they are not persisted and
-    /// do not need to match across restarts.
-    pub fn next_revision(&self, id: &Uuid) -> u64 {
-        self.revisions
-            .lock()
-            .entry(*id)
-            .or_insert_with(|| AtomicU64::new(0))
-            .fetch_add(1, Ordering::Relaxed)
-            + 1
-    }
-
-    /// Returns the current annotation revision without advancing it.
-    ///
-    /// A project with no in-process update yet reports revision 0.
-    pub fn current_revision(&self, id: &Uuid) -> u64 {
-        self.revisions
-            .lock()
-            .get(id)
-            .map(|revision| revision.load(Ordering::Relaxed))
-            .unwrap_or(0)
-    }
-
-    pub fn remove(&self, id: &Uuid) -> Result<()> {
-        let mut guard = self.inner.lock();
-        let mut next = guard.clone();
-        self.apply_flagged_overrides(&mut next);
-        next.retain(|meta| &meta.id != id);
-        self.persist_locked(&next)?;
-        *guard = next;
-        self.revisions.lock().remove(id);
-        self.flagged_overrides.lock().remove(id);
-        Ok(())
+        Ok(metadata)
     }
 
     pub fn find(&self, id: &Uuid) -> Option<ProjectMeta> {
-        let mut meta = self
-            .inner
-            .lock()
-            .iter()
-            .find(|meta| &meta.id == id)
-            .cloned()?;
-        if let Some(count) = self.flagged_overrides.lock().get(id) {
-            meta.flagged_records = *count;
+        self.try_find(id).unwrap_or_else(|error| {
+            eprintln!("[store] {error:#}");
+            None
+        })
+    }
+
+    pub fn insert(&self, meta: ProjectMeta) -> Result<()> {
+        storage::insert_project_meta(&self.project_dir(&meta.id), &meta)
+    }
+
+    pub fn update_hidden_columns(&self, id: &Uuid, columns: Vec<String>) -> Result<()> {
+        storage::update_project_meta(&self.project_dir(id), |meta| meta.hidden_columns = columns)
+    }
+
+    pub fn update_flagged_records(&self, id: &Uuid, count: usize) -> Result<()> {
+        storage::update_project_meta(&self.project_dir(id), |meta| meta.flagged_records = count)
+    }
+
+    pub fn set_flagged_records_override(&self, id: &Uuid, count: usize) {
+        if let Err(error) = self.update_flagged_records(id, count) {
+            eprintln!("[store] {error:#}");
         }
-        Some(meta)
+    }
+
+    pub fn update_ioc_applied_records(&self, id: &Uuid, count: usize) -> Result<()> {
+        storage::update_project_meta(&self.project_dir(id), |meta| {
+            meta.ioc_applied_records = count
+        })
+    }
+
+    pub fn next_revision(&self, id: &Uuid) -> u64 {
+        storage::bump_project_revision(&self.project_dir(id)).unwrap_or_else(|error| {
+            eprintln!("[store] {error:#}");
+            0
+        })
+    }
+
+    pub fn current_revision(&self, id: &Uuid) -> u64 {
+        storage::project_revision(&self.project_dir(id)).unwrap_or_else(|error| {
+            eprintln!("[store] {error:#}");
+            0
+        })
+    }
+
+    pub fn remove(&self, id: &Uuid) -> Result<()> {
+        storage::remove_project_meta(&self.project_dir(id))
     }
 
     pub fn project_dir(&self, id: &Uuid) -> PathBuf {
         self.root_dir.join("projects").join(id.to_string())
     }
-
-    /// Path handed to the annotation storage functions. The `.db` sibling is
-    /// derived from it by `storage::flags_db_path`.
     pub fn flags_path(&self, id: &Uuid) -> PathBuf {
         self.project_dir(id).join("flags.json")
     }
-
-    /// Root of the per-import staging area. Completed projects are renamed
-    /// into `projects/` from here, so a failed import leaves no project dir.
     pub fn staging_root(&self) -> PathBuf {
         self.root_dir.join(".staging")
     }
-
-    /// Staging directory for one in-progress import.
+    /// Owned deletion workspace, excluded from saved-case discovery.
+    pub fn trash_root(&self) -> PathBuf {
+        self.root_dir.join(".trash")
+    }
     pub fn staging_dir(&self, id: &Uuid) -> PathBuf {
         self.staging_root().join(id.to_string())
     }
-
-    fn persist_locked(&self, guard: &[ProjectMeta]) -> Result<()> {
-        write_metadata_atomic(&self.meta_path, guard)
-    }
-}
-
-/// Replaces the project list atomically. A failed write must not leave a
-/// truncated metadata file that loses the existing projects on restart.
-fn write_metadata_atomic(meta_path: &Path, projects: &[ProjectMeta]) -> Result<()> {
-    let data = serde_json::to_vec_pretty(projects)?;
-    let temp_path = meta_path.with_extension(format!("json.tmp.{}", std::process::id()));
-    let result = fs::write(&temp_path, data)
-        .with_context(|| format!("failed to write metadata file {:?}", temp_path))
-        .and_then(|_| {
-            fs::rename(&temp_path, meta_path).with_context(|| {
-                format!(
-                    "failed to replace metadata file {:?} with {:?}",
-                    meta_path, temp_path
-                )
-            })
-        });
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-    result
 }

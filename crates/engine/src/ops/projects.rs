@@ -9,27 +9,26 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    analysis::infer_column_kinds,
     error::AppError,
     import::csv,
     import::jsonl,
-    ioc::load_ioc_entries,
     jobs::JobContext,
-    models::{ColumnMeta, FlagEntry, LoadProjectResponse, ProjectMeta, ProjectSummary},
-    project_io::{
-        read_project_dataframe, BatchDataWriter, ProjectColumns,
-    },
-    storage::{
-        clear_ioc_flag_cache, close_flags_db, compute_column_max_chars,
-        load_color_rules, load_column_metrics, load_flags, save_column_metrics, save_flags,
-    },
+    models::{ColumnMeta, FlagEntry, ProjectMeta, ProjectSummary},
+    project_io::{read_project_schema_columns, BatchDataWriter},
+    storage::{save_column_metrics, save_flags},
     store::ProjectsStore,
 };
 
 use sha2::{Digest, Sha256};
 
 use super::query::cache_remove_project;
-use super::util::{materialize_rows, DEFAULT_PAGE_SIZE};
+mod load;
+mod profile;
+
+pub use load::{
+    load_column_kinds_with_job, load_project, load_project_metadata_with_job, load_project_with_job,
+};
+use profile::{save_import_profile, KindAccumulator};
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
 /// Fixed-size streaming buffer. The whole source is never held in memory just
@@ -86,6 +85,7 @@ struct ImportedSource {
     total_records: usize,
     flags: HashMap<usize, FlagEntry>,
     column_max_chars: Option<HashMap<String, usize>>,
+    column_kinds: HashMap<String, String>,
 }
 
 /// Streams JSON/JSONL records through the fixed schema from pass 1 and writes
@@ -96,11 +96,16 @@ fn import_json_batches(
     format: jsonl::RecordFormat,
     job: &JobContext,
 ) -> Result<ImportedSource, AppError> {
-    let importer =
-        jsonl::JsonImporter::open(source, format, jsonl::BatchLimits::default(), job)?;
+    let importer = jsonl::JsonImporter::open(source, format, jsonl::BatchLimits::default(), job)?;
     let columns = importer.columns().to_vec();
     let mut writer = BatchDataWriter::create(parquet_path, &columns).map_err(AppError::from)?;
+    let ids = columns
+        .iter()
+        .map(|column| column.id.clone())
+        .collect::<Vec<_>>();
+    let mut kinds = KindAccumulator::default();
     let summary = importer.write_batches(job, |batch| {
+        kinds.observe(batch, &ids, job)?;
         writer.write_batch(batch).map_err(AppError::from)
     })?;
     writer.finish().map_err(AppError::from)?;
@@ -110,38 +115,46 @@ fn import_json_batches(
         total_records: summary.rows,
         flags: summary.flags,
         column_max_chars: Some(summary.column_max_chars),
+        column_kinds: kinds.finish(&ids),
     })
 }
 
 /// Copies the source into the staging directory while hashing the same bytes
 /// with a fixed-size buffer. The source itself is opened read-only and is
 /// never modified or moved.
-fn copy_source_and_hash(source: &Path, destination: &Path) -> Result<CopiedSource, AppError> {
-    let mut input = File::open(source)
-        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
+fn copy_source_and_hash(
+    source: &Path,
+    destination: &Path,
+    job: &JobContext,
+) -> Result<CopiedSource, AppError> {
+    job.check_cancelled()?;
+    let mut input =
+        File::open(source).map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
     let before = input
         .metadata()
         .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;
 
-    let mut output = File::create(destination).map_err(|e| {
-        AppError::Message(format!("Failed to create temporary import file: {}", e))
-    })?;
+    let mut output = File::create(destination)
+        .map_err(|e| AppError::Message(format!("Failed to create temporary import file: {}", e)))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; HASH_BUFFER_SIZE];
     let mut size = 0u64;
     loop {
+        job.check_cancelled()?;
         let read = input
             .read(&mut buffer)
             .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
         if read == 0 {
             break;
         }
-        output
-            .write_all(&buffer[..read])
-            .map_err(|e| AppError::Message(format!("Failed to write temporary import file: {}", e)))?;
+        output.write_all(&buffer[..read]).map_err(|e| {
+            AppError::Message(format!("Failed to write temporary import file: {}", e))
+        })?;
         hasher.update(&buffer[..read]);
         size += read as u64;
+        job.report_progress(size, Some(before.len()), Some("Copying source".into()));
     }
+    job.check_cancelled()?;
     drop(output);
 
     // Detect a source that changed between the copy start and end. The parser
@@ -180,8 +193,7 @@ pub struct CreateProjectPayload {
 
 /// Lists saved projects ordered by creation time (newest first).
 pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppError> {
-    println!("[debug] list_projects called");
-    let metas = store.all();
+    let metas = store.try_all().map_err(AppError::from)?;
     let mut result = Vec::with_capacity(metas.len());
     for meta in metas {
         result.push(ProjectSummary { meta: meta.clone() });
@@ -232,7 +244,7 @@ pub fn create_project_with_job(
     let project_id = Uuid::new_v4();
     let mut staging = StagingDir::create(store.staging_dir(&project_id))?;
     job.report_progress(0, Some(4), Some("Copying source".into()));
-    let copied = copy_source_and_hash(&source_path, &staging.path().join(STAGED_SOURCE_FILE))?;
+    let copied = copy_source_and_hash(&source_path, &staging.path().join(STAGED_SOURCE_FILE), job)?;
     job.check_cancelled()?;
 
     // Parse the copied snapshot, not the source path, so the hash recorded in
@@ -240,12 +252,7 @@ pub fn create_project_with_job(
     job.report_progress(1, Some(4), Some("Importing data".into()));
     let parquet_path = staging.path().join("data.parquet");
     let imported = match source_format {
-        "json" => import_json_batches(
-            &copied.path,
-            &parquet_path,
-            jsonl::RecordFormat::Json,
-            job,
-        )?,
+        "json" => import_json_batches(&copied.path, &parquet_path, jsonl::RecordFormat::Json, job)?,
         "jsonl" | "ndjson" => import_json_batches(
             &copied.path,
             &parquet_path,
@@ -264,7 +271,13 @@ pub fn create_project_with_job(
             let columns = importer.columns().to_vec();
             let mut writer =
                 BatchDataWriter::create(&parquet_path, &columns).map_err(AppError::from)?;
+            let ids = columns
+                .iter()
+                .map(|column| column.id.clone())
+                .collect::<Vec<_>>();
+            let mut kinds = KindAccumulator::default();
             while let Some(batch) = importer.next_batch(job)? {
+                kinds.observe(&batch, &ids, job)?;
                 writer.write_batch(&batch).map_err(AppError::from)?;
             }
             writer.finish().map_err(AppError::from)?;
@@ -274,6 +287,7 @@ pub fn create_project_with_job(
                 total_records: summary.rows,
                 flags: summary.flags,
                 column_max_chars: Some(summary.column_max_chars),
+                column_kinds: kinds.finish(&ids),
             }
         }
     };
@@ -318,6 +332,15 @@ pub fn create_project_with_job(
             .map_err(AppError::from)?;
     }
 
+    let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
+    save_import_profile(
+        staging.path(),
+        metadata.total_records,
+        &schema,
+        imported.column_kinds,
+        imported.column_max_chars.unwrap_or_default(),
+    )?;
+
     let flags_path = staging.path().join("flags.json");
     if !imported.flags.is_empty() {
         save_flags(&flags_path, &imported.flags).map_err(AppError::from)?;
@@ -327,6 +350,11 @@ pub fn create_project_with_job(
     // completed staging directory is renamed into place.
     fs::remove_file(&copied.path)
         .map_err(|e| AppError::Message(format!("Failed to remove temporary import file: {}", e)))?;
+
+    // Metadata belongs to the same staged case database as its settings and
+    // annotations. Publishing the directory then exposes one complete case;
+    // no post-rename registry write or crash window remains.
+    crate::storage::insert_project_meta(staging.path(), &metadata).map_err(AppError::from)?;
 
     // Last cancellation point before the project becomes visible. A cancel
     // after this line is not observed; the import completes and is registered.
@@ -345,13 +373,6 @@ pub fn create_project_with_job(
         .map_err(AppError::from)?;
     staging.disarm();
 
-    // Register the project only after its data, metadata, and directory are
-    // complete. If registration fails, do not leave a project-looking folder.
-    if let Err(err) = store.insert(metadata.clone()) {
-        let _ = fs::remove_dir_all(&project_dir);
-        return Err(AppError::from(err));
-    }
-
     Ok(ProjectSummary { meta: metadata })
 }
 
@@ -363,110 +384,33 @@ pub struct ProjectRequest {
 
 /// Removes a project directory and clears related caches.
 pub fn delete_project(store: &ProjectsStore, request: ProjectRequest) -> Result<(), AppError> {
-    let Some(meta) = store.find(&request.project_id) else {
+    let Some(meta) = store
+        .try_find(&request.project_id)
+        .map_err(AppError::from)?
+    else {
         return Ok(());
     };
     let project_dir = store.project_dir(&meta.id);
-    // Remove the registry entry first. If that write fails, the project is
-    // still intact and can be opened; the previous order deleted the data
-    // directory first and then left a listed but unreadable project.
-    store.remove(&meta.id).map_err(AppError::from)?;
-    super::bulk::forget_undo(&meta.id);
+    // The scanned case index follows this atomic directory publication. A
+    // failed rename leaves the entire case visible and unchanged. Connections
+    // used by try_find have already closed; no database tombstone is written.
+    let trash_root = store.trash_root();
+    fs::create_dir_all(&trash_root)
+        .with_context(|| {
+            format!("failed to create deletion workspace {trash_root:?}; saved case was preserved")
+        })
+        .map_err(AppError::from)?;
+    let trash_path = trash_root.join(format!("{}-{}", meta.id, Uuid::new_v4()));
+    fs::rename(&project_dir, &trash_path)
+        .with_context(|| format!("failed to move case to deletion workspace {trash_path:?}; saved case was preserved"))
+        .map_err(AppError::from)?;
     cache_remove_project(&meta.id);
-    // Release the annotation database before removing its directory.
-    close_flags_db(&project_dir);
-    if let Err(err) = clear_ioc_flag_cache(&project_dir) {
-        eprintln!(
-            "[cache] failed to clear IOC cache for {:?}: {:?}",
-            project_dir, err
-        );
-    }
-    if project_dir.exists() {
-        fs::remove_dir_all(&project_dir)
-            .with_context(|| format!("failed to remove project dir {:?}", project_dir))
-            .map_err(AppError::from)?;
+
+    // Logical deletion committed at the rename. Cleanup errors must not
+    // report that a still-visible case exists or restore a partially removed
+    // directory. Keep the exact owned trash path for explicit manual cleanup.
+    if let Err(error) = fs::remove_dir_all(&trash_path) {
+        eprintln!("[projects] case {} was deleted, but cleanup failed at {trash_path:?}: {error}. Remaining files are retained there for manual cleanup.", meta.id);
     }
     Ok(())
-}
-
-/// Loads project metadata, initial rows, legacy IOC definitions, and column metrics.
-///
-/// The IOC definitions are returned for the legacy rules UI. They are not
-/// evaluated here and do not change row flags or memos.
-pub fn load_project(
-    store: &ProjectsStore,
-    request: ProjectRequest,
-) -> Result<LoadProjectResponse, AppError> {
-    let meta = store
-        .find(&request.project_id)
-        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    let project_dir = store.project_dir(&meta.id);
-    let parquet_path = project_dir.join("data.parquet");
-    if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()));
-    }
-
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let project_columns = ProjectColumns::from_meta(&meta, &df);
-    let columns = project_columns.ids();
-
-    let flags_path = store.flags_path(&meta.id);
-    let flags = load_flags(&flags_path).map_err(AppError::from)?;
-
-    let metrics_path = project_dir.join(COLUMN_METRICS_FILE);
-    let mut column_max_chars = match load_column_metrics(&metrics_path).map_err(AppError::from)? {
-        Some(map) => map,
-        None => {
-            let computed = compute_column_max_chars(&df);
-            save_column_metrics(&metrics_path, &computed).map_err(AppError::from)?;
-            computed
-        }
-    };
-    if columns
-        .iter()
-        .any(|column| !column_max_chars.contains_key(column))
-    {
-        column_max_chars = compute_column_max_chars(&df);
-        save_column_metrics(&metrics_path, &column_max_chars).map_err(AppError::from)?;
-    }
-
-    let iocs = load_ioc_entries(&project_dir).map_err(AppError::from)?;
-
-    // Like query coloring, a broken colors.json must not block project loading.
-    let color_rules = match load_color_rules(&project_dir) {
-        Ok(rules) => rules.unwrap_or_default(),
-        Err(err) => {
-            eprintln!(
-                "[colors] failed to load color rules for {:?}: {:?}",
-                project_dir, err
-            );
-            Vec::new()
-        }
-    };
-
-    let page_limit = usize::min(DEFAULT_PAGE_SIZE, df.height());
-    let initial_rows = materialize_rows(&df, project_columns.columns(), 0..page_limit, &flags);
-
-    println!(
-        "[debug] load_project id={} total_rows={} initial_rows={}",
-        meta.id,
-        df.height(),
-        initial_rows.len()
-    );
-    let summary = ProjectSummary { meta: meta.clone() };
-
-    Ok(LoadProjectResponse {
-        project: summary,
-        columns,
-        columns_meta: project_columns.columns().to_vec(),
-        hidden_columns: meta.hidden_columns.clone(),
-        column_max_chars,
-        column_kinds: infer_column_kinds(&df)
-            .into_iter()
-            .map(|(name, kind)| (name, kind.as_str().to_string()))
-            .collect(),
-        iocs,
-        color_rules,
-        initial_rows,
-    })
 }

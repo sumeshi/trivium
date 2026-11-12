@@ -2,13 +2,11 @@ use std::collections::HashMap;
 
 use polars::prelude::Series;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
 use crate::models::FlagEntry;
 
 use super::values::{datetime_point, float_point, format_nanos, int_point};
-use super::{
-    histogram_series_ranged, Histogram, HistogramBucket, HistogramFlags, HistogramRangeInfo,
-};
+use super::{Histogram, HistogramBucket, HistogramFlags, HistogramRangeInfo};
 
 /// Shared histogram with manual flag counts. Initial timeline focus uses a
 /// bounded deterministic sample; timestamps are parsed once and never rounded.
@@ -21,10 +19,44 @@ pub fn histogram_series_annotated(
     flags: &HashMap<usize, FlagEntry>,
     focus: bool,
 ) -> Result<Histogram, String> {
-    if series_kind(series) == ColumnKind::Datetime {
-        return datetime_histogram(column, series, rows, buckets.max(1), range, flags, focus);
+    histogram_series_annotated_with_job(
+        column,
+        series,
+        rows,
+        buckets,
+        range,
+        flags,
+        focus,
+        &crate::jobs::JobContext::none(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn histogram_series_annotated_with_job(
+    column: &str,
+    series: &Series,
+    rows: &[usize],
+    buckets: usize,
+    range: Option<(&str, &str)>,
+    flags: &HashMap<usize, FlagEntry>,
+    focus: bool,
+    job: &crate::jobs::JobContext,
+) -> Result<Histogram, String> {
+    let kind = series_kind_with_job(series, job).map_err(|e| e.to_string())?;
+    if kind == ColumnKind::Datetime {
+        return datetime_histogram(
+            column,
+            series,
+            rows,
+            buckets.max(1),
+            range,
+            flags,
+            focus,
+            job,
+        );
     }
-    let mut result = histogram_series_ranged(column, series, rows, buckets, range)?;
+    let mut result =
+        super::histogram_series_ranged_kind(column, series, rows, buckets, range, kind, job)?;
     // The numeric stats view retains its existing bucket calculation. Count
     // flags without retaining a second vector of numeric values.
     for bucket in &mut result.buckets {
@@ -50,7 +82,10 @@ pub fn histogram_series_annotated(
             } else {
                 None
             };
-            for row in rows {
+            for (position, row) in rows.iter().enumerate() {
+                if position % 1024 == 0 {
+                    job.check_cancelled().map_err(|e| e.to_string())?;
+                }
                 let index = if let Some((low, high)) = int_bounds {
                     int_point(series, *row)
                         .and_then(|point| integer_index(point, low, high, result.buckets.len()))
@@ -100,6 +135,7 @@ fn integer_index(value: i128, min: i128, max: i128, buckets: usize) -> Option<us
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn datetime_histogram(
     column: &str,
     series: &Series,
@@ -108,6 +144,7 @@ fn datetime_histogram(
     range: Option<(&str, &str)>,
     flags: &HashMap<usize, FlagEntry>,
     focus: bool,
+    job: &crate::jobs::JobContext,
 ) -> Result<Histogram, String> {
     let mut points = Vec::with_capacity(rows.len());
     let mut sample = Vec::with_capacity(4096.min(rows.len()));
@@ -115,7 +152,10 @@ fn datetime_histogram(
     let mut missing = 0;
     let mut full_min = i128::MAX;
     let mut full_max = i128::MIN;
-    for row in rows {
+    for (position, row) in rows.iter().enumerate() {
+        if position % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
         let Some(value) = datetime_point(series, *row) else {
             missing += 1;
             continue;
@@ -174,7 +214,10 @@ fn datetime_histogram(
         })
         .collect::<Vec<_>>();
     let mut outside = 0;
-    for (point, row) in points {
+    for (position, (point, row)) in points.into_iter().enumerate() {
+        if position % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
         if let Some(index) = integer_index(point, min, max, buckets) {
             output[index].count += 1;
             add_flag(&mut output[index].flags, flags.get(&row));

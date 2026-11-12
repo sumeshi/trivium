@@ -1,17 +1,18 @@
 use polars::prelude::Series;
 use serde_json::Value;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
 use crate::value_utils::anyvalue_to_json;
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct TimeSpan {
     pub start: String,
     pub end: String,
+    #[ts(type = "number")]
     pub count: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct TimeAnalysis {
     pub column: String,
     pub gaps: Vec<TimeSpan>,
@@ -36,22 +37,55 @@ pub fn analyze_series(
     burst_window_seconds: u64,
     burst_min: u64,
 ) -> Result<TimeAnalysis, String> {
-    if series_kind(series) != ColumnKind::Datetime {
+    analyze_series_with_job(
+        column,
+        series,
+        row_indices,
+        gap_seconds,
+        session_minutes,
+        burst_window_seconds,
+        burst_min,
+        &crate::jobs::JobContext::none(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn analyze_series_with_job(
+    column: &str,
+    series: &Series,
+    row_indices: &[usize],
+    gap_seconds: u64,
+    session_minutes: u64,
+    burst_window_seconds: u64,
+    burst_min: u64,
+    job: &crate::jobs::JobContext,
+) -> Result<TimeAnalysis, String> {
+    if series_kind_with_job(series, job).map_err(|e| e.to_string())? != ColumnKind::Datetime {
         return Err("Column is not datetime.".into());
     }
     let mut events = Vec::new();
-    for idx in row_indices {
+    for (position, idx) in row_indices.iter().enumerate() {
+        if position % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
         if let Some(event) = event_at(series, *idx) {
             events.push(event);
         }
     }
-    events.sort_by(|left, right| left.nanos.cmp(&right.nanos).then(left.text.cmp(&right.text)));
-    Ok(TimeAnalysis {
+    events.sort_by(|left, right| {
+        left.nanos
+            .cmp(&right.nanos)
+            .then_with(|| left.text.cmp(&right.text))
+    });
+    job.check_cancelled().map_err(|e| e.to_string())?;
+    let result = TimeAnalysis {
         column: column.to_string(),
-        gaps: gaps(&events, gap_seconds),
-        sessions: sessions(&events, session_minutes),
-        bursts: bursts(&events, burst_window_seconds, burst_min),
-    })
+        gaps: gaps(&events, gap_seconds, job)?,
+        sessions: sessions(&events, session_minutes, job)?,
+        bursts: bursts(&events, burst_window_seconds, burst_min, job)?,
+    };
+    job.check_cancelled().map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 fn event_at(series: &Series, idx: usize) -> Option<Event> {
@@ -67,32 +101,44 @@ fn event_at(series: &Series, idx: usize) -> Option<Event> {
     Some(Event { nanos, text })
 }
 
-fn gaps(events: &[Event], gap_seconds: u64) -> Vec<TimeSpan> {
+fn gaps(
+    events: &[Event],
+    gap_seconds: u64,
+    job: &crate::jobs::JobContext,
+) -> Result<Vec<TimeSpan>, String> {
     let minimum = i128::from(gap_seconds) * 1_000_000_000;
-    events
-        .windows(2)
-        .filter_map(|pair| {
-            let delta = i128::from(pair[1].nanos) - i128::from(pair[0].nanos);
-            if delta < minimum {
-                return None;
-            }
-            Some(TimeSpan {
+    let mut spans = Vec::new();
+    for (index, pair) in events.windows(2).enumerate() {
+        if index % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
+        let delta = i128::from(pair[1].nanos) - i128::from(pair[0].nanos);
+        if delta >= minimum {
+            spans.push(TimeSpan {
                 start: pair[0].text.clone(),
                 end: pair[1].text.clone(),
                 count: (delta / 1_000_000_000) as u64,
-            })
-        })
-        .collect()
+            });
+        }
+    }
+    Ok(spans)
 }
 
-fn sessions(events: &[Event], session_minutes: u64) -> Vec<TimeSpan> {
+fn sessions(
+    events: &[Event],
+    session_minutes: u64,
+    job: &crate::jobs::JobContext,
+) -> Result<Vec<TimeSpan>, String> {
     if events.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let minimum = i128::from(session_minutes) * 60 * 1_000_000_000;
     let mut spans = Vec::new();
-    let mut start = 0usize;
+    let mut start = 0;
     for index in 1..events.len() {
+        if index % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
         let delta = i128::from(events[index].nanos) - i128::from(events[index - 1].nanos);
         if delta >= minimum {
             spans.push(span(&events[start..index]));
@@ -100,44 +146,45 @@ fn sessions(events: &[Event], session_minutes: u64) -> Vec<TimeSpan> {
         }
     }
     spans.push(span(&events[start..]));
-    spans
+    Ok(spans)
 }
 
-fn bursts(events: &[Event], window_seconds: u64, burst_min: u64) -> Vec<TimeSpan> {
-    if events.is_empty() {
-        return Vec::new();
-    }
+fn bursts(
+    events: &[Event],
+    window_seconds: u64,
+    burst_min: u64,
+    job: &crate::jobs::JobContext,
+) -> Result<Vec<TimeSpan>, String> {
     let window = i128::from(window_seconds) * 1_000_000_000;
-    let mut ranges = Vec::new();
-    let mut end = 0usize;
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    let mut end = 0;
     for start in 0..events.len() {
-        if end < start {
-            end = start;
+        if start % 1024 == 0 {
+            job.check_cancelled().map_err(|e| e.to_string())?;
         }
+        end = end.max(start);
         while end + 1 < events.len()
             && i128::from(events[end + 1].nanos) - i128::from(events[start].nanos) <= window
         {
             end += 1;
-        }
-        let count = end - start + 1;
-        if count as u64 > burst_min {
-            ranges.push((start, end));
-        }
-    }
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for range in ranges {
-        if let Some(last) = merged.last_mut() {
-            if range.0 <= last.1 {
-                last.1 = last.1.max(range.1);
-                continue;
+            if end % 1024 == 0 {
+                job.check_cancelled().map_err(|e| e.to_string())?;
             }
         }
-        merged.push(range);
+        if (end - start + 1) as u64 > burst_min {
+            if let Some(last) = merged.last_mut() {
+                if start <= last.1 {
+                    last.1 = last.1.max(end);
+                    continue;
+                }
+            }
+            merged.push((start, end));
+        }
     }
-    merged
+    Ok(merged
         .into_iter()
         .map(|(start, end)| span(&events[start..=end]))
-        .collect()
+        .collect())
 }
 
 fn span(events: &[Event]) -> TimeSpan {

@@ -6,13 +6,11 @@ use uuid::Uuid;
 use crate::analysis::group::{add_row, finalize, GroupNode, GroupNodePartial, GroupTreeRow};
 use crate::error::AppError;
 use crate::jobs::JobContext;
-use crate::project_io::read_project_dataframe;
-use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
 
-use super::query::{data_columns, resolve_target, QuerySpec};
-use super::util::resolve_columns;
+use super::analysis_data::{AnalysisSource, SelectedRows};
+use super::query::QuerySpec;
 
 #[derive(Debug, Deserialize)]
 pub struct GroupTreePayload {
@@ -35,7 +33,7 @@ pub struct GroupTreePayload {
     pub group_columns: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub struct GroupTreeNode {
     pub value: serde_json::Value,
     pub label: String,
@@ -43,7 +41,7 @@ pub struct GroupTreeNode {
     pub children: Vec<GroupTreeNode>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub struct GroupTreeResponse {
     pub columns: Vec<String>,
     pub nodes: Vec<GroupTreeNode>,
@@ -55,6 +53,14 @@ pub fn group_tree(
     store: &ProjectsStore,
     payload: GroupTreePayload,
 ) -> Result<GroupTreeResponse, AppError> {
+    group_tree_with_job(store, payload, &JobContext::none())
+}
+
+pub fn group_tree_with_job(
+    store: &ProjectsStore,
+    payload: GroupTreePayload,
+    job: &JobContext,
+) -> Result<GroupTreeResponse, AppError> {
     let requested: Vec<String> = payload
         .group_columns
         .iter()
@@ -65,22 +71,7 @@ pub fn group_tree(
         return Err(AppError::Message("Group columns must not be empty.".into()));
     }
 
-    let meta = store
-        .find(&payload.project_id)
-        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    let project_dir = store.project_dir(&meta.id);
-    let parquet_path = project_dir.join("data.parquet");
-    if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()));
-    }
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns = data_columns(&df, meta.storage_version);
-    let resolved = resolve_columns(&df, &requested, "group columns")?;
-    let group_series: Vec<Option<&Series>> =
-        resolved.iter().map(|name| df.column(name).ok()).collect();
-
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let mut spec = QuerySpec {
+    let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -92,28 +83,42 @@ pub fn group_tree(
         sort_key: None,
         sort_direction: None,
     };
-    spec.resolve_search_labels(&meta.columns)?;
-    let filtered = resolve_target(&df, &spec, &columns, &flags, &JobContext::none())?.filtered;
-    let total = filtered.len();
-
+    let source = AnalysisSource::open(store, payload.project_id, &spec, job)?;
+    let resolved = source.columns(&requested, "group columns")?;
+    let total = source.target.ids.len();
+    let selected = SelectedRows::new(source.target.total_rows, &source.target.ids);
+    let mut reader = source.selected_reader(&resolved)?;
     let mut root = GroupNodePartial::default();
-    for row_idx in filtered {
-        let mut labels = Vec::with_capacity(group_series.len());
-        let mut values = Vec::with_capacity(group_series.len());
-        for series in &group_series {
-            let value = series.and_then(|series| series.get(row_idx).ok());
-            labels.push(
-                value
-                    .as_ref()
-                    .and_then(anyvalue_to_search_string)
-                    .map(|text| text.trim().to_string())
-                    .unwrap_or_default(),
-            );
-            values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
+    while let Some(batch) = reader.next_with_job(job) {
+        let batch = batch.map_err(AppError::from)?;
+        let group_series: Vec<&Series> = resolved
+            .iter()
+            .map(|name| batch.frame.column(name).expect("projected column"))
+            .collect();
+        for row_idx in 0..batch.frame.height() {
+            if row_idx % 1024 == 0 {
+                job.check_cancelled()?;
+            }
+            if !selected.contains(batch.offset + row_idx) {
+                continue;
+            }
+            let mut labels = Vec::with_capacity(group_series.len());
+            let mut values = Vec::with_capacity(group_series.len());
+            for series in &group_series {
+                let value = series.get(row_idx).ok();
+                labels.push(
+                    value
+                        .as_ref()
+                        .and_then(anyvalue_to_search_string)
+                        .map(|text| text.trim().to_string())
+                        .unwrap_or_default(),
+                );
+                values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
+            }
+            add_row(&mut root, &GroupTreeRow { labels, values });
         }
-        add_row(&mut root, &GroupTreeRow { labels, values });
     }
-
+    job.check_cancelled()?;
     let nodes = finalize(&root).into_iter().map(to_response).collect();
     Ok(GroupTreeResponse {
         columns: resolved,

@@ -9,6 +9,12 @@ chrono.workspace = true
 csv = "1"
 parking_lot.workspace = true
 polars.workspace = true
+polars-parquet = { version = "0.40", default-features = false }
+rusqlite = { version = "0.38", features = ["bundled"] }
+fs2 = "0.4"
+same-file = "1"
+tokio = { version = "1", features = ["sync"] }
+ts-rs = { version = "11", features = ["uuid-impl", "chrono-impl", "serde-json-impl", "no-serde-warnings"] }
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true

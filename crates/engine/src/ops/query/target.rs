@@ -7,10 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
-use crate::project_io::is_internal_column_for_version;
 
-use super::ioc::user_flags;
-use super::page::filtered_indices;
+use super::page::{flag_population, is_unrestricted_flag_filter, FlagFilterMask};
 use super::search::prepare_search;
 use super::sort::ordered_row_indices;
 
@@ -36,7 +34,8 @@ pub fn reset_resolve_count() {
 ///
 /// `search_columns` is the search scope, not the visible or output columns.
 /// `None` or an empty list means every data column.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ts_rs::TS)]
+#[ts(optional_fields = nullable)]
 pub struct QuerySpec {
     #[serde(default)]
     pub search: Option<String>,
@@ -66,15 +65,6 @@ pub struct ResolvedTarget {
     pub annotated_total: usize,
 }
 
-/// Data columns in frame order, excluding internal storage columns.
-pub fn data_columns(df: &DataFrame, storage_version: u32) -> Vec<String> {
-    df.get_column_names()
-        .into_iter()
-        .filter(|name| !is_internal_column_for_version(name, storage_version))
-        .map(|name| name.to_string())
-        .collect()
-}
-
 /// Resolves a `QuerySpec` to original row ids in display order.
 ///
 /// This is the single implementation used by the page query, export, and bulk
@@ -101,22 +91,58 @@ pub fn resolve_target(
         spec.condition.as_ref(),
         job,
     )?;
-    let ordered = ordered_row_indices(df, spec.sort_key.as_deref(), spec.sort_direction.as_deref());
-    let final_flag_vec = user_flags(df.height(), flags);
-    let bookmarked: Vec<bool> = (0..df.height())
-        .map(|idx| flags.get(&idx).is_some_and(|entry| entry.bookmarked))
-        .collect();
-    let (filtered, annotated_filtered) = filtered_indices(
-        &ordered,
-        &final_flag_vec,
-        &bookmarked,
-        spec.bookmarked_only,
-        spec.flag_filter.as_deref(),
-        search_state.mask.as_deref(),
-    );
-    let annotated_total = final_flag_vec
+    let restrict_flags = !is_unrestricted_flag_filter(spec.flag_filter.as_deref());
+    let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref());
+    let matches = |index: usize| {
+        if search_state.mask.as_ref().is_some_and(|mask| !mask[index]) {
+            return false;
+        }
+        if restrict_flags || spec.bookmarked_only == Some(true) {
+            let entry = flags.get(&index);
+            if restrict_flags
+                && !flag_filter
+                    .matches_population(entry.map_or(8, |entry| flag_population(&entry.flag)))
+            {
+                return false;
+            }
+            if spec.bookmarked_only == Some(true) && !entry.is_some_and(|entry| entry.bookmarked) {
+                return false;
+            }
+        }
+        true
+    };
+    // Source order is implicit; a search does not need a second N-row ordering
+    // vector or N owned flag strings/bookmark bools.
+    let mut filtered = if spec
+        .sort_key
+        .as_deref()
+        .is_some_and(|key| df.column(key).is_ok())
+    {
+        ordered_row_indices(df, spec.sort_key.as_deref(), spec.sort_direction.as_deref())
+    } else {
+        (0..df.height()).collect()
+    };
+    let mut cancelled = None;
+    let mut visited = 0usize;
+    filtered.retain(|index| {
+        if visited.is_multiple_of(1024) && cancelled.is_none() {
+            cancelled = job.check_cancelled().err();
+        }
+        visited += 1;
+        cancelled.is_none() && matches(*index)
+    });
+    if let Some(error) = cancelled {
+        return Err(error);
+    }
+    let annotated_total = flags
         .iter()
-        .filter(|flag| !flag.trim().is_empty())
+        .filter(|(index, entry)| **index < df.height() && flag_population(&entry.flag) != 8)
+        .count();
+    let annotated_filtered = flags
+        .iter()
+        .filter(|(index, entry)| {
+            **index < df.height() && flag_population(&entry.flag) != 8 && matches(**index)
+        })
         .count();
 
     Ok(ResolvedTarget {

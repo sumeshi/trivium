@@ -1,12 +1,13 @@
+pub(crate) mod analysis_data;
 pub mod bulk;
 pub mod cell;
 pub mod cross;
 pub mod diff;
 pub mod dupes;
 pub mod export;
+pub mod flags;
 pub mod group;
 pub mod histogram;
-pub mod flags;
 pub mod iocs;
 pub mod preset;
 pub mod projects;

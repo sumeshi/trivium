@@ -1,15 +1,13 @@
-use polars::prelude::*;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::analysis::stats::{summarize_series, ColumnStats};
+use crate::analysis::stats::{ColumnStats, StatsAccumulator};
 use crate::error::AppError;
 use crate::jobs::JobContext;
-use crate::project_io::{is_internal_column_for_version, read_project_dataframe};
-use crate::storage::load_flags;
 use crate::store::ProjectsStore;
 
-use super::query::{data_columns, resolve_target, QuerySpec};
+use super::analysis_data::{AnalysisSource, SelectedRows};
+use super::query::QuerySpec;
 
 #[derive(Debug, Deserialize)]
 pub struct ColumnStatsPayload {
@@ -31,31 +29,37 @@ fn default_rare_max() -> u64 {
 /// Column kind, missing count, distinct count, top 20 values, and up to 20 rare values.
 pub fn column_stats(
     store: &ProjectsStore,
-    mut payload: ColumnStatsPayload,
+    payload: ColumnStatsPayload,
 ) -> Result<ColumnStats, AppError> {
-    let meta = store
-        .find(&payload.project_id)
-        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    payload.spec.resolve_search_labels(&meta.columns)?;
-    if is_internal_column_for_version(&payload.column, meta.storage_version) {
-        return Err(AppError::Message("Column not found.".into()));
+    column_stats_with_job(store, payload, &JobContext::none())
+}
+
+pub fn column_stats_with_job(
+    store: &ProjectsStore,
+    payload: ColumnStatsPayload,
+    job: &JobContext,
+) -> Result<ColumnStats, AppError> {
+    let source = AnalysisSource::open(store, payload.project_id, &payload.spec, job)?;
+    let projection = source.columns(&[payload.column], "statistics column")?;
+    let mut reader = source.selected_reader(&projection)?;
+    let empty = reader.empty_frame().map_err(AppError::from)?;
+    let dtype = empty
+        .column(&projection[0])
+        .map_err(|error| AppError::Other(error.into()))?
+        .dtype();
+    let mut stats = StatsAccumulator::new(&projection[0], dtype);
+    let selected = SelectedRows::new(source.target.total_rows, &source.target.ids);
+    while let Some(batch) = reader.next_with_job(job) {
+        let batch = batch.map_err(AppError::from)?;
+        let series = batch
+            .frame
+            .column(&projection[0])
+            .map_err(|error| AppError::Other(error.into()))?;
+        stats.observe(
+            series,
+            (0..batch.frame.height()).filter(|row| selected.contains(batch.offset + row)),
+            job,
+        )?;
     }
-    let project_dir = store.project_dir(&meta.id);
-    let parquet_path = project_dir.join("data.parquet");
-    if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()));
-    }
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let columns = data_columns(&df, meta.storage_version);
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-    let target = resolve_target(&df, &payload.spec, &columns, &flags, &JobContext::none())?;
-    let take_idx = UInt32Chunked::from_iter_values(
-        "take_idx",
-        target.filtered.iter().map(|index| *index as u32),
-    );
-    let filtered = df.take(&take_idx).map_err(|err| AppError::Other(err.into()))?;
-    let series = filtered
-        .column(&payload.column)
-        .map_err(|_| AppError::Message("Column not found.".into()))?;
-    Ok(summarize_series(&payload.column, series, payload.rare_max))
+    stats.finish(payload.rare_max, job)
 }

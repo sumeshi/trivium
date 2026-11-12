@@ -4,23 +4,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    error::AppError,
-    jobs::JobContext,
-    project_io::{
-        is_internal_column_for_version, read_project_columns, read_project_row_count,
-        read_project_schema_columns, INTERNAL_ROW_ID,
-    },
-    storage::load_flags,
-    store::ProjectsStore,
+    error::AppError, jobs::JobContext, project_io::read_project_row_count, store::ProjectsStore,
 };
 
 use super::{
-    page_read::{is_unconditional_page, resolution_projection},
-    result_cache::{self, CachedResult},
-    target::{resolve_target, QuerySpec},
+    page_read::is_unconditional_page, resolve_project_target, result_cache, target::QuerySpec,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ts_rs::TS)]
 pub struct LocateRowPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
@@ -31,7 +22,7 @@ pub struct LocateRowPayload {
     pub spec: QuerySpec,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct LocateRowResponse {
     /// Zero-based position inside the current filtered/sorted result, if any.
     pub position: Option<usize>,
@@ -54,7 +45,8 @@ pub fn locate_project_row_with_job(
 ) -> Result<LocateRowResponse, AppError> {
     job.check_cancelled()?;
     let meta = store
-        .find(&payload.project_id)
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
     payload.spec.resolve_search_labels(&meta.columns)?;
     let project_dir = store.project_dir(&meta.id);
@@ -76,39 +68,20 @@ pub fn locate_project_row_with_job(
         });
     }
 
-    let revision = store.current_revision(&meta.id);
+    let revision = crate::storage::project_revision(&project_dir).map_err(AppError::from)?;
     let annotation_token =
         result_cache::spec_depends_on_annotations(&payload.spec).then(|| revision.to_string());
     let cache_key =
         result_cache::query_cache_key(meta.id, &payload.spec, &parquet_path, annotation_token);
-    let result = match cache_key.as_ref().and_then(result_cache::cache_lookup) {
-        Some(cached) => cached,
+    let ids = match cache_key
+        .as_ref()
+        .and_then(result_cache::cache_lookup_if_present)
+    {
+        Some(cached) => cached.ids,
         None => {
-            // Exactly the same projection and resolver used by query_project_rows.
-            // A miss warms the shared page cache without materializing any rows.
-            job.report_progress(1, Some(3), Some("Evaluating query".into()));
-            let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-            let columns: Vec<String> = schema
-                .iter()
-                .filter(|name| !is_internal_column_for_version(name, meta.storage_version))
-                .cloned()
-                .collect();
-            let has_row_id = schema.iter().any(|name| name == INTERNAL_ROW_ID);
-            let projection = resolution_projection(&payload.spec, &columns, has_row_id);
-            let frame = read_project_columns(&parquet_path, &projection).map_err(AppError::from)?;
-            let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
-            let target = resolve_target(&frame, &payload.spec, &columns, &flags, job)?;
+            let target = resolve_project_target(store, meta.id, &payload.spec, job)?;
             job.check_cancelled()?;
-            let cached = CachedResult::new(
-                target.filtered,
-                target.annotated_filtered,
-                target.annotated_total,
-                revision,
-            );
-            if let Some(key) = cache_key {
-                result_cache::cache_store(key, cached.clone());
-            }
-            cached
+            target.ids
         }
     };
 
@@ -118,7 +91,7 @@ pub fn locate_project_row_with_job(
     // map. Chunk checkpoints also keep an already cached long scan cancellable.
     let mut position = None;
     if payload.row_index < total_rows {
-        for (chunk_index, chunk) in result.ids.chunks(4096).enumerate() {
+        for (chunk_index, chunk) in ids.chunks(4096).enumerate() {
             job.check_cancelled()?;
             if let Some(index) = chunk.iter().position(|id| *id == payload.row_index) {
                 position = Some(chunk_index * 4096 + index);
@@ -131,6 +104,6 @@ pub fn locate_project_row_with_job(
     Ok(LocateRowResponse {
         position,
         total_rows,
-        total_filtered_rows: result.ids.len(),
+        total_filtered_rows: ids.len(),
     })
 }

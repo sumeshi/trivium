@@ -45,7 +45,9 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     let store = ProjectsStore::new(root.clone()).map_err(AppError::from)?;
 
     println!("fixture={}", fixture);
-    println!("  cold=first request in this process with an empty result cache; OS cache not dropped");
+    println!(
+        "  cold=first request in this process with an empty result cache; OS cache not dropped"
+    );
 
     let build_create = || CreateProjectPayload {
         path: fixture.to_string(),
@@ -58,7 +60,12 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     for attempt in 0..IMPORT_RUNS {
         let summary = imports.record(|| create_project(&store, build_create()))?;
         if attempt + 1 < IMPORT_RUNS {
-            delete_project(&store, ProjectRequest { project_id: summary.meta.id })?;
+            delete_project(
+                &store,
+                ProjectRequest {
+                    project_id: summary.meta.id,
+                },
+            )?;
         } else {
             last_id = Some(summary.meta.id);
         }
@@ -113,9 +120,13 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
 
     let store = ProjectsStore::new(root.clone()).map_err(AppError::from)?;
     clear_result_cache();
-    once("page_first_cold", || page(&store, id, None, None, 0).map(|_| ()))?;
+    once("page_first_cold", || {
+        page(&store, id, None, None, 0).map(|_| ())
+    })?;
     let mut page_first_warm = Samples::new("page_first_warm");
-    measure(&mut page_first_warm, |_| page(&store, id, None, None, 0).map(|_| ()))?;
+    measure(&mut page_first_warm, |_| {
+        page(&store, id, None, None, 0).map(|_| ())
+    })?;
     page_first_warm.report();
 
     reset_resolve_count();
@@ -124,7 +135,10 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
         page(&store, id, None, None, PAGE_SIZE * (index + 1)).map(|_| ())
     })?;
     page_move.report();
-    out("page_move_check", format!("resolve_target_calls={}", resolve_count()));
+    out(
+        "page_move_check",
+        format!("resolve_target_calls={}", resolve_count()),
+    );
 
     clear_result_cache();
     reset_resolve_count();
@@ -145,12 +159,17 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     sort_warm.report();
     out(
         "sort_page_check_warm",
-        format!("resolve_target_calls={} (0 = search/sort not re-run)", resolve_count()),
+        format!(
+            "resolve_target_calls={} (0 = search/sort not re-run)",
+            resolve_count()
+        ),
     );
 
     clear_result_cache();
     reset_resolve_count();
-    let all_search = once("search_all_cold", || page(&store, id, Some("powershell"), None, 0))?;
+    let all_search = once("search_all_cold", || {
+        page(&store, id, Some("powershell"), None, 0)
+    })?;
     out(
         "search_all_check",
         format!(
@@ -168,7 +187,10 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     search_warm.report();
     out(
         "search_same_check",
-        format!("resolve_target_calls={} (0 = search not re-run)", resolve_count()),
+        format!(
+            "resolve_target_calls={} (0 = search not re-run)",
+            resolve_count()
+        ),
     );
 
     clear_result_cache();
@@ -195,7 +217,10 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     flag_save.report();
     out(
         "flag_save_check",
-        format!("project_data_reads={} (0 = no full original read)", project_data_reads()),
+        format!(
+            "project_data_reads={} (0 = no full original read)",
+            project_data_reads()
+        ),
     );
 
     let small_search = format!("{}:alice {}:WS01", user_id, host_id);
@@ -207,7 +232,10 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
                 id,
                 &root.join("bench-filtered.csv"),
                 "filtered",
-                QuerySpec { search: Some(small_search.clone()), ..QuerySpec::default() },
+                QuerySpec {
+                    search: Some(small_search.clone()),
+                    ..QuerySpec::default()
+                },
                 None,
                 &JobContext::none(),
             )

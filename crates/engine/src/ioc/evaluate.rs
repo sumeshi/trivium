@@ -128,8 +128,7 @@ fn evaluate_entries_internal(df: &DataFrame, iocs: &[IocEntry]) -> Vec<InternalO
         let mut needed_cols: Vec<String> = Vec::new();
         let mut needs_all_column_text = false;
         for token in &tokens {
-            if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = token
-            {
+            if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = token {
                 if text.is_empty() {
                     continue;
                 }
@@ -155,7 +154,11 @@ fn evaluate_entries_internal(df: &DataFrame, iocs: &[IocEntry]) -> Vec<InternalO
             ensure_column_text_cache(&c, &column_series_lower, &mut per_column_text, row_count);
         }
         if needs_all_column_text && all_column_text.is_none() {
-            all_column_text = Some(build_searchable_text(row_count, &all_columns, &column_series));
+            all_column_text = Some(build_searchable_text(
+                row_count,
+                &all_columns,
+                &column_series,
+            ));
         }
         // The mask length follows the text slice. Every term is either
         // column-scoped (served from per_column_text) or covered by

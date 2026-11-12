@@ -46,13 +46,11 @@ pub fn apply_ioc_outcomes_to_rows(rows: &mut [ProjectRow], outcomes: &[IocRowOut
 }
 
 pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
-    let path = project_dir.join("iocs.json");
-    if !path.exists() {
+    let Some(data) = crate::storage::load_setting_bytes(project_dir, "iocs")? else {
         return Ok(Vec::new());
-    }
-    let data = fs::read(&path).with_context(|| format!("failed to read ioc file {:?}", path))?;
-    let mut entries: Vec<IocEntry> = serde_json::from_slice(&data)
-        .with_context(|| format!("failed to parse ioc file {:?}", path))?;
+    };
+    let mut entries: Vec<IocEntry> =
+        serde_json::from_slice(&data).context("failed to parse saved IOC definitions")?;
     for entry in &mut entries {
         entry.flag = normalize_flag_value(&entry.flag);
         entry.tag = entry.tag.trim().to_string();
@@ -62,13 +60,8 @@ pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
 }
 
 pub fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> {
-    let path = project_dir.join("iocs.json");
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to prepare ioc dir {:?}", parent))?;
-    }
-    let data = serde_json::to_vec_pretty(entries).context("failed to serialize ioc entries")?;
-    crate::storage::write_file_atomic(&path, &data)
+    let data = serde_json::to_vec(entries).context("failed to serialize ioc entries")?;
+    crate::storage::save_setting_bytes(project_dir, "iocs", &data)
 }
 
 pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {

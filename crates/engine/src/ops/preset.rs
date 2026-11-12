@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::condition::Node;
 use crate::error::AppError;
-use crate::project_io::read_project_dataframe;
+use crate::project_io::read_project_schema_columns;
 use crate::store::ProjectsStore;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,7 +73,11 @@ pub fn extract_columns(node: &Node) -> Vec<String> {
 
 /// Writes the current view as a portable preset file.
 pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<(), AppError> {
-    if store.find(&payload.project_id).is_none() {
+    if store
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
+        .is_none()
+    {
         return Err(AppError::Message("Project not found.".into()));
     }
 
@@ -103,7 +107,10 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
 }
 
 /// Reads a preset file and reports columns unknown to the selected project.
-pub fn load_preset(store: &ProjectsStore, payload: LoadPresetPayload) -> Result<PresetData, AppError> {
+pub fn load_preset(
+    store: &ProjectsStore,
+    payload: LoadPresetPayload,
+) -> Result<PresetData, AppError> {
     let path = PathBuf::from(&payload.source);
     let data = fs::read(&path)
         .with_context(|| format!("failed to read preset {}", payload.source))
@@ -118,7 +125,8 @@ pub fn load_preset(store: &ProjectsStore, payload: LoadPresetPayload) -> Result<
     let unknown_columns = match payload.project_id {
         Some(id) => {
             let meta = store
-                .find(&id)
+                .try_find(&id)
+                .map_err(AppError::from)?
                 .ok_or_else(|| AppError::Message("Project not found.".into()))?;
             match preset.condition.as_ref() {
                 Some(condition) => unknown_columns(store, &meta.id, condition)?,
@@ -147,12 +155,8 @@ fn unknown_columns(
     if !parquet_path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let known: HashSet<String> = df
-        .get_column_names()
-        .iter()
-        .map(|name| name.to_lowercase())
-        .collect();
+    let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
+    let known: HashSet<String> = schema.iter().map(|name| name.to_lowercase()).collect();
 
     let mut missing: Vec<String> = extract_columns(condition)
         .into_iter()

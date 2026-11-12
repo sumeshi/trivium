@@ -11,7 +11,9 @@ use trivium_engine::ops::{
     histogram::{histogram, HistogramPayload},
     projects::{create_project, CreateProjectPayload},
 };
-use trivium_engine::project_io::{project_data_reads, reset_project_read_counters};
+use trivium_engine::project_io::{
+    project_data_reads, project_read_stats, reset_project_read_counters, reset_project_read_stats,
+};
 use trivium_engine::store::ProjectsStore;
 
 mod common;
@@ -309,6 +311,7 @@ fn operation_respects_search_multiselect_and_bookmark_scope_in_one_source_read()
         .unwrap();
     }
     reset_project_read_counters();
+    reset_project_read_stats();
     let result = histogram(
         &store,
         HistogramPayload {
@@ -328,8 +331,13 @@ fn operation_respects_search_multiselect_and_bookmark_scope_in_one_source_read()
     .unwrap();
     assert_eq!(
         project_data_reads(),
-        1,
-        "initial focus must not reread data"
+        0,
+        "timeline must not materialize unrelated source columns"
+    );
+    assert_eq!(
+        project_read_stats().decoded_rows,
+        8,
+        "one projected query scan and one timestamp scan; focus adds no scan"
     );
     assert_counts(&result, 1);
     assert_eq!(

@@ -1,44 +1,52 @@
 use polars::prelude::Series;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
 mod annotated;
 mod values;
 
 pub use annotated::histogram_series_annotated;
+pub(crate) use annotated::histogram_series_annotated_with_job;
 use values::{datetime_point, finite, float_point, format_nanos, int_point};
 
 pub const DEFAULT_BUCKETS: usize = 50;
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct HistogramBucket {
     pub start: String,
     pub end: String,
+    #[ts(type = "number")]
     pub count: u64,
     pub flags: HistogramFlags,
     pub end_inclusive: bool,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct HistogramFlags {
+    #[ts(type = "number")]
     pub safe: u64,
+    #[ts(type = "number")]
     pub suspicious: u64,
+    #[ts(type = "number")]
     pub critical: u64,
+    #[ts(type = "number")]
     pub unflagged: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct HistogramRangeInfo {
     pub min: String,
     pub max: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct Histogram {
     pub column: String,
     pub kind: String,
     pub buckets: Vec<HistogramBucket>,
+    #[ts(type = "number")]
     pub missing: u64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub outside: u64,
     pub full_range: Option<HistogramRangeInfo>,
     pub auto_focused: bool,
@@ -66,10 +74,31 @@ pub fn histogram_series_ranged(
     buckets: usize,
     range: Option<(&str, &str)>,
 ) -> Result<Histogram, String> {
+    let job = crate::jobs::JobContext::none();
+    histogram_series_ranged_kind(
+        column,
+        series,
+        row_indices,
+        buckets,
+        range,
+        series_kind_with_job(series, &job).map_err(|e| e.to_string())?,
+        &job,
+    )
+}
+
+pub(crate) fn histogram_series_ranged_kind(
+    column: &str,
+    series: &Series,
+    row_indices: &[usize],
+    buckets: usize,
+    range: Option<(&str, &str)>,
+    kind: ColumnKind,
+    job: &crate::jobs::JobContext,
+) -> Result<Histogram, String> {
     let buckets = buckets.max(1);
-    match series_kind(series) {
+    match kind {
         ColumnKind::Int => {
-            let points = points(series, row_indices, int_point);
+            let points = points(series, row_indices, int_point, job)?;
             match range {
                 Some((min, max)) => {
                     let min = parse_int_bound(min)?;
@@ -94,10 +123,16 @@ pub fn histogram_series_ranged(
             }
         }
         ColumnKind::Float => {
-            let values: Vec<Option<f64>> = row_indices
+            let values = row_indices
                 .iter()
-                .map(|idx| float_point(series, *idx))
-                .collect();
+                .enumerate()
+                .map(|(position, idx)| {
+                    if position % 1024 == 0 {
+                        job.check_cancelled().map_err(|e| e.to_string())?;
+                    }
+                    Ok(float_point(series, *idx))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             match range {
                 Some((min, max)) => {
                     let min = parse_float_bound(min)?;
@@ -108,7 +143,7 @@ pub fn histogram_series_ranged(
             }
         }
         ColumnKind::Datetime => {
-            let points = points(series, row_indices, datetime_point);
+            let points = points(series, row_indices, datetime_point, job)?;
             match range {
                 Some((min, max)) => {
                     let min = parse_datetime_bound(min)?;
@@ -160,8 +195,18 @@ fn points(
     series: &Series,
     row_indices: &[usize],
     read: fn(&Series, usize) -> Option<i128>,
-) -> Vec<Option<i128>> {
-    row_indices.iter().map(|idx| read(series, *idx)).collect()
+    job: &crate::jobs::JobContext,
+) -> Result<Vec<Option<i128>>, String> {
+    row_indices
+        .iter()
+        .enumerate()
+        .map(|(position, idx)| {
+            if position % 1024 == 0 {
+                job.check_cancelled().map_err(|e| e.to_string())?;
+            }
+            Ok(read(series, *idx))
+        })
+        .collect()
 }
 
 fn histogram_i128(

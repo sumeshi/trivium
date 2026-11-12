@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -10,6 +11,9 @@ use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
 
 use super::model::{GroupKind, Node, Op};
+
+mod bound;
+pub use bound::BoundNode;
 
 /// Test instrumentation: regex compilations in this process.
 ///
@@ -41,6 +45,7 @@ pub struct PreparedCondition {
     column: String,
     op: Op,
     values: Vec<String>,
+    lower_values: Vec<String>,
     regexes: Vec<Regex>,
     negated: bool,
 }
@@ -52,6 +57,20 @@ pub struct PreparedGroup {
 }
 
 impl PreparedNode {
+    /// A lone exact-text predicate can use a string column's equality kernel.
+    /// Ordered numeric/datetime operations deliberately keep the exact scalar
+    /// evaluator; parsing raw source text must never introduce float coercion.
+    pub fn exact_text_comparison(&self) -> Option<(&str, &[String], bool)> {
+        let Self::Condition(condition) = self else {
+            return None;
+        };
+        if condition.column.is_empty() || !matches!(condition.op, Op::Eq | Op::Ne | Op::In) {
+            return None;
+        }
+        let inverted = condition.negated ^ (condition.op == Op::Ne && !condition.values.is_empty());
+        Some((&condition.column, &condition.values, inverted))
+    }
+
     pub fn prepare(node: &Node) -> Result<Self, EvalError> {
         match node {
             Node::Condition(condition) => {
@@ -68,6 +87,11 @@ impl PreparedNode {
                     column: condition.column.clone(),
                     op: condition.op,
                     values: condition.values.clone(),
+                    lower_values: condition
+                        .values
+                        .iter()
+                        .map(|value| value.to_lowercase())
+                        .collect(),
                     regexes,
                     negated: condition.negated,
                 }))
@@ -147,7 +171,10 @@ impl EvalError {
 
     fn datetime(value: &str) -> Self {
         Self {
-            message: format!("Datetime comparison requires a recognized datetime: {}", value),
+            message: format!(
+                "Datetime comparison requires a recognized datetime: {}",
+                value
+            ),
         }
     }
 
@@ -187,38 +214,74 @@ pub fn eval(node: &Node, row: &HashMap<String, Value>) -> Result<bool, EvalError
 
 impl PreparedCondition {
     fn eval(&self, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
-        let cell = lookup(row, &self.column);
+        let cell = lookup(row, &self.column).and_then(|value| match value {
+            Value::Null => None,
+            Value::String(value) => Some(Cow::Borrowed(value.as_str())),
+            other => Some(Cow::Owned(other.to_string())),
+        });
+        self.eval_text(cell.as_deref())
+    }
+
+    /// Evaluate the original textual cell without constructing a JSON row.
+    pub fn eval_text(&self, cell: Option<&str>) -> Result<bool, EvalError> {
         let matched = if self.values.is_empty() {
             false
         } else {
             match self.op {
-                Op::Eq | Op::In => self.values.iter().any(|value| eq(cell, value)),
-                Op::Ne => !self.values.iter().any(|value| eq(cell, value)),
+                Op::Eq | Op::In => self.values.iter().any(|value| cell == Some(value.as_str())),
+                Op::Ne => !self.values.iter().any(|value| cell == Some(value.as_str())),
                 Op::Gt => numeric_any(cell, &self.values, Ordering::Greater, false)?,
                 Op::Lt => numeric_any(cell, &self.values, Ordering::Less, false)?,
                 Op::Ge => numeric_any(cell, &self.values, Ordering::Greater, true)?,
                 Op::Le => numeric_any(cell, &self.values, Ordering::Less, true)?,
-                Op::Contains => {
-                    text_any(cell, &self.values, |hay, needle| hay.contains(needle))
+                Op::Contains | Op::StartsWith | Op::EndsWith => {
+                    text_any(cell, &self.lower_values, self.op)
                 }
-                Op::StartsWith => {
-                    text_any(cell, &self.values, |hay, needle| hay.starts_with(needle))
-                }
-                Op::EndsWith => {
-                    text_any(cell, &self.values, |hay, needle| hay.ends_with(needle))
-                }
-                Op::Regex => self.regexes.iter().any(|re| re.is_match(&text(cell))),
+                Op::Regex => self
+                    .regexes
+                    .iter()
+                    .any(|re| re.is_match(cell.unwrap_or_default())),
             }
         };
         Ok(if self.negated { !matched } else { matched })
     }
 }
 
-fn text_any(cell: Option<&Value>, values: &[String], pred: impl Fn(&str, &str) -> bool) -> bool {
-    let hay = text(cell).to_lowercase();
+fn text_any(cell: Option<&str>, values: &[String], op: Op) -> bool {
+    let text = cell.unwrap_or_default();
+    if text.is_ascii() {
+        // ASCII folds one byte to one byte. Borrow the original buffer even
+        // for uppercase logs; Unicode keeps Rust's contextual lowercase below.
+        return values
+            .iter()
+            .filter(|value| !value.is_empty() && value.is_ascii())
+            .any(|value| {
+                let hay = text.as_bytes();
+                let needle = value.as_bytes();
+                match op {
+                    Op::Contains => hay
+                        .windows(needle.len())
+                        .any(|part| part.eq_ignore_ascii_case(needle)),
+                    Op::StartsWith => hay
+                        .get(..needle.len())
+                        .is_some_and(|part| part.eq_ignore_ascii_case(needle)),
+                    Op::EndsWith => hay
+                        .get(hay.len().saturating_sub(needle.len())..)
+                        .is_some_and(|part| part.eq_ignore_ascii_case(needle)),
+                    _ => unreachable!("text operator"),
+                }
+            });
+    }
+    let hay = text.to_lowercase();
     values
         .iter()
-        .any(|value| !value.is_empty() && pred(&hay, &value.to_lowercase()))
+        .filter(|value| !value.is_empty())
+        .any(|value| match op {
+            Op::Contains => hay.contains(value),
+            Op::StartsWith => hay.starts_with(value),
+            Op::EndsWith => hay.ends_with(value),
+            _ => unreachable!("text operator"),
+        })
 }
 
 fn lookup<'a>(row: &'a HashMap<String, Value>, column: &str) -> Option<&'a Value> {
@@ -230,27 +293,8 @@ fn lookup<'a>(row: &'a HashMap<String, Value>, column: &str) -> Option<&'a Value
         .map(|(_, value)| value)
 }
 
-fn text(cell: Option<&Value>) -> String {
-    match cell {
-        Some(Value::Null) | None => String::new(),
-        Some(Value::String(value)) => value.clone(),
-        Some(Value::Number(value)) => value.to_string(),
-        Some(Value::Bool(value)) => value.to_string(),
-        Some(other) => other.to_string(),
-    }
-}
-
-/// Equality is exact text equality. Null and a missing value never equal an
-/// empty string, and no numeric coercion is applied.
-fn eq(cell: Option<&Value>, raw: &str) -> bool {
-    match cell {
-        None | Some(Value::Null) => false,
-        Some(value) => text(Some(value)) == raw,
-    }
-}
-
 fn numeric_any(
-    cell: Option<&Value>,
+    cell: Option<&str>,
     values: &[String],
     want: Ordering,
     or_equal: bool,
@@ -258,9 +302,6 @@ fn numeric_any(
     let Some(cell) = cell else {
         return Ok(false);
     };
-    if matches!(cell, Value::Null) {
-        return Ok(false);
-    }
     let mut matched = false;
     for raw in values {
         if let Some(ordering) = numeric_cmp(cell, raw)? {
@@ -273,26 +314,20 @@ fn numeric_any(
 }
 
 /// Compares an integer cell or a datetime cell without a float round trip.
-fn numeric_cmp(cell: &Value, raw: &str) -> Result<Option<Ordering>, EvalError> {
-    let left = match cell {
-        Value::Null => return Ok(None),
-        Value::String(value) => value.trim().to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::Bool(value) => value.to_string(),
-        other => other.to_string(),
-    };
+fn numeric_cmp(cell: &str, raw: &str) -> Result<Option<Ordering>, EvalError> {
+    let left = cell.trim();
 
     if let Ok(left) = left.parse::<i128>() {
         let right = parse_i128(raw)?;
         return Ok(Some(left.cmp(&right)));
     }
-    if let Some(left) = parse_datetime_nanos(&left) {
+    if let Some(left) = parse_datetime_nanos(left) {
         let right_text = raw.trim();
-        let right = parse_datetime_nanos(right_text)
-            .ok_or_else(|| EvalError::datetime(right_text))?;
+        let right =
+            parse_datetime_nanos(right_text).ok_or_else(|| EvalError::datetime(right_text))?;
         return Ok(Some(left.cmp(&right)));
     }
-    Err(EvalError::numeric(&left))
+    Err(EvalError::numeric(left))
 }
 
 fn parse_i128(raw: &str) -> Result<i128, EvalError> {

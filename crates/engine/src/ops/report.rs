@@ -1,21 +1,27 @@
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-
-use anyhow::Context as _;
+use super::{
+    analysis_data::AnalysisSource,
+    query::{materialize_page_rows, QuerySpec},
+};
+use crate::{
+    analysis::stats::StatsAccumulator,
+    error::AppError,
+    export::{
+        atomic::{
+            ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
+        },
+        ranks::RowRanks,
+        sorted_runs::ExternalSorter,
+    },
+    jobs::JobContext,
+    project_io::{ProjectBatchReader, ProjectColumns, INTERNAL_ROW_ID},
+    store::ProjectsStore,
+};
+use anyhow::Context;
+use polars::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, io::Write, path::PathBuf};
 use uuid::Uuid;
-
-use crate::analysis::stats::{summarize_series, ColumnStats};
-use crate::error::AppError;
-use crate::jobs::JobContext;
-use crate::models::{FlagEntry, ProjectMeta, ProjectRow};
-use crate::project_io::{read_project_dataframe, ProjectColumns};
-use crate::storage::load_flags;
-use crate::store::ProjectsStore;
-
-use super::query::{data_columns, materialize_page, resolve_target, user_flags, QuerySpec};
-use super::util::resolve_columns;
+mod render;
 
 #[derive(Debug, Deserialize)]
 pub struct BuildReportPayload {
@@ -50,30 +56,20 @@ pub struct ReportMeta {
     pub flagged_in_matches: usize,
 }
 
-/// Writes a static HTML report of the current filter results.
+/// Write an atomic report without retaining the source frame or all HTML rows.
 pub fn build_report(
     store: &ProjectsStore,
     payload: BuildReportPayload,
 ) -> Result<ReportMeta, AppError> {
-    let meta = store
-        .find(&payload.project_id)
-        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    let project_dir = store.project_dir(&meta.id);
-    let parquet_path = project_dir.join("data.parquet");
-    if !parquet_path.exists() {
-        return Err(AppError::Message("Project data file missing.".into()));
-    }
-    let df = read_project_dataframe(&parquet_path).map_err(AppError::from)?;
-    let all_columns = data_columns(&df, meta.storage_version);
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
+    build_report_with_job(store, payload, &JobContext::none())
+}
 
-    let display_columns = match payload.columns.as_deref() {
-        Some(requested) => resolve_columns(&df, requested, "display columns")?,
-        None => all_columns.clone(),
-    };
-
-    let final_flag_vec = user_flags(df.height(), &flags);
-    let mut spec = QuerySpec {
+pub fn build_report_with_job(
+    store: &ProjectsStore,
+    payload: BuildReportPayload,
+    job: &JobContext,
+) -> Result<ReportMeta, AppError> {
+    let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
             .search_columns
@@ -85,247 +81,181 @@ pub fn build_report(
         sort_key: payload.sort_key.clone(),
         sort_direction: payload.sort_direction.clone(),
     };
-    spec.resolve_search_labels(&meta.columns)?;
-    let target = resolve_target(&df, &spec, &all_columns, &flags, &JobContext::none())?;
-    let flagged_in_matches = target.annotated_filtered;
-    let filtered = target.filtered;
-    let hit_rows = filtered.len();
-
-    let annotated_indices: Vec<usize> = filtered
+    let source = AnalysisSource::open(store, payload.project_id, &spec, job)?;
+    let display = match &payload.columns {
+        Some(columns) => source.columns(columns, "display columns")?,
+        None => source.target.columns.clone(),
+    };
+    let mut projection = if display.is_empty() {
+        vec![source
+            .target
+            .columns
+            .first()
+            .cloned()
+            .unwrap_or_else(|| INTERNAL_ROW_ID.into())]
+    } else {
+        display.clone()
+    };
+    let mut unique = std::collections::HashSet::new();
+    projection.retain(|column| unique.insert(column.clone()));
+    let mut reader = ProjectBatchReader::open(&source.path, &projection).map_err(AppError::from)?;
+    let empty = reader.empty_frame().map_err(AppError::from)?;
+    let mut stats = display
+        .iter()
+        .map(|column| {
+            StatsAccumulator::new(
+                column,
+                empty
+                    .column(column)
+                    .expect("projected report column")
+                    .dtype(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let annotated = source
+        .target
+        .ids
         .iter()
         .copied()
-        .filter(|idx| is_annotated(*idx, &final_flag_vec, &flags))
-        .collect();
-    let project_columns = ProjectColumns::from_meta(&meta, &df);
-    let display_meta: Vec<_> = project_columns
+        .filter(|id| {
+            source
+                .target
+                .flags
+                .get(id)
+                .is_some_and(|entry| entry.is_annotated())
+        })
+        .collect::<Vec<_>>();
+    let project_columns = ProjectColumns::from_meta_and_names(&source.meta, &source.target.columns);
+    let display_meta = project_columns
         .columns()
         .iter()
-        .filter(|column| display_columns.contains(&column.id))
+        .filter(|column| display.contains(&column.id))
         .cloned()
-        .collect();
-    let annotated_rows = materialize_page(
-        &df,
-        &annotated_indices,
-        &display_meta,
-        &flags,
-        &[],
-        false,
-    )?;
-
-    let stats: Vec<ColumnStats> = display_columns
-        .iter()
-        .filter_map(|column| {
-            df.column(column)
-                .ok()
-                .map(|series| summarize_series(column, series, 1))
-        })
-        .collect();
-
-    let html = render_report(
-        &meta,
-        payload.search.as_deref(),
-        payload.condition.as_ref(),
-        df.height(),
-        hit_rows,
-        flagged_in_matches,
-        &display_columns,
-        &annotated_rows,
-        &stats,
-    );
-    write_report(&payload.destination, &html)?;
-
+        .collect::<Vec<_>>();
+    let destination = PathBuf::from(&payload.destination);
+    let validate = || {
+        ensure_destination_is_not_source(&destination, &source.meta)?;
+        ensure_destination_is_not_managed(&destination, store)
+    };
+    write_atomically(&destination, job, validate, |workspace, writer| {
+        writer
+            .write_all(
+                render::prefix(
+                    &source.meta,
+                    payload.search.as_deref(),
+                    payload.condition.as_ref(),
+                    source.target.total_rows,
+                    source.target.ids.len(),
+                    source.target.annotated_filtered,
+                )
+                .as_bytes(),
+            )
+            .context("failed to write report header")?;
+        let ordered = annotated.windows(2).all(|ids| ids[0] < ids[1]);
+        let mut ranks = (!ordered)
+            .then(|| {
+                RowRanks::new(
+                    source.target.total_rows,
+                    &annotated,
+                    &workspace.join("ranks"),
+                    job,
+                )
+            })
+            .transpose()?;
+        let mut ordinal = 0;
+        let mut sorter = (!ordered)
+            .then(|| ExternalSorter::new(&workspace.join("rows")))
+            .transpose()?;
+        if annotated.is_empty() {
+            writer
+                .write_all(b"<p>No annotated rows in the current filter.</p>\n")
+                .context("failed to write empty report")?;
+        } else {
+            writer
+                .write_all(render::rows_header(&display).as_bytes())
+                .context("failed to write report table")?;
+        }
+        let mut written = 0;
+        while let Some(batch) = reader.next_with_job(job) {
+            let batch = batch.map_err(AppError::from)?;
+            for (column, acc) in display.iter().zip(&mut stats) {
+                acc.observe(
+                    batch.frame.column(column).expect("projected report column"),
+                    0..batch.frame.height(),
+                    job,
+                )?;
+            }
+            let mut local = Vec::new();
+            let mut ids = Vec::new();
+            let mut positions = Vec::new();
+            for row in 0..batch.frame.height() {
+                let id = batch.offset + row;
+                let rank = if let Some(ranks) = &mut ranks {
+                    ranks.get(id, job)?
+                } else if annotated.get(ordinal) == Some(&id) {
+                    let rank = ordinal;
+                    ordinal += 1;
+                    Some(rank)
+                } else {
+                    None
+                };
+                if let Some(rank) = rank {
+                    local.push(row as IdxSize);
+                    ids.push(batch.offset + row);
+                    positions.push(rank);
+                }
+            }
+            if ids.is_empty() {
+                continue;
+            }
+            let frame = batch
+                .frame
+                .take(&IdxCa::from_vec("", local))
+                .context("failed to select report rows")?;
+            let rows = materialize_page_rows(
+                &frame,
+                &ids,
+                &display_meta,
+                &source.target.flags,
+                &HashMap::new(),
+                false,
+            )?;
+            for (row, rank) in rows.iter().zip(positions) {
+                let html = render::row(&display, row);
+                if let Some(sorter) = &mut sorter {
+                    sorter.push(rank as u64, html.as_bytes(), job)?;
+                } else {
+                    writer
+                        .write_all(html.as_bytes())
+                        .context("failed to write report row")?;
+                }
+                written += 1;
+            }
+        }
+        if written != annotated.len() {
+            return Err(AppError::Message("Missing annotated report rows.".into()));
+        }
+        if let Some(sorter) = sorter {
+            let mut rows = sorter.finish(job)?;
+            while rows.write_next(writer, false, job)?.is_some() {}
+        }
+        if !annotated.is_empty() {
+            writer
+                .write_all(b"</tbody></table>\n")
+                .context("failed to finish report table")?;
+        }
+        let stats = stats
+            .into_iter()
+            .map(|acc| acc.finish(1, job))
+            .collect::<Result<Vec<_>, _>>()?;
+        writer
+            .write_all(render::suffix(&stats).as_bytes())
+            .context("failed to finish report")?;
+        Ok(())
+    })?;
     Ok(ReportMeta {
-        total_rows: df.height(),
-        hit_rows,
-        flagged_in_matches,
+        total_rows: source.target.total_rows,
+        hit_rows: source.target.ids.len(),
+        flagged_in_matches: source.target.annotated_filtered,
     })
 }
-
-fn is_annotated(
-    idx: usize,
-    final_flag_vec: &[String],
-    flags: &HashMap<usize, FlagEntry>,
-) -> bool {
-    !final_flag_vec[idx].trim().is_empty()
-        || flags.get(&idx).is_some_and(|entry| entry.is_annotated())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_report(
-    meta: &ProjectMeta,
-    search: Option<&str>,
-    condition: Option<&crate::condition::Node>,
-    total_rows: usize,
-    hit_rows: usize,
-    flagged_in_matches: usize,
-    display_columns: &[String],
-    annotated_rows: &[ProjectRow],
-    stats: &[ColumnStats],
-) -> String {
-    let mut html = String::new();
-    html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
-    push_meta(&mut html, "trivium-version", "1");
-    push_meta(&mut html, "trivium-total-rows", &total_rows.to_string());
-    push_meta(&mut html, "trivium-hit-rows", &hit_rows.to_string());
-    push_meta(
-        &mut html,
-        "trivium-flagged-in-matches",
-        &flagged_in_matches.to_string(),
-    );
-    html.push_str("<title>Trivium Report</title>\n<style>");
-    html.push_str(CSS);
-    html.push_str("</style>\n</head>\n<body>\n");
-    html.push_str(&format!(
-        "<h1>Trivium Report {}</h1>\n",
-        html_escape(&meta.name)
-    ));
-
-    html.push_str("<section class=\"meta\"><h2>Project</h2><ul>");
-    push_stat_li(&mut html, "Total rows", &meta.total_records.to_string());
-    push_stat_li(&mut html, "Annotated rows", &meta.flagged_records.to_string());
-    push_stat_li(
-        &mut html,
-        "IOC applied rows",
-        &meta.ioc_applied_records.to_string(),
-    );
-    html.push_str("</ul></section>\n");
-
-    html.push_str("<section class=\"filter\"><h2>Filter</h2>");
-    html.push_str(&format!(
-        "<p><strong>Search:</strong> {}</p>\n",
-        html_escape(search.unwrap_or(""))
-    ));
-    if let Some(condition) = condition {
-        let json = serde_json::to_string_pretty(condition)
-            .unwrap_or_else(|_| "<unserializable condition>".to_string());
-        html.push_str(&format!("<pre>{}</pre>\n", html_escape(&json)));
-    }
-    html.push_str("</section>\n");
-
-    html.push_str("<section class=\"counts\"><h2>Counts</h2><ul>");
-    push_stat_li(&mut html, "Total rows", &total_rows.to_string());
-    push_stat_li(&mut html, "Hit rows", &hit_rows.to_string());
-    push_stat_li(
-        &mut html,
-        "Flagged in matches",
-        &flagged_in_matches.to_string(),
-    );
-    html.push_str("</ul></section>\n");
-
-    html.push_str("<section class=\"annotated\"><h2>Annotated rows</h2>\n");
-    if annotated_rows.is_empty() {
-        html.push_str("<p>No annotated rows in the current filter.</p>\n");
-    } else {
-        render_rows_table(&mut html, display_columns, annotated_rows);
-    }
-    html.push_str("</section>\n");
-
-    html.push_str("<section class=\"stats\"><h2>Column stats</h2>\n");
-    render_stats_table(&mut html, stats);
-    html.push_str("</section>\n</body>\n</html>\n");
-    html
-}
-
-fn push_meta(html: &mut String, name: &str, value: &str) {
-    html.push_str(&format!(
-        "<meta name=\"{}\" content=\"{}\">\n",
-        name,
-        html_escape(value)
-    ));
-}
-
-fn push_stat_li(html: &mut String, label: &str, value: &str) {
-    html.push_str(&format!(
-        "<li>{}: {}</li>",
-        html_escape(label),
-        html_escape(value)
-    ));
-}
-
-fn render_rows_table(html: &mut String, columns: &[String], rows: &[ProjectRow]) {
-    html.push_str("<table><thead><tr><th>row</th>");
-    for column in columns {
-        html.push_str(&format!("<th>{}</th>", html_escape(column)));
-    }
-    html.push_str("<th>flag</th><th>memo</th></tr></thead><tbody>\n");
-    for row in rows {
-        html.push_str(&format!("<tr><td>{}</td>", row.row_index));
-        for column in columns {
-            let text = row
-                .cells
-                .get(column)
-                .and_then(|cell| cell.text.as_deref())
-                .unwrap_or_default();
-            html.push_str(&format!("<td>{}</td>", html_escape(text)));
-        }
-        html.push_str(&format!(
-            "<td class=\"flag\">{}</td><td class=\"memo\">{}</td></tr>\n",
-            html_escape(&row.flag),
-            html_escape(row.memo.as_deref().unwrap_or(""))
-        ));
-    }
-    html.push_str("</tbody></table>\n");
-}
-
-fn render_stats_table(html: &mut String, stats: &[ColumnStats]) {
-    html.push_str(
-        "<table><thead><tr><th>column</th><th>kind</th><th>missing</th><th>unique</th>\
-         <th>top values</th></tr></thead><tbody>\n",
-    );
-    for stat in stats {
-        html.push_str(&format!(
-            "<tr data-column=\"{}\"><td>{}</td><td>{}</td><td>{}</td><td>{}</td>",
-            html_escape(&stat.column),
-            html_escape(&stat.column),
-            html_escape(&stat.kind),
-            stat.missing,
-            stat.unique
-        ));
-        html.push_str("<td><table>");
-        for item in stat.top.iter().take(5) {
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td></tr>",
-                html_escape(&item.value),
-                item.count
-            ));
-        }
-        html.push_str("</table></td></tr>\n");
-    }
-    html.push_str("</tbody></table>\n");
-}
-
-fn write_report(destination: &str, html: &str) -> Result<(), AppError> {
-    let path = PathBuf::from(destination);
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create report output dir {:?}", parent))
-                .map_err(AppError::from)?;
-        }
-    }
-    fs::write(&path, html)
-        .with_context(|| format!("failed to write report {}", destination))
-        .map_err(AppError::from)
-}
-
-fn html_escape(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
-const CSS: &str = "body{font-family:system-ui,sans-serif;margin:2rem;color:#1f2933;background:#fff}\
-h1{font-size:1.5rem}h2{font-size:1.1rem;margin-top:1.5rem}\
-table{border-collapse:collapse;margin:0.5rem 0}\
-th,td{border:1px solid #cbd2d9;padding:0.3rem 0.5rem;text-align:left;vertical-align:top}\
-th{background:#f0f4f8}pre{background:#f0f4f8;padding:0.5rem;overflow:auto}\
-.flag{font-weight:600}.memo{white-space:pre-wrap}";

@@ -4,13 +4,7 @@
 //! output columns, and cell values never enter this cache. The key omits
 //! offset/limit so moving between pages of the same result is a hit.
 
-use std::{
-    fs,
-    mem::size_of,
-    path::Path,
-    sync::OnceLock,
-    time::UNIX_EPOCH,
-};
+use std::{fs, mem::size_of, path::Path, sync::OnceLock, time::UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use uuid::Uuid;
@@ -63,7 +57,7 @@ pub struct ResultCacheStats {
     pub evictions: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DataRevision {
     len: u64,
     modified_nanos: u128,
@@ -71,7 +65,7 @@ struct DataRevision {
 
 /// Cache key: project, normalized spec, data revision, and — only when the
 /// spec reads annotations — the current annotation token.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryCacheKey {
     project_id: Uuid,
     spec: String,
@@ -104,8 +98,14 @@ impl ResultCache {
     }
 
     pub(crate) fn get(&mut self, key: &QueryCacheKey) -> Option<CachedResult> {
+        self.lookup(key, true)
+    }
+
+    fn lookup(&mut self, key: &QueryCacheKey, count_miss: bool) -> Option<CachedResult> {
         let Some(position) = self.entries.iter().position(|(known, _)| known == key) else {
-            self.misses += 1;
+            if count_miss {
+                self.misses += 1;
+            }
             return None;
         };
         let entry = self.entries.remove(position);
@@ -126,8 +126,7 @@ impl ResultCache {
         }
 
         while !self.entries.is_empty()
-            && (self.entries.len() >= self.max_entries
-                || self.total_bytes + bytes > self.max_bytes)
+            && (self.entries.len() >= self.max_entries || self.total_bytes + bytes > self.max_bytes)
         {
             let (_, evicted) = self.entries.remove(0);
             self.total_bytes = self.total_bytes.saturating_sub(evicted.estimated_bytes);
@@ -160,6 +159,22 @@ impl ResultCache {
         self.hits = 0;
         self.misses = 0;
         self.evictions = 0;
+    }
+
+    fn refresh_counts(
+        &mut self,
+        key: &QueryCacheKey,
+        revision: u64,
+        total: usize,
+        filtered: usize,
+    ) {
+        if let Some((_, result)) = self.entries.iter_mut().find(|(known, _)| known == key) {
+            if revision >= result.annotation_revision {
+                result.annotation_revision = revision;
+                result.annotated_total = total;
+                result.annotated_filtered = filtered;
+            }
+        }
     }
 
     fn remove_key(&mut self, key: &QueryCacheKey) {
@@ -220,11 +235,7 @@ fn normalized_spec_json(spec: &QuerySpec) -> String {
     if normalized.bookmarked_only == Some(false) {
         normalized.bookmarked_only = None;
     }
-    if normalized
-        .sort_key
-        .as_deref()
-        .is_some_and(str::is_empty)
-    {
+    if normalized.sort_key.as_deref().is_some_and(str::is_empty) {
         normalized.sort_key = None;
     }
     if normalized.sort_direction.as_deref() == Some("asc") {
@@ -265,8 +276,35 @@ pub(crate) fn cache_lookup(key: &QueryCacheKey) -> Option<CachedResult> {
     global_cache().lock().get(key)
 }
 
+/// Page/locator preflight counts a ready hit; a miss is counted by the shared
+/// resolver exactly once, instead of again at every internal cache probe.
+pub(crate) fn cache_lookup_if_present(key: &QueryCacheKey) -> Option<CachedResult> {
+    global_cache().lock().lookup(key, false)
+}
+
+/// Owner-election race check is internal work, not another cache request.
+pub(crate) fn cache_peek(key: &QueryCacheKey) -> Option<CachedResult> {
+    global_cache()
+        .lock()
+        .entries
+        .iter()
+        .find(|(known, _)| known == key)
+        .map(|(_, result)| result.clone())
+}
+
 pub(crate) fn cache_store(key: QueryCacheKey, result: CachedResult) {
     global_cache().lock().insert(key, result);
+}
+
+pub(crate) fn cache_refresh_counts(
+    key: &QueryCacheKey,
+    revision: u64,
+    total: usize,
+    filtered: usize,
+) {
+    global_cache()
+        .lock()
+        .refresh_counts(key, revision, total, filtered);
 }
 
 pub(crate) fn cache_remove_project(project_id: &Uuid) {
@@ -388,5 +426,28 @@ mod tests {
             bookmarked_only: Some(true),
             ..Default::default()
         }));
+    }
+
+    #[test]
+    fn late_annotation_count_refresh_cannot_roll_back_a_newer_snapshot_or_copy_ids() {
+        let mut cache = ResultCache::new(2, MAX_RESULT_BYTES);
+        let key = key(Uuid::new_v4(), "data-only");
+        let entry = result(8);
+        let ids = entry.ids.clone();
+        let bytes = entry.estimated_bytes;
+        cache.insert(key.clone(), entry);
+        cache.refresh_counts(&key, 3, 2, 1);
+        cache.refresh_counts(&key, 2, 99, 99);
+        let refreshed = cache.get(&key).unwrap();
+        assert_eq!(
+            (
+                refreshed.annotation_revision,
+                refreshed.annotated_total,
+                refreshed.annotated_filtered
+            ),
+            (3, 2, 1)
+        );
+        assert!(std::sync::Arc::ptr_eq(&ids, &refreshed.ids));
+        assert_eq!(cache.stats().total_bytes, bytes);
     }
 }

@@ -8,7 +8,8 @@ use crate::models::FlagEntry;
 /// `Some("")` for the flag, `Some(None)` or a blank string for the memo,
 /// `Some(vec![])` for tags, and `Some(false)` for the bookmark. Tags can also be
 /// changed one-directionally with `add_tags` and `remove_tags`.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, ts_rs::TS)]
+#[ts(optional_fields = nullable)]
 pub struct AnnotationPatch {
     /// `None` keeps the stored flag; `Some("")` clears it.
     #[serde(default)]
@@ -150,8 +151,8 @@ mod tests {
     #[test]
     fn clearing_the_memo_keeps_the_entry_when_other_content_remains() {
         let existing = entry("", Some("note"), &["pc"], false);
-        let next = apply_annotation_patch(Some(&existing), &patch(None, Some(None)))
-            .expect("tags remain");
+        let next =
+            apply_annotation_patch(Some(&existing), &patch(None, Some(None))).expect("tags remain");
         assert_eq!(next.memo, None);
         assert_eq!(next.tags, vec!["pc".to_string()]);
     }
@@ -167,7 +168,10 @@ mod tests {
             ..AnnotationPatch::default()
         };
         assert_eq!(apply_annotation_patch(Some(&existing), &cleared), None);
-        assert_eq!(apply_annotation_patch(None, &AnnotationPatch::default()), None);
+        assert_eq!(
+            apply_annotation_patch(None, &AnnotationPatch::default()),
+            None
+        );
     }
 
     #[test]
@@ -182,10 +186,9 @@ mod tests {
             serde_json::from_str(r#"{"memo":null}"#).expect("null memo");
         assert_eq!(null_memo.memo, Some(None));
 
-        let value: AnnotationPatch = serde_json::from_str(
-            r#"{"flag":"","memo":"x","tags":[],"bookmarked":false}"#,
-        )
-        .expect("explicit values");
+        let value: AnnotationPatch =
+            serde_json::from_str(r#"{"flag":"","memo":"x","tags":[],"bookmarked":false}"#)
+                .expect("explicit values");
         assert_eq!(value.flag, Some(String::new()));
         assert_eq!(value.memo, Some(Some("x".to_string())));
         assert_eq!(value.tags, Some(Vec::new()));

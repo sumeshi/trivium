@@ -14,6 +14,7 @@ use trivium_engine::ops::projects::{self, CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::view::{
     load_view_state, save_view_state, SaveViewStatePayload, ViewStateRequest,
 };
+use trivium_engine::storage::{load_setting_bytes, project_database_path, save_setting_bytes};
 use trivium_engine::store::ProjectsStore;
 
 mod common;
@@ -146,11 +147,8 @@ fn broken_view_state_does_not_block_project_or_annotations() {
     .expect("failed to annotate row");
     assert!(flags.entry.is_some());
 
-    fs::write(
-        store.project_dir(&id).join("view_state.json"),
-        b"{ this is not json",
-    )
-    .expect("failed to corrupt view state");
+    save_setting_bytes(&store.project_dir(&id), "view_state", b"{ this is not json")
+        .expect("inject malformed canonical view state");
 
     assert!(load(&store, id).is_none());
     assert_eq!(load_status(&store, id), "unreadable");
@@ -167,14 +165,15 @@ fn broken_view_state_does_not_block_project_or_annotations() {
 #[test]
 fn newer_view_state_is_ignored_and_not_overwritten() {
     let (root, store, id, _) = setup();
-    let path = store.project_dir(&id).join("view_state.json");
+    let project_dir = store.project_dir(&id);
     let content = serde_json::to_vec(&json!({
         "version": VIEW_STATE_VERSION + 1,
         "search": "future",
         "logicalRow": 99
     }))
     .expect("failed to serialize");
-    fs::write(&path, &content).expect("failed to write future view state");
+    save_setting_bytes(&project_dir, "view_state", &content)
+        .expect("write future canonical view state");
 
     assert!(load(&store, id).is_none());
     assert_eq!(load_status(&store, id), "newer");
@@ -191,27 +190,29 @@ fn newer_view_state_is_ignored_and_not_overwritten() {
         error.to_string().contains("newer version"),
         "unexpected error: {error}"
     );
-    let after = fs::read(&path).expect("future view state should remain");
+    let after = load_setting_bytes(&project_dir, "view_state")
+        .expect("read canonical view state")
+        .expect("future view state should remain");
     assert_eq!(after, content);
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn atomic_save_replaces_content_and_leaves_no_temp_file() {
+fn atomic_save_replaces_canonical_content_without_legacy_sidecars() {
     let (root, store, id, _) = setup();
     let mut first = sample_state();
     first.search = "first".to_string();
     save(&store, id, &first);
 
     let project_dir = store.project_dir(&id);
-    let temp_prefix = "view_state.json.tmp.";
-    let leftovers: Vec<String> = fs::read_dir(&project_dir)
-        .expect("failed to list project dir")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .filter(|name| name.starts_with(temp_prefix))
-        .collect();
-    assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+    assert!(project_database_path(&project_dir).exists());
+    assert!(!project_dir.join("view_state.json").exists());
+    assert_eq!(
+        load_setting_bytes(&project_dir, "view_state")
+            .unwrap()
+            .unwrap(),
+        serde_json::to_vec(&first).unwrap()
+    );
 
     let mut second = sample_state();
     second.search = "second".to_string();
@@ -224,62 +225,77 @@ fn atomic_save_replaces_content_and_leaves_no_temp_file() {
 }
 
 #[test]
-fn failed_save_keeps_existing_view_state_and_removes_temp() {
+fn failed_save_keeps_existing_canonical_view_state() {
     let (root, store, id, _) = setup();
     let mut original = sample_state();
     original.search = "keep".to_string();
     save(&store, id, &original);
-
     let project_dir = store.project_dir(&id);
-    let view_path = project_dir.join("view_state.json");
+    let connection = rusqlite::Connection::open(project_database_path(&project_dir)).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_view BEFORE UPDATE OF value ON settings
+         WHEN OLD.key='view_state'
+         BEGIN SELECT RAISE(ABORT, 'injected view state failure'); END;",
+        )
+        .expect("inject view state write failure");
+    let mut changed = original.clone();
+    changed.search = "cannot-write".to_string();
+    save_view_state(
+        &store,
+        SaveViewStatePayload {
+            project_id: id,
+            state: changed,
+        },
+    )
+    .expect_err("save must report the failed transaction");
+    assert_eq!(
+        load(&store, id).expect("original view state must remain"),
+        original
+    );
+    assert_eq!(
+        load_setting_bytes(&project_dir, "view_state")
+            .unwrap()
+            .unwrap(),
+        serde_json::to_vec(&original).unwrap()
+    );
+    assert!(!project_dir.join("view_state.json").exists());
+    drop(connection);
+    drop(store);
+    let reopened = ProjectsStore::new(root.clone()).unwrap();
+    assert_eq!(
+        load(&reopened, id).expect("original view after reopen"),
+        original
+    );
+    let _ = fs::remove_dir_all(root);
+}
 
-    // A read-only project directory makes the temporary write fail. On a
-    // system that ignores the permission (for example, root) the check below
-    // decides whether this scenario is testable.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let original_permissions = fs::metadata(&project_dir)
-            .expect("failed to read project dir metadata")
-            .permissions();
-        let mut read_only = original_permissions.clone();
-        read_only.set_mode(0o555);
-        fs::set_permissions(&project_dir, read_only).expect("failed to make project dir read-only");
+#[test]
+fn legacy_view_state_migrates_once_and_preserves_the_source_file() {
+    let (root, store, id, _) = setup();
+    let path = store.project_dir(&id).join("view_state.json");
+    let original = sample_state();
+    let bytes = serde_json::to_vec(&original).unwrap();
+    fs::write(&path, &bytes).expect("write legacy view");
+    assert_eq!(load(&store, id).expect("migrated view"), original);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
 
-        let probe = project_dir.join(".write-probe");
-        let enforced = fs::write(&probe, b"x").is_err();
-        if enforced {
-            let mut changed = original.clone();
-            changed.search = "cannot-write".to_string();
-            let result = save_view_state(
-                &store,
-                SaveViewStatePayload {
-                    project_id: id,
-                    state: changed,
-                },
-            );
-            assert!(result.is_err(), "save should fail in a read-only directory");
-            assert_eq!(
-                load(&store, id).expect("existing view state should remain"),
-                original
-            );
-            let leftovers: Vec<String> = fs::read_dir(&project_dir)
-                .expect("failed to list project dir")
-                .filter_map(|entry| entry.ok())
-                .map(|entry| entry.file_name().to_string_lossy().to_string())
-                .filter(|name| name.starts_with("view_state.json.tmp."))
-                .collect();
-            assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
-            assert!(view_path.exists());
-        } else {
-            let _ = fs::remove_file(&probe);
-            eprintln!("skipping read-only failure check: permissions not enforced");
-        }
-
-        fs::set_permissions(&project_dir, original_permissions)
-            .expect("failed to restore project dir permissions");
-    }
-
+    let mut changed = original.clone();
+    changed.search = "canonical changes".to_string();
+    save(&store, id, &changed);
+    assert_eq!(load(&store, id).unwrap(), changed);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        bytes,
+        "migration source must remain untouched"
+    );
+    drop(store);
+    let reopened = ProjectsStore::new(root.clone()).unwrap();
+    assert_eq!(
+        load(&reopened, id).unwrap(),
+        changed,
+        "legacy sidecar must not replace canonical edits"
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -308,13 +324,19 @@ fn projects_keep_independent_view_state() {
 fn deleting_a_project_removes_its_view_state() {
     let (root, store, id, _) = setup();
     save(&store, id, &sample_state());
-    let view_path = store.project_dir(&id).join("view_state.json");
+    let project_dir = store.project_dir(&id);
+    let view_path = project_database_path(&project_dir);
     assert!(view_path.exists());
+    assert!(load_setting_bytes(&project_dir, "view_state")
+        .unwrap()
+        .is_some());
 
     projects::delete_project(&store, ProjectRequest { project_id: id })
         .expect("failed to delete project");
 
     assert!(!view_path.exists());
+    assert!(!project_dir.exists());
+    assert!(load_view_state(&store, ViewStateRequest { project_id: id }).is_err());
     let _ = fs::remove_dir_all(root);
 }
 

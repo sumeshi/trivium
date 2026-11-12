@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::jobs::JobContext;
 use crate::models::Cell;
 use crate::project_io::{
-    is_internal_column_for_version, read_page_rows_dataframe, read_project_schema_columns,
+    is_internal_column_for_version, read_page_rows_dataframe_with_job, read_project_schema_columns,
     ProjectColumns, INTERNAL_ORIGINAL,
 };
 use crate::store::ProjectsStore;
@@ -57,8 +58,18 @@ pub fn get_cell(
     store: &ProjectsStore,
     payload: GetCellPayload,
 ) -> Result<GetCellResponse, AppError> {
+    get_cell_with_job(store, payload, &JobContext::none())
+}
+
+pub fn get_cell_with_job(
+    store: &ProjectsStore,
+    payload: GetCellPayload,
+    job: &JobContext,
+) -> Result<GetCellResponse, AppError> {
+    job.check_cancelled()?;
     let meta = store
-        .find(&payload.project_id)
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
     if is_internal_column_for_version(&payload.column_id, meta.storage_version) {
         return Err(AppError::Message("Column not found.".into()));
@@ -87,8 +98,9 @@ pub fn get_cell(
     if has_original {
         projection.push(INTERNAL_ORIGINAL.to_string());
     }
-    let df = read_page_rows_dataframe(&parquet_path, &projection, &[payload.row_index])
-        .map_err(AppError::from)?;
+    let df =
+        read_page_rows_dataframe_with_job(&parquet_path, &projection, &[payload.row_index], job)
+            .map_err(AppError::from)?;
     if df.height() != 1 {
         return Err(AppError::Message("Row not found.".into()));
     }
@@ -102,5 +114,6 @@ pub fn get_cell(
         .unwrap_or(polars::prelude::AnyValue::Null);
     let original = original_record_at(&df, 0);
     let cell = cell_columns.build_full(&payload.column_id, &value, original.as_ref());
+    job.check_cancelled()?;
     Ok(cell.into())
 }

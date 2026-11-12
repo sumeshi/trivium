@@ -1,20 +1,21 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::project_io::read_project_dataframe;
+use crate::export::atomic::{
+    ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
+};
+use crate::jobs::JobContext;
+use crate::models::ProjectMeta;
+use crate::project_io::{read_project_schema_columns, ProjectBatchReader};
 use crate::store::ProjectsStore;
 use crate::value_utils::{anyvalue_to_json, anyvalue_to_search_string};
-
-use super::util::resolve_columns;
 
 #[derive(Debug, Deserialize)]
 pub struct DiffProjectsPayload {
@@ -51,6 +52,15 @@ pub fn diff_projects(
     store: &ProjectsStore,
     payload: DiffProjectsPayload,
 ) -> Result<DiffResult, AppError> {
+    diff_projects_with_job(store, payload, &JobContext::none())
+}
+
+pub fn diff_projects_with_job(
+    store: &ProjectsStore,
+    payload: DiffProjectsPayload,
+    job: &JobContext,
+) -> Result<DiffResult, AppError> {
+    job.check_cancelled()?;
     let requested: Vec<String> = payload
         .key_columns
         .iter()
@@ -61,16 +71,18 @@ pub fn diff_projects(
         return Err(AppError::Message("Key columns must not be empty.".into()));
     }
 
-    let df_a = load_frame(store, &payload.project_id_a)?;
-    let df_b = load_frame(store, &payload.project_id_b)?;
-    let names_a = resolve_columns(&df_a, &requested, "A")?;
-    let names_b = resolve_columns(&df_b, &requested, "B")?;
-
-    let accum_a = count_keys(&df_a, &names_a);
-    let accum_b = count_keys(&df_b, &names_b);
+    let (meta_a, mut reader_a, names_a) =
+        load_keys(store, &payload.project_id_a, &requested, "A", job)?;
+    let accum_a = count_keys(&mut reader_a, &names_a, job)?;
+    drop(reader_a);
+    let (meta_b, mut reader_b, names_b) =
+        load_keys(store, &payload.project_id_b, &requested, "B", job)?;
+    let accum_b = count_keys(&mut reader_b, &names_b, job)?;
+    drop(reader_b);
 
     let counts = accum_a.counts.keys().chain(accum_b.counts.keys());
     let mut keys: Vec<String> = counts.cloned().collect();
+    job.check_cancelled()?;
     keys.sort();
     keys.dedup();
 
@@ -79,7 +91,10 @@ pub fn diff_projects(
         .into_iter()
         .map(|status| (status.to_string(), 0))
         .collect();
-    for key in keys {
+    for (index, key) in keys.into_iter().enumerate() {
+        if index % 1024 == 0 {
+            job.check_cancelled()?;
+        }
         let count_a = *accum_a.counts.get(&key).unwrap_or(&0);
         let count_b = *accum_b.counts.get(&key).unwrap_or(&0);
         let status = match (count_a, count_b) {
@@ -104,6 +119,7 @@ pub fn diff_projects(
             },
         ));
     }
+    job.check_cancelled()?;
     keyed.sort_by(|left, right| {
         status_rank(&left.1.status)
             .cmp(&status_rank(&right.1.status))
@@ -111,9 +127,16 @@ pub fn diff_projects(
     });
 
     if let Some(destination) = payload.destination {
-        write_diff_csv(&keyed, &names_a, &destination)?;
+        let path = PathBuf::from(destination);
+        let validate = || {
+            ensure_destination_is_not_managed(&path, store)?;
+            ensure_destination_is_not_source(&path, &meta_a)?;
+            ensure_destination_is_not_source(&path, &meta_b)
+        };
+        write_diff_csv(&keyed, &names_a, &path, job, validate)?;
     }
 
+    job.check_cancelled()?;
     Ok(DiffResult {
         entries: keyed.into_iter().map(|(_, entry)| entry).collect(),
         status_counts,
@@ -126,37 +149,91 @@ struct KeyAccum {
     values: HashMap<String, Vec<Value>>,
 }
 
-fn load_frame(store: &ProjectsStore, id: &Uuid) -> Result<DataFrame, AppError> {
+fn load_keys(
+    store: &ProjectsStore,
+    id: &Uuid,
+    requested: &[String],
+    label: &str,
+    job: &JobContext,
+) -> Result<(ProjectMeta, ProjectBatchReader, Vec<String>), AppError> {
+    job.check_cancelled()?;
     let meta = store
-        .find(id)
+        .try_find(id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    let parquet_path = store.project_dir(&meta.id).join("data.parquet");
-    if !parquet_path.exists() {
+    let path = store.project_dir(&meta.id).join("data.parquet");
+    if !path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
-    read_project_dataframe(&parquet_path).map_err(AppError::from)
+    let schema = read_project_schema_columns(&path).map_err(AppError::from)?;
+    let lookup = schema
+        .iter()
+        .map(|name| (name.to_lowercase(), name))
+        .collect::<HashMap<_, _>>();
+    let names = requested
+        .iter()
+        .map(|name| {
+            lookup
+                .get(&name.to_lowercase())
+                .map(|actual| (*actual).clone())
+                .ok_or_else(|| {
+                    AppError::Message(format!("Column '{}' not found in project {}.", name, label))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut projection = names.clone();
+    projection.sort();
+    projection.dedup();
+    let reader = ProjectBatchReader::open(&path, &projection).map_err(AppError::from)?;
+    Ok((meta, reader, names))
 }
 
 /// Counts rows per key string and records the first row's values per key.
-fn count_keys(df: &DataFrame, names: &[String]) -> KeyAccum {
-    let series: Vec<Option<&Series>> = names.iter().map(|name| df.column(name).ok()).collect();
+fn count_keys(
+    reader: &mut ProjectBatchReader,
+    names: &[String],
+    job: &JobContext,
+) -> Result<KeyAccum, AppError> {
     let mut accum = KeyAccum::default();
-    for row_idx in 0..df.height() {
-        let mut parts: Vec<String> = Vec::with_capacity(names.len());
-        let mut values: Vec<Value> = Vec::with_capacity(names.len());
-        for column in &series {
-            let value = column.and_then(|series| series.get(row_idx).ok());
-            let text = value.as_ref().and_then(anyvalue_to_search_string);
-            parts.push(text.map(|text| text.trim().to_string()).unwrap_or_default());
-            values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
+    while let Some(batch) = reader.next_with_job(job) {
+        let batch = batch.map_err(AppError::from)?;
+        let series = names
+            .iter()
+            .map(|name| batch.frame.column(name).expect("validated key column"))
+            .collect::<Vec<_>>();
+        for row_idx in 0..batch.frame.height() {
+            if row_idx % 1024 == 0 {
+                job.check_cancelled()?;
+            }
+            let mut key = String::new();
+            let mut values = Vec::with_capacity(names.len());
+            for column in &series {
+                let value = column.get(row_idx).ok();
+                let text = value
+                    .as_ref()
+                    .and_then(anyvalue_to_search_string)
+                    .unwrap_or_default();
+                let text = text.trim();
+                // Length framing keeps separator characters inside values
+                // distinct while preserving the legacy trim/null semantics.
+                key.push_str(&text.len().to_string());
+                key.push(':');
+                key.push_str(text);
+                values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
+            }
+            *accum.counts.entry(key.clone()).or_insert(0) += 1;
+            if let Entry::Vacant(slot) = accum.values.entry(key) {
+                slot.insert(values);
+            }
         }
-        let key = parts.join("\u{1}");
-        *accum.counts.entry(key.clone()).or_insert(0) += 1;
-        if let Entry::Vacant(slot) = accum.values.entry(key) {
-            slot.insert(values);
-        }
+        job.report_progress(
+            (batch.offset + batch.frame.height()) as u64,
+            Some(reader.total_rows() as u64),
+            Some("Comparing project keys".into()),
+        );
     }
-    accum
+    job.check_cancelled()?;
+    Ok(accum)
 }
 
 fn status_rank(status: &str) -> usize {
@@ -181,47 +258,40 @@ fn json_to_csv(value: &Value) -> String {
 fn write_diff_csv(
     entries: &[(String, DiffEntry)],
     key_names: &[String],
-    destination: &str,
+    destination: &Path,
+    job: &JobContext,
+    validate: impl Fn() -> Result<(), AppError>,
 ) -> Result<(), AppError> {
-    let path = PathBuf::from(destination);
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create diff output dir {:?}", parent))
-                .map_err(AppError::from)?;
-        }
-    }
-    let mut writer = csv::WriterBuilder::new()
-        .has_headers(true)
-        .from_path(&path)
-        .with_context(|| format!("failed to create diff CSV {}", destination))
-        .map_err(AppError::from)?;
-    let mut header = vec![
-        "status".to_string(),
-        "count_a".to_string(),
-        "count_b".to_string(),
-    ];
-    header.extend(key_names.iter().cloned());
-    writer
-        .write_record(&header)
-        .with_context(|| format!("failed to write diff CSV header {}", destination))
-        .map_err(AppError::from)?;
-    for (_, entry) in entries {
-        let mut record: Vec<String> = vec![
-            entry.status.clone(),
-            entry.count_a.to_string(),
-            entry.count_b.to_string(),
+    write_atomically(destination, job, validate, |_, output| {
+        let mut writer = csv::WriterBuilder::new()
+            .has_headers(true)
+            .from_writer(output);
+        let mut header = vec![
+            "status".to_string(),
+            "count_a".to_string(),
+            "count_b".to_string(),
         ];
-        for name in key_names {
-            record.push(json_to_csv(entry.key.get(name).unwrap_or(&Value::Null)));
-        }
+        header.extend(key_names.iter().cloned());
         writer
-            .write_record(&record)
-            .with_context(|| format!("failed to write diff CSV row {}", destination))
-            .map_err(AppError::from)?;
-    }
-    writer
-        .flush()
-        .with_context(|| format!("failed to flush diff CSV {}", destination))
-        .map_err(AppError::from)
+            .write_record(&header)
+            .context("failed to write diff CSV header")?;
+        for (index, (_, entry)) in entries.iter().enumerate() {
+            if index % 1024 == 0 {
+                job.check_cancelled()?;
+            }
+            let mut record = vec![
+                entry.status.clone(),
+                entry.count_a.to_string(),
+                entry.count_b.to_string(),
+            ];
+            for name in key_names {
+                record.push(json_to_csv(entry.key.get(name).unwrap_or(&Value::Null)));
+            }
+            writer
+                .write_record(&record)
+                .context("failed to write diff CSV row")?;
+        }
+        writer.flush().context("failed to flush diff CSV")?;
+        Ok(())
+    })
 }

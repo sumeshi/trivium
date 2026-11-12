@@ -12,7 +12,7 @@ use uuid::Uuid;
 /// labels are synthesized from the original frame column names. New projects
 /// use an internal id (`c000001`) so the display label and the source path can
 /// differ from the column the query paths address.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 pub struct ColumnMeta {
     /// Internal column id. `c000001` for the new storage format, the original
     /// column name for legacy projects.
@@ -34,7 +34,7 @@ pub struct ImportedData {
     pub flags: HashMap<usize, FlagEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct ProjectMeta {
     pub id: Uuid,
     pub name: String,
@@ -56,6 +56,7 @@ pub struct ProjectMeta {
     pub source_format: Option<String>,
     /// Size of the imported bytes. The recorded hash covers the same bytes.
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub source_size: Option<u64>,
     /// Absolute path of the evidence file as it was when the project was
     /// created. Export refuses to overwrite this file. Legacy projects and
@@ -70,7 +71,7 @@ pub struct ProjectMeta {
     pub columns: Vec<ColumnMeta>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct ProjectSummary {
     pub meta: ProjectMeta,
 }
@@ -84,7 +85,7 @@ pub const VIEW_STATE_VERSION: u32 = 1;
 /// view state must never prevent the evidence or annotations from loading.
 /// `condition` keeps the frontend editor tree as-is; the engine does not
 /// interpret it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 pub struct ViewState {
     pub version: u32,
     #[serde(default)]
@@ -140,7 +141,7 @@ impl Default for ViewState {
 ///
 /// `kind` is the column-level type. Integers are always passed as decimal
 /// strings, so a long integer never travels through a JavaScript `Number`.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, ts_rs::TS)]
 pub struct Cell {
     /// Preview text for list responses; full text from `get_cell`. `None` for
     /// null/missing.
@@ -155,7 +156,7 @@ pub struct Cell {
     pub length: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct ProjectRow {
     pub row_index: usize,
     /// Exact per-column cell DTOs. This is the only row-value map; display,
@@ -173,7 +174,7 @@ pub struct ProjectRow {
 
 /// A condition-to-color rule. `condition` is the shared F1 node, so row
 /// coloring uses the same predicate as search and structured filters.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 pub struct ColorRule {
     pub name: String,
     pub condition: crate::condition::Node,
@@ -181,14 +182,14 @@ pub struct ColorRule {
     pub color: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct IocEntry {
     pub flag: String,
     pub tag: String,
     pub query: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct LoadProjectResponse {
     pub project: ProjectSummary,
     /// Data column ids in source order. For legacy projects these are the
@@ -204,7 +205,7 @@ pub struct LoadProjectResponse {
     pub initial_rows: Vec<ProjectRow>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 pub struct FlagEntry {
     pub flag: String,
     pub memo: Option<String>,
@@ -239,12 +240,13 @@ impl FlagEntry {
 ///
 /// The updated row data is not included: the frontend already has it and
 /// applies only the annotation fields to its cache.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateFlagResponse {
     /// `None` when the patch removed the last annotation on the row.
     pub entry: Option<FlagEntry>,
-    /// Process-local monotonic revision for the project.
+    /// Durable monotonic annotation revision for the project.
+    #[ts(type = "number")]
     pub revision: u64,
     /// Whole-project count after applying this update.
     pub flagged_records: usize,

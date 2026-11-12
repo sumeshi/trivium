@@ -14,7 +14,7 @@ use trivium_engine::ops;
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::project_io::{project_data_reads, reset_project_data_reads};
-use trivium_engine::storage::{close_flags_db, load_flag};
+use trivium_engine::storage::{close_flags_db, load_flag, project_database_path};
 use trivium_engine::store::ProjectsStore;
 
 fn write_fixture(root: &Path, rows: usize) -> PathBuf {
@@ -133,7 +133,8 @@ fn flagged_count_changes_by_difference_and_revision_increases() {
     let (root, store, id) = setup(10);
 
     let first = update(&store, id, 0, Some("safe"), None, None, None).expect("update failed");
-    let second = update(&store, id, 1, Some("suspicious"), None, None, None).expect("update failed");
+    let second =
+        update(&store, id, 1, Some("suspicious"), None, None, None).expect("update failed");
     let third = update(&store, id, 2, Some("critical"), None, None, None).expect("update failed");
     assert_eq!(first.flagged_records, 1);
     assert_eq!(second.flagged_records, 2);
@@ -144,7 +145,10 @@ fn flagged_count_changes_by_difference_and_revision_increases() {
     assert!(added.revision > third.revision);
 
     let cleared = update(&store, id, 3, Some(""), None, None, None).expect("update failed");
-    assert!(cleared.entry.is_none(), "the cleared row had no other annotation");
+    assert!(
+        cleared.entry.is_none(),
+        "the cleared row had no other annotation"
+    );
     assert_eq!(cleared.flagged_records, 3);
     assert!(cleared.revision > added.revision);
 
@@ -163,18 +167,21 @@ fn flagged_count_changes_by_difference_and_revision_increases() {
 fn update_before_project_load_migrates_legacy_flags_json() {
     let (root, store, id) = setup(10);
 
-    // Create the annotation db, then replace it with the legacy JSON file and
-    // keep the saved flagged count non-zero. ProjectsStore::new therefore
-    // skips its migration, and the first annotation update must not open an
-    // empty db that hides the legacy entry.
+    // Model an actual pre-SQLite case: metadata lived in projects.json and
+    // annotations in flags.json. Removing flags.db alone would leave the
+    // authoritative SQLite case intact and must not retrigger migration.
     update(&store, id, 0, Some("safe"), None, None, None).expect("initial update failed");
+    let meta = store.find(&id).expect("project metadata");
     let project_dir = store.project_dir(&id);
     close_flags_db(&project_dir);
     drop(store);
-    let db_path = project_dir.join("flags.db");
-    if db_path.exists() {
-        fs::remove_dir_all(&db_path).expect("failed to remove flags db");
-    }
+    fs::remove_file(project_database_path(&project_dir))
+        .expect("remove canonical fixture database");
+    fs::write(
+        root.join("projects.json"),
+        serde_json::to_vec(&vec![meta]).unwrap(),
+    )
+    .expect("write legacy registry");
     let legacy: std::collections::HashMap<usize, trivium_engine::models::FlagEntry> =
         std::collections::HashMap::from([(
             0,
@@ -195,7 +202,7 @@ fn update_before_project_load_migrates_legacy_flags_json() {
     assert_eq!(
         reopened.find(&id).expect("project").flagged_records,
         1,
-        "the saved count keeps the startup migration off"
+        "legacy metadata must be present before any project data is loaded"
     );
     update(&reopened, id, 1, Some("critical"), None, None, None)
         .expect("update before load_project failed");
@@ -219,43 +226,44 @@ fn update_before_project_load_migrates_legacy_flags_json() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[cfg(unix)]
 #[test]
-fn metadata_write_failure_does_not_report_the_annotation_as_unsaved() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn metadata_write_failure_rolls_back_annotation_count_and_revision() {
     let (root, store, id) = setup(5);
-    let original_permissions = fs::metadata(&root).expect("root metadata").permissions();
-    let mut read_only = original_permissions.clone();
-    read_only.set_mode(0o555);
-    fs::set_permissions(&root, read_only).expect("make root read-only");
+    // Complete the unrelated one-time annotation migration before injecting
+    // the failure, so this exercises rollback of an actual row patch.
+    assert!(load_flag(&flags_path(&store, id), 0).unwrap().is_none());
+    let revision = store.current_revision(&id);
+    let connection = rusqlite::Connection::open(project_database_path(&store.project_dir(&id)))
+        .expect("open canonical database");
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_metadata BEFORE UPDATE OF metadata ON project_state
+         BEGIN SELECT RAISE(ABORT, 'injected metadata write failure'); END;",
+        )
+        .expect("inject metadata failure");
 
     let result = update(&store, id, 0, Some("safe"), None, None, None);
-
-    fs::set_permissions(&root, original_permissions).expect("restore root permissions");
-    let response = result.expect("a metadata write failure must not fail the annotation");
-    assert_eq!(response.flagged_records, 1);
+    result.expect_err("an annotation must not claim success if its count transaction fails");
     assert_eq!(
-        load_flag(&flags_path(&store, id), 0)
-            .expect("read row 0")
-            .expect("annotation missing")
-            .flag,
+        load_flag(&flags_path(&store, id), 0).expect("read row 0"),
+        None
+    );
+    assert_eq!(store.find(&id).expect("project").flagged_records, 0);
+    assert_eq!(store.current_revision(&id), revision);
+
+    connection
+        .execute_batch("DROP TRIGGER reject_metadata")
+        .expect("remove failure injection");
+    drop(connection);
+    let saved = update(&store, id, 0, Some("safe"), None, None, None)
+        .expect("retry must save annotation and count together");
+    assert_eq!(saved.flagged_records, 1);
+    assert!(saved.revision > revision);
+    assert_eq!(
+        load_flag(&flags_path(&store, id), 0).unwrap().unwrap().flag,
         "safe"
     );
-    assert_eq!(
-        store.find(&id).expect("project").flagged_records,
-        1,
-        "the derived count override must keep the session correct even though \
-         the metadata file was not written"
-    );
-
-    // A later update starts from the override and persists the right count
-    // once the registry is writable again.
-    let second = update(&store, id, 1, Some("critical"), None, None, None)
-        .expect("second annotation must be saved");
-    assert_eq!(second.flagged_records, 2);
-    assert_eq!(store.find(&id).expect("project").flagged_records, 2);
-
+    assert_eq!(store.find(&id).expect("project").flagged_records, 1);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -302,7 +310,9 @@ fn annotations_and_flagged_count_survive_reopening_the_store() {
     drop(store);
 
     let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");
-    let meta = reopened.find(&id).expect("project metadata missing after reopen");
+    let meta = reopened
+        .find(&id)
+        .expect("project metadata missing after reopen");
     assert_eq!(meta.flagged_records, 2);
     assert_eq!(
         load_flag(&flags_path(&reopened, id), 0).expect("failed to read row 0"),

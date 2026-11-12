@@ -15,13 +15,8 @@ use trivium_engine::store::ProjectsStore;
 
 /// Maps original source name (CSV header / JSON Pointer) to internal column id.
 pub fn column_ids(store: &ProjectsStore, project_id: Uuid) -> HashMap<String, String> {
-    let loaded = projects::load_project(
-        store,
-        ProjectRequest {
-            project_id,
-        },
-    )
-    .expect("failed to load project columns");
+    let loaded = projects::load_project(store, ProjectRequest { project_id })
+        .expect("failed to load project columns");
     loaded
         .columns_meta
         .into_iter()
@@ -43,7 +38,5 @@ pub fn search(ids: &HashMap<String, String>, column: &str, expression: &str) -> 
 
 /// Exact text of one cell, or `None` for null/missing.
 pub fn cell_text<'a>(row: &'a ProjectRow, column: &str) -> Option<&'a str> {
-    row.cells
-        .get(column)
-        .and_then(|cell| cell.text.as_deref())
+    row.cells.get(column).and_then(|cell| cell.text.as_deref())
 }

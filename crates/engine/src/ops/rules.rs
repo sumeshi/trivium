@@ -67,7 +67,8 @@ pub fn save_color_rules(
     payload: SaveColorRulesPayload,
 ) -> Result<ColorRulesResponse, AppError> {
     let meta = store
-        .find(&payload.project_id)
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".to_string()))?;
     let project_dir = store.project_dir(&meta.id);
     let rules = normalize_rules(payload.rules)?;
@@ -81,7 +82,8 @@ pub fn color_rules(
     request: ProjectRequest,
 ) -> Result<ColorRulesResponse, AppError> {
     let meta = store
-        .find(&request.project_id)
+        .try_find(&request.project_id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".to_string()))?;
     let project_dir = store.project_dir(&meta.id);
     let rules = load_color_rules(&project_dir)

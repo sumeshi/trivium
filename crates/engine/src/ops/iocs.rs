@@ -36,7 +36,10 @@ pub struct ExportIocsPayload {
 /// Definitions are kept as legacy settings. Saving them does not re-evaluate
 /// rows or change `ioc_applied_records`; the existing stored count is kept.
 pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), AppError> {
-    let Some(meta) = store.find(&payload.project_id) else {
+    let Some(meta) = store
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
+    else {
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
@@ -51,7 +54,10 @@ pub fn import_iocs(
     store: &ProjectsStore,
     payload: ImportIocsPayload,
 ) -> Result<Vec<IocEntry>, AppError> {
-    let Some(meta) = store.find(&payload.project_id) else {
+    let Some(meta) = store
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
+    else {
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
@@ -68,7 +74,10 @@ pub fn import_iocs(
 
 /// Writes the current IOC set to a destination CSV file.
 pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<(), AppError> {
-    let Some(meta) = store.find(&payload.project_id) else {
+    let Some(meta) = store
+        .try_find(&payload.project_id)
+        .map_err(AppError::from)?
+    else {
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);

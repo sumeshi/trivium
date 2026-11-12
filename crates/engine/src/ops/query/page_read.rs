@@ -12,10 +12,10 @@ use polars::prelude::{DataFrame, Series};
 use crate::{
     condition::Node,
     error::AppError,
-    models::{ColorRule, FlagEntry, ProjectRow},
+    models::{ColorRule, ProjectRow},
     project_io::{is_internal_column, INTERNAL_ROW_ID},
     search::{tokenize_search_query, SearchToken},
-    storage::{load_color_rules, load_flag},
+    storage::load_color_rules,
 };
 
 use super::super::util::{collect_row_record_from_series, matched_rule_color};
@@ -23,22 +23,23 @@ use super::page::is_unrestricted_flag_filter;
 use super::target::QuerySpec;
 
 pub(super) fn is_unconditional_page(spec: &QuerySpec) -> bool {
+    is_source_order_unsearched(spec)
+        && is_unrestricted_flag_filter(spec.flag_filter.as_deref())
+        && spec.bookmarked_only != Some(true)
+}
+
+pub(super) fn is_source_order_unsearched(spec: &QuerySpec) -> bool {
     let search_empty = spec
         .search
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty);
-    let flag_filter_empty = is_unrestricted_flag_filter(spec.flag_filter.as_deref());
     let sort_empty = spec
         .sort_key
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty);
-    search_empty
-        && spec.condition.is_none()
-        && flag_filter_empty
-        && spec.bookmarked_only != Some(true)
-        && sort_empty
+    search_empty && spec.condition.is_none() && sort_empty
 }
 
 /// Columns the resolver actually reads: search scope, condition columns, the
@@ -102,7 +103,12 @@ pub(super) fn resolution_projection(
     for name in requested {
         if let Some(actual) = all_columns
             .iter()
-            .find(|known| known.eq_ignore_ascii_case(&name))
+            .find(|known| *known == &name)
+            .or_else(|| {
+                all_columns
+                    .iter()
+                    .find(|known| known.eq_ignore_ascii_case(&name))
+            })
         {
             if !resolved.iter().any(|known| known == actual) {
                 resolved.push(actual.clone());
@@ -158,17 +164,4 @@ pub(super) fn apply_page_colors(
         row.color = matched_rule_color(&record, rules)?;
     }
     Ok(())
-}
-
-pub(super) fn load_page_flags(
-    flags_path: &Path,
-    row_indices: &[usize],
-) -> Result<HashMap<usize, FlagEntry>, AppError> {
-    let mut flags = HashMap::with_capacity(row_indices.len());
-    for &row_index in row_indices {
-        if let Some(entry) = load_flag(flags_path, row_index).map_err(AppError::from)? {
-            flags.insert(row_index, entry);
-        }
-    }
-    Ok(flags)
 }
