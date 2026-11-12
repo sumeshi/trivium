@@ -73,11 +73,12 @@ Validated on Debian 13 with Node 24.22.1 and Rust 1.99.1:
 
 | Check | Result |
 | --- | --- |
-| Complete engine suite | 336 successful executions including the migration subprocess; 0 failures |
+| Complete engine suite | 337 successful executions including the migration subprocess; 0 failures |
 | UI unit suite | 90 passed |
 | Svelte and test TypeScript checks | Passed; 0 errors / 0 Svelte warnings |
 | Frontend and embedded-assets native builds | Passed |
 | Engine Clippy, all targets, `-D warnings` | Passed |
+| Desktop Clippy with embedded assets, `-D warnings` | Passed on Linux |
 | Rust 500-line guard and diff whitespace check | Passed |
 
 The frontend suite includes actual controller tests for independent case

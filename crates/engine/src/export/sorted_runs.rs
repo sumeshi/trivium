@@ -5,11 +5,13 @@ use std::{
     cmp::Reverse,
     collections::BinaryHeap,
     fs::File,
-    io::{self, BufReader, BufWriter, Read, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 const RUN_BYTES: usize = 8 * 1024 * 1024;
-const RUN_ROWS: usize = 8192;
+// Entries occupy at most 65,536 * 24 = 1.5 MiB. Source decode batches
+// remain 8,192 rows; run payloads retain the independent 8 MiB bound.
+const RUN_ROWS: usize = 65_536;
 const FAN_IN: usize = 32;
 
 pub(crate) struct ExternalSorter {
@@ -178,10 +180,22 @@ impl SortedRecords {
         if header {
             write_header(output, key, len)?;
         }
-        let copied = io::copy(&mut (&mut self.readers[index]).take(len), output)
-            .context("failed to merge sort record")?;
-        if copied != len {
-            return Err(AppError::Message("Truncated sorted record.".into()));
+        let input = &mut self.readers[index];
+        let mut remaining = len;
+        while remaining > 0 {
+            let buffer = input.fill_buf().context("failed to read sorted record")?;
+            if buffer.is_empty() {
+                return Err(AppError::Message("Truncated sorted record.".into()));
+            }
+            let take = remaining.min(buffer.len() as u64) as usize;
+            output
+                .write_all(&buffer[..take])
+                .context("failed to merge sorted record")?;
+            input.consume(take);
+            remaining -= take as u64;
+            if len > 1024 * 1024 {
+                job.check_cancelled()?;
+            }
         }
         if let Some((key, len)) = read_header(&mut self.readers[index])? {
             self.heap.push(Reverse((key, index, len)));
