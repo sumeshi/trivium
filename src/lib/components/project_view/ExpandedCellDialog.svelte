@@ -52,9 +52,16 @@
     if (event.key === 'Escape') {
       event.preventDefault();
       closeCell();
+    } else if (scrollEl && dialogEl?.contains(document.activeElement)
+      && ['PageDown', 'PageUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const page = Math.max(1, scrollEl.clientHeight * 0.9);
+      scrollEl.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? scrollEl.scrollHeight
+        : scrollEl.scrollTop + (event.key === 'PageDown' ? page : -page);
+      scrollEl.focus({ preventScroll: true });
     } else if (event.key === 'Tab' && dialogEl) {
-      const buttons = [...dialogEl.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
-      const first = buttons[0], last = buttons.at(-1);
+      const items = [...dialogEl.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')];
+      const first = items[0], last = items.at(-1);
       if (event.shiftKey && document.activeElement === first && last) {
         event.preventDefault(); last.focus();
       } else if (!event.shiftKey && document.activeElement === last && first) {
@@ -146,11 +153,11 @@
       dispatch('notify', { message: copyStatus, tone: 'error' });
     }
   };
-  const filterField = (column: string, op: 'eq' | 'ne') => {
+  const filterField = (column: string) => {
     const target = $expandedCell;
     const value = detailFilterValue(loadedValue(column));
     if (!target || value === null || target.projectId !== $projectDetail?.project.meta.id) return;
-    addFilterCondition(column, op, value);
+    addFilterCondition(column, 'eq', value);
     closeCell();
   };
 </script>
@@ -163,10 +170,15 @@
       aria-label={`Row ${$expandedCell.rowIndex + 1}`} bind:this={dialogEl}>
       <div class="cell-dialog-header">
         <h3>Row {$expandedCell.rowIndex + 1}</h3>
-        <button type="button" class="ghost close-dialog" bind:this={closeButton} on:click={closeCell}>Close</button>
+        <button type="button" class="ghost dialog-close" bind:this={closeButton}
+          aria-label="Close" title="Close row details" on:click={closeCell}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
       </div>
       <p class="row-detail-copy-status" role="status" aria-live="polite">{copyStatus}</p>
-      <div class="row-detail-scroll" bind:this={scrollEl}>
+      <!-- Scrollable content needs a tab stop for keyboard navigation. -->
+      <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+      <div class="row-detail-scroll" bind:this={scrollEl} tabindex="0" role="region" aria-label="Row fields">
         <dl class="row-fields">
           {#each detailColumns as column}
             {@const field = fields.get(column)}
@@ -175,16 +187,8 @@
             <div class="row-detail-field" class:is-focus={column === $expandedCell.columnId} data-column-id={column}>
               <dt>
                 <span class="row-field-label">{label}{$hiddenColumns.has(column) ? ' (hidden)' : ''}</span>
-                <div class="row-field-actions">
-                  <button type="button" class="ghost" aria-label={`Copy ${label}`} title={copyTip(value)}
-                    disabled={detailCopyValue(value) === null} on:click={() => copyField(column)}>Copy</button>
-                  <button type="button" class="ghost" aria-label={`Filter in ${label}`} title={filterTip(value)}
-                    disabled={detailFilterValue(value) === null} on:click={() => filterField(column, 'eq')}>Filter in</button>
-                  <button type="button" class="ghost" aria-label={`Filter out ${label}`} title={filterTip(value)}
-                    disabled={detailFilterValue(value) === null} on:click={() => filterField(column, 'ne')}>Filter out</button>
-                </div>
               </dt>
-              <dd>
+              <dd class="row-field-body">
                 {#if field?.state === 'error'}
                   <p class="memo-error">Failed to load the full field value: {field.error}</p>
                   <button type="button" class="ghost" aria-label={`Retry ${label}`} on:click={() => details.retry(column)}>Retry</button>
@@ -202,6 +206,16 @@
                   <span class="row-field-empty">Loading full value…</span>
                 {/if}
               </dd>
+              <dd class="row-field-actions">
+                <button type="button" class="ghost" aria-label={`Copy ${label}`} title={copyTip(value)}
+                  disabled={detailCopyValue(value) === null} on:click={() => copyField(column)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V3H3v13h5" /></svg>
+                </button>
+                <button type="button" class="ghost" aria-label={`Filter in ${label}`} title={filterTip(value)}
+                  disabled={detailFilterValue(value) === null} on:click={() => filterField(column)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /><path d="M18 15v6m-3-3h6" /></svg>
+                </button>
+              </dd>
             </div>
           {/each}
         </dl>
@@ -211,18 +225,22 @@
 {/if}
 
 <style>
-  .row-fields { display: flex; flex-direction: column; gap: 0; margin: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .row-detail-field { padding: 10px 12px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; min-width: 0; }
+  .row-fields { display: block; margin: 0; border: 1px solid var(--border); border-radius: 4px; }
+  .row-detail-field { display: grid; grid-template-columns: minmax(110px, 20%) minmax(0, 1fr) 50px; min-height: 29px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; min-width: 0; }
   .row-detail-field:last-child { border-bottom: 0; }
   .row-detail-field.is-focus { border-left-color: var(--accent); background: var(--surface-weak); }
-  dt { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--fg); }
-  .row-field-label { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-  .row-field-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .row-field-actions button { padding: 3px 6px; font-size: 10.5px; }
-  dd { margin: 7px 0 0; min-width: 0; }
-  .row-field-value { margin: 0; color: var(--fg); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-  .row-field-empty { color: var(--muted); font-size: 12px; }
-  .row-detail-copy-status { margin: -10px 0 0; min-height: 0; color: var(--muted); font-size: 11px; }
+  dt { padding: 4px 8px; color: var(--fg); line-height: 20px; }
+  .row-field-label { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+  dd { margin: 0; min-width: 0; }
+  .row-field-body { padding: 4px 8px; }
+  .row-field-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 2px; padding: 3px 3px 3px 0; }
+  .row-field-actions button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); }
+  .row-field-actions button:hover:not(:disabled) { color: var(--fg); background: var(--surface-weak); }
+  .row-field-actions button:disabled { opacity: .4; }
+  .row-field-value { margin: 0; color: var(--fg); font: 11.5px/18px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+  .row-field-empty { color: var(--muted); font-size: 11.5px; line-height: 18px; }
+  .row-detail-copy-status { margin: 0; min-height: 0; color: var(--muted); font-size: 11px; }
   .row-detail-copy-status:empty { display: none; }
   .memo-error { margin: 0 0 6px; }
+  @media (max-width: 480px) { .row-detail-field { grid-template-columns: minmax(76px, 28%) minmax(0, 1fr) 50px; } }
 </style>

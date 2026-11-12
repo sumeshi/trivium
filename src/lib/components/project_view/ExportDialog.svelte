@@ -32,8 +32,9 @@
   >
     <div class="cell-dialog-header">
       <h3 id="export-dialog-title">Export CSV</h3>
-      <button type="button" class="ghost" on:click={() => dispatch('close')}>
-        Close
+      <button type="button" class="ghost dialog-close" aria-label="Close" title="Close export dialog"
+        on:click={() => dispatch('close')}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
     </div>
 
@@ -82,11 +83,11 @@
 
     <label class="export-option export-annotations">
       <input type="checkbox" bind:checked={includeAnnotations} />
-      <span>Include annotations (flags, memo, tags, bookmark)</span>
+      <span>Include annotations (flags, note, tags, bookmark)</span>
     </label>
     <p class="export-hint">
       {includeAnnotations
-        ? 'Adds independent trivium-* columns. Tags are separate from the memo.'
+        ? 'Adds independent trivium-* columns. Tags are separate from the note.'
         : 'Writes data columns only.'}
     </p>
 

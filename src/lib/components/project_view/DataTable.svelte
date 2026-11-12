@@ -407,7 +407,7 @@
           </div>
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
-          <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Memo</div>
+          <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Note</div>
           {#each $visibleColumns as column, columnIndex}
             <div
               class="header-cell column-heading"
@@ -519,7 +519,7 @@
                     class="cell memo-button sticky sticky-memo"
                     class:frozenDataEdge={frozenLayout.offsets.size === 0}
                     class:has-memo={Boolean(item.row?.memo?.trim())}
-                    aria-label={item.row?.memo?.trim() ? `Edit memo for row ${item.row.row_index + 1}: ${item.row.memo}` : item.row ? `Add memo for row ${item.row.row_index + 1}` : 'Loading memo'}
+                    aria-label={item.row?.memo?.trim() ? `Edit note for row ${item.row.row_index + 1}: ${item.row.memo}` : item.row ? `Add note for row ${item.row.row_index + 1}` : 'Loading note'}
                     on:click={() =>
                       item.row &&
                       $projectDetail &&
@@ -528,7 +528,7 @@
                       item.row
                         ? item.row.memo && item.row.memo.trim().length
                           ? item.row.memo
-                          : 'Add memo'
+                          : 'Add note'
                         : 'Loading…'
                     }
                     disabled={!item.row}
@@ -538,7 +538,7 @@
                       <span class="memo-text">{item.row.memo}</span>
                     {:else if item.row}
                       <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
-                      <span class="memo-placeholder">Add memo</span>
+                      <span class="memo-placeholder">Add note</span>
                     {:else}
                       <span class="memo-placeholder">Loading…</span>
                     {/if}

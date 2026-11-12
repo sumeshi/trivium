@@ -160,18 +160,18 @@
       {/each}
     </select>
     <label class="condition-count">
-      Memo
+      Note
       <input
         bind:value={memo}
         placeholder="Leave unchanged"
-        aria-label="Bulk memo"
+        aria-label="Bulk note"
         disabled={clearMemo}
         on:input={() => (clearMemo = false)}
       />
     </label>
     <label
       class="condition-count memo-clear"
-      title="Send an explicit memo deletion for the target rows"
+      title="Delete the note from the target rows"
     >
       <input
         type="checkbox"
@@ -180,7 +180,7 @@
           if (clearMemo) memo = "";
         }}
       />
-      Clear memo
+      Clear note
     </label>
     <button
       type="button"

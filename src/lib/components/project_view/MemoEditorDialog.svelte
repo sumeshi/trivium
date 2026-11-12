@@ -100,7 +100,7 @@
         flaggedCount.set(updated.flaggedRecords);
       }
 
-      dispatch('notify', { message: 'Memo updated.', tone: 'success' });
+      dispatch('notify', { message: 'Note updated.', tone: 'success' });
       if (get(memoEditor) === editor) {
         closeMemoEditor();
       }
@@ -118,9 +118,9 @@
           bookmarked: baseline.bookmarked ?? false,
           displayCache: { ...cached.displayCache, memo: baseline.memo },
         }));
-        memoError = 'Failed to update memo.';
+        memoError = 'Failed to update note.';
       }
-      dispatch('notify', { message: 'Failed to update memo.', tone: 'error' });
+      dispatch('notify', { message: 'Failed to update note.', tone: 'error' });
     } finally {
       memoSaving = false;
     }
@@ -172,35 +172,27 @@
     class="cell-dialog-backdrop"
     role="dialog"
     aria-modal="true"
-    aria-label={`Edit memo for row ${$memoEditor.rowIndex + 1}`}
+    aria-label={`Edit note for row ${$memoEditor.rowIndex + 1}`}
     on:click={handleMemoBackdropClick}
     tabindex="-1"
     on:keydown={handleMemoBackdropKey}
   >
     <div class="cell-dialog memo-dialog">
       <div class="cell-dialog-header">
-        <h3>Edit memo</h3>
-        <div class="cell-dialog-actions">
-          <button type="button" class="ghost" on:click={closeMemoEditor} disabled={memoSaving}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="primary"
-            on:click={saveMemo}
-            disabled={memoSaving}
-          >
-            {memoSaving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+        <h3>Note · row {$memoEditor.rowIndex + 1}</h3>
+        <button type="button" class="ghost dialog-close" aria-label="Close note editor" title="Close note editor"
+          on:click={closeMemoEditor} disabled={memoSaving}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
       </div>
       <label class="memo-editor-label">
-        <span>Memo</span>
+        <span>Note</span>
         <textarea
+          aria-label="Note"
           bind:this={textareaEl}
           bind:value={memoDraft}
           rows="8"
-          placeholder="Add memo"
+          placeholder="Add note"
           spellcheck="true"
           disabled={memoSaving}
           on:keydown={(event) => {
@@ -255,6 +247,16 @@
       {#if memoError}
         <p class="memo-error">{memoError}</p>
       {/if}
+      <div class="cell-dialog-actions note-actions">
+        <button type="button" class="ghost" on:click={closeMemoEditor} disabled={memoSaving}>Cancel</button>
+        <button type="button" class="primary" on:click={saveMemo} disabled={memoSaving}>
+          {memoSaving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
+
+<style>
+  .note-actions { justify-content: flex-end; }
+</style>
