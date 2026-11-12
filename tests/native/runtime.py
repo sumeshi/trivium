@@ -13,6 +13,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from urllib.parse import urlsplit
+from startup_diagnostics import startup_diagnostics
 
 
 def native_driver_default() -> str:
@@ -67,6 +68,8 @@ class ApplicationSession:
                  *, platform: str | None = None):
         self.process = None
         self.log = None
+        self.log_path = None
+        self.platform = platform or os.name
         self.details: dict = {"mode": "driver-launch"}
         self.capabilities = {"tauri:options": {"application": str(binary)}}
         if (platform or os.name) != "nt":
@@ -90,7 +93,8 @@ class ApplicationSession:
                 raise AssertionError("Selected WebView2 runtime is missing; inspect the driver installation step")
             app_environment["WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"] = runtime
         evidence.mkdir(parents=True, exist_ok=True)
-        self.log = (evidence / "application.log").open("a", encoding="utf-8")
+        self.log_path = evidence / "application.log"
+        self.log = self.log_path.open("a", encoding="utf-8")
         try:
             self.process = start_driver([str(binary)], app_environment, self.log)
             version = self._wait_for_debugging(port)
@@ -103,6 +107,7 @@ class ApplicationSession:
 
     def _probe(self, port: int, endpoint: str, diagnostic: dict):
         diagnostic[f"{endpoint}_http"] = None
+        diagnostic.pop(f"{endpoint}_error_number", None)
         try:
             with urlopen(f"http://127.0.0.1:{port}/json/{endpoint}", timeout=2) as response:
                 diagnostic[f"{endpoint}_http"] = response.status
@@ -142,7 +147,9 @@ class ApplicationSession:
                 return version
             time.sleep(.05)
         details = json.dumps(diagnostic, sort_keys=True, separators=(",", ":"))
-        raise AssertionError(f"Native app did not publish a debuggable WebView2 target within {timeout:g} seconds; probes={details}; inspect application.log")
+        startup = startup_diagnostics(self.process, getattr(self, "log_path", None), platform=getattr(self, "platform", None))
+        evidence = json.dumps(startup, separators=(",", ":"))
+        raise AssertionError(f"Native app did not publish a debuggable WebView2 target within {timeout:g} seconds; probes={details}; startup={evidence}; inspect application.log")
 
     def close(self) -> None:
         try:
@@ -173,7 +180,7 @@ def emit_failure_annotation(error: Exception) -> None:
         return
     text = str(error)
     if text.startswith(("Native app ", "Windows native checks ", "Selected WebView2 runtime ")):
-        message = text[:1800]
+        message = text[:3000]
     elif text.startswith("WebDriver ") and ": {" in text:
         try:
             value = json.loads(text[text.index(": {") + 2:])["value"]

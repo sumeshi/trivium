@@ -15,12 +15,18 @@ use tauri::Manager;
 use crate::state::AppState;
 
 fn main() {
+    #[cfg(all(target_os = "windows", debug_assertions))]
+    automation_phase("before-builder");
     tauri::Builder::new()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(all(target_os = "windows", debug_assertions))]
+            automation_phase("setup-start");
             let state = AppState::new(app)?;
+            #[cfg(all(target_os = "windows", debug_assertions))]
+            automation_phase("state-ready");
             app.manage(state);
             Ok(())
         })
@@ -63,4 +69,12 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Fixed phase names only; no case paths, values or environment contents.
+#[cfg(all(target_os = "windows", debug_assertions))]
+fn automation_phase(phase: &'static str) {
+    if std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true") {
+        eprintln!("[trivium-native] {phase}");
+    }
 }

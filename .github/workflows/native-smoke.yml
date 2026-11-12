@@ -32,6 +32,8 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.version }}
       - uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Linux native dependencies
         if: runner.os == 'Linux'
         run: |

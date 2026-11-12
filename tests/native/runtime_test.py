@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import tempfile
 from threading import Thread
+from urllib.error import URLError
 import unittest
 from unittest.mock import patch
 
@@ -143,6 +144,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('"target_types":["webview"]', message)
         self.assertNotIn('private.invalid', message)
         self.assertNotIn('never-print-this', message)
+
+    def test_probe_does_not_keep_an_old_errno_after_a_different_failure(self):
+        app = object.__new__(ApplicationSession)
+        diagnostic = {}
+        refused = URLError(OSError(10061, 'private-first-error'))
+        timeout = URLError(TimeoutError('private-next-error'))
+        with patch('runtime.urlopen', side_effect=[refused, timeout]):
+            app._probe(12345, 'list', diagnostic)
+            self.assertEqual(diagnostic['list_error_number'], 10061)
+            app._probe(12345, 'list', diagnostic)
+        self.assertNotIn('list_error_number', diagnostic)
+        self.assertEqual(diagnostic['list_error'], 'TimeoutError')
+        self.assertNotIn('private', json.dumps(diagnostic))
 
     def test_windows_refuses_a_release_binary_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:
