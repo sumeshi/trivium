@@ -763,6 +763,7 @@ button.primary:disabled {
   z-index: 10;
   background: var(--surface-weak);
   box-shadow: none;
+  transition: color 100ms ease;
 }
 
 /* Fixed cells must paint an opaque layer above the horizontally moving cells.
