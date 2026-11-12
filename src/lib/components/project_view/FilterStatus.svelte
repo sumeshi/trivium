@@ -5,13 +5,14 @@
   const { appliedFilters, appliedResultLoading, columnLabels, search, searchColumns,
     flagFilter, bookmarkedOnly, conditionTree } = useWorkspace();
   const dispatch = createEventDispatcher<{ clear: void }>();
+  export let height = 26;
   let expanded = false;
   $: description = describeAppliedFilters($appliedFilters, $columnLabels);
   $: canClear = description.active || $search !== '' || $searchColumns.length > 0 ||
     $flagFilter !== 'all' || $bookmarkedOnly || $conditionTree.children.length > 0;
 </script>
 
-<footer class="applied-filter-status" class:has-filters={description.active} aria-label="Applied filters">
+<footer class="applied-filter-status" bind:offsetHeight={height} class:has-filters={description.active} aria-label="Applied filters">
   <div class="filter-status-line">
     <span class="filter-status-state">{$appliedResultLoading ? 'Applying…' : description.active ? 'Filtered' : 'All rows'}</span>
     {#if description.active}

@@ -69,6 +69,7 @@
 
   let filterControls: FilterControls | undefined;
   let initialized = false;
+  let filterStatusHeight = 26;
   let filterTimeout: ReturnType<typeof setTimeout> | null = null;
   let pendingFilters: (AppliedFilters & { resetScroll: boolean }) | null = null;
   let lastSortRevision = 0;
@@ -716,7 +717,7 @@
   };
 </script>
 
-<section class="project-view">
+<section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
   <FilterControls bind:this={filterControls} on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 
   <div slot="navigation" class="table-navigation">
@@ -797,5 +798,5 @@
 
   <DataTable {columnWidths} on:notify={(e) => dispatch('notify', e.detail)}
     on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)} />
-  <FilterStatus on:clear={clearAllFilters} />
+  <FilterStatus bind:height={filterStatusHeight} on:clear={clearAllFilters} />
 </section>
