@@ -694,7 +694,8 @@ button.primary:disabled {
   color: var(--muted);
 }
 
-.data-row:nth-child(2n),
+/* DOM child indexes change as the virtual window slides. The class follows
+   result positions, keeping retained rows' paint stable while scrolling. */
 .data-row.alt-row {
   --row-base: var(--surface-soft);
 }
