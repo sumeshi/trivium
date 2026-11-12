@@ -153,9 +153,9 @@ writer; GTK file-picker interaction itself is not automated.
 
 Windows GUI behavior has not been verified in this Linux environment. Debug
 fixture timings are functional checks, not release throughput benchmarks.
-Package installation and a new GitHub Actions run have not been verified.
-The Debian workflow remains configured for `develop` pushes with three-day
-artifact retention; its Clippy gate now includes test targets.
+Package installation has not been verified. The Debian workflow builds on
+`develop` pushes with three-day artifact retention; its Clippy gate includes
+test targets. Current CI results are recorded below.
 
 
 ## Investigation usability follow-up (0.2.0)
@@ -196,8 +196,25 @@ rows: `target/native-feedback-navigation/f49c2e687ac9/report.json`. First,
 middle, last, filtered descending results, excluded-row notices, annotations,
 export and delayed lookup responses remain covered.
 
-Windows startup now uses explicit WebView2 attach mode and a dedicated native
-build identifier. Its local contract and namespace tests pass; actual Windows
-execution must be verified by the next Native smoke CI run. The GTK native
-file-picker dialog remains outside automated coverage. See [native CI](native-ci.md)
-and [artifact identification](artifacts.md).
+### Published CI evidence
+
+The `cfc0cc5` source revision passed the complete
+[Debian build](https://github.com/sumeshi/trivium/actions/runs/43148962659),
+including quality gates, the GUI `.deb` package and optional automation CLI.
+Use its **trivium-deb** artifact for the graphical application. Its Linux
+[native navigation job](https://github.com/sumeshi/trivium/actions/runs/43148962620/job/130953355499)
+also passed against the embedded Tauri app with 5,199 rows.
+
+The [Windows native job](https://github.com/sumeshi/trivium/actions/runs/43148962620/job/130953355763)
+still fails before WebDriver attachment. Fixed startup markers confirm
+`state-ready`, a real app window and six owned WebView2 child processes, with
+no logged panic or HRESULT. Both localhost debugging endpoints remained
+unreachable during the 45-second wait. This establishes successful application
+initialization, but does **not** establish Windows GUI operation or identify
+why the debugging endpoint is unavailable. The public startup diagnostic is
+bounded; the owned application log and report remain in the native artifact.
+Local startup/diagnostic contract tests (14) and namespace guard tests (3) pass.
+
+The GTK native file-picker dialog and package installation remain outside
+automated coverage. See [native CI](native-ci.md) and
+[artifact identification](artifacts.md).

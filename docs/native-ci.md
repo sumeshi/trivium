@@ -48,10 +48,20 @@ case/preferences files live under the separate native-test app-data namespace;
 the ephemeral GitHub runner discards them after the job.
 
 The first Windows CI run failed before session creation with a missing
-`DevToolsActivePort` file. The updated attach mode is covered by local contract
-tests, but Windows execution cannot be verified in this Linux cloud environment.
-A successful new CI run is required before claiming Windows GUI verification.
-YAML parsing and Python compilation validate harness setup only.
+`DevToolsActivePort` file. Explicit attach mode avoids that discovery step, but
+has **not** resolved Windows automation: at source revision `cfc0cc5`,
+[the Windows job](https://github.com/sumeshi/trivium/actions/runs/43148962620/job/130953355763)
+timed out waiting for the localhost debugging endpoint. Its final startup
+marker was `state-ready`, with a real app window, six owned WebView2 children
+and no logged panic or HRESULT. The 90-byte log was not truncated. App startup
+completed; the cause of the unavailable debug endpoint remains unverified.
+
+Timeout diagnostics expose only fixed startup phases, bounded error codes and
+owned process names/IDs. Complete application output stays in the native
+artifact. Fourteen local Python contract tests and three namespace guard tests
+pass, but do not establish Windows GUI operation. A successful Windows native
+job is required before claiming that verification. No GPU/runtime workaround
+has been added based solely on a timeout.
 Local native Linux results are recorded separately in the current validation
 report; these scripts do not replace packaged installation checks.
 
