@@ -38,6 +38,7 @@
   const dispatch = createEventDispatcher<{
     notify: { message: string; tone: 'success' | 'error' };
     columnRule: { columnId: string };
+    columnGroup: { columnId: string };
   }>();
 
   type CellMenuState = {
@@ -587,6 +588,7 @@
       x={columnMenu.x} y={columnMenu.y}
       on:search={(event) => searchColumn(event.detail.columnId)}
       on:rule={(event) => { columnMenu = null; dispatch('columnRule', event.detail); }}
+      on:group={(event) => { columnMenu = null; dispatch('columnGroup', event.detail); }}
       on:close={(event) => {
         if (event.detail.restoreFocus) columnMenu?.trigger.focus({ preventScroll: true });
         columnMenu = null;

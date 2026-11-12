@@ -11,6 +11,7 @@
   import HistoryButtons from './project_view/HistoryButtons.svelte';
   import FilterStatus from './project_view/FilterStatus.svelte';
   import { clearFilterInputs } from '../appliedFilterSummary';
+  import { effectiveSearchScopeKey, normalizeSearchText } from '../searchScope';
   import { parseFlagFilter } from '../flagFilters';
   import type { LoadProjectResponse } from '../types';
   import type { Backend } from '../backend';
@@ -289,7 +290,7 @@
     })));
     initializeColumnWidths(saved?.columnWidths);
     const filters: AppliedFilters = {
-      search: $search.trim(),
+      search: normalizeSearchText($search),
       flag: $flagFilter,
       bookmarkedOnly: $bookmarkedOnly,
       searchColumns: [...$searchColumns],
@@ -308,7 +309,7 @@
     lastSearchValue = filters.search;
     lastFlagFilter = filters.flag;
     lastBookmarkedOnly = filters.bookmarkedOnly;
-    lastSearchColumnsSignature = JSON.stringify(filters.searchColumns);
+    lastSearchColumnsSignature = effectiveSearchScopeKey(filters.search, filters.searchColumns);
     lastSummaryFlagged = -1;
     lastSummaryHiddenKey = '';
     // Dialog state belongs to the previous project and must not be applied here.
@@ -381,11 +382,11 @@
   }
 
   $: if (initialized) {
-    const searchValue = $search.trim();
+    const searchValue = normalizeSearchText($search);
     const flagValue = $flagFilter;
     const bookmarkedValue = $bookmarkedOnly;
     const scopedColumns = [...$searchColumns];
-    const signature = JSON.stringify(scopedColumns);
+    const signature = effectiveSearchScopeKey(searchValue, scopedColumns);
     const conditionJson = JSON.stringify($conditionPayload);
     const searchChanged = lastSearchValue === null || searchValue !== lastSearchValue;
     const flagChanged = lastFlagFilter === null || flagValue !== lastFlagFilter;
@@ -502,7 +503,7 @@
     }
     return applyFilters(
       {
-        search: $search.trim(),
+        search: normalizeSearchText($search),
         flag: $flagFilter,
         bookmarkedOnly: $bookmarkedOnly,
         searchColumns: [...$searchColumns],
@@ -797,6 +798,7 @@
   {/if}
 
   <DataTable {columnWidths} on:notify={(e) => dispatch('notify', e.detail)}
-    on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)} />
+    on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)}
+    on:columnGroup={(event) => void filterControls?.openGroupingForColumn(event.detail.columnId)} />
   <FilterStatus bind:height={filterStatusHeight} on:clear={clearAllFilters} />
 </section>

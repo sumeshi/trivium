@@ -5,6 +5,7 @@ import type { WorkspaceQuery } from "./workspaceQuery";
 import { PAGE_SIZE, ROW_HEIGHT } from "./components/project_view/state.ts";
 import { clampRow, logicalRowAt, scrollTopForRow } from "./virtualScroll.ts";
 import { errorMessage } from "./errors.ts";
+import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
 
 interface NavigationOptions {
   backend: Backend;
@@ -52,8 +53,8 @@ export function createWorkspaceNavigation(
 
   const navigationQuery = () => ({
     projectId: get(workspace.currentProjectId),
-    search: get(workspace.search).trim(),
-    searchColumns: [...get(workspace.searchColumns)],
+    search: normalizeSearchText(get(workspace.search)),
+    searchColumns: effectiveSearchColumns(get(workspace.search), get(workspace.searchColumns)),
     condition: structuredClone(get(workspace.conditionPayload)),
     flagFilter: get(workspace.flagFilter),
     bookmarkedOnly: get(workspace.bookmarkedOnly),

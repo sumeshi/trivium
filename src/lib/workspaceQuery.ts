@@ -5,6 +5,7 @@ import { PAGE_SIZE, PREFETCH_PAGES, normalizeRow } from "./components/project_vi
 import { errorMessage } from "./errors.ts";
 import { isJobLimitError } from "./jobTracking.ts";
 import { logicalRowAt } from "./virtualScroll.ts";
+import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
 import type { WorkspaceController } from "./workspaceController";
 
 interface QueryOptions {
@@ -41,7 +42,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     finally { release(); }
   };
   const signatureFor = (filters: AppliedFilters) =>
-    JSON.stringify([filters.search, filters.flag, filters.bookmarkedOnly, filters.searchColumns,
+    JSON.stringify([normalizeSearchText(filters.search), filters.flag, filters.bookmarkedOnly, effectiveSearchColumns(filters.search, filters.searchColumns),
       get(workspace.sortKey), get(workspace.sortDirection), filters.condition]);
   const resetCache = () => {
     workspace.rowsCache.set(new Map());
@@ -55,8 +56,8 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
   };
   const normalize = (filters: AppliedFilters): AppliedFilters => ({
     ...filters,
-    search: filters.search.trim(),
-    searchColumns: [...filters.searchColumns],
+    search: normalizeSearchText(filters.search),
+    searchColumns: effectiveSearchColumns(filters.search, filters.searchColumns),
     condition: structuredClone(filters.condition),
   });
   const initialize = (filters: AppliedFilters) => {

@@ -10,6 +10,7 @@
     close: { restoreFocus: boolean };
     search: { columnId: string };
     rule: { columnId: string };
+    group: { columnId: string };
   }>();
   let menu: HTMLDivElement;
   let left = x;
@@ -50,6 +51,9 @@
   </button>
   <button type="button" role="menuitem" on:click={() => dispatch('rule', { columnId })}>
     Add rule for this column…
+  </button>
+  <button type="button" role="menuitem" on:click={() => dispatch('group', { columnId })}>
+    Group by this column
   </button>
 </div>
 

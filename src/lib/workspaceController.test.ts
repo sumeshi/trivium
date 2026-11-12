@@ -12,6 +12,8 @@ import { createOwnedRequests } from "./workspaceRequests.ts";
 import { createWorkspaceAnnotationObserver } from "./workspaceAnnotations.ts";
 import { markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { virtualWindow } from "./virtualScroll.ts";
+import { createWorkspaceView } from "./workspaceView.ts";
+import { effectiveSearchScopeKey } from "./searchScope.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -268,4 +270,84 @@ test("restored annotation baselines cannot supersede a slow first query and disc
   assert.equal(calls, 2, "a later real bulk mutation must still refresh the active case");
   workspace.dispose();
   forgetAnnotationVersion(projectId);
+});
+
+
+test("empty or whitespace search scope changes preserve cached pages, selection, position and saved picker scope", async () => {
+  const requests: QueryProjectRowsArgs[] = [];
+  const { workspace, queries, backend, cancelled } = setup({ queryProjectRows: async (args) => {
+    requests.push(args); return response(args.offset ?? 0);
+  } });
+  await queries.requestPage(0);
+  workspace.scrollTop.set(640); workspace.scrollLeft.set(80); workspace.toggleRowSelection(23);
+  const cached = get(workspace.rowsCache), applied = get(workspace.appliedFilters);
+  const revision = queries.revision, signature = queries.signature;
+  const scopeKey = effectiveSearchScopeKey("", []);
+  for (const search of ["", "  ", "\t\n", "\u0085", "\u2003\u2028"]) {
+    workspace.search.set(search);
+    workspace.searchColumns.set(["c1"]);
+    assert.equal(effectiveSearchScopeKey(search, get(workspace.searchColumns)), scopeKey);
+    await queries.applyFilters({ ...filters(search), searchColumns: get(workspace.searchColumns) }, true, false);
+    workspace.searchColumns.set([]);
+    await queries.applyFilters(filters(search), true, false);
+  }
+  workspace.searchColumns.set(["c1"]);
+  const view = createWorkspaceView(workspace, { backend, isReady: () => true, columnWidths: () => new Map(),
+    logicalRow: () => 20, scrollLeft: () => 80, signature: () => queries.signature, notify: () => {} });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(cancelled, []);
+  assert.equal(queries.revision, revision); assert.equal(queries.signature, signature);
+  assert.strictEqual(get(workspace.rowsCache), cached); assert.strictEqual(get(workspace.appliedFilters), applied);
+  assert.equal(get(workspace.scrollTop), 640); assert.equal(get(workspace.scrollLeft), 80);
+  assert.deepEqual([...get(workspace.selectedRowIds)], [23]);
+  assert.deepEqual(view.buildViewState().searchColumns, ["c1"], "unused picker changes still persist");
+  assert.deepEqual(view.snapshotSession()?.selectedRowIds, [23]);
+  assert.equal(view.snapshotSession()?.selectionSignature, queries.signature);
+  workspace.dispose();
+});
+
+test("the first real query uses the chosen scope and a scope change during text search reloads normally", async () => {
+  const requests: QueryProjectRowsArgs[] = [];
+  const { workspace, queries } = setup({ queryProjectRows: async (args) => {
+    requests.push(args); return response(args.offset ?? 0);
+  } });
+  await queries.requestPage(0);
+  workspace.searchColumns.set(["c1"]);
+  await queries.applyFilters({ ...filters("  "), searchColumns: ["c1"] }, false, false);
+  assert.equal(requests.length, 1);
+  workspace.search.set("  \u0085needle\u0085  ");
+  await queries.applyFilters({ ...filters(get(workspace.search)), searchColumns: get(workspace.searchColumns) }, false, false);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].search, "needle"); assert.deepEqual(requests[1].searchColumns, ["c1"]);
+  workspace.searchColumns.set([]);
+  await queries.applyFilters(filters("needle"), false, false);
+  assert.equal(requests.length, 3); assert.deepEqual(requests[2].searchColumns, []);
+  assert.equal(get(workspace.appliedFilters).search, "needle");
+  workspace.dispose();
+});
+
+test("an unused search-column change cannot supersede an in-flight original-row Go", async () => {
+  const located = deferred<{ position: number; total_rows: number; total_filtered_rows: number }>();
+  const lookups: QueryProjectRowsArgs[] = [];
+  let queryCalls = 0;
+  const { workspace, queries, backend, cancelled, errors } = setup({
+    queryProjectRows: async (args) => { queryCalls += 1; return response(args.offset ?? 0); },
+    locateProjectRow: (args) => { lookups.push(args); return located.promise; },
+  });
+  await queries.requestPage(0);
+  const navigation = createWorkspaceNavigation(workspace, queries, {
+    backend, isReady: () => true, isFilterPending: () => false, beforeScroll: () => {}, notify: (message) => errors.push(message),
+  });
+  const moving = navigation.jumpToEnteredRow(43);
+  await settle();
+  assert.equal(lookups.length, 1); assert.deepEqual(lookups[0].searchColumns, []);
+  workspace.search.set(" "); workspace.searchColumns.set(["c1"]);
+  await queries.applyFilters({ ...filters(" "), searchColumns: ["c1"] }, false, false);
+  assert.equal(queryCalls, 1); assert.deepEqual(cancelled, []); assert.equal(get(navigation.locatingRow), true);
+  located.resolve({ position: 42, total_rows: 5199, total_filtered_rows: 5199 });
+  await moving;
+  assert.ok(get(workspace.scrollTop) > 0, "the original Go still scrolls to its requested row");
+  assert.equal(get(navigation.locatingRow), false); assert.deepEqual(errors, []);
+  assert.equal(queryCalls, 1, "the target's already cached page stays available");
+  workspace.dispose();
 });

@@ -3,6 +3,7 @@
   import { FLAG_FILTER_OPTIONS } from './state';
   import { get } from 'svelte/store';
   import { appendEmptyColumnRule } from '../../appliedFilterSummary';
+  import { MAX_GROUP_LEVELS } from '../../grouping';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
@@ -10,6 +11,7 @@
   import ConditionEditor from './ConditionEditor.svelte';
   import SearchControls from './SearchControls.svelte';
   import StatsPanel from './StatsPanel.svelte';
+  import GroupingPanel from './GroupingPanel.svelte';
   import TimePanel from './TimePanel.svelte';
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
@@ -34,6 +36,7 @@
     { id: 'conditions', label: 'Rules', group: 'filters' },
     { id: 'presets', label: 'Presets', group: 'filters' },
     { id: 'stats', label: 'Column stats', group: 'analysis' },
+    { id: 'groups', label: 'Groups', group: 'analysis' },
     { id: 'time', label: 'Time analysis', group: 'analysis' },
     { id: 'timeline', label: 'Timeline', group: 'analysis' },
     { id: 'bulk', label: 'Bulk annotate', group: 'annotations' },
@@ -46,6 +49,8 @@
   let drawerEl: HTMLDivElement | null = null;
   let drawerTrigger: HTMLButtonElement | null = null;
   let searchControls: SearchControls | undefined;
+  let groupingPanel: GroupingPanel | undefined;
+  let groupColumns: string[] = [];
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
   $: categoryLabel = groups.find((group) => group.id === activeGroup)?.label ?? 'Tools';
@@ -91,6 +96,18 @@
     await selectTool('conditions');
     await tick();
     drawerEl?.querySelector<HTMLInputElement>(`[data-condition-id="${result.ruleId}"]`)?.focus();
+  }
+  export async function openGroupingForColumn(columnId: string): Promise<void> {
+    if (!$projectDetail?.columns.includes(columnId)) return;
+    // Set the requested levels before mounting, so reopening the panel does
+    // not start an aggregation for its old levels followed by a second one.
+    if (!groupColumns.includes(columnId) && groupColumns.length < MAX_GROUP_LEVELS) {
+      groupColumns = [...groupColumns, columnId];
+    }
+    drawerTrigger = document.getElementById('tool-group-analysis') as HTMLButtonElement | null;
+    await selectTool('groups');
+    await tick();
+    groupingPanel?.groupByColumn(columnId);
   }
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
@@ -331,6 +348,8 @@
           <ConditionEditor />
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} />
+        {:else if activeTool === 'groups'}
+          <GroupingPanel bind:this={groupingPanel} bind:groupColumns />
         {:else if activeTool === 'time'}
           <TimePanel open={true} />
         {:else if activeTool === 'timeline'}
