@@ -14,9 +14,9 @@ The investigation usability follow-up starts from `35f2fa3` and identifies build
 | Flags | All 16 selections of Safe / Suspicious / Critical / Unflagged share query, analysis, export and bulk targets. Empty selection means all rows. Old string filters remain accepted. |
 | Columns | Searchable, bounded list with Select all / Deselect all. Visibility does not change the query. Writes stay ordered across tab remounts. |
 | Table controls | Original-row Go / result First and Last, history icons, concise Flagged count. The original 32px rows, 11.5px table text, three flag buttons and Add memo remain. |
-| Analysis tools | One nonmodal side drawer overlays the table. Inactive contents are unmounted; the visible table remains interactive. Top-value count bars, collapsed rare values, histograms and sorted time spans replace long default lists. |
+| Analysis tools | One nonmodal side drawer overlays the table. Inactive contents are unmounted; the visible table remains interactive. Column stats, nested Groups, time analysis and timeline share the Analysis category. |
 | Timeline | Initial focus on a dense period, exact outside counts, Show all, zoom/pan/drag, and four flag counts per bucket. Current annotations and query filters are respected. |
-| Themes | Trivium / Light / Dark / Paper / Midnight / Mauve use CSS variables and persist across restart. Trivium is the first-run default; saved choices remain intact. Semantic flag colors stay consistent. |
+| Themes | Neutral Light is the first-run default; Dark retains its surfaces. The previous Light is now Yukari, with ten pastel choices in total. Other saved themes remain available. Semantic flags use soft selected fills and consistent meanings. |
 
 No cross-project timeline, import-time period restriction or automated risk
 classification was added. The architecture follow-up stores case metadata,
@@ -74,8 +74,8 @@ Validated on Debian 13 with Node 24.22.1 and Rust 1.99.1:
 
 | Check | Result |
 | --- | --- |
-| Complete engine suite | 345 successful executions including the migration subprocess; 0 failures |
-| UI unit suite | 108 passed |
+| Complete engine suite | 349 successful executions including the migration subprocess; 0 failures |
+| UI unit suite | 116 passed |
 | Svelte and test TypeScript checks | Passed; 0 errors / 0 Svelte warnings |
 | Frontend and embedded-assets native builds | Passed |
 | Engine Clippy, all targets, `-D warnings` | Passed |
@@ -218,3 +218,44 @@ Local startup/diagnostic contract tests (14) and namespace guard tests (3) pass.
 The GTK native file-picker dialog and package installation remain outside
 automated coverage. See [native CI](native-ci.md) and
 [artifact identification](artifacts.md).
+
+## Pastel themes and nested grouping follow-up
+
+Feature source `5c5ca56` passed the full real Tauri/WebKitGTK workspace run:
+`target/native-refinement-workspace-final/e16e61186f69/report.json`.
+All nine stages passed across 19 actual app sessions and 356 IPC calls, with
+zero JavaScript errors or transport retries. The one deliberate invalid-date
+query remains the only expected native error.
+
+- The format list uses slashes, CSV settings appear only for CSV, and the
+  source notice says read-only. Real tab-delimited CSV and JSON imports retain
+  their original bytes and SHA. Only the OS picker selected-path response is
+  substituted; project creation and data processing use real native IPC.
+- Recent keeps its shortened hash without a visible SHA prefix. The current
+  filename exposes the original full path, with a copy action in its menu.
+- Empty and whitespace-only search-column edits issue zero row, lookup or
+  heavy-analysis reads, preserving selected IDs and both scroll positions.
+  The next text query uses the selected columns; changing a live query still
+  refreshes its results.
+- Bookmark rows have an opaque gold tint and marker, including custom-coloured
+  and frozen cells. Light, Dark and Yukari paint/hit checks pass after actual
+  horizontal body-wheel input. Empty memo text is quieter than written text.
+  Real checked, mixed and keyboard-focused checkboxes are verified.
+- The header menu opens Analysis / Groups. Three-level nesting, counts,
+  expand/collapse, reordering, removal and replacement pass. Group drill-down
+  retains an existing OR tree, complete parent path, whitespace, empty strings,
+  null/missing groups and integer text beyond JavaScript's safe integer range.
+  Grouping rejects results exceeding 8 levels, 10,000 nodes or 32 MiB of labels;
+  no partial counts are silently returned. At most 100 expanded group rows are
+  rendered per page; closed panels start no grouping jobs.
+- All 16 offered themes survive actual process restarts. Old plain localStorage
+  and native-file Light preferences reopen as Yukari; newly saved Light stays
+  the neutral palette. The ten pastel names are provisional: Yukari, Sakura,
+  Sora, Kohaku, Hisui, Fuji, Wakaba, Momiji, Toki and Nagi. All palettes pass
+  foreground, muted-text, focus-boundary and semantic-flag contrast checks.
+
+The same binary passed original-row navigation with both 5,199 and 2,000,000
+rows: `target/native-refinement-navigation/9828ac1274a9/report.json`.
+All 349 engine executions, 116 UI tests, strict engine Clippy, generated IPC
+contracts, Svelte/TypeScript and the embedded-assets build pass. Windows GUI
+automation retains the previously documented debugging-endpoint limitation.

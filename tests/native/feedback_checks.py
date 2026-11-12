@@ -93,7 +93,9 @@ def _header_and_search(web, data, evidence, report) -> None:
 def _column_and_dates(web, data, report) -> None:
     web.named("Actions for column cohort")
     web.named("Search this column", ".column-context-menu")
-    web.applied(searchColumns=[data["columns"]["cohort"]])
+    # An unused search scope is saved by the picker without requerying rows.
+    web.applied(search="", searchColumns=[])
+    assert "cohort" in web.script("return document.querySelector('[aria-label=\"Choose search columns\"]').textContent;")
     assert web.script("return document.activeElement?.getAttribute('aria-label');") == "Search rows"
     _clear(web, data["total"])
     web.named("Actions for column source_id")

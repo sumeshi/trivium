@@ -22,12 +22,13 @@ import uuid
 
 from row_navigation import ELEMENT, WebView, free_port, open_project, wait_for
 from feedback_checks import verify_feedback
+from refinement_checks import verify_refinements
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
-TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
-HEAVY = {"column_stats", "histogram", "time_analysis"}
+TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
+HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree"}
 
 
 class WorkspaceView(WebView):
@@ -739,8 +740,28 @@ def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Pa
 
 
 def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -> None:
+    # Seed only this test profile's previous-format preferences, then launch
+    # the actual bundled app to exercise both persistence read paths.
+    app.web.script("localStorage.setItem('trivium:theme','light');")
+    app.end_session()
+    web = app.start()
+    wait_for(lambda: web.script("return document.documentElement.dataset.theme;"),
+        lambda value: value == "yukari", "legacy localStorage Light retains its palette as Yukari")
+    web.script("localStorage.removeItem('trivium:theme');")
+    app.end_session()
+    settings = list(root.rglob("theme.json"))
+    assert len(settings) == 1, settings
+    settings[0].write_text(json.dumps({"theme": "light"}), encoding="utf-8")
+    web = app.start()
+    wait_for(lambda: web.script("return document.documentElement.dataset.theme;"),
+        lambda value: value == "yukari", "legacy native-file Light retains its palette as Yukari")
+    report["legacy_theme_migration"] = {"localStorage_light": "yukari", "native_file_light": "yukari"}
     restored = []
-    for theme in ["trivium", "light", "dark", "paper", "midnight", "mauve"]:
+    app.web.named("Workspace options")
+    available = app.web.script("return [...document.querySelectorAll('select[aria-label=\"Theme\"] option')].map(e=>e.value);")
+    app.web.named("Workspace options")
+    assert len(available) == len(set(available)) and {"light", "dark", "trivium", "yukari"}.issubset(available), available
+    for theme in available:
         web = app.web
         web.named("Workspace options")
         if web.script("return document.documentElement.dataset.theme;") == theme:
@@ -772,7 +793,7 @@ def main() -> None:
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
     evidence.mkdir(parents=True)
     report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "passed": False,
-                              "unverified": ["Native GTK export destination picker"], "stages": []}
+                              "unverified": ["Native GTK export destination picker", "Native OS import picker (only its selected-path response is substituted)"], "stages": []}
     with tempfile.TemporaryDirectory(prefix="trivium-native-workspace-") as temporary:
         root = Path(temporary)
         app = NativeApp(args, root, evidence)
@@ -785,13 +806,14 @@ def main() -> None:
             web.screenshot(evidence / "default-table.png")
             for name, run in [
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
+                ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
-                ("six themes and actual restarts", lambda: themes(app, root, evidence, report)),
+                ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
                 print(f"CHECK: {name}", flush=True)
                 run()
