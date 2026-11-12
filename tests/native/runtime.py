@@ -32,6 +32,36 @@ def isolated_environment(root: Path) -> dict[str, str]:
                 GSETTINGS_BACKEND="memory", NO_AT_BRIDGE="1")
 
 
+def context_click(web, point: dict[str, int]) -> str:
+    """Use real right-button input; WebKitWebDriver releases it as a left click."""
+    if os.name == "nt":
+        web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "native-context",
+            "parameters": {"pointerType": "mouse"}, "actions": [
+                {"type": "pointerMove", **point, "duration": 0, "origin": "viewport"},
+                {"type": "pointerDown", "button": 2}, {"type": "pointerUp", "button": 2}]}]})
+        return "WebDriver right-button input"
+    # Linux checks run in bare Xvfb: window and content origins coincide.
+    # XTest preserves the actual press/release buttons, without DOM dispatch.
+    from ctypes import CDLL, c_char_p, c_int, c_ulong, c_void_p
+    x11, xtest = CDLL("libX11.so.6"), CDLL("libXtst.so.6")
+    x11.XOpenDisplay.argtypes, x11.XOpenDisplay.restype = [c_char_p], c_void_p
+    x11.XSync.argtypes = [c_void_p, c_int]
+    x11.XCloseDisplay.argtypes = [c_void_p]
+    xtest.XTestFakeMotionEvent.argtypes = [c_void_p, c_int, c_int, c_int, c_ulong]
+    xtest.XTestFakeButtonEvent.argtypes = [c_void_p, c_int, c_int, c_ulong]
+    display = x11.XOpenDisplay(None)
+    assert display, "The native context-click check requires Xvfb and libXtst6"
+    try:
+        rect = web.request("GET", web.route("window/rect"))
+        assert xtest.XTestFakeMotionEvent(display, -1, rect["x"] + point["x"], rect["y"] + point["y"], 0)
+        assert xtest.XTestFakeButtonEvent(display, 3, 1, 0)
+        assert xtest.XTestFakeButtonEvent(display, 3, 0, 0)
+        x11.XSync(display, 0)
+    finally:
+        x11.XCloseDisplay(display)
+    return "XTest native right-button input"
+
+
 def start_driver(command: list[str], environment: dict[str, str], log) -> subprocess.Popen:
     return subprocess.Popen(command, env=environment, stdout=log, stderr=log,
                             start_new_session=os.name != "nt",

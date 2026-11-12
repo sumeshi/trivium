@@ -7,6 +7,7 @@ import uuid
 
 from feedback_checks import _clear, _settle
 from row_navigation import open_project, wait_for
+from runtime import context_click
 
 
 def _field(web, column_id: str):
@@ -68,8 +69,16 @@ def _details(web, project_id: str, columns: dict[str, str], message: str, total:
     web.applied(projectId=project_id, condition={"column": columns["empty"], "op": "eq", "values": [""], "negated": False})
     web.results(1)
     _clear(web, total)
-    _open_detail(web)
-    web.named("Filter out message", ".row-detail-dialog")
+    target = web.script("return document.querySelector('.data-row button[data-column-id=\"'+arguments[0]+'\"]');", columns["message"])
+    point = web.script("const r=arguments[0].getBoundingClientRect(),v=document.querySelector('.virtual-viewport').getBoundingClientRect();const x=Math.round((Math.max(r.left,v.left)+Math.min(r.right,v.right))/2),y=Math.round((r.top+r.bottom)/2);return {x,y,hit:arguments[0].contains(document.elementFromPoint(x,y))};", target)
+    assert point.pop("hit"), "The source cell must be reachable for a trusted context click"
+    left = web.script("return document.querySelector('.virtual-viewport').scrollLeft;")
+    context_input = context_click(web, point)
+    wait_for(lambda: web.script("return !!document.querySelector('.cell-context-menu');"), bool, "right-click opens the real cell menu")
+    _settle(web)
+    assert web.script("return document.querySelector('.virtual-viewport').scrollLeft;") == left, "Right-click must not pan a partly visible column and dismiss its menu"
+    assert not web.script("return !!document.querySelector('.row-detail-dialog');"), "A context click must not open row details"
+    web.named("Filter out", '[aria-label="Cell actions"]')
     web.applied(projectId=project_id, condition={"column": columns["message"], "op": "ne", "values": [message], "negated": False})
     web.results(total - 1)
     _clear(web, total)
@@ -79,7 +88,8 @@ def _details(web, project_id: str, columns: dict[str, str], message: str, total:
     assert full_reads and all(entry["requestId"] for entry in full_reads), full_reads
     return {"fields_have_borders": True, "full_long_value_and_integer_copy": True,
         "clipboard_audit": "Payload recorded while forwarding to the actual clipboard implementation",
-        "exact_in_out_filters": True, "empty_string_filter": True, "nullable_filter_disabled": True,
+        "exact_in_out_filters": True, "filter_out_uses_cell_context_menu": True, "context_input": context_input,
+        "right_click_preserves_horizontal_position": True, "empty_string_filter": True, "nullable_filter_disabled": True,
         "surrounding_rows_requests": 0, "owned_full_cell_reads": len(full_reads)}
 
 

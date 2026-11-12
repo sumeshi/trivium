@@ -562,6 +562,11 @@
                       data-frozen={frozenLayout.offsets.has(column)}
                       style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${(frozenLayout.offsets.get(column) ?? 0) - frozenViewport.pan}px;` : undefined}
                       on:focus={() => focusColumn(columnIndex)}
+                      on:mousedown={(event) => {
+                        // A right-click must not pan a partly visible column;
+                        // its queued scroll event would dismiss the new menu.
+                        if (event.button === 2) event.preventDefault();
+                      }}
                       title={
                         !item.row || cellValue === null
                           ? 'Loading…'
