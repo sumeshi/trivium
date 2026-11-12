@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::analysis::group::{add_row, finalize, GroupNode, GroupNodePartial, GroupTreeRow};
+use crate::analysis::group::{GroupNode, GroupTreeBuilder, MAX_GROUP_LEVELS};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::store::ProjectsStore;
@@ -70,6 +70,11 @@ pub fn group_tree_with_job(
     if requested.is_empty() {
         return Err(AppError::Message("Group columns must not be empty.".into()));
     }
+    if requested.len() > MAX_GROUP_LEVELS {
+        return Err(AppError::Message(
+            "Grouping supports at most 8 column levels.".into(),
+        ));
+    }
 
     let spec = QuerySpec {
         search: payload.search.clone(),
@@ -85,10 +90,16 @@ pub fn group_tree_with_job(
     };
     let source = AnalysisSource::open(store, payload.project_id, &spec, job)?;
     let resolved = source.columns(&requested, "group columns")?;
+    let unique: std::collections::HashSet<_> = resolved.iter().collect();
+    if unique.len() != resolved.len() {
+        return Err(AppError::Message(
+            "Choose each grouping column only once.".into(),
+        ));
+    }
     let total = source.target.ids.len();
     let selected = SelectedRows::new(source.target.total_rows, &source.target.ids);
     let mut reader = source.selected_reader(&resolved)?;
-    let mut root = GroupNodePartial::default();
+    let mut tree = GroupTreeBuilder::default();
     while let Some(batch) = reader.next_with_job(job) {
         let batch = batch.map_err(AppError::from)?;
         let group_series: Vec<&Series> = resolved
@@ -110,16 +121,16 @@ pub fn group_tree_with_job(
                     value
                         .as_ref()
                         .and_then(anyvalue_to_search_string)
-                        .map(|text| text.trim().to_string())
                         .unwrap_or_default(),
                 );
                 values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
             }
-            add_row(&mut root, &GroupTreeRow { labels, values });
+            tree.add_row(&labels, &values)
+                .map_err(|message| AppError::Message(message.into()))?;
         }
     }
     job.check_cancelled()?;
-    let nodes = finalize(&root).into_iter().map(to_response).collect();
+    let nodes = tree.finish().into_iter().map(to_response).collect();
     Ok(GroupTreeResponse {
         columns: resolved,
         nodes,

@@ -2,22 +2,18 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-/// One row's grouping path: the label text and representative value per level.
-#[derive(Debug, Default)]
-pub struct GroupTreeRow {
-    pub labels: Vec<String>,
-    pub values: Vec<Value>,
-}
+pub const MAX_GROUP_LEVELS: usize = 8;
+pub const MAX_GROUP_NODES: usize = 10_000;
+const MAX_LABEL_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Default)]
-pub struct GroupNodePartial {
-    pub count: usize,
-    /// Representative value per level, recorded on the first row that reaches it.
-    pub values: Vec<Value>,
-    pub children: HashMap<String, GroupNodePartial>,
+struct PartialNode {
+    count: usize,
+    value: Value,
+    children: HashMap<(String, bool), PartialNode>,
 }
 
-/// A normalized node: children sorted by label, value taken from the first row.
+/// A normalized node. Text is exact, including whitespace; null is not empty.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupNode {
     pub value: Value,
@@ -26,40 +22,119 @@ pub struct GroupNode {
     pub children: Vec<GroupNode>,
 }
 
-/// Counts one row along its label path.
-pub fn add_row(root: &mut GroupNodePartial, row: &GroupTreeRow) {
-    if row.labels.len() != row.values.len() {
-        return;
+/// Bounded aggregation. Exceeding a limit rejects the entire result rather
+/// than returning plausible-looking incomplete counts.
+#[derive(Debug, Default)]
+pub struct GroupTreeBuilder {
+    root: PartialNode,
+    nodes: usize,
+    label_bytes: usize,
+}
+
+impl GroupTreeBuilder {
+    pub fn add_row(&mut self, labels: &[String], values: &[Value]) -> Result<(), &'static str> {
+        self.add_with_limits(labels, values, MAX_GROUP_NODES, MAX_LABEL_BYTES)
     }
-    let mut node = root;
-    for (level, label) in row.labels.iter().enumerate() {
-        let child = node.children.entry(label.clone()).or_default();
-        child.count += 1;
-        if child.values.len() == level {
-            child.values.push(row.values[level].clone());
+
+    fn add_with_limits(
+        &mut self,
+        labels: &[String],
+        values: &[Value],
+        max_nodes: usize,
+        max_bytes: usize,
+    ) -> Result<(), &'static str> {
+        if labels.len() != values.len() || labels.len() > MAX_GROUP_LEVELS {
+            return Err("Grouping supports at most 8 matching column levels.");
         }
-        node = child;
+        let mut node = &mut self.root;
+        for (label, value) in labels.iter().zip(values) {
+            let key = (label.clone(), value.is_null() && label.is_empty());
+            if !node.children.contains_key(&key) {
+                if self.nodes >= max_nodes
+                    || label.len() > max_bytes.saturating_sub(self.label_bytes)
+                {
+                    return Err("Too many group values (limit: 10,000 groups / 32 MiB labels). Add a filter or remove a grouping level.");
+                }
+                self.nodes += 1;
+                self.label_bytes += label.len();
+            }
+            let child = node.children.entry(key).or_insert_with(|| PartialNode {
+                value: value.clone(),
+                ..PartialNode::default()
+            });
+            child.count += 1;
+            node = child;
+        }
+        Ok(())
+    }
+
+    pub fn finish(self) -> Vec<GroupNode> {
+        finalize(self.root.children)
     }
 }
 
-/// Sorts every level by label and returns the level-1 nodes.
-pub fn finalize(root: &GroupNodePartial) -> Vec<GroupNode> {
-    finalize_children(root, 0)
-}
-
-fn finalize_children(parent: &GroupNodePartial, level: usize) -> Vec<GroupNode> {
-    let mut labels: Vec<&String> = parent.children.keys().collect();
-    labels.sort();
-    labels
+fn finalize(children: HashMap<(String, bool), PartialNode>) -> Vec<GroupNode> {
+    let mut children: Vec<_> = children.into_iter().collect();
+    children.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    children
         .into_iter()
-        .map(|label| {
-            let child = &parent.children[label];
-            GroupNode {
-                value: child.values.get(level).cloned().unwrap_or(Value::Null),
-                label: label.clone(),
-                count: child.count,
-                children: finalize_children(child, level + 1),
-            }
+        .map(|((label, _), child)| GroupNode {
+            value: child.value,
+            label,
+            count: child.count,
+            children: finalize(child.children),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn exact_group_identity_and_nested_values_survive() {
+        let mut tree = GroupTreeBuilder::default();
+        for value in [Value::Null, json!(""), json!(" "), json!("a"), json!(" a ")] {
+            let label = value.as_str().unwrap_or_default().to_string();
+            tree.add_row(&["parent".into(), label], &[json!("parent"), value])
+                .unwrap();
+        }
+        let nodes = tree.finish();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].count, 5);
+        let children = &nodes[0].children;
+        assert_eq!(children.len(), 5);
+        assert_eq!(children.iter().map(|child| child.count).sum::<usize>(), 5);
+        assert!(children
+            .iter()
+            .any(|child| child.value == Value::Null && child.label.is_empty()));
+        for value in ["", " ", "a", " a "] {
+            assert!(children
+                .iter()
+                .any(|child| child.value == json!(value) && child.label == value));
+        }
+    }
+
+    #[test]
+    fn repeated_groups_fit_but_new_nodes_and_large_labels_are_rejected() {
+        let mut tree = GroupTreeBuilder::default();
+        for _ in 0..3 {
+            tree.add_with_limits(&["a".into()], &[json!("a")], 1, 1)
+                .unwrap();
+        }
+        assert_eq!(tree.finish()[0].count, 3);
+        let mut tree = GroupTreeBuilder::default();
+        tree.add_with_limits(&["a".into()], &[json!("a")], 1, 100)
+            .unwrap();
+        assert!(tree
+            .add_with_limits(&["b".into()], &[json!("b")], 1, 100)
+            .is_err());
+        assert!(GroupTreeBuilder::default()
+            .add_with_limits(&["long".into()], &[json!("long")], 10, 3)
+            .is_err());
+        assert!(GroupTreeBuilder::default()
+            .add_row(&vec!["a".into(); 9], &vec![json!("a"); 9])
+            .is_err());
+    }
 }
