@@ -105,7 +105,7 @@ test("old Light preferences migrate to Yukari while newly saved Light remains ne
   for (const old of ["light", '{"theme":"light"}', { theme: "light" }, { version: 1, theme: "light" }]) {
     assert.equal(parseSavedTheme(old), "yukari");
   }
-  for (const id of ["dark", "yozora", "tasogare", "tsukimi", "trivium"] as const) {
+  for (const id of ["dark", "yozora", "kasumi", "tsukimi", "trivium"] as const) {
     assert.equal(parseSavedTheme(id), id);
     assert.equal(parseSavedTheme({ theme: id }), id);
   }
@@ -158,7 +158,7 @@ test("flag meanings retain consistent colours and readable selected symbols in e
 
 test("retired choices map consistently without turning Paper into Yukari", () => {
   const aliases = { fuji: "yukari", wakaba: "hisui", momiji: "kohaku", paper: "light",
-    sumi: "dark", midnight: "yozora", mauve: "tsukimi" } as const;
+    sumi: "dark", midnight: "yozora", mauve: "tsukimi", tasogare: "kasumi" } as const;
   for (const [retired, replacement] of Object.entries(aliases)) {
     assert.equal(THEME_OPTIONS.some(({ value }) => value === retired), false);
     assert.equal(parseTheme(retired), replacement);
@@ -188,7 +188,7 @@ test("colour stays on pastel headers and accents while main backgrounds remain w
 });
 
 test("new night palettes are dark and bookmarks remain a subtle surface tint", () => {
-  for (const name of ["yozora", "tasogare", "tsukimi"] as const) {
+  for (const name of ["yozora", "kasumi", "tsukimi"] as const) {
     assert.equal(parseTheme(name), name);
     assert.equal(isLightTheme(name), false);
     assert.ok(luminance(colour(cssTokens(name), "bg")) < .03);

@@ -65,7 +65,7 @@
 
   [data-theme="dark"],
   [data-theme="yozora"],
-  [data-theme="tasogare"],
+  [data-theme="kasumi"],
   [data-theme="tsukimi"],
   [data-theme="trivium"] {
     color-scheme: dark;
@@ -215,7 +215,7 @@
     --accent-soft: var(--surface-weak);
   }
 
-  /* Lightened grey-blue and dusk surfaces, followed by the purple Tsukimi. */
+  /* Lightened night-blue and warm mist-grey surfaces, followed by purple Tsukimi. */
   [data-theme="yozora"] {
     --bg: #1d2430;
     --fg: #e7edf5;
@@ -231,18 +231,18 @@
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
-  [data-theme="tasogare"] {
-    --bg: #282228;
-    --fg: #f2e9ee;
-    --muted: #cdbbc7;
-    --surface: #322a32;
-    --surface-weak: #3e343d;
-    --surface-soft: #392f38;
-    --surface-strong: #4a3e47;
-    --border: #665363;
-    --border-strong: #a18b9a;
-    --accent: #d9bac7;
-    --accent-contrast: #30252d;
+  [data-theme="kasumi"] {
+    --bg: #292726;
+    --fg: #efece7;
+    --muted: #c9c0b6;
+    --surface: #33302f;
+    --surface-weak: #3e3b38;
+    --surface-soft: #393634;
+    --surface-strong: #46433f;
+    --border: #625b54;
+    --border-strong: #a29688;
+    --accent: #abc9c4;
+    --accent-contrast: #24302e;
     --overlay: rgba(12, 13, 18, 0.9);
   }
 
