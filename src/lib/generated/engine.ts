@@ -7,139 +7,139 @@ export type GroupKind = "and" | "or";
 export type Condition = { column: string, op: Op, values: Array<string>, negated: boolean, };
 export type Group = { kind: GroupKind, children: Array<Node>, };
 export type Node = Condition | Group;
-export type AnnotationPatch = { 
+export type AnnotationPatch = {
 /**
  * `None` keeps the stored flag; `Some("")` clears it.
  */
-flag?: string | null, 
+flag?: string | null,
 /**
  * `None` keeps the stored memo; `Some(None)` or a blank string clears it.
  */
-memo?: string | null | null, 
+memo?: string | null | null,
 /**
  * `None` keeps the stored tags; `Some(vec![])` clears them.
  */
-tags?: Array<string> | null, 
+tags?: Array<string> | null,
 /**
  * Tags appended after any `tags` replacement. Existing tags are kept and
  * duplicates are not added.
  */
-add_tags: Array<string>, 
+add_tags: Array<string>,
 /**
  * Tags removed after any `tags` replacement and `add_tags` additions.
  */
-remove_tags: Array<string>, 
+remove_tags: Array<string>,
 /**
  * `None` keeps the stored bookmark state; `Some(false)` clears it.
  */
 bookmarked?: boolean | null, };
-export type ColumnMeta = { 
+export type ColumnMeta = {
 /**
  * Internal column id. `c000001` for the new storage format, the original
  * column name for legacy projects.
  */
-id: string, 
+id: string,
 /**
  * Display label. Not guaranteed to be unique.
  */
-label: string, 
+label: string,
 /**
  * Original CSV header or JSON Pointer.
  */
-source: string, 
+source: string,
 /**
  * Column order in the source.
  */
 order: number, };
-export type ProjectMeta = { id: string, name: string, description: string | null, created_at: string, total_records: number, flagged_records: number, ioc_applied_records: number, source_sha256: string | null, 
+export type ProjectMeta = { id: string, name: string, description: string | null, created_at: string, total_records: number, flagged_records: number, ioc_applied_records: number, source_sha256: string | null,
 /**
  * Original file name as selected by the user. Legacy projects and
  * hand-built fixtures have none.
  */
-source_file_name: string | null, 
+source_file_name: string | null,
 /**
  * `csv`, `json`, `jsonl`, or `ndjson` when known.
  */
-source_format: string | null, 
+source_format: string | null,
 /**
  * Size of the imported bytes. The recorded hash covers the same bytes.
  */
-source_size: number | null, 
+source_size: number | null,
 /**
  * Absolute path of the evidence file as it was when the project was
  * created. Export refuses to overwrite this file. Legacy projects and
  * hand-built fixtures have none.
  */
-source_path: string | null, hidden_columns: Array<string>, 
+source_path: string | null, hidden_columns: Array<string>,
 /**
  * 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
  */
 storage_version: number, columns: Array<ColumnMeta>, };
 export type ProjectSummary = { meta: ProjectMeta, };
 export type ViewState = { version: number, search: string, searchColumns: Array<string>, condition: JsonValue | null, flagFilter: string, bookmarkedOnly: boolean, sortKey: string | null, sortDirection: string, hiddenColumns: Array<string>, columnWidths: { [key in string]?: number }, logicalRow: number, };
-export type Cell = { 
+export type Cell = {
 /**
  * Preview text for list responses; full text from `get_cell`. `None` for
  * null/missing.
  */
-text: string | null, 
+text: string | null,
 /**
  * "string" | "int" | "float" | "bool" | "null" | "missing"
  */
-kind: string, 
+kind: string,
 /**
  * True when `text` is a prefix of the original value.
  */
-truncated: boolean, 
+truncated: boolean,
 /**
  * Original character count. `None` for null/missing.
  */
 length: number | null, };
-export type ProjectRow = { row_index: number, 
+export type ProjectRow = { row_index: number,
 /**
  * Exact per-column cell DTOs. This is the only row-value map; display,
  * copy and filter values all come from here.
  */
-cells: { [key in string]?: Cell }, flag: string, memo: string | null, tags: Array<string>, bookmarked: boolean, 
+cells: { [key in string]?: Cell }, flag: string, memo: string | null, tags: Array<string>, bookmarked: boolean,
 /**
  * `None` when no color rule matches. Query and flag updates evaluate this
  * in the engine so the frontend never carries a second predicate.
  */
 color: string | null, };
-export type ColorRule = { name: string, condition: Node, 
+export type ColorRule = { name: string, condition: Node,
 /**
  * Normalized "#rrggbb" or "#rgb".
  */
 color: string, };
 export type IocEntry = { flag: string, tag: string, query: string, };
-export type LoadProjectResponse = { project: ProjectSummary, 
+export type LoadProjectResponse = { project: ProjectSummary,
 /**
  * Data column ids in source order. For legacy projects these are the
  * original column names.
  */
-columns: Array<string>, 
+columns: Array<string>,
 /**
  * Display and source metadata for `columns`.
  */
 columns_meta: Array<ColumnMeta>, hidden_columns: Array<string>, column_max_chars: { [key in string]?: number }, column_kinds: { [key in string]?: string }, iocs: Array<IocEntry>, color_rules: Array<ColorRule>, initial_rows: Array<ProjectRow>, };
-export type FlagEntry = { flag: string, memo: string | null, 
+export type FlagEntry = { flag: string, memo: string | null,
 /**
  * User-defined tags. serde's default keeps entries written before F19 readable.
  */
-tags: Array<string>, 
+tags: Array<string>,
 /**
  * Independent bookmark flag. Old entries deserialize as `false`.
  */
 bookmarked: boolean, };
-export type UpdateFlagResponse = { 
+export type UpdateFlagResponse = {
 /**
  * `None` when the patch removed the last annotation on the row.
  */
-entry: FlagEntry | null, 
+entry: FlagEntry | null,
 /**
  * Durable monotonic annotation revision for the project.
  */
-revision: number, 
+revision: number,
 /**
  * Whole-project count after applying this update.
  */
@@ -149,29 +149,29 @@ export type ViewStateRequest = { projectId: string, };
 export type SaveViewStatePayload = { projectId: string, state: ViewState, };
 export type QuerySpec = { search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
 export type QueryRowsPayload = { projectId: string, offset?: number | null, limit?: number | null, search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
-export type QueryRowsResponse = { rows: Array<ProjectRow>, 
+export type QueryRowsResponse = { rows: Array<ProjectRow>,
 /**
  * Annotated rows in the whole project (user flags only).
  */
-annotated_total: number, 
+annotated_total: number,
 /**
  * Annotated rows inside the current result set.
  */
-annotated_filtered: number, 
+annotated_filtered: number,
 /**
  * Rows in the whole project.
  */
-total_rows: number, 
+total_rows: number,
 /**
  * Rows matching the current QuerySpec.
  */
 total_filtered_rows: number, offset: number, };
-export type LocateRowPayload = { projectId: string, 
+export type LocateRowPayload = { projectId: string,
 /**
  * Zero-based original row id, matching the table's one-based `#` minus 1.
  */
 rowIndex: number, search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
-export type LocateRowResponse = { 
+export type LocateRowResponse = {
 /**
  * Zero-based position inside the current filtered/sorted result, if any.
  */
@@ -186,7 +186,7 @@ export type TimeSpan = { start: string, end: string, count: number, };
 export type TimeAnalysis = { column: string, gaps: Array<TimeSpan>, sessions: Array<TimeSpan>, bursts: Array<TimeSpan>, };
 export type GroupTreeNode = { value: JsonValue, label: string, count: number, children: Array<GroupTreeNode>, };
 export type GroupTreeResponse = { columns: Array<string>, nodes: Array<GroupTreeNode>, total: number, };
-export type BulkCount = { count: number, 
+export type BulkCount = { count: number,
 /**
  * Binds a later `bulk_update` to the same spec, row set, and annotated
  * count that this preview observed.
@@ -194,7 +194,7 @@ export type BulkCount = { count: number,
 previewToken: string, };
 export type BulkApplied = { updated: number, };
 export type JobKind = "import" | "query" | "export" | "load" | "analysis" | "mutation";
-export type JobInfo = { id: number, kind: JobKind, projectId: string | null, 
+export type JobInfo = { id: number, kind: JobKind, projectId: string | null,
 /**
  * Transport-level ownership; never part of QuerySpec or result-cache keys.
  */

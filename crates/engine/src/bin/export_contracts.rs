@@ -5,8 +5,10 @@ use ts_rs::TS;
 
 fn add<T: TS>(out: &mut String) {
     out.push_str("export ");
-    out.push_str(&T::decl());
-    out.push('\n');
+    for line in T::decl().lines() {
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
