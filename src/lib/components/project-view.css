@@ -1485,6 +1485,8 @@ button.primary:disabled {
   overflow: auto;
   max-height: none;
   overscroll-behavior: contain;
+  /* GTK overlay scrollbars have a wider hit area than their visible track. */
+  padding-inline-end: 16px;
 }
 
 button.dialog-close {
