@@ -3,31 +3,35 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  /* The first-run palette follows sumeshi.github.io's #0c111b navy,
+     off-white text and indigo links. Surfaces stay opaque for sticky cells.
+     Source: sumeshi/sumeshi.github.io@88b4e9d, src/app.css. */
+  :root,
+  [data-theme="trivium"] {
     color-scheme: dark;
-    --bg: #0b0d10;
-    --fg: #e8eaed;
-    --muted: #8c95a3;
-    --surface: #12151a;
-    --surface-weak: #171b21;
-    --surface-soft: #15191f;
-    --surface-strong: #1d222a;
-    --overlay: rgba(11, 13, 16, 0.84);
-    --border: #252b34;
-    --border-strong: #35404c;
-    --hover: color-mix(in srgb, var(--fg) 6%, transparent);
+    --bg: #0c111b;
+    --fg: #f3f4f6;
+    --muted: #aab6ca;
+    --surface: #111827;
+    --surface-weak: #19243a;
+    --surface-soft: #151e30;
+    --surface-strong: #22314a;
+    --overlay: rgba(8, 12, 22, 0.88);
+    --border: #34425b;
+    --border-strong: #63738e;
+    --hover: color-mix(in srgb, var(--fg) 6%, var(--surface));
     --heading: var(--fg);
-    --accent: #8ab8b0;
-    --accent-contrast: #0a1412;
-    --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
-    --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
-    --positive: #6bc4a2;
-    --positive-soft: color-mix(in srgb, var(--positive) 16%, transparent);
-    --warning: #dfb36d;
-    --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
-    --danger: #df7f7f;
-    --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
-    --flag-selected-text: #08110f;
+    --accent: #a5b4fc;
+    --accent-contrast: #101525;
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    --accent-border: var(--accent);
+    --positive: #81d0a5;
+    --positive-soft: color-mix(in srgb, var(--positive) 14%, var(--surface));
+    --warning: #f0c879;
+    --warning-soft: color-mix(in srgb, var(--warning) 14%, var(--surface));
+    --danger: #f29b9b;
+    --danger-soft: color-mix(in srgb, var(--danger) 14%, var(--surface));
+    --flag-selected-text: #111827;
     --flag-safe-text: var(--positive);
     --flag-suspicious-text: var(--warning);
     --flag-critical-text: var(--danger);
@@ -51,37 +55,43 @@
     --rule-pink: #472a3b;
   }
 
+  [data-theme="dark"] {
+    --bg: #101318;
+    --fg: #edf1f7;
+    --muted: #afbbcb;
+    --surface: #171c24;
+    --surface-weak: #222b37;
+    --surface-soft: #1c2430;
+    --surface-strong: #2c3747;
+    --overlay: rgba(10, 13, 18, 0.9);
+    --border: #3a475b;
+    --border-strong: #6a7a94;
+    --accent: #9ec5ef;
+    --accent-contrast: #111b2b;
+  }
+
   [data-theme="light"],
   [data-theme="paper"] {
     color-scheme: light;
-    --bg: #f4f3ef;
-    --fg: #1b1f24;
-    --muted: #6c737d;
+    --bg: #f2f5fa;
+    --fg: #202b3d;
+    --muted: #4f5f74;
     --surface: #ffffff;
-    --surface-weak: #eeece6;
-    --surface-soft: #f8f7f3;
-    --surface-strong: #e7e4dc;
-    --overlay: rgba(244, 243, 239, 0.88);
-    --border: #dedbd3;
-    --border-strong: #c8c4ba;
-    --hover: color-mix(in srgb, var(--fg) 5%, transparent);
-    --heading: var(--fg);
-    --accent: #2d6a62;
+    --surface-weak: #e9eef6;
+    --surface-soft: #f7f9fc;
+    --surface-strong: #dce4f0;
+    --overlay: rgba(236, 241, 248, 0.88);
+    --border: #c5cfdd;
+    --border-strong: #8192ab;
+    --hover: color-mix(in srgb, var(--fg) 5%, var(--surface));
+    --accent: #5948a5;
     --accent-contrast: #ffffff;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-border: color-mix(in srgb, var(--accent) 34%, transparent);
-    --positive: #2f7d5c;
-    --positive-soft: color-mix(in srgb, var(--positive) 12%, transparent);
-    --warning: #a66c2c;
-    --warning-soft: color-mix(in srgb, var(--warning) 12%, transparent);
-    --danger: #b94e4e;
-    --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+    --positive: #176345;
+    --warning: #80520b;
+    --danger: #a72840;
     --flag-selected-text: #ffffff;
-    --flag-safe-text: var(--positive);
-    --flag-suspicious-text: var(--warning);
-    --flag-critical-text: var(--danger);
-    --shadow-soft: 0 8px 24px rgba(31, 41, 55, 0.07);
-    --shadow-strong: 0 18px 48px rgba(31, 41, 55, 0.14);
+    --shadow-soft: 0 8px 24px rgba(31, 41, 55, 0.09);
+    --shadow-strong: 0 18px 48px rgba(31, 41, 55, 0.17);
     --rule-red: #fbe4e4;
     --rule-orange: #fbe9db;
     --rule-amber: #faf1d5;
@@ -92,36 +102,51 @@
     --rule-pink: #fbe4ef;
   }
 
-  /* Extra themes change surfaces and accents. Semantic flag colours retain
-     the corresponding Light/Dark values above. */
   [data-theme="paper"] {
-    --bg: #efebe1;
-    --fg: #302e29;
-    --muted: #706b61;
-    --surface: #fcfaf3;
-    --surface-weak: #ede8db;
-    --surface-soft: #f6f2e8;
-    --surface-strong: #e5dfd0;
-    --overlay: rgba(239, 235, 225, 0.9);
-    --border: #d9d1c0;
-    --border-strong: #bfb49f;
-    --accent: #526d56;
+    --bg: #f4f0e6;
+    --fg: #30352f;
+    --muted: #596255;
+    --surface: #fffdf7;
+    --surface-weak: #eee9dc;
+    --surface-soft: #f8f4ea;
+    --surface-strong: #e4decf;
+    --overlay: rgba(244, 240, 230, 0.9);
+    --border: #c9c2b2;
+    --border-strong: #918974;
+    --accent: #65509b;
     --accent-contrast: #ffffff;
   }
 
   [data-theme="midnight"] {
-    --bg: #0c1420;
-    --fg: #e2e9f3;
-    --muted: #93a2b8;
-    --surface: #111c2b;
-    --surface-weak: #172438;
-    --surface-soft: #142133;
-    --surface-strong: #1d2e45;
-    --overlay: rgba(12, 20, 32, 0.9);
-    --border: #293b51;
-    --border-strong: #3d526b;
-    --accent: #9cb9dc;
-    --accent-contrast: #0c1724;
+    --bg: #080f1d;
+    --fg: #e8eefb;
+    --muted: #abbdd7;
+    --surface: #0d182b;
+    --surface-weak: #14263f;
+    --surface-soft: #101f35;
+    --surface-strong: #1d3351;
+    --overlay: rgba(6, 12, 24, 0.92);
+    --border: #344c6b;
+    --border-strong: #607f9f;
+    --accent: #a6c8f4;
+    --accent-contrast: #0a1424;
+  }
+
+  /* A restrained pastel/mauve alternative inspired by Catppuccin's colour
+     families. Semantic flag colours remain shared with the other dark themes. */
+  [data-theme="mauve"] {
+    --bg: #191925;
+    --fg: #eeeaf9;
+    --muted: #bfb8d2;
+    --surface: #222235;
+    --surface-weak: #2d2c45;
+    --surface-soft: #27263d;
+    --surface-strong: #3b3856;
+    --overlay: rgba(18, 17, 29, 0.91);
+    --border: #4d4b6d;
+    --border-strong: #82779e;
+    --accent: #c6aff2;
+    --accent-contrast: #221b36;
   }
 
   html,

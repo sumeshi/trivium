@@ -15,6 +15,10 @@
   export let pendingDelimiter: string;
   export let canCreateProject: boolean;
 
+  $: selectedFormat = pendingFileName.split('.').at(-1)?.toLowerCase() ?? '';
+  $: csvSettingsRelevant = !pendingFileName || selectedFormat === 'csv';
+  const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
+
   const truncateText = (text: string, length: number) => {
     return text.length > length ? `${text.slice(0, length)}…` : text;
   };
@@ -64,11 +68,16 @@
     </header>
 
     <section class="import-panel">
-      <button class="button primary full" on:click={() => dispatch('pickCsv')}>
+      <div class="import-heading">
+        <h3>Open a data file</h3>
+        <p id="import-formats">CSV · JSON · JSONL / NDJSON</p>
+      </div>
+      <button class="button choose-file full" disabled={creating}
+        aria-describedby="import-formats" on:click={() => dispatch('pickCsv')}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 16V4m0 0L7 9m5-5 5 5M4 20h16" />
+          <path d="M3 7h7l2-3h9v16H3V7Z" />
         </svg>
-        Import log file
+        {pendingFileName ? 'Choose another file' : 'Choose data file'}
       </button>
       {#if pendingFileName}
         <div class="pending-file" title={pendingFileName}>
@@ -85,31 +94,39 @@
             placeholder="Optional"
             value={pendingDescription}
             on:input={handleDescriptionInput}
+            disabled={creating}
           />
         </label>
         <label class="field">
           <span>CSV delimiter</span>
           <select
             aria-label="CSV delimiter"
-            value={pendingDelimiter}
+            value={pendingDelimiter === ',' ? '' : pendingDelimiter}
             on:change={handleDelimiterChange}
+            disabled={creating || !csvSettingsRelevant}
+            aria-describedby="csv-import-help"
           >
-            <option value="">Comma</option>
-            <option value=",">Comma ,</option>
+            <option value="">Comma , (default)</option>
             <option value={'\t'}>Tab</option>
             <option value=";">Semicolon ;</option>
             <option value="|">Pipe |</option>
           </select>
         </label>
       </div>
+      <p class="import-help" id="csv-import-help">
+        {csvSettingsRelevant
+          ? 'CSV uses its first row as column names. Choose the separator used by your file.'
+          : 'CSV separator settings do not apply to JSON or JSONL files.'}
+      </p>
 
       <button
-        class="button accent full"
+        class="button primary full"
         disabled={!canCreateProject || creating}
         on:click={() => dispatch('createProject')}
       >
-        {creating ? 'Importing…' : 'Create project'}
+        {creating ? 'Importing…' : 'Import and open'}
       </button>
+      <p class="import-help">Creates a saved investigation you can reopen from Recent. Your source file stays unchanged.</p>
     </section>
 
     <section class="project-section">
@@ -145,11 +162,16 @@
                 on:click={() => dispatch('selectProject', project.meta.id)}
               >
                 <div class="project-top">
-                  <span class="project-name">{truncateText(project.meta.name, 34)}</span>
+                  <span class="project-name" title={project.meta.source_file_name || project.meta.name}>{project.meta.name}</span>
                   <span class="project-date">
                     {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
                   </span>
                 </div>
+                {#if project.meta.source_sha256}
+                  <div class="project-hash" title={`SHA-256: ${project.meta.source_sha256}`}>
+                    <span>SHA-256</span><code>{shortSha(project.meta.source_sha256)}</code>
+                  </div>
+                {/if}
                 {#if project.meta.description}
                   <p class="project-desc">{truncateText(project.meta.description, 70)}</p>
                 {/if}
@@ -265,6 +287,9 @@
     background: var(--surface-weak);
   }
 
+  .import-heading h3 { margin: 0 0 3px; color: var(--fg); font-size: 12.5px; font-weight: 600; }
+  .import-heading p, .import-help { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+
   .button {
     display: inline-flex;
     align-items: center;
@@ -291,16 +316,8 @@
     filter: brightness(1.06);
   }
 
-  .button.accent {
-    background: var(--surface);
-    color: var(--fg);
-    border-color: var(--border-strong);
-  }
-
-  .button.accent:hover:not(:disabled) {
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-  }
+  .button.choose-file { border-color: var(--border-strong); background: var(--surface); color: var(--fg); }
+  .button.choose-file:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-soft); }
 
   .button:disabled {
     opacity: 0.45;
@@ -366,6 +383,7 @@
     border-color: var(--accent-border);
     box-shadow: 0 0 0 3px var(--accent-soft);
   }
+  .field select:disabled, .field input:disabled { opacity: .6; cursor: not-allowed; }
 
   .project-section {
     display: flex;
@@ -470,6 +488,9 @@
     color: var(--muted);
     font-size: 11px;
   }
+
+  .project-hash { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+  .project-hash code { font: 10.5px var(--font-mono); white-space: nowrap; }
 
   .project-stats {
     display: flex;

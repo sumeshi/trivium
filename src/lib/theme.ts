@@ -1,7 +1,7 @@
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
-import { parseTheme } from "./themeModel.ts";
+import { DEFAULT_THEME, parseTheme } from "./themeModel.ts";
 import type { Theme } from "./themeModel";
 
 export { THEME_OPTIONS } from "./themeModel";
@@ -12,14 +12,7 @@ const THEME_FILE = "theme.json";
 let themeRevision = 0;
 let pendingWrite = Promise.resolve();
 
-function systemTheme(): Theme {
-  if (typeof window !== "undefined" && window.matchMedia) {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  return "light";
-}
-
-export const theme = writable<Theme>(systemTheme());
+export const theme = writable<Theme>(DEFAULT_THEME);
 
 function applyThemeAttr(next: Theme) {
   const root = document.documentElement;
@@ -49,7 +42,7 @@ export async function initTheme() {
 
   // A theme chosen while the file was loading takes precedence over that read.
   if (revision !== themeRevision) return;
-  const next = loaded ?? systemTheme();
+  const next = loaded ?? DEFAULT_THEME;
   applyThemeAttr(next);
   theme.set(next);
 }

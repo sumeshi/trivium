@@ -3,6 +3,7 @@
   import type { LoadProjectResponse } from '../../types';
   import { theme, setTheme, THEME_OPTIONS } from '../../theme';
   import { parseTheme } from '../../themeModel';
+  import { BUILD_LABEL } from '../../buildInfo';
 
   export let projectDetail: LoadProjectResponse | null;
 
@@ -91,21 +92,21 @@
           <span class="brand-slash" aria-hidden="true">/</span>
           <span class="project-title" title={fileName}>{fileName}</span>
         {/if}
+        {#if meta?.source_sha256}
+          <button
+            type="button"
+            class="sha-button"
+            on:click={() => void copySha()}
+            aria-label="Copy full SHA-256"
+            title={`SHA-256: ${meta.source_sha256}\nCopy full hash`}
+          >
+            <span class="sha-text">{shortSha(meta.source_sha256)}</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V3H3v13h5" />
+            </svg>
+          </button>
+        {/if}
       </div>
-      {#if meta?.source_sha256}
-        <button
-          type="button"
-          class="sha-button"
-          on:click={() => void copySha()}
-          aria-label="Copy full SHA-256"
-          title={`SHA-256: ${meta.source_sha256}\nCopy full hash`}
-        >
-          {shortSha(meta.source_sha256)}
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V3H3v13h5" />
-          </svg>
-        </button>
-      {/if}
     </div>
   </div>
 
@@ -141,6 +142,9 @@
         {#if meta?.description}
           <p class="project-description">{meta.description}</p>
         {/if}
+        <p class="build-identity" aria-label="Application version">
+          <span>Version</span><span>{BUILD_LABEL}</span>
+        </p>
       </div>
     </details>
   </div>
@@ -149,7 +153,7 @@
 <style>
   .app-header {
     flex: 0 0 auto;
-    height: 44px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -168,10 +172,13 @@
   }
   .header-left { flex: 1; }
   .header-actions { flex-shrink: 0; }
-  .brand-block { min-width: 0; }
-  .brand-name { font-size: 14px; font-weight: 650; }
-  .brand-slash { color: var(--muted); font-size: 14px; }
+  .brand-block { min-width: 0; flex: 1; }
+  .brand-line { flex-wrap: nowrap; white-space: nowrap; }
+  .brand-name { flex: 0 0 auto; font-size: 14px; font-weight: 650; }
+  .brand-slash { flex: 0 0 auto; color: var(--muted); font-size: 14px; }
   .project-title {
+    min-width: 0;
+    flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -179,7 +186,10 @@
     font-size: 13px;
   }
   .sha-button {
-    display: flex;
+    display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 64px;
+    max-width: 126px;
     align-items: center;
     gap: 5px;
     padding: 0;
@@ -188,7 +198,10 @@
     color: var(--muted);
     font: 10.5px var(--font-mono);
     line-height: 14px;
+    white-space: nowrap;
   }
+  .sha-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .sha-button svg { flex: 0 0 auto; }
   .sha-button:hover { color: var(--fg); }
   .icon-button {
     display: inline-flex;
@@ -207,7 +220,7 @@
   .icon-button::-webkit-details-marker { display: none; }
   .icon-button:hover, .workspace-menu[open] > summary { background: var(--surface-weak); color: var(--fg); }
   button:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
-  .copy-status { color: var(--muted); font-size: 11px; }
+  .copy-status { color: var(--muted); font-size: 11px; white-space: nowrap; }
   .workspace-menu { position: relative; }
   .workspace-options {
     position: absolute;
@@ -226,5 +239,6 @@
   .menu-action:hover { background: var(--surface-weak); }
   .menu-action:disabled { opacity: .45; cursor: default; }
   .project-description { margin: 5px 5px 2px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; overflow-wrap: anywhere; max-height: 96px; overflow-y: auto; }
+  .build-identity { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 5px 2px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10.5px; }
   @media (max-width: 540px) { .copy-status { position: absolute; right: 44px; bottom: 0; font-size: 10px; } }
 </style>

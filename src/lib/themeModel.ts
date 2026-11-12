@@ -1,8 +1,12 @@
+export const DEFAULT_THEME = "trivium" as const;
+
 export const THEME_OPTIONS = [
+  { value: "trivium", label: "Trivium" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "paper", label: "Paper" },
   { value: "midnight", label: "Midnight" },
+  { value: "mauve", label: "Mauve" },
 ] as const;
 
 export type Theme = (typeof THEME_OPTIONS)[number]["value"];
