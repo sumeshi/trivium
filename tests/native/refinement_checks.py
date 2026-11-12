@@ -95,9 +95,9 @@ const rgba=v=>{c.clearRect(0,0,1,1);c.fillStyle=v;c.fillRect(0,0,1,1);return [..
 const row=id=>[...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()===String(id));
 const distance=(a,b)=>Math.hypot(...a.slice(0,3).map((n,i)=>n-b[i]));
 const sample=id=>{const e=row(id),s=getComputedStyle(e),bg=rgba(s.backgroundColor),gold=rgba(s.getPropertyValue('--bookmark'));
- const base=rgba(s.getPropertyValue('--row-color')||s.getPropertyValue('--surface'));
+ const base=rgba(s.getPropertyValue('--row-color')||s.getPropertyValue('--row-base')||s.getPropertyValue('--surface'));
  return {id,bookmarked:e.classList.contains('bookmarked'),custom:!!e.style.getPropertyValue('--row-color'),bg,gold,
-  closerToGold:distance(bg,gold)<distance(base,gold),marker:getComputedStyle(e.querySelector('.select-cell')).boxShadow,
+  closerToGold:distance(bg,gold)<distance(base,gold),tintFraction:distance(bg,base)/distance(gold,base),marker:getComputedStyle(e.querySelector('.select-cell')).boxShadow,
   pinned:[...e.querySelectorAll(':scope>.sticky')].map(x=>({alpha:rgba(getComputedStyle(x).backgroundColor)[3],opacity:getComputedStyle(x).opacity}))};};
 const lum=rgb=>{const a=rgb.slice(0,3).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;});return a[0]*.2126+a[1]*.7152+a[2]*.0722;};
 const contrast=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
@@ -137,6 +137,7 @@ def _bookmarked_rows(web, data, evidence: Path, report) -> None:
             for row in sample["rows"]:
                 assert row["bookmarked"] and row["bg"][3] == 255 and row["closerToGold"] and row["marker"] != "none", row
                 assert row["gold"][0] > row["gold"][2] and row["gold"][1] > row["gold"][2], row
+                assert 0 < row["tintFraction"] < .12, "Bookmark tint stays subtle over the original row colour"
                 assert all(cell["alpha"] == 255 and cell["opacity"] == "1" for cell in row["pinned"]), row
             assert sample["memo"]["emptyText"] == "Add memo" and sample["memo"]["filledText"] == "Persist native audit", sample
             assert sample["memo"]["emptyOpacity"] == "1" and sample["memo"]["emptyContrast"] < sample["memo"]["filledContrast"], sample

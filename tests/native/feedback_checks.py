@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import uuid
 
 from row_navigation import wait_for
 
@@ -22,21 +23,36 @@ def _horizontal_to(web, target: int) -> None:
     # A trusted header click settles focus after a case remount. If WebKit
     # swallows that first wheel, retry only the measured remaining distance.
     web.tap(web.element('.data-header .sticky-index'))
+    web.script("""
+      window.__feedbackWheelProbe=[];
+      if(!window.__feedbackWheelListener){
+        window.__feedbackWheelListener=e=>{
+          const p={deltaX:e.deltaX,deltaY:e.deltaY,prevented:e.defaultPrevented,cancelable:e.cancelable,trusted:e.isTrusted,
+            target:String(e.target?.className??''),body:document.querySelector('.virtual-viewport')?.scrollLeft,
+            header:document.querySelector('.table-header-scroll')?.scrollLeft};
+          window.__feedbackWheelProbe.push(p);if(window.__feedbackWheelProbe.length>12)window.__feedbackWheelProbe.shift();
+        };
+        addEventListener('wheel',window.__feedbackWheelListener,{passive:true});
+      }
+    """)
     for attempt in range(3):
         current = web.state()["scrollLeft"]
         if current == target:
             assert web.script("return document.querySelector('.table-header-scroll').scrollLeft;") == target
             return
         point = web.script("const r=document.querySelector('.table-header-scroll').getBoundingClientRect();return {x:Math.round(Math.min(r.left+600,innerWidth-20)),y:Math.round(r.top+r.height/2)};")
-        web.request("POST", web.route("actions"), {"actions": [{"type": "wheel", "id": "feedback-wheel", "actions": [
+        # WebKitWebDriver reuses the previous impulse as wheel-source state.
+        # A fresh source avoids converting +700 after -700 into a +1400 event.
+        web.request("POST", web.route("actions"), {"actions": [{"type": "wheel", "id": f"feedback-wheel-{uuid.uuid4().hex}", "actions": [
             {"type": "scroll", **point, "deltaX": target-current, "deltaY": 0, "duration": 0}]}]})
         try:
             wait_for(lambda: web.script("return {body:document.querySelector('.virtual-viewport').scrollLeft,header:document.querySelector('.table-header-scroll').scrollLeft};"),
                 lambda value: value["body"] == target and value["header"] == target, "trusted horizontal wheel moves body and header", timeout=2)
             return
-        except AssertionError:
+        except AssertionError as error:
             if attempt == 2:
-                raise
+                probe=web.script("return window.__feedbackWheelProbe;")
+                raise AssertionError(f"{error}; trusted wheel probe: {probe}") from error
             _settle(web)
 
 

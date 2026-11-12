@@ -23,6 +23,8 @@ import uuid
 from row_navigation import ELEMENT, WebView, free_port, open_project, wait_for
 from feedback_checks import verify_feedback
 from refinement_checks import verify_refinements
+from column_pin_checks import verify_column_pinning
+from detail_timeline_checks import verify_detail_timeline
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -761,6 +763,8 @@ def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -
     available = app.web.script("return [...document.querySelectorAll('select[aria-label=\"Theme\"] option')].map(e=>e.value);")
     app.web.named("Workspace options")
     assert len(available) == len(set(available)) and {"light", "dark", "trivium", "yukari"}.issubset(available), available
+    assert {"yozora", "tasogare", "sumi", "tsukimi"}.issubset(available), available
+    assert not {"fuji", "wakaba", "momiji", "paper"}.intersection(available), available
     for theme in available:
         web = app.web
         web.named("Workspace options")
@@ -774,6 +778,9 @@ def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -
             except (OSError, json.JSONDecodeError):
                 return []
         wait_for(saved_themes, lambda value: theme in value, f"{theme} written to native settings")
+        if theme in {"light", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"}:
+            surfaces = web.script("const c=document.createElement('canvas').getContext('2d'),s=getComputedStyle(document.documentElement);return ['--bg','--surface'].map(name=>{c.clearRect(0,0,1,1);c.fillStyle=s.getPropertyValue(name);c.fillRect(0,0,1,1);return [...c.getImageData(0,0,1,1).data];});")
+            assert all(colour == [255, 255, 255, 255] for colour in surfaces), (theme, surfaces)
         web.screenshot(evidence / f"theme-{theme}.png")
         app.end_session()
         web = app.start()
@@ -807,6 +814,8 @@ def main() -> None:
             for name, run in [
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
+                ("saved arbitrary column pinning", lambda: verify_column_pinning(web, data, root, evidence, report)),
+                ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),

@@ -12,11 +12,11 @@ The investigation usability follow-up starts from `35f2fa3` and identifies build
 | Tab state | Search, nested conditions, sort, visible columns/widths, logical/horizontal scroll, selected original IDs and condition history are restored. Stale responses cannot update another tab. |
 | Header | `Trivium / filename`, shortened SHA with full tooltip/copy, and a compact menu. Reload reads the saved project, without reimporting its source. |
 | Flags | All 16 selections of Safe / Suspicious / Critical / Unflagged share query, analysis, export and bulk targets. Empty selection means all rows. Old string filters remain accepted. |
-| Columns | Searchable, bounded list with Select all / Deselect all. Visibility does not change the query. Writes stay ordered across tab remounts. |
+| Columns | Searchable, bounded list with Select all / Deselect all; header actions hide or freeze through any source column. Hidden columns add no frozen width. Visibility and freezing do not change the query; settings survive reloads and tab changes. |
 | Table controls | Original-row Go / result First and Last, history icons, concise Flagged count. The original 32px rows, 11.5px table text, three flag buttons and Add memo remain. |
 | Analysis tools | One nonmodal side drawer overlays the table. Inactive contents are unmounted; the visible table remains interactive. Column stats, nested Groups, time analysis and timeline share the Analysis category. |
 | Timeline | Initial focus on a dense period, exact outside counts, Show all, zoom/pan/drag, and four flag counts per bucket. Current annotations and query filters are respected. |
-| Themes | Neutral Light is the first-run default; Dark retains its surfaces. The previous Light is now Yukari, with ten pastel choices in total. Other saved themes remain available. Semantic flags use soft selected fills and consistent meanings. |
+| Themes | Neutral Light is the first-run default; Yukari and Dark retain their palettes. Other retained pastels use white bodies and coloured stronger surfaces. Yozora, Tasogare, Sumi and Tsukimi add natural dark choices; retired choices map to current palettes. |
 
 No cross-project timeline, import-time period restriction or automated risk
 classification was added. The architecture follow-up stores case metadata,
@@ -74,8 +74,8 @@ Validated on Debian 13 with Node 24.22.1 and Rust 1.99.1:
 
 | Check | Result |
 | --- | --- |
-| Complete engine suite | 349 successful executions including the migration subprocess; 0 failures |
-| UI unit suite | 116 passed |
+| Complete engine suite | 350 successful executions including the migration subprocess; 0 failures |
+| UI unit suite | 138 passed |
 | Svelte and test TypeScript checks | Passed; 0 errors / 0 Svelte warnings |
 | Frontend and embedded-assets native builds | Passed |
 | Engine Clippy, all targets, `-D warnings` | Passed |
@@ -259,3 +259,54 @@ rows: `target/native-refinement-navigation/9828ac1274a9/report.json`.
 All 349 engine executions, 116 UI tests, strict engine Clippy, generated IPC
 contracts, Svelte/TypeScript and the embedded-assets build pass. Windows GUI
 automation retains the previously documented debugging-endpoint limitation.
+
+## Column controls, readable details and supplied branding
+
+The final embedded-assets app at `ac59025` passed all 11 stages in
+`target/native-polish-branded-final/ddd26d9b55aa/report.json`: 19 real native
+sessions, 463 IPC calls, zero JavaScript errors and zero transport retries.
+One deliberately invalid datetime query is still the only expected native
+error. The complete 350-execution engine suite, 138 UI tests, strict engine
+Clippy, generated contracts, Svelte/TypeScript and native build pass.
+
+- Header menus hide a column or freeze the visible source prefix through any
+  chosen column. Hidden predecessors and a hidden boundary add no width.
+  View reloads, tab switches and old presets preserve the boundary; old view
+  files retain first-visible-column freezing. Unfreeze is available even when
+  every data column is hidden. These operations start no row queries.
+- Oversized frozen prefixes pan beneath the opaque, fixed annotation columns.
+  A native 4 × 450px fixture verifies trusted wheel and keyboard access to every
+  frozen header and the next scrolling column. Ordinary fitting prefixes stay
+  fixed. Newly frozen headers/cells do not animate from transparency.
+- Full-row details have bordered fields and per-field Copy / Filter in / Filter
+  out. Exact long text, empty strings and `18446744073709551615` pass native
+  copy/filter checks, including Enter on Copy. Null/missing fields are distinct.
+  The old Around UI starts no `surrounding_rows` calls; this removes the full
+  datetime scan/sort previously performed on every detail open. Only focused
+  or truncated/missing DTOs need full-cell IO, with at most two reads at once.
+- Timeline count bars retain their original proportions. A separate presence
+  marker makes one flagged event visible beside a 200-event unflagged peak.
+  Intermediate UTC ticks, exact visible/selected periods and all four bucket
+  counts remain readable without a hover tooltip. Inspection and keyboard
+  movement issue zero additional histogram reads; wheel/pan/drag still pass.
+- Auxiliary category headings are noninteractive `h3` elements in a separate
+  band above the tabs. Bookmark backgrounds use a subtle 5% gold tint and a
+  narrow marker, while all pinned layers remain opaque.
+- White-led retained pastels and the four additional dark themes survive real
+  restarts. Retired Fuji/Wakaba/Momiji/Paper settings resolve to current themes.
+  The startup HTML uses the same versioned theme parser as the application.
+- The supplied square icon and README banner are stored unchanged in
+  `assets/branding/`. Tauri's official converter produces the 512px application
+  PNG and multi-resolution ICO; the browser favicon uses that ICO. Original
+  image hashes match the provided ZIP, and repeat conversion is byte-identical.
+
+Original-row navigation also passed with 5,199 and 2,000,000 rows on the feature
+build: `target/native-polish-navigation-verified/7ee6c6b9ea82/report.json`.
+The native wheel helper uses a fresh WebDriver wheel source per impulse:
+reusing a source made WebKitWebDriver deliver the difference between successive
+impulses. Trusted DOM event probes diagnose that driver behaviour; no script
+assigns scroll positions to satisfy gesture checks.
+
+The native import picker selected-path response is the only substituted import
+interaction. Actual OS import/export pickers and package installation remain
+unverified; Windows automation has the previously recorded connection blocker.
