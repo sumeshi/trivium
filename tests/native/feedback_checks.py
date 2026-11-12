@@ -74,6 +74,9 @@ def _header_and_search(web, data, evidence, report) -> None:
     assert header["filename"] == data["filename"] and data["sha"] in header["hash"], header
     assert header["sameLine"] and header["hashAfterName"] and header["headerHeight"] <= 40, header
     assert web.script("return [...document.querySelectorAll('.tool-groups > button')].map(e=>e.textContent.trim());") == ["Filters", "Analysis", "Annotations"]
+    assert web.script("return document.querySelector('button[aria-controls=\"flag-filter-menu\"]').textContent.trim();") == "", "Flags uses an accessible icon without the redundant All/count label"
+    assert web.script("return [...document.querySelectorAll('.history-buttons button,.row-jump button')].every(e=>!e.textContent.trim()&&e.getAttribute('aria-label')&&e.title);")
+    assert web.script("return document.querySelector('.history-buttons').textContent.trim();") == "", "Rule history keeps its accessible name without a visible heading"
     export = web.script("const e=document.querySelector('[aria-label=\"Export rows\"]');return e&&{text:e.textContent.trim(),title:e.title};")
     assert export and export["text"] == "" and export["title"], export
     web.named("Workspace options")
@@ -195,7 +198,7 @@ def _sticky_feedback(web, data, evidence, report) -> None:
         _settle(web)
         # The header wheel is a trusted action and must move the real body.
         _horizontal_to(web, 700)
-        for name in ("trivium", "light", "mauve"):
+        for name in ("trivium", "light", "shion"):
             _theme(web, name); _settle(web)
             sample = _check_sticky(web, ".data-row:not(.loading)", name)
             assert sample["customColourApplied"], (name, sample)

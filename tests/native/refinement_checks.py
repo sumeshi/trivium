@@ -139,7 +139,7 @@ def _bookmarked_rows(web, data, evidence: Path, report) -> None:
                 assert row["gold"][0] > row["gold"][2] and row["gold"][1] > row["gold"][2], row
                 assert 0 < row["tintFraction"] < .12, "Bookmark tint stays subtle over the original row colour"
                 assert all(cell["alpha"] == 255 and cell["opacity"] == "1" for cell in row["pinned"]), row
-            assert sample["memo"]["emptyText"] == "Add memo" and sample["memo"]["filledText"] == "Persist native audit", sample
+            assert sample["memo"]["emptyText"] == "Add note" and sample["memo"]["filledText"] == "Persist native audit", sample
             assert sample["memo"]["emptyOpacity"] == "1" and sample["memo"]["emptyContrast"] < sample["memo"]["filledContrast"], sample
             sample["sticky"] = _check_sticky(web, ".data-row:not(.loading)", name + " bookmarked")
             samples.append(sample)

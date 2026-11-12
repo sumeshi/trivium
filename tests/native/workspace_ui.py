@@ -25,6 +25,8 @@ from feedback_checks import verify_feedback
 from refinement_checks import verify_refinements
 from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
+from compact_detail_checks import verify_compact_detail
+from scroll_render_checks import verify_scroll_rendering
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -354,7 +356,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.flags([])
     web.results(total)
     web.drawer("Bulk annotation")
-    web.write('input[aria-label="Bulk memo"]', "delayed bulk audit")
+    web.write('input[aria-label="Bulk note"]', "delayed bulk audit")
     before = len(web.trace())
     web.named("Preview", "#analysis-drawer")
     wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_preview" and "result" in entry), None), bool, "delayed bulk preview")
@@ -567,7 +569,7 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
         wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='512')?.querySelector('.flag-buttons button.selected')?.getAttribute('aria-label');"), lambda value: value == flag, "last row flag remains reachable beside horizontal scrolling")
     memo = web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='512')?.querySelector('.memo-button');")
     web.tap(memo)
-    wait_for(lambda: web.script("return !!document.querySelector('[role=dialog][aria-label=\"Edit memo for row 512\"]');"), bool, "last-row Add memo opens")
+    wait_for(lambda: web.script("return !!document.querySelector('[role=dialog][aria-label=\"Edit note for row 512\"]');"), bool, "last-row Add note opens")
     web.named("Cancel", ".memo-dialog")
     web.screenshot(evidence / "last-row-flags.png")
     web.button("First")
@@ -742,29 +744,12 @@ def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Pa
 
 
 def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -> None:
-    # Seed only this test profile's previous-format preferences, then launch
-    # the actual bundled app to exercise both persistence read paths.
-    app.web.script("localStorage.setItem('trivium:theme','light');")
-    app.end_session()
-    web = app.start()
-    wait_for(lambda: web.script("return document.documentElement.dataset.theme;"),
-        lambda value: value == "yukari", "legacy localStorage Light retains its palette as Yukari")
-    web.script("localStorage.removeItem('trivium:theme');")
-    app.end_session()
-    settings = list(root.rglob("theme.json"))
-    assert len(settings) == 1, settings
-    settings[0].write_text(json.dumps({"theme": "light"}), encoding="utf-8")
-    web = app.start()
-    wait_for(lambda: web.script("return document.documentElement.dataset.theme;"),
-        lambda value: value == "yukari", "legacy native-file Light retains its palette as Yukari")
-    report["legacy_theme_migration"] = {"localStorage_light": "yukari", "native_file_light": "yukari"}
     restored = []
     app.web.named("Workspace options")
     available = app.web.script("return [...document.querySelectorAll('select[aria-label=\"Theme\"] option')].map(e=>e.value);")
     app.web.named("Workspace options")
-    assert len(available) == len(set(available)) and {"light", "dark", "trivium", "yukari"}.issubset(available), available
-    assert {"yozora", "tasogare", "sumi", "tsukimi"}.issubset(available), available
-    assert not {"fuji", "wakaba", "momiji", "paper"}.intersection(available), available
+    assert available == ["trivium", "light", "dark", "toki", "sakura", "kohaku", "hisui", "nagi",
+        "sora", "yukari", "sumire", "yozora", "shion", "kasumi"], available
     for theme in available:
         web = app.web
         web.named("Workspace options")
@@ -814,7 +799,9 @@ def main() -> None:
             for name, run in [
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
+                ("stable stripes while scrolling", lambda: verify_scroll_rendering(web, data, evidence, report)),
                 ("saved arbitrary column pinning", lambda: verify_column_pinning(web, data, root, evidence, report)),
+                ("compact scrollable row detail", lambda: verify_compact_detail(web, data, root, evidence, report)),
                 ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),

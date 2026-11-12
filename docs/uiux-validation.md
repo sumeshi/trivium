@@ -13,10 +13,10 @@ The investigation usability follow-up starts from `35f2fa3` and identifies build
 | Header | `Trivium / filename`, shortened SHA with full tooltip/copy, and a compact menu. Reload reads the saved project, without reimporting its source. |
 | Flags | All 16 selections of Safe / Suspicious / Critical / Unflagged share query, analysis, export and bulk targets. Empty selection means all rows. Old string filters remain accepted. |
 | Columns | Searchable, bounded list with Select all / Deselect all; header actions hide or freeze through any source column. Hidden columns add no frozen width. Visibility and freezing do not change the query; settings survive reloads and tab changes. |
-| Table controls | Original-row Go / result First and Last, history icons, concise Flagged count. The original 32px rows, 11.5px table text, three flag buttons and Add memo remain. |
+| Table controls | Original-row Go / result First and Last, history icons, concise Flagged count. The original 32px rows, 11.5px table text and three flag buttons remain; annotation actions use Note / Add note labels. |
 | Analysis tools | One nonmodal side drawer overlays the table. Inactive contents are unmounted; the visible table remains interactive. Column stats, nested Groups, time analysis and timeline share the Analysis category. |
 | Timeline | Initial focus on a dense period, exact outside counts, Show all, zoom/pan/drag, and four flag counts per bucket. Current annotations and query filters are respected. |
-| Themes | Neutral Light is the first-run default; Yukari and Dark retain their palettes. Other retained pastels use white bodies and coloured stronger surfaces. Yozora, Tasogare, Sumi and Tsukimi add natural dark choices; retired choices map to current palettes. |
+| Themes | Menu order: Trivium, Light, Dark, Toki, Sakura, Kohaku, Hisui, Nagi, Sora, Yukari, Sumire, Yozora, Shion, Kasumi. Light is the first-run default. Only current names and version 2 preference records are accepted; retired aliases and legacy theme formats are removed. |
 
 No cross-project timeline, import-time period restriction or automated risk
 classification was added. The architecture follow-up stores case metadata,
@@ -25,6 +25,9 @@ Existing registry/annotation/settings files remain migration inputs and are
 preserved; public annotation and saved-view field semantics remain compatible.
 Multiselect flags use the existing string field (`safe|critical|none`); legacy
 `all`, `none` and `priority` remain compatible.
+Earlier theme-migration results below are historical evidence for their named
+revisions. The current theme contract is documented in the latest follow-up;
+removing legacy theme preferences does not change case or schema compatibility.
 
 ## Correctness and resource bounds
 
@@ -310,3 +313,128 @@ assigns scroll positions to satisfy gesture checks.
 The native import picker selected-path response is the only substituted import
 interaction. Actual OS import/export pickers and package installation remain
 unverified; Windows automation has the previously recorded connection blocker.
+
+## Compact controls, complete row scrolling and stable row paint
+
+The next follow-up keeps the 32px table rows and existing table text sizes.
+The flag, column, history and original-row navigation controls use compact
+icons with accessible names and tooltips. Redundant navigation captions and
+duplicate totals were removed; current result counts remain above the table.
+The visible annotation label is now **Note** / **Add note**. Stored `memo`
+fields, annotation APIs, saved cases and export data remain compatible.
+
+The detail inspector now uses a compact three-column field layout: name,
+unmodified value, and icon actions for Copy / Filter in. Short fields occupy
+about 30px rather than a separate large card; long values wrap without truncating
+their underlying text. The field region has an explicit flex scroll boundary
+with `min-height: 0`, so it can shrink within the modal rather than pushing
+later fields outside an unscrollable box. The region exposes wheel and
+Home, PageUp/PageDown and End controls. The dialog traps Tab focus and restores
+the originating cell on close. Per-field copy still uses exact complete values, and creating
+a filter does not substitute a displayed preview.
+
+The defect was reproduced before the fix on the actual embedded app:
+`target/native-detail-before/dd3d550fbcd0/report.json`. With 67 fields,
+64 short values and a 10,044-character long value, the apparent scroll region
+reported both `scrollHeight` and `clientHeight` as 538px while the final field
+was below 8,100px. A trusted wheel impulse left `scrollTop` at zero. Short
+fields were about 80.6px high. This baseline records the inaccessible fields,
+rather than inferring the bug from a mocked layout.
+
+Themes are consolidated to 14 offered choices in this order: Trivium, Light,
+Dark, Toki, Sakura, Kohaku, Hisui, Nagi, Sora, Yukari, Sumire, Yozora, Shion,
+Kasumi. Trivium uses near-black navy and blue-black panels; Yozora and Shion
+use lighter night-blue and purple surfaces. Shion retains the former Tsukimi
+palette. Sumire retains the silver-grey surfaces and near-black accents of the
+former Gin palette. Kasumi uses warm grey with a blue-green accent.
+
+Theme preference compatibility was explicitly removed at the user's request.
+Selection accepts only current names; persistence accepts a version 2 record
+`{ "version": 2, "theme": "<current name>" }`, either as an object or its JSON
+string encoding. Plain theme-name preferences, unversioned/version 1 records
+and retired names such as Gin, Tsukimi or Tasogare are rejected. Invalid or
+older preferences fall back to Light rather than being migrated or aliased.
+This change concerns theme settings only; existing cases, schemas, annotation
+data and saved-view semantics remain compatible. Thirteen theme tests cover
+the current order, preference round trips, rejected formats and palette contrast.
+Light and Dark use clearer selected-flag borders and bookmark emphasis;
+the retained pastels keep white main surfaces and coloured accents. The
+Safe / Suspicious / Critical meanings remain green / amber / red.
+
+### Controlled scrolling comparison
+
+The old zebra selector combined `.data-row:nth-child(2n)` with `.alt-row`.
+When the virtual window removed its first DOM row, child indexes changed for
+all retained rows. Their original result positions did not change, so the
+extra selector repainted normal rows as alternate rows on every other window
+shift. The fix removes only the DOM-child selector; `.alt-row` continues to
+follow the actual result position. No row IDs, query, paging, frozen-column
+geometry or cache limits changed.
+
+`target/scroll-profile-paired/summary.json` records a controlled A/B/A comparison
+within one Tauri/WebKitGTK process. Each phase ran twice using the same warmed
+5,199-row, 27-column fixture at 1280 × 827. Each run advanced the native table
+viewport through 160 animation-frame-driven 32px scroll steps. This measures
+real rendering and native scroll events; it is not a trusted-wheel input test.
+Only the zebra selector was changed through the page's CSSOM between phases.
+
+| Phase | Median frame interval, two runs | 95th percentile, two runs | Frames above 50ms |
+| --- | --- | --- | --- |
+| Original selector | 68 / 69ms | 77 / 79ms | 144 / 144 |
+| Result-position selector only | 33 / 33ms | 38 / 39ms | 2 / 0 |
+| Original selector restored | 68 / 67ms | 84 / 77ms | 145 / 145 |
+
+All six runs recorded 162 frames, 160 actual scroll events, 20,056 DOM mutations,
+zero row-query IPCs, zero explicit bounding-rectangle reads and no JavaScript
+errors. Returning to the original selector restored the slowdown in the same
+process, controlling for glyph caches and startup effects. These are debug
+WebKitGTK/Xvfb measurements, not a cross-platform frame-rate guarantee. The
+Long Tasks API is unavailable in this WebKit build, so no long-task result is
+claimed. The separate native regression moves the virtual window from original
+row 1 to row 2 and verifies that retained rows 19 and 20 keep their distinct,
+unchanged backgrounds and opaque fixed cells.
+
+### Current verification
+
+The UI unit suite passes 141 tests. Actual original-row navigation passes for
+5,199 and 2,000,000 rows in
+`target/native-density-navigation/60ffa8a22ccf/report.json`, including filtered
+descending order, excluded-row notifications, first/middle/last geometry,
+annotations, export and delayed responses.
+
+Source `8fd58f6` passed the final 13-stage Linux native workspace run:
+`target/native-density-workspace-verified/3d3b521f22b9/report.json`. All 15 actual
+app sessions and 485 IPC calls completed with zero JavaScript errors, unexpected
+native errors, superseded-query cancellations or transport retries. The single
+deliberate invalid-timestamp rejection is recorded as an expected negative case.
+All 14 themes applied and survived actual app restarts in the listed menu order.
+The 14 native Python tests, build-identity check, Svelte and test TypeScript
+checks also pass.
+
+The 67-field inspector passes at both 827px and 620px window heights. Its 64
+short test fields have a median height of 30px. Trusted wheel input and keyboard
+End each expose the final field; real copy preserves all 10,044 characters, and
+clicking the final field's Filter in applies its complete exact value. These
+checks include real pointer hit testing and successful actions, not only changed
+DOM scroll offsets. No surrounding-timestamp scan is started.
+
+A separate controlled native comparison isolated GTK's overlay-scrollbar hit
+region: `target/native-webkit-gutter-confirmation/63b48a3fd342/report.json`.
+The last Filter in button's centre was 15px from the scroll region's right edge
+and hit the scroll container instead of the button. Reserving a 16px end gutter
+moved that centre to 31px and restored the actual button hit after both wheel
+and keyboard End. The fix leaves field contents and values unchanged.
+
+Right-clicking a partly visible table cell also exposed a focus/scroll race:
+default focus could pan its column, and the queued scroll dismissed the newly
+opened context menu. Suppressing default focus on right-button mouse-down only
+keeps its original horizontal position; normal clicks and keyboard column
+reveal remain available. The final native run verifies opening that menu and
+applying its exact full-value Filter out action.
+
+The tested WebKitWebDriver build released a right-button action as a left click.
+Linux context-menu checks therefore use real XTest OS pointer input through
+Python's standard `ctypes`; CI installs `libxtst6`. No DOM context-menu event is
+substituted. The Windows input path has not been exercised. Native OS import
+and export pickers, package installation and Windows GUI operation retain the
+previously documented verification limits.
