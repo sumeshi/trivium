@@ -35,6 +35,8 @@ export function createWorkspaceState() {
   const currentProjectId = writable<string | null>(null);
   const lastHiddenColumnsRef = writable<string[] | null>(null);
   const hiddenColumns = writable(new Set<string>());
+  /** Missing keeps the first-visible default; empty explicitly unfreezes data. */
+  const frozenThrough = writable<string | undefined>(undefined);
 
   const search = writable("");
   const searchColumns = writable<string[]>([]);
@@ -373,6 +375,7 @@ export function createWorkspaceState() {
     registerLoadedPage,
     resetPageCache,
     visibleColumns,
+    frozenThrough,
     iocDraft,
     toggleSort,
     setFlag,

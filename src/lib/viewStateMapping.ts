@@ -121,6 +121,8 @@ export function savedViewFromUnknown(
     value.logicalRow === undefined
       ? rawOffset
       : nonNegativeInteger(value.logicalRow);
+  const frozenThrough = typeof value.frozenThrough === "string" &&
+    (value.frozenThrough === "" || known.has(value.frozenThrough)) ? value.frozenThrough : undefined;
   return {
     condition,
     search: typeof value.search === "string" ? value.search : "",
@@ -128,6 +130,7 @@ export function savedViewFromUnknown(
     flagFilter: flagFilter(value.flagFilter),
     bookmarkedOnly: value.bookmarkedOnly === true,
     hiddenColumns: stringArray(value.hiddenColumns, known),
+    ...(frozenThrough !== undefined ? { frozenThrough } : {}),
     sortKey:
       typeof value.sortKey === "string" && known.has(value.sortKey)
         ? value.sortKey
@@ -173,6 +176,9 @@ export function viewStateWarnings(
   if (state.sortKey !== null && !known.has(state.sortKey)) {
     warnings.push(`sort column ${state.sortKey}`);
   }
+  if (state.frozenThrough !== undefined && state.frozenThrough !== "" && !known.has(state.frozenThrough)) {
+    warnings.push(`frozen column ${state.frozenThrough}`);
+  }
   const unknownHidden = state.hiddenColumns.filter((column) => !known.has(column));
   if (unknownHidden.length > 0) {
     warnings.push(`hidden columns ${unknownHidden.join(", ")}`);
@@ -192,6 +198,7 @@ export function savedViewToViewState(view: SavedView): ViewState {
     sortKey: view.sortKey,
     sortDirection: view.sortDirection,
     hiddenColumns: [...view.hiddenColumns],
+    ...(view.frozenThrough !== undefined ? { frozenThrough: view.frozenThrough } : {}),
     columnWidths: { ...view.columnWidths },
     logicalRow: view.logicalRow ?? view.offset ?? 0,
   };

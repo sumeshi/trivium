@@ -36,6 +36,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     sortKey: get(workspace.sortKey),
     sortDirection: get(workspace.sortDirection),
     hiddenColumns: Array.from(get(workspace.hiddenColumns)),
+    ...(get(workspace.frozenThrough) !== undefined ? { frozenThrough: get(workspace.frozenThrough) } : {}),
     columnWidths: Object.fromEntries(options.columnWidths()),
     logicalRow: options.logicalRow(),
   });

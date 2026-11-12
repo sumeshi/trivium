@@ -76,7 +76,12 @@ source_path: string | null, hidden_columns: Array<string>,
  */
 storage_version: number, columns: Array<ColumnMeta>, };
 export type ProjectSummary = { meta: ProjectMeta, };
-export type ViewState = { version: number, search: string, searchColumns: Array<string>, condition: JsonValue | null, flagFilter: string, bookmarkedOnly: boolean, sortKey: string | null, sortDirection: string, hiddenColumns: Array<string>, columnWidths: { [key in string]?: number }, logicalRow: number, };
+export type ViewState = { version: number, search: string, searchColumns: Array<string>, condition: JsonValue | null, flagFilter: string, bookmarkedOnly: boolean, sortKey: string | null, sortDirection: string, hiddenColumns: Array<string>,
+/**
+ * Missing keeps first-visible-column freezing; empty unfreezes data.
+ * A column id freezes the source prefix through that id, excluding hidden widths.
+ */
+frozenThrough?: string, columnWidths: { [key in string]?: number }, logicalRow: number, };
 export type Cell = {
 /**
  * Preview text for list responses; full text from `get_cell`. `None` for

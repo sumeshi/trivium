@@ -5,12 +5,16 @@
   export let label: string;
   export let x: number;
   export let y: number;
+  export let frozenThrough: string | undefined = undefined;
 
   const dispatch = createEventDispatcher<{
     close: { restoreFocus: boolean };
     search: { columnId: string };
     rule: { columnId: string };
     group: { columnId: string };
+    hide: { columnId: string };
+    freeze: { columnId: string };
+    unfreeze: void;
   }>();
   let menu: HTMLDivElement;
   let left = x;
@@ -21,7 +25,7 @@
   };
   const keydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') { event.preventDefault(); close(true); return; }
-    const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button')];
+    const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const next = event.key === 'ArrowDown' ? (at + 1) % buttons.length
       : event.key === 'ArrowUp' ? (at - 1 + buttons.length) % buttons.length
@@ -36,7 +40,7 @@
     const rect = menu.getBoundingClientRect();
     left = Math.max(8, Math.min(x, innerWidth - rect.width - 8));
     top = Math.max(8, Math.min(y, innerHeight - rect.height - 8));
-    menu.querySelector<HTMLButtonElement>('button')?.focus();
+    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   });
 </script>
 
@@ -55,9 +59,22 @@
   <button type="button" role="menuitem" on:click={() => dispatch('group', { columnId })}>
     Group by this column
   </button>
+  <div class="column-menu-separator" role="separator"></div>
+  <button type="button" role="menuitem" on:click={() => dispatch('hide', { columnId })}>
+    Hide this column
+  </button>
+  <button type="button" role="menuitem" disabled={frozenThrough === columnId}
+    on:click={() => dispatch('freeze', { columnId })}>
+    Freeze columns through this column
+  </button>
+  <button type="button" role="menuitem" disabled={frozenThrough === ''} on:click={() => dispatch('unfreeze')}>
+    Unfreeze data columns
+  </button>
 </div>
 
 <style>
   .column-context-menu { min-width: 190px; max-width: min(300px, calc(100vw - 16px)); }
+  .column-menu-separator { border-top: 1px solid var(--border); margin: 3px 0; }
+  button:disabled { opacity: .45; cursor: default; }
   .column-menu-label { display: block; padding: 4px 7px 5px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 </style>

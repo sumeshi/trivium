@@ -19,6 +19,8 @@ export interface SavedView {
   flagFilter: FlagFilterValue;
   bookmarkedOnly: boolean;
   hiddenColumns: string[];
+  /** Missing: first visible; empty: none; otherwise freeze through this source id. */
+  frozenThrough?: string;
   sortKey: string | null;
   sortDirection: "asc" | "desc";
   /** Persisted widths keyed by data column id. Rebuilt when absent. */

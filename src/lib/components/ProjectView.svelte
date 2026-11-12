@@ -53,7 +53,7 @@
   const {
     goBack, goForward, historyRestore, recordAppliedCondition, rememberOffset, resetHistory,
     restoreHistory, setHistoryProject, projectDetail: projectDetailStore, backend: backendStore,
-    visibleColumns, hiddenColumns, columnLabels, search, searchColumns, flagFilter,
+    visibleColumns, hiddenColumns, frozenThrough, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
     totalRows, totalFilteredRows, appliedResultLoading, flaggedCount,
     expandedCell, memoEditor, iocManagerOpen, viewportHeight, scrollTop, scrollLeft,
@@ -263,6 +263,7 @@
     sortDirection.set('asc');
     conditionTree.set(emptyTree);
     hiddenColumns.set(new Set(detail.hidden_columns ?? []));
+    frozenThrough.set(undefined);
     initializeColumnWidths();
 
     const saved = await view.loadSavedView(detail, tabSession, () =>
@@ -280,6 +281,7 @@
     flagFilter.set(saved?.flagFilter ?? 'all');
     bookmarkedOnly.set(saved?.bookmarkedOnly ?? false);
     hiddenColumns.set(new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? [])));
+    frozenThrough.set(saved?.frozenThrough);
     sortKey.set(saved?.sortKey ?? null);
     sortDirection.set(saved?.sortDirection ?? 'asc');
     iocDraft.set(detail.iocs.map((entry) => ({
@@ -423,6 +425,7 @@
         flagFilter: $flagFilter,
         bookmarkedOnly: $bookmarkedOnly,
         hidden: Array.from($hiddenColumns),
+        frozenThrough: $frozenThrough,
         sortKey: $sortKey,
         sortDirection: $sortDirection,
         columnWidths,

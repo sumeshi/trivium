@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
+  import { get } from 'svelte/store';
+  import { frozenColumnLayout, horizontalScrollForColumn } from '../../frozenColumns';
+  import { errorMessage } from '../../errors';
   import {
     ROW_HEIGHT, PAGE_SIZE, SELECT_COL_WIDTH, INDEX_COL_WIDTH, FLAG_COL_WIDTH, MEMO_COL_WIDTH,
     STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, CHAR_PIXEL, COLUMN_PADDING, BUFFER,
@@ -24,7 +27,7 @@
     sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
     tableWidth, projectDetail, columnLabels, toggleSort, setFlag, editMemo, openCell,
     handleCellKeydown, positionToRowIndex, largePages, selectedRowIds, selectedCount,
-    selectVisibleRows, toggleRowSelection, rememberOffset, searchColumns,
+    selectVisibleRows, toggleRowSelection, rememberOffset, searchColumns, hiddenColumns, frozenThrough, backend,
   } = useWorkspace();
 
   const _toggleSort = toggleSort;
@@ -79,6 +82,7 @@
   $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column));
   $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
+  $: frozenLayout = frozenColumnLayout($projectDetail?.columns ?? [], $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
@@ -177,6 +181,41 @@
     document.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')?.focus();
   };
 
+  const hideColumn = async (columnId: string) => {
+    const service = get(backend), detail = get(projectDetail);
+    if (!service || !detail?.columns.includes(columnId)) return;
+    const previousIndex = get(visibleColumns).indexOf(columnId);
+    const nextHidden = new Set(get(hiddenColumns));
+    nextHidden.add(columnId);
+    hiddenColumns.set(nextHidden);
+    columnMenu = null;
+    const pending = service.setHiddenColumns({ projectId: detail.project.meta.id, hiddenColumns: [...nextHidden] });
+    await tick();
+    if (get(projectDetail)?.project.meta.id === detail.project.meta.id) {
+      const remaining = get(visibleColumns);
+      const next = remaining[Math.min(previousIndex, remaining.length - 1)];
+      const heading = next ? [...document.querySelectorAll<HTMLElement>('.column-heading')]
+        .find((element) => element.dataset.columnId === next)?.querySelector<HTMLButtonElement>('.column-sort') : null;
+      (heading ?? document.querySelector<HTMLButtonElement>('[aria-label="Choose visible columns"]'))?.focus();
+    }
+    try { await pending; }
+    catch (error) { dispatch('notify', { message: errorMessage(error, 'Failed to save visible columns.'), tone: 'error' }); }
+  };
+  const freezeColumn = async (columnId: string) => {
+    if (!$projectDetail?.columns.includes(columnId)) return;
+    const trigger = columnMenu?.trigger;
+    frozenThrough.set(columnId);
+    columnMenu = null;
+    await tick();
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+  };
+  const unfreezeColumns = async () => {
+    const trigger = columnMenu?.trigger;
+    frozenThrough.set(''); columnMenu = null;
+    await tick();
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+  };
+
   const buildVirtualRows = (
     start: number,
     end: number,
@@ -264,15 +303,9 @@
   };
 
   const focusColumn = (index: number) => {
-    if (!$bodyScrollEl || index === 0 || index >= distributedDataWidths.length) return;
-    const left = STICKY_COLUMNS_WIDTH + distributedDataWidths.slice(0, index).reduce((a, b) => a + b, 0);
-    const right = left + distributedDataWidths[index];
-    const stickyWidth = STICKY_COLUMNS_WIDTH + (distributedDataWidths[0] ?? 0);
-    if (left < $bodyScrollEl.scrollLeft + stickyWidth) {
-      $bodyScrollEl.scrollLeft = Math.max(0, left - stickyWidth);
-    } else if (right > $bodyScrollEl.scrollLeft + $bodyScrollEl.clientWidth) {
-      $bodyScrollEl.scrollLeft = right - $bodyScrollEl.clientWidth;
-    }
+    if (!$bodyScrollEl) return;
+    $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
+      frozenLayout, STICKY_COLUMNS_WIDTH, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
   };
 
@@ -365,12 +398,16 @@
           </div>
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
-          <div class="header-cell sticky sticky-memo">Memo</div>
+          <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Memo</div>
           {#each $visibleColumns as column, columnIndex}
             <div
               class="header-cell column-heading"
-              class:sticky={columnIndex === 0}
-              class:stickyData={columnIndex === 0}
+              class:sticky={frozenLayout.offsets.has(column)}
+              class:stickyData={frozenLayout.offsets.has(column)}
+              class:lastFrozenData={frozenLayout.lastColumn === column}
+              data-column-id={column}
+              data-frozen={frozenLayout.offsets.has(column)}
+              style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${frozenLayout.offsets.get(column)}px;` : undefined}
               class:sorted={$sortKey === column}
             >
               <button type="button" class="column-sort"
@@ -471,6 +508,7 @@
                   </div>
                   <button
                     class="cell memo-button sticky sticky-memo"
+                    class:frozenDataEdge={frozenLayout.offsets.size === 0}
                     class:has-memo={Boolean(item.row?.memo?.trim())}
                     aria-label={item.row?.memo?.trim() ? `Edit memo for row ${item.row.row_index + 1}: ${item.row.memo}` : item.row ? `Add memo for row ${item.row.row_index + 1}` : 'Loading memo'}
                     on:click={() =>
@@ -508,8 +546,13 @@
                     <button
                       type="button"
                       class="cell"
-                      class:sticky={columnIndex === 0}
-                      class:stickyData={columnIndex === 0}
+                      class:sticky={frozenLayout.offsets.has(column)}
+                      class:stickyData={frozenLayout.offsets.has(column)}
+                      class:lastFrozenData={frozenLayout.lastColumn === column}
+                      data-column-id={column}
+                      data-frozen={frozenLayout.offsets.has(column)}
+                      style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${frozenLayout.offsets.get(column)}px;` : undefined}
+                      on:focus={() => focusColumn(columnIndex)}
                       title={
                         !item.row || cellValue === null
                           ? 'Loading…'
@@ -588,8 +631,12 @@
   {#key columnMenu}
     <ColumnContextMenu columnId={columnMenu.columnId}
       label={$columnLabels.get(columnMenu.columnId) ?? columnMenu.columnId}
+      frozenThrough={$frozenThrough}
       x={columnMenu.x} y={columnMenu.y}
       on:search={(event) => searchColumn(event.detail.columnId)}
+      on:hide={(event) => void hideColumn(event.detail.columnId)}
+      on:freeze={(event) => freezeColumn(event.detail.columnId)}
+      on:unfreeze={unfreezeColumns}
       on:rule={(event) => { columnMenu = null; dispatch('columnRule', event.detail); }}
       on:group={(event) => { columnMenu = null; dispatch('columnGroup', event.detail); }}
       on:close={(event) => {

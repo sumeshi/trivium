@@ -19,7 +19,7 @@
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
-    visibleColumns, hiddenColumns, flagFilter, bookmarkedOnly,
+    visibleColumns, hiddenColumns, flagFilter, bookmarkedOnly, frozenThrough,
     isExporting, projectDetail, backend, columnLabels, conditionTree,
   } = workspace;
 
@@ -283,6 +283,9 @@
             <button type="button" title="Show every data column" on:click={() => setAllColumns(true)}>Select all</button>
             <button type="button" title="Hide every data column" on:click={() => setAllColumns(false)}>Deselect all</button>
           </div>
+          <button type="button" class="unfreeze-columns" title="Let every data column scroll horizontally"
+            aria-label="Unfreeze data columns" disabled={$frozenThrough === ''}
+            on:click={() => frozenThrough.set('')}>Unfreeze data columns</button>
           <input class="column-search" type="search" aria-label="Find a column" placeholder="Find column"
             bind:value={columnSearch} />
           <ul>
@@ -328,20 +331,20 @@
     <div class="analysis-drawer" id="analysis-drawer" role="dialog" aria-labelledby="analysis-tool-label"
       bind:this={drawerEl} tabindex="-1">
       <div class="analysis-head">
-        <span id="analysis-tool-label">{categoryLabel}</span>
-        <div class="analysis-tabs" role="tablist" aria-label={`${categoryLabel} tools`}>
-          {#each categoryTools as tool}
-            <button type="button" role="tab" id={`tool-tab-${tool.id}`} aria-selected={activeTool === tool.id}
-              tabindex={activeTool === tool.id ? 0 : -1} aria-controls="analysis-tool-content"
-              on:click={() => void selectTool(tool.id)} on:keydown={(event) => void moveToolTab(event, tool.id)}>{tool.label}</button>
-          {/each}
-        </div>
+        <h3 id="analysis-tool-label">{categoryLabel}</h3>
         <button type="button" class="analysis-close" aria-label="Close analysis panel"
           title="Close panel" on:click={closeTool}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
             <path d="m6 6 12 12M6 18 18 6" />
           </svg>
         </button>
+      </div>
+      <div class="analysis-tabs" role="tablist" aria-label={`${categoryLabel} tools`}>
+        {#each categoryTools as tool}
+          <button type="button" role="tab" id={`tool-tab-${tool.id}`} aria-selected={activeTool === tool.id}
+            tabindex={activeTool === tool.id ? 0 : -1} aria-controls="analysis-tool-content"
+            on:click={() => void selectTool(tool.id)} on:keydown={(event) => void moveToolTab(event, tool.id)}>{tool.label}</button>
+        {/each}
       </div>
       <div class="analysis-body" id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
         {#if activeTool === 'conditions'}
@@ -409,12 +412,14 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 39px;
-    padding: 5px 8px;
+    justify-content: space-between;
+    min-height: 28px;
+    padding: 2px 8px;
     border-bottom: 1px solid var(--border);
+    background: var(--surface-strong);
   }
-  .analysis-head > span { color: var(--muted); font-size: 10.5px; }
-  .analysis-tabs { display: flex; flex: 1; min-width: 0; gap: 3px; flex-wrap: wrap; }
+  .analysis-head h3 { margin: 0; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; cursor: default; }
+  .analysis-tabs { display: flex; min-width: 0; gap: 3px; flex-wrap: wrap; padding: 4px 7px; background: var(--surface-weak); border-bottom: 1px solid var(--border); }
   .analysis-tabs button { border: 1px solid transparent; border-radius: 4px; padding: 4px 7px; background: transparent; color: var(--muted); font-size: 11px; }
   .analysis-tabs button[aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--fg); }
   .analysis-tabs button:hover { color: var(--fg); background: var(--surface-weak); }
@@ -515,4 +520,6 @@
     color: var(--muted);
     font-size: 11px;
   }
+  .unfreeze-columns { width: 100%; margin: 0 0 5px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); font-size: 10.5px; text-align: left; }
+  .unfreeze-columns:hover:not(:disabled) { color: var(--fg); background: var(--surface-weak); }
 </style>

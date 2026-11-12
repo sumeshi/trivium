@@ -113,6 +113,7 @@ fn sample_state() -> ViewState {
         sort_direction: "desc".to_string(),
         hidden_columns: vec!["c000004".to_string()],
         column_widths: widths,
+        frozen_through: None,
         logical_row: 17,
     }
 }
@@ -357,5 +358,43 @@ fn column_ids_are_stable_for_saved_widths() {
     assert!(loaded.search_columns.contains(&host));
     assert_eq!(loaded.sort_key.as_deref(), Some(host.as_str()));
     assert_eq!(loaded.column_widths.get(&host), Some(&222.0));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn frozen_boundary_and_explicit_unfreeze_round_trip_without_changing_legacy_default() {
+    let (root, store, id_a, id_b) = setup();
+    let legacy: ViewState = serde_json::from_value(json!({"version": 1})).unwrap();
+    assert_eq!(legacy.frozen_through, None);
+    assert!(serde_json::to_value(&legacy)
+        .unwrap()
+        .get("frozenThrough")
+        .is_none());
+
+    let mut state = sample_state();
+    state.frozen_through = Some("c000003".to_string());
+    state.hidden_columns = vec!["c000002".into(), "c000003".into()];
+    save(&store, id_a, &state);
+    assert_eq!(load(&store, id_a), Some(state.clone()));
+    assert!(
+        load(&store, id_b).is_none(),
+        "frozen columns are case-specific"
+    );
+    drop(store);
+    let reopened = ProjectsStore::new(root.clone()).unwrap();
+    assert_eq!(
+        load(&reopened, id_a).unwrap().frozen_through.as_deref(),
+        Some("c000003")
+    );
+    state.frozen_through = Some(String::new());
+    save(&reopened, id_a, &state);
+    assert_eq!(
+        load(&reopened, id_a).unwrap().frozen_through.as_deref(),
+        Some("")
+    );
+    assert_eq!(
+        serde_json::to_value(&state).unwrap()["frozenThrough"],
+        json!("")
+    );
     let _ = fs::remove_dir_all(root);
 }

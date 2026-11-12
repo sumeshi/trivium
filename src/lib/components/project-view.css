@@ -709,11 +709,10 @@ button.primary:disabled {
   --row-bg: color-mix(in srgb, var(--accent) 5%, var(--row-color, var(--row-base)));
 }
 
-/* Keep the original rule colour visible beneath an unmistakable bookmark tint.
+/* Keep the original rule colour visible beneath a quiet bookmark tint.
    Mix only opaque surfaces so frozen cells cannot reveal horizontally moving text. */
 .data-row.bookmarked {
-  --row-base: var(--bookmark-soft, color-mix(in srgb, var(--bookmark, #b58a24) 18%, var(--surface)));
-  --bookmarked-row-bg: color-mix(in srgb, var(--bookmark, #b58a24) 18%, var(--row-color, var(--row-base)));
+  --bookmarked-row-bg: color-mix(in srgb, var(--bookmark, #b58a24) 5%, var(--row-color, var(--row-base)));
   --row-bg: var(--bookmarked-row-bg);
 }
 
@@ -722,7 +721,7 @@ button.primary:disabled {
 }
 
 .data-row.bookmarked > .select-cell {
-  box-shadow: inset 3px 0 0 var(--bookmark, #b58a24);
+  box-shadow: inset 2px 0 0 var(--bookmark, #b58a24);
 }
 
 .data-row:last-child {
@@ -848,7 +847,13 @@ button.primary:disabled {
 }
 
 .stickyData {
-  left: var(--sticky-data);
+  left: var(--sticky-data-left, var(--sticky-data));
+}
+
+.stickyData:not(.lastFrozenData)::after,
+.sticky-flag::after,
+.sticky-memo:not(.frozenDataEdge)::after {
+  display: none;
 }
 
 .sticky::after {
@@ -1454,66 +1459,6 @@ button.primary:disabled {
   gap: 12px;
   overflow-y: auto;
   max-height: 65vh;
-}
-
-.row-fields {
-  display: grid;
-  grid-template-columns: minmax(7rem, 28%) 1fr;
-  gap: 6px 12px;
-  margin: 0;
-}
-
-.row-fields dt {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.row-fields dd {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.row-fields dt.is-focus {
-  color: var(--fg);
-}
-
-.cell-load-state {
-  color: var(--muted);
-}
-
-.cell-load-error-detail {
-  display: block;
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-top: 4px;
-}
-
-.retry-cell {
-  margin-top: 8px;
-  padding: 4px 10px;
-}
-
-.row-around {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.row-around li {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.row-around li.is-anchor {
-  border-color: var(--accent);
 }
 
 .close-dialog {
