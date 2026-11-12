@@ -20,10 +20,46 @@ Linux uses Xvfb and WebKitWebDriver. Windows uses msedgedriver selected against
 the installed WebView2 runtime; the first three version components must match.
 An unavailable compatible driver fails the job explicitly. Both harnesses use
 isolated data/config/cache/WebView profiles and clean up their own process tree.
+Windows starts the real application explicitly with a test-only localhost remote
+debugging port, waits for a genuine WebView2 page, then attaches msedgedriver
+using `debuggerAddress`. This is Microsoft's documented WebView2 attach mode;
+it avoids implicit `DevToolsActivePort` profile discovery. The selected runtime
+folder is pinned to the same version used to download the driver. App startup
+output is retained as `application.log`, and an early process exit fails the
+test before session creation. Linux retains the existing WebKit launch path.
 IPC instrumentation recognizes `ipc://localhost` and `http://ipc.localhost`.
 
-The Windows job is configured; it has not been executed in this Linux cloud
-environment. A successful CI run is required before claiming Windows GUI
-verification. YAML parsing and Python compilation validate harness setup only.
+Native CI compiles the dedicated `com.trivium.native-tests` identifier using
+`TAURI_CONFIG`. Windows known-folder APIs ignore `APPDATA`/`LOCALAPPDATA` path
+overrides, so a separate compiled identifier protects normal case and preference
+storage. The debug Windows app rejects automation under the production identifier
+before opening its case store; the Python harness also rejects ordinary release
+binary paths. A local Windows run must use a dedicated Cargo debug test build:
+
+```powershell
+$env:TAURI_CONFIG = '{"identifier":"com.trivium.native-tests"}'
+cargo build --locked -p trivium-desktop --features custom-protocol
+python tests/native/row_navigation.py --binary target/debug/trivium-desktop.exe --rows 5199
+```
+
+Normal builds retain `com.trivium.app` and existing cases. Linux test processes
+additionally isolate their data directory with XDG variables. On Windows, test
+case/preferences files live under the separate native-test app-data namespace;
+the ephemeral GitHub runner discards them after the job.
+
+The first Windows CI run failed before session creation with a missing
+`DevToolsActivePort` file. The updated attach mode is covered by local contract
+tests, but Windows execution cannot be verified in this Linux cloud environment.
+A successful new CI run is required before claiming Windows GUI verification.
+YAML parsing and Python compilation validate harness setup only.
 Local native Linux results are recorded separately in the current validation
 report; these scripts do not replace packaged installation checks.
+
+## Artifact identity
+
+Application packages and the optional automation CLI share one checked version.
+Workspace options display the version and source commit embedded by Vite. Each
+download artifact includes `BUILD-INFO.json`, per-file `SHA256SUMS` and a short
+README identifying GUI versus CLI use. The GitHub Actions artifact ZIP has a
+separate digest; compare an extracted `.deb` or `.exe` against the included
+`SHA256SUMS`, not against the ZIP digest. See [artifacts.md](artifacts.md).

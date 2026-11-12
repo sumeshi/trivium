@@ -21,11 +21,12 @@ from urllib.error import URLError
 import uuid
 
 from row_navigation import ELEMENT, WebView, free_port, open_project, wait_for
-from runtime import IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
+from feedback_checks import verify_feedback
+from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
-TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules (legacy)": "iocs"}
+TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
 HEAVY = {"column_stats", "histogram", "time_analysis"}
 
 
@@ -132,7 +133,7 @@ class WorkspaceView(WebView):
             tabs:document.querySelectorAll('[role=tab]').length};
         """))
         if not state.get("ready"):
-            state.update(self.script("return {total:Number(document.querySelector('.table-meta-left strong')?.textContent.replaceAll(',','')??-1),search:document.querySelector('input[placeholder=\"Search rows\"]')?.value??''};"))
+            state.update(self.script("return {total:Number(document.querySelector('.table-meta-left strong')?.textContent.replaceAll(',','')??-1),search:document.querySelector('input[aria-label=\"Search rows\"]')?.value??''};"))
         return state
 
     def horizontal(self, delta: int) -> dict[str, int]:
@@ -178,11 +179,12 @@ class WorkspaceView(WebView):
 
     def drawer(self, name: str) -> None:
         before = self.view().get("viewportHeight")
-        if self.script("return !!document.querySelector('#analysis-drawer');"):
-            self.choose('select[aria-label="Analysis tool"]', TOOLS[name])
-        else:
-            self.named(f"Open {name}")
-        wait_for(lambda: self.script("return document.querySelector('select[aria-label=\"Analysis tool\"]')?.value;"), lambda value: value == TOOLS[name], f"{name} drawer")
+        tool = TOOLS[name]
+        group = "Filters" if tool in {"conditions", "presets"} else "Annotations" if tool in {"bulk", "iocs"} else "Analysis"
+        if not self.script("return !!document.querySelector(arguments[0]);", f"#tool-tab-{tool}"):
+            self.named(f"Open {group}")
+        self.click(self.element(f"#tool-tab-{tool}"))
+        wait_for(lambda: self.script("return document.querySelector(arguments[0])?.getAttribute('aria-selected');", f"#tool-tab-{tool}"), lambda value: value == "true", f"{name} drawer")
         assert self.script("return document.querySelectorAll('#analysis-drawer').length;") == 1
         after = self.view().get("viewportHeight")
         if before is not None and after is not None:
@@ -217,6 +219,8 @@ class NativeApp:
         while self.native_port == self.port:
             self.native_port = free_port()
         environment = isolated_environment(root)
+        self.environment = environment
+        self.application = None
         self.log = (evidence / "driver.log").open("w")
         self.driver = start_driver([args.driver, "--port", str(self.port), "--native-port", str(self.native_port),
                                     "--native-driver", args.native_driver], environment, self.log)
@@ -234,7 +238,13 @@ class NativeApp:
                 return False
         wait_for(ready, bool, "native WebDriver ready", 20)
         self.web.origin = f"http://127.0.0.1:{self.port}"
-        session = self.web.request("POST", "/session", {"capabilities": {"alwaysMatch": {"tauri:options": {"application": str(self.args.binary.resolve())}}}})
+        self.application = ApplicationSession(self.args.binary.resolve(), self.environment, self.evidence)
+        try:
+            session = self.web.request("POST", "/session", {"capabilities": {"alwaysMatch": self.application.capabilities}})
+        except BaseException:
+            self.application.close()
+            self.application = None
+            raise
         self.web.session = session["sessionId"]
         self.web.origin = f"http://127.0.0.1:{self.native_port}"
         self.web.request("POST", self.web.route("timeouts"), {"script": 600000, "pageLoad": 60000, "implicit": 0})
@@ -249,11 +259,18 @@ class NativeApp:
         return self.web
 
     def end_session(self) -> None:
-        if not self.web.session:
-            return
-        self.sessions.append(self.web.diagnostics())
-        self.web.request("DELETE", f"/session/{self.web.session}")
-        self.web.session = None
+        try:
+            if self.web.session:
+                diagnostic = self.web.diagnostics()
+                if self.application is not None:
+                    diagnostic["startup"] = self.application.details
+                self.sessions.append(diagnostic)
+                self.web.request("DELETE", f"/session/{self.web.session}")
+        finally:
+            self.web.session = None
+            if self.application is not None:
+                self.application.close()
+                self.application = None
 
     def close(self) -> None:
         try:
@@ -298,7 +315,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
         web.results(expected)
         query = web.query()
         assert query["flagFilter"] == wire and not query.get("search") and query.get("condition") is None, query
-        web.named("Export", ".filters")
+        web.named("Export rows", ".filters")
         wait_for(lambda: web.script("return document.querySelector('.export-dialog')?.textContent;"), lambda value: bool(value and f"Current results ({expected})" in value), "export uses applied flag count")
         web.named("Close", ".export-dialog")
         destination = root / f"flags-{mask}.csv"
@@ -357,7 +374,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
 
 
 def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, report: dict[str, Any]) -> None:
-    web.write('input[placeholder="Search rows"]', "cohort:keep")
+    web.write('input[aria-label="Search rows"]', "cohort:keep")
     expected = sum(i % 5 != 0 for i in range(1, data["total"] + 1))
     web.applied(search="cohort:keep")
     web.results(expected)
@@ -394,11 +411,11 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     web.results(expected)
     assert imports == sum(entry["name"] == "create_project" for entry in web.trace()), "Reload must not reimport the source"
     assert data["sha"] in web.script("return document.querySelector('[aria-label=\"Copy full SHA-256\"]').title;")
-    web.write('input[placeholder="Search rows"]', "")
+    web.write('input[aria-label="Search rows"]', "")
     web.applied(search="")
     web.results(data["total"])
     for label in ["source_id", "score", "cohort", "timestamp"]:
-        header = web.script("return [...document.querySelectorAll('.data-header button')].find(e=>e.querySelector('.header-label').textContent.trim()===arguments[0]);", label)
+        header = web.script("return [...document.querySelectorAll('.data-header button')].find(e=>e.querySelector('.header-label')?.textContent.trim()===arguments[0]);", label)
         web.tap(header)
         web.applied(sortKey=data["columns"][label], sortDirection="asc")
         web.results(data["total"])
@@ -457,16 +474,16 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     web.screenshot(evidence / "timeline-all-flags.png")
     web.close_drawer()
     before = sum(entry["name"] in HEAVY for entry in web.trace())
-    web.write('input[placeholder="Search rows"]', "keep")
+    web.write('input[aria-label="Search rows"]', "keep")
     web.applied(search="keep")
     web.results(sum(i % 5 != 0 for i in range(1, data["total"] + 1)))
     time.sleep(.4)
     assert before == sum(entry["name"] in HEAVY for entry in web.trace()), "Closed panels must not run heavy analysis"
-    web.write('input[placeholder="Search rows"]', "")
+    web.write('input[aria-label="Search rows"]', "")
     web.applied(search="")
     web.results(data["total"])
     web.flags(["safe", "critical"])
-    web.write('input[placeholder="Search rows"]', "keep")
+    web.write('input[aria-label="Search rows"]', "keep")
     web.applied(search="keep", flagFilter="safe|critical")
     filtered = sum(i % 4 in [0, 2] and i % 5 != 0 for i in range(1, data["total"] + 1))
     web.results(filtered)
@@ -478,7 +495,7 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     wait_for(flag_totals, lambda value: value == expected_flags, "timeline shares search and flag selections")
     web.close_drawer()
     web.flags([])
-    web.write('input[placeholder="Search rows"]', "")
+    web.write('input[aria-label="Search rows"]', "")
     web.applied(search="", flagFilter="all")
     web.results(data["total"])
     report["analysis"] = {"top_values": values, "only_active_drawer": True, "height_preserved": True,
@@ -552,7 +569,7 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     web.screenshot(evidence / "last-row-flags.png")
     web.button("First")
     web.results(data["total"])
-    web.write('input[placeholder="Search rows"]', "keep")
+    web.write('input[aria-label="Search rows"]', "keep")
     web.applied(search="keep")
     web.drawer("Conditions")
     web.named("Add condition", ".condition-editor")
@@ -595,7 +612,7 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     open_project(web, second["meta"]["name"])
     web.results(256)
     assert web.state()["tabs"] == 2 and web.state()["views"] == 1
-    web.write('input[placeholder="Search rows"]', "secondary")
+    web.write('input[aria-label="Search rows"]', "secondary")
     web.applied(projectId=second_id, search="secondary")
     web.results(256)
     web.tab(data["id"])
@@ -632,7 +649,7 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     web.results(expected)
     web.script("window.__workspaceHold={name:'query_project_rows',projectId:arguments[0],search:'never-present',total:0,ready:false,release:null};", data["id"])
     try:
-        web.write('input[placeholder="Search rows"]', "never-present")
+        web.write('input[aria-label="Search rows"]', "never-present")
         wait_for(lambda: web.script("return window.__workspaceHold.ready;"), bool, "real old-tab query response held")
         held = web.script("return {request:window.__workspaceHold.request,result:window.__workspaceHold.result};")
         assert held["request"]["search"] == "never-present" and held["result"]["total_filtered_rows"] == 0, held
@@ -723,7 +740,7 @@ def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Pa
 
 def themes(app: NativeApp, root: Path, evidence: Path, report: dict[str, Any]) -> None:
     restored = []
-    for theme in ["light", "dark", "paper", "midnight"]:
+    for theme in ["trivium", "light", "dark", "paper", "midnight", "mauve"]:
         web = app.web
         web.named("Workspace options")
         if web.script("return document.documentElement.dataset.theme;") == theme:
@@ -767,13 +784,14 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for name, run in [
+                ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
-                ("four themes and actual restarts", lambda: themes(app, root, evidence, report)),
+                ("six themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
                 print(f"CHECK: {name}", flush=True)
                 run()
@@ -782,7 +800,15 @@ def main() -> None:
             assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
             errors = [entry for session in app.sessions + [app.web.diagnostics()] for entry in session["ipc"] if "error" in entry]
             cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows", "load_project", "locate_project_row", "get_cell", "surrounding_rows", "group_tree", "bulk_preview"}]
-            assert all(entry in cancelled for entry in errors), errors
+            # The feedback scenario deliberately types one invalid timestamp;
+            # its query must reject that exact literal rather than coerce it.
+            expected_invalid = [entry for entry in errors if entry["name"] == "query_project_rows"
+                and entry["request"].get("projectId") == data["id"]
+                and entry["request"].get("condition") == {"column": data["columns"]["timestamp"],
+                    "op": "ge", "values": ["not-a-timestamp"], "negated": False}
+                and entry["error"] == "Datetime comparison requires a recognized datetime: not-a-timestamp"]
+            assert all(entry in cancelled or entry in expected_invalid for entry in errors), errors
+            report["expected_invalid_timestamp_queries"] = len(expected_invalid)
             report["cancelled_superseded_queries"] = len(cancelled)
             report["passed"] = True
         except Exception as error:

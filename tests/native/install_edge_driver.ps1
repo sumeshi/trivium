@@ -28,3 +28,6 @@ $driverInfo = (& $driver --version) -join ' '
 if ($driverInfo -notmatch "\b$([regex]::Escape($build))\.[0-9]+\b") { throw "Driver mismatch: WebView2 $version, $driverInfo" }
 Write-Host "WebView2 runtime: $version; native driver: $driverInfo"
 "TRIVIUM_NATIVE_DRIVER=$driver" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+# Pin the tested app to the exact runtime used to choose this driver.
+"TRIVIUM_WEBVIEW2_RUNTIME_DIRECTORY=$($runtime.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8

@@ -26,6 +26,11 @@ jobs:
           node-version-file: '.node-version'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install dependencies
         run: npm ci
 
@@ -44,6 +49,8 @@ jobs:
       - name: Quality gates
         shell: bash
         run: |
+          python tests/check_build_identity.py
+          python tests/build_manifest_test.py
           bash scripts/check_rust_size.sh
           cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
           cargo test --locked -p trivium-engine
@@ -80,13 +87,24 @@ jobs:
             exit 1
           }
 
-      - name: Upload artifacts
+      - name: Prepare desktop and optional CLI artifacts
+        shell: bash
+        run: |
+          python scripts/build_manifest.py --kind desktop-app --platform windows-x86_64 --output target/artifacts/trivium-windows "target/release/Trivium-v${{ steps.version.outputs.version }}.exe"
+          python scripts/build_manifest.py --kind automation-cli --platform windows-x86_64 --output target/artifacts/trivium-cli-windows target/release/trivium-cli.exe
+
+      - name: Upload desktop application
         uses: actions/upload-artifact@v5
         with:
           name: trivium-${{ matrix.platform }}
-          path: |
-            target/release/Trivium-v*.exe
-            target/release/trivium-cli.exe
+          path: target/artifacts/trivium-windows/
+          retention-days: 30
+
+      - name: Upload optional Windows automation CLI
+        uses: actions/upload-artifact@v5
+        with:
+          name: trivium-cli-${{ matrix.platform }}
+          path: target/artifacts/trivium-cli-windows/
           retention-days: 30
 
   release:

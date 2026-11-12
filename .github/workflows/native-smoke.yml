@@ -41,9 +41,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./tests/native/install_edge_driver.ps1
+      - name: Check package identity and native startup contract
+        run: |
+          python tests/check_build_identity.py
+          python -m unittest discover -s tests/native -p "*_test.py"
       - run: npm ci
       - run: npm run build
       - name: Build real app with embedded assets
+        env:
+          TAURI_CONFIG: '{"identifier":"com.trivium.native-tests"}'
         run: cargo build --locked -p trivium-desktop --features custom-protocol
       - name: Install native app driver
         run: cargo install tauri-driver --version 2.1.0 --locked

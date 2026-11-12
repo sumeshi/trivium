@@ -19,6 +19,11 @@ jobs:
           node-version-file: '.node-version'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install dependencies
         run: npm ci
 
@@ -45,6 +50,8 @@ jobs:
 
       - name: Quality gates
         run: |
+          python tests/check_build_identity.py
+          python tests/build_manifest_test.py
           bash scripts/check_rust_size.sh
           cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
           cargo test --locked -p trivium-engine
@@ -60,26 +67,22 @@ jobs:
       - name: Build standalone CLI
         run: cargo build --locked --release -p trivium-engine --bin trivium-cli
 
-      - name: Generate SHA256SUMS
+      - name: Prepare desktop and optional CLI artifacts
         run: |
-          # The Cargo workspace puts the target dir at the repo root (R0a),
-          # so bundles land in target/release/bundle/deb — not src-tauri/target.
-          deb_dir="target/release/bundle/deb"
-          ls "$deb_dir"
-          (cd "$deb_dir" && sha256sum *.deb > SHA256SUMS)
+          app_version=$(node -p "require('./package.json').version")
+          python scripts/build_manifest.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-deb target/release/bundle/deb/*_"$app_version"_*.deb
+          python scripts/build_manifest.py --kind automation-cli --platform linux-x86_64 --output target/artifacts/trivium-cli-linux target/release/trivium-cli
 
-      - name: Upload artifacts
+      - name: Upload desktop application
         uses: actions/upload-artifact@v5
         with:
           name: trivium-deb
-          path: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/deb/SHA256SUMS
+          path: target/artifacts/trivium-deb/
           retention-days: 3
 
-      - name: Upload standalone Linux CLI
+      - name: Upload optional Linux automation CLI
         uses: actions/upload-artifact@v5
         with:
           name: trivium-cli-linux-x86_64
-          path: target/release/trivium-cli
+          path: target/artifacts/trivium-cli-linux/
           retention-days: 3

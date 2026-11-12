@@ -2,6 +2,7 @@
 
 Starting UI revision: `develop` at `fbe3417` (the P0 navigation fix).
 Architecture follow-up starts from `95ee777`.
+The investigation usability follow-up starts from `35f2fa3` and identifies builds as version 0.2.0.
 
 ## Implemented scope
 
@@ -15,7 +16,7 @@ Architecture follow-up starts from `95ee777`.
 | Table controls | Original-row Go / result First and Last, history icons, concise Flagged count. The original 32px rows, 11.5px table text, three flag buttons and Add memo remain. |
 | Analysis tools | One nonmodal side drawer overlays the table. Inactive contents are unmounted; the visible table remains interactive. Top-value count bars, collapsed rare values, histograms and sorted time spans replace long default lists. |
 | Timeline | Initial focus on a dense period, exact outside counts, Show all, zoom/pan/drag, and four flag counts per bucket. Current annotations and query filters are respected. |
-| Themes | Light / Dark / Paper / Midnight use CSS variables and persist across restart. Semantic flag colors stay consistent. |
+| Themes | Trivium / Light / Dark / Paper / Midnight / Mauve use CSS variables and persist across restart. Trivium is the first-run default; saved choices remain intact. Semantic flag colors stay consistent. |
 
 No cross-project timeline, import-time period restriction or automated risk
 classification was added. The architecture follow-up stores case metadata,
@@ -73,8 +74,8 @@ Validated on Debian 13 with Node 24.22.1 and Rust 1.99.1:
 
 | Check | Result |
 | --- | --- |
-| Complete engine suite | 337 successful executions including the migration subprocess; 0 failures |
-| UI unit suite | 90 passed |
+| Complete engine suite | 345 successful executions including the migration subprocess; 0 failures |
+| UI unit suite | 108 passed |
 | Svelte and test TypeScript checks | Passed; 0 errors / 0 Svelte warnings |
 | Frontend and embedded-assets native builds | Passed |
 | Engine Clippy, all targets, `-D warnings` | Passed |
@@ -155,3 +156,48 @@ fixture timings are functional checks, not release throughput benchmarks.
 Package installation and a new GitHub Actions run have not been verified.
 The Debian workflow remains configured for `develop` pushes with three-day
 artifact retention; its Clippy gate now includes test targets.
+
+
+## Investigation usability follow-up (0.2.0)
+
+The actual embedded Tauri/WebKit app passed all eight stages in
+`target/native-feedback-workspace/fee2c14a7ca9/report.json`: seven native sessions,
+all six themes restored after process restart, and no unexpected JavaScript or
+native errors. One exact invalid-timestamp query was deliberately rejected and
+verified; this negative case is distinguished from unexpected failures.
+
+- Filename and SHA occupy one 38px header line; recent cases expose the full SHA
+  in a tooltip. Workspace options shows version and source commit.
+- Search syntax and column scope are explicit, independent of visible columns.
+  Three tool categories mount only the active subpanel. The footer describes
+  applied conditions and clears filters in one operation while retaining sort,
+  column visibility, annotations and saved evidence.
+- Column menus support search scope and an initially inactive blank rule.
+  Existing OR expressions retain their meaning. Header tab navigation still
+  reveals all 27 columns; Down or Shift+F10 opens column actions.
+- The real Rust parser validates invalid dates, nanoseconds and offsets. Equal
+  instants with different offsets produce identical decimal nanoseconds. Opening
+  the UTC helper preserves existing text; only explicit insertion changes it.
+- The applied-filter footer remains visible and clickable while Rules is open. A noninteractive notification cannot intercept its
+  clear action.
+
+The fixed-column defect was reproduced in the old native app:
+`target/native-sticky-before/7a794d0781f2/`: all five pinned cells had transparent
+backgrounds, allowing moving text to paint through. The fixed native app in
+`target/native-sticky-after/7de8b93e5227/` painted each pinned cell opaquely.
+The full feedback regression uses trusted horizontal wheel input at 700px and
+checks opacity plus hit testing in Trivium, Light and Mauve for normal,
+alternating, custom-coloured, hovered and loading rows. Screenshots and JSON
+paint evidence accompany the full report. Row density and text sizes remain
+unchanged.
+
+Original-row navigation also passed with the final UI on 5,199 and 2,000,000
+rows: `target/native-feedback-navigation/f49c2e687ac9/report.json`. First,
+middle, last, filtered descending results, excluded-row notices, annotations,
+export and delayed lookup responses remain covered.
+
+Windows startup now uses explicit WebView2 attach mode and a dedicated native
+build identifier. Its local contract and namespace tests pass; actual Windows
+execution must be verified by the next Native smoke CI run. The GTK native
+file-picker dialog remains outside automated coverage. See [native CI](native-ci.md)
+and [artifact identification](artifacts.md).

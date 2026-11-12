@@ -29,7 +29,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 
-from runtime import IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
+from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
@@ -276,7 +276,7 @@ def stale_lookup(web: WebView, query: str, target: int) -> None:
         web.input('.row-jump input[type="number"]', str(target))
         web.button("Go")
         wait_for(lambda: web.script("return window.__navigationHold.ready;"), bool, "held native lookup response")
-        web.input('input[placeholder="Search rows"]', query)
+        web.input('input[aria-label="Search rows"]', query)
         web.result(1, 1)
         web.script("window.__navigationHold.release();delete window.__navigationHold;")
         web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
@@ -334,7 +334,7 @@ def scenario(web: WebView, directory: Path, total: int, progress: dict[str, Any]
     web.result(total, total)
 
     stage("search keep")
-    web.input('input[placeholder="Search rows"]', "keep")
+    web.input('input[aria-label="Search rows"]', "keep")
     filtered = total // 2
     web.result(filtered, stride=2)
     web.button("First")
@@ -407,6 +407,7 @@ def main() -> None:
         while native_port == port:
             native_port = free_port()
         web = WebView(port)
+        application = None
         with (evidence / "driver.log").open("w") as log:
             driver = start_driver([args.driver, "--port", str(port), "--native-port", str(native_port),
                                    "--native-driver", args.native_driver], environment, log)
@@ -420,8 +421,9 @@ def main() -> None:
                     except (OSError, URLError):
                         return False
                 wait_for(ready, bool, "tauri-driver starts", 20)
-                session = web.request("POST", "/session", {"capabilities": {"alwaysMatch": {
-                    "tauri:options": {"application": str(binary)}}}})
+                application = ApplicationSession(binary, environment, evidence)
+                report["startup"] = application.details
+                session = web.request("POST", "/session", {"capabilities": {"alwaysMatch": application.capabilities}})
                 web.session = session["sessionId"]
                 web.origin = f"http://127.0.0.1:{native_port}"
                 report["webdriver_transport"] = "tauri-driver session, direct owned native WebDriver commands"
@@ -461,7 +463,11 @@ def main() -> None:
                         web.request("DELETE", f"/session/{web.session}")
                     except Exception:
                         pass
-                stop_driver(driver)
+                try:
+                    if application is not None:
+                        application.close()
+                finally:
+                    stop_driver(driver)
     print(f"Evidence: {evidence / 'report.json'}", flush=True)
 
 
