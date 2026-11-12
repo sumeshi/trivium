@@ -5,19 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trivium</title>
     <link rel="icon" href="/favicon.ico" />
-    <script>
+    <script type="module">
+      import { DEFAULT_THEME, parseSavedTheme } from "/src/lib/themeModel.ts";
       (() => {
         try {
-          const stored = localStorage.getItem("trivium:theme");
-          const theme =
-            stored === "light" || stored === "dark"
-              ? stored
-              : window.matchMedia("(prefers-color-scheme: dark)").matches
-                ? "dark"
-                : "light";
+          const theme = parseSavedTheme(localStorage.getItem("trivium:theme")) ?? DEFAULT_THEME;
           document.documentElement.setAttribute("data-theme", theme);
         } catch (_) {
-          document.documentElement.setAttribute("data-theme", "light");
+          document.documentElement.setAttribute("data-theme", DEFAULT_THEME);
         }
       })();
     </script>

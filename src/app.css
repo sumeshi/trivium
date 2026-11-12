@@ -8,7 +8,7 @@
   :root,
   [data-theme="light"] {
     color-scheme: light;
-    --bg: #f7f8fa;
+    --bg: #ffffff;
     --fg: #20252d;
     --muted: #56616f;
     --surface: #ffffff;
