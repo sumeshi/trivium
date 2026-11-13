@@ -11,7 +11,7 @@ import socket
 import subprocess
 import time
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import build_opener, ProxyHandler
 from urllib.parse import urlsplit
 from startup_diagnostics import startup_diagnostics
 
@@ -112,10 +112,12 @@ class ApplicationSession:
         app_environment = dict(environment)
         profile = Path(environment["LOCALAPPDATA"]) / "native-webview-profile"
         profile.mkdir(parents=True, exist_ok=True)
-        app_environment["WEBVIEW2_USER_DATA_FOLDER"] = str(profile)
-        existing = app_environment.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
-        app_environment["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
-            f"{existing} --remote-debugging-address=127.0.0.1 --remote-debugging-port={port}".strip())
+        # The dedicated debug binary applies both through WebviewWindowBuilder.
+        # Host WebView2 overrides could otherwise change this endpoint/profile.
+        app_environment.pop("WEBVIEW2_USER_DATA_FOLDER", None)
+        app_environment.pop("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", None)
+        app_environment["TRIVIUM_NATIVE_PROFILE"] = str(profile)
+        app_environment["TRIVIUM_NATIVE_DEBUG_PORT"] = str(port)
         app_environment["TAURI_WEBVIEW_AUTOMATION"] = "true"
         runtime = app_environment.get("TRIVIUM_WEBVIEW2_RUNTIME_DIRECTORY")
         if runtime:
@@ -139,7 +141,7 @@ class ApplicationSession:
         diagnostic[f"{endpoint}_http"] = None
         diagnostic.pop(f"{endpoint}_error_number", None)
         try:
-            with urlopen(f"http://127.0.0.1:{port}/json/{endpoint}", timeout=2) as response:
+            with _open_debugger(f"http://127.0.0.1:{port}/json/{endpoint}", timeout=2) as response:
                 diagnostic[f"{endpoint}_http"] = response.status
                 value = json.load(response)
             diagnostic.pop(f"{endpoint}_error", None)
@@ -177,7 +179,8 @@ class ApplicationSession:
                 return version
             time.sleep(.05)
         details = json.dumps(diagnostic, sort_keys=True, separators=(",", ":"))
-        startup = startup_diagnostics(self.process, getattr(self, "log_path", None), platform=getattr(self, "platform", None))
+        startup = startup_diagnostics(self.process, getattr(self, "log_path", None),
+            platform=getattr(self, "platform", None), debug_port=port)
         evidence = json.dumps(startup, separators=(",", ":"))
         raise AssertionError(f"Native app did not publish a debuggable WebView2 target within {timeout:g} seconds; probes={details}; startup={evidence}; inspect application.log")
 
@@ -190,6 +193,12 @@ class ApplicationSession:
             if self.log is not None:
                 self.log.close()
                 self.log = None
+
+
+def _open_debugger(url: str, *, timeout: float):
+    # Only our owned loopback CDP endpoint uses this opener; do not alter the
+    # process proxy configuration or external requests used by other tests.
+    return build_opener(ProxyHandler({})).open(url, timeout=timeout)
 
 
 def debuggable_webview(version, targets) -> bool:

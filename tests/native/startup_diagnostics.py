@@ -13,7 +13,7 @@ import subprocess
 
 LOG_LIMIT = 8192
 MAX_CHILDREN = 16
-PHASES = ('before-builder', 'setup-start', 'state-ready')
+PHASES = ('before-builder', 'setup-start', 'state-ready', 'window-ready')
 
 
 def log_diagnostics(path: Path | None) -> dict:
@@ -70,10 +70,14 @@ def sanitize_process_snapshot(value, root_pid: int) -> dict:
                 changed = True
         if not changed:
             break
-    return {'has_window': value.get('has_window') is True, 'count': len(selected), 'items': selected}
+    result = {'has_window': value.get('has_window') is True, 'count': len(selected), 'items': selected}
+    listener = value.get('debug_listener')
+    if listener in ('owned-loopback', 'owned-other-address', 'other-process', 'absent', 'unavailable'):
+        result['debug_listener'] = listener
+    return result
 
 
-def process_diagnostics(process, *, platform: str | None = None) -> dict:
+def process_diagnostics(process, *, platform: str | None = None, debug_port: int | None = None) -> dict:
     if (platform or os.name) != 'nt':
         return {'probe': 'not-windows'}
     root_pid = getattr(process, 'pid', None)
@@ -101,8 +105,23 @@ while ($queue.Count -gt 0 -and $records.Count -lt 17) {
     }
 }
 $app = Get-Process -Id $nativeRootPid -ErrorAction SilentlyContinue
-@{has_window=[bool]($app -and $app.MainWindowHandle -ne 0);items=$records.ToArray()} | ConvertTo-Json -Compress -Depth 3
-'''.replace('ROOT_PID', str(root_pid))
+$result = @{has_window=[bool]($app -and $app.MainWindowHandle -ne 0);items=$records.ToArray()}
+$nativeDebugPort = DEBUG_PORT
+if ($nativeDebugPort -gt 0) {
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $nativeDebugPort -State Listen -ErrorAction SilentlyContinue)
+        $result.debug_listener = 'absent'
+        foreach ($listener in $listeners) {
+            if ($seen.Contains([uint32]$listener.OwningProcess)) {
+                $result.debug_listener = if ($listener.LocalAddress -in @('127.0.0.1', '::1')) {'owned-loopback'} else {'owned-other-address'}
+                break
+            }
+            $result.debug_listener = 'other-process'
+        }
+    } catch { $result.debug_listener = 'unavailable' }
+}
+$result | ConvertTo-Json -Compress -Depth 3
+'''.replace('ROOT_PID', str(root_pid)).replace('DEBUG_PORT', str(debug_port if type(debug_port) is int and 0 < debug_port <= 65535 else 0))
     try:
         completed = subprocess.run(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
                                    capture_output=True, text=True, timeout=5, check=False,
@@ -114,5 +133,5 @@ $app = Get-Process -Id $nativeRootPid -ErrorAction SilentlyContinue
         return {'probe': type(error).__name__}
 
 
-def startup_diagnostics(process, path: Path | None, *, platform: str | None = None) -> dict:
-    return {'log': log_diagnostics(path), 'process': process_diagnostics(process, platform=platform)}
+def startup_diagnostics(process, path: Path | None, *, platform: str | None = None, debug_port: int | None = None) -> dict:
+    return {'log': log_diagnostics(path), 'process': process_diagnostics(process, platform=platform, debug_port=debug_port)}

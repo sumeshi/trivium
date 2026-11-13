@@ -47,19 +47,28 @@ class StartupDiagnosticsTests(unittest.TestCase):
         self.assertEqual(value['count'], MAX_CHILDREN + 1)
         self.assertEqual(value['items'][-1]['pid'], 100 + MAX_CHILDREN)
 
+    def test_listener_probe_exposes_only_a_fixed_ownership_state(self):
+        for state in ('owned-loopback', 'owned-other-address', 'other-process', 'absent', 'unavailable'):
+            value = sanitize_process_snapshot({'items': [], 'debug_listener': state}, 100)
+            self.assertEqual(value['debug_listener'], state)
+        for private in ('127.0.0.1:12345/private-secret', {'private': 'secret'}, ['private']):
+            value = sanitize_process_snapshot({'items': [], 'debug_listener': private}, 100)
+            self.assertNotIn('debug_listener', value)
+
     def test_process_probe_is_timed_and_does_not_request_command_lines(self):
         process = SimpleNamespace(pid=100)
         result = SimpleNamespace(returncode=0, stdout=json.dumps({'has_window': False, 'items': [
             {'pid': 100, 'parent': 5, 'name': 'trivium-desktop.exe'},
         ]}))
         with patch('startup_diagnostics.subprocess.run', return_value=result) as run:
-            value = process_diagnostics(process, platform='nt')
+            value = process_diagnostics(process, platform='nt', debug_port=12345)
         self.assertEqual(value['count'], 1)
         self.assertEqual(run.call_args.kwargs['timeout'], 5)
         command = run.call_args.args[0]
         self.assertEqual(command[0], 'powershell.exe')
         self.assertNotIn('CommandLine', command[-1])
         self.assertNotIn('Environment', command[-1])
+        self.assertIn('$nativeDebugPort = 12345', command[-1])
 
     def test_process_probe_failure_reports_only_an_error_class(self):
         with patch('startup_diagnostics.subprocess.run', side_effect=subprocess.TimeoutExpired('private-command', 5, output='private-output')):

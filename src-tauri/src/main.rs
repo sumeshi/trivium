@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows release builds
 
 mod commands;
+#[cfg(any(all(target_os = "windows", debug_assertions), test))]
+mod native_test;
 mod state;
 
 // Re-exported command functions, used by `generate_handler!` via bare
@@ -17,17 +19,26 @@ use crate::state::AppState;
 fn main() {
     #[cfg(all(target_os = "windows", debug_assertions))]
     automation_phase("before-builder");
+    let context = tauri::generate_context!();
+    #[cfg(all(target_os = "windows", debug_assertions))]
+    let (context, native_window) =
+        native_test::prepare(context).expect("invalid Windows native automation configuration");
     tauri::Builder::new()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(all(target_os = "windows", debug_assertions))]
             automation_phase("setup-start");
             let state = AppState::new(app)?;
             #[cfg(all(target_os = "windows", debug_assertions))]
             automation_phase("state-ready");
             app.manage(state);
+            #[cfg(all(target_os = "windows", debug_assertions))]
+            if let Some(window) = native_window {
+                window.create(app)?;
+                automation_phase("window-ready");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -67,7 +78,7 @@ fn main() {
             load_view_state,
             save_view_state
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

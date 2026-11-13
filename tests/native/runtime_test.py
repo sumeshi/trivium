@@ -5,7 +5,6 @@ import io
 from contextlib import redirect_stdout
 import os
 from pathlib import Path
-import re
 import tempfile
 from threading import Thread
 from urllib.error import URLError
@@ -40,6 +39,7 @@ class RuntimeTests(unittest.TestCase):
             root = Path(directory)
             environment = isolated_environment(root)
             environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = '--disable-features=Example'
+            environment['WEBVIEW2_USER_DATA_FOLDER'] = 'unrelated-host-profile'
             runtime = root / 'runtime'
             runtime.mkdir()
             (runtime / 'msedgewebview2.exe').touch()
@@ -65,7 +65,7 @@ class RuntimeTests(unittest.TestCase):
                 nonlocal server
                 child.update(env)
                 self.assertEqual(command, [str(root / 'debug' / 'trivium.exe')])
-                port = int(re.search(r'--remote-debugging-port=(\d+)', env['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'])[1])
+                port = int(env['TRIVIUM_NATIVE_DEBUG_PORT'])
                 server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
                 server.daemon_threads = True
                 Thread(target=server.serve_forever, daemon=True).start()
@@ -76,7 +76,12 @@ class RuntimeTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
-            with patch('runtime.start_driver', start), patch('runtime.stop_driver', side_effect=stop) as stop_owned:
+            # The owned CDP endpoint must stay local even when a machine has
+            # proxy settings without a localhost exclusion.
+            proxy = {'HTTP_PROXY': 'http://127.0.0.1:1', 'http_proxy': 'http://127.0.0.1:1',
+                     'NO_PROXY': '', 'no_proxy': ''}
+            with patch.dict(os.environ, proxy), patch('runtime.start_driver', start), \
+                    patch('runtime.stop_driver', side_effect=stop) as stop_owned:
                 app = ApplicationSession(root / 'debug' / 'trivium.exe', environment, root / 'evidence', platform='nt')
                 self.assertEqual(app.capabilities['browserName'], 'webview2')
                 self.assertNotIn('tauri:options', app.capabilities)
@@ -84,8 +89,9 @@ class RuntimeTests(unittest.TestCase):
                 port = server.server_port
                 self.assertEqual(app.capabilities['ms:edgeOptions']['debuggerAddress'], f'127.0.0.1:{port}')
                 self.assertEqual(child['WEBVIEW2_BROWSER_EXECUTABLE_FOLDER'], str(runtime))
-                self.assertEqual(child['WEBVIEW2_USER_DATA_FOLDER'], str(Path(environment['LOCALAPPDATA']) / 'native-webview-profile'))
-                self.assertIn('--disable-features=Example', child['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'])
+                self.assertEqual(child['TRIVIUM_NATIVE_PROFILE'], str(Path(environment['LOCALAPPDATA']) / 'native-webview-profile'))
+                self.assertNotIn('WEBVIEW2_USER_DATA_FOLDER', child)
+                self.assertNotIn('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', child)
                 self.assertEqual(environment, original)
                 self.assertEqual(app.details, {'mode': 'webview2-attach', 'browser': 'Edg/145.1.2.3'})
                 app.close()
@@ -134,7 +140,7 @@ class RuntimeTests(unittest.TestCase):
                      [{'type': 'webview', 'url': 'http://private.invalid/?secret=never-print-this'}])
             return Response(json.dumps(value).encode())
 
-        with patch('runtime.urlopen', side_effect=endpoint), patch('runtime.time.monotonic', side_effect=[0, .01, 1]), patch('runtime.time.sleep'):
+        with patch('runtime._open_debugger', side_effect=endpoint), patch('runtime.time.monotonic', side_effect=[0, .01, 1]), patch('runtime.time.sleep'):
             with self.assertRaises(AssertionError) as failure:
                 app._wait_for_debugging(12345, timeout=1)
         message = str(failure.exception)
@@ -150,7 +156,7 @@ class RuntimeTests(unittest.TestCase):
         diagnostic = {}
         refused = URLError(OSError(10061, 'private-first-error'))
         timeout = URLError(TimeoutError('private-next-error'))
-        with patch('runtime.urlopen', side_effect=[refused, timeout]):
+        with patch('runtime._open_debugger', side_effect=[refused, timeout]):
             app._probe(12345, 'list', diagnostic)
             self.assertEqual(diagnostic['list_error_number'], 10061)
             app._probe(12345, 'list', diagnostic)
