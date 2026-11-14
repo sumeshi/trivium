@@ -84,6 +84,8 @@
         <dt><code>"failed login"</code></dt><dd>Keep the phrase together</dd>
         <dt><code>column:value</code></dt><dd>Search one named column</dd>
         <dt><code>column:"failed login"</code></dt><dd>A phrase in one column</dd>
+        <dt><code>@tag:review</code></dt><dd>Rows with the tag review</dd>
+        <dt><code>@tag:*</code></dt><dd>Rows with any tag</dd>
       </dl>
       <p>Quote literal colons: <code>"https://example.test"</code>.</p>
       <p>For grouped AND/OR, comparisons, dates or regular expressions, use <strong>Filters → Rules</strong>.</p>
