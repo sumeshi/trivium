@@ -1,28 +1,25 @@
-import type { AnnotationPatch, BulkAnnotateArgs } from "./backend";
+import type { AnnotationPatch, Backend, BulkAnnotateArgs } from "./backend";
+import type { BulkApplied, BulkCount } from "./types";
 import type { AppliedFilters } from "./components/project_view/state";
 
 export type BulkTarget = "selection" | "filtered" | "all";
+export type BulkFlag = "keep" | NonNullable<AnnotationPatch["flag"]>;
+export type BulkTagOperation = "add" | "remove";
 
-/**
- * Builds the flag/memo part of a bulk patch.
- *
- * An empty memo input means "leave the memo alone", not "delete it". Deletion
- * is an explicit `clearMemo` operation that sends `memo: null`. Tags and
- * bookmarks are never touched here.
- */
-export function buildFlagMemoPatch(input: {
-  flag: NonNullable<AnnotationPatch["flag"]>;
+/** Omitted fields stay unchanged; tag text is one exact label, including commas. */
+export function buildBulkPatch(input: {
+  flag: BulkFlag;
   memo: string;
   clearMemo: boolean;
+  tag: string;
+  tagOperation: BulkTagOperation;
 }): AnnotationPatch {
-  const patch: AnnotationPatch = { flag: input.flag };
-  if (input.clearMemo) {
-    patch.memo = null;
-    return patch;
-  }
-  if (input.memo.trim().length > 0) {
-    patch.memo = input.memo;
-  }
+  const patch: AnnotationPatch = {};
+  if (input.flag !== "keep") patch.flag = input.flag;
+  if (input.clearMemo) patch.memo = null;
+  else if (input.memo.trim()) patch.memo = input.memo;
+  const tag = input.tag.trim();
+  if (tag) patch[input.tagOperation === "remove" ? "remove_tags" : "add_tags"] = [tag];
   return patch;
 }
 
@@ -53,4 +50,22 @@ export function buildBulkAnnotateArgs(input: {
     ...(input.previewToken ? { previewToken: input.previewToken } : {}),
     ...input.patch,
   };
+}
+
+/** Direct Apply and optional Preview share one frozen, token-checked operation. */
+export async function applyBulkAnnotation(
+  api: Pick<Backend, "bulkPreview" | "bulkUpdate">,
+  args: BulkAnnotateArgs,
+  options: {
+    preview?: BulkCount | null;
+    isCurrent: () => boolean;
+  },
+): Promise<BulkApplied | null> {
+  if (!options.isCurrent()) return null;
+  const snapshot = structuredClone(args);
+  const preview = options.preview ?? await api.bulkPreview(snapshot);
+  if (!options.isCurrent()) return null;
+  // An empty operation must not replace the last useful undo record.
+  if (preview.count === 0) return { updated: 0 };
+  return api.bulkUpdate({ ...snapshot, previewToken: preview.previewToken });
 }

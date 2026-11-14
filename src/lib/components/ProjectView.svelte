@@ -238,7 +238,8 @@
       const selectedFlags = parseFlagFilter(get(flagFilter)) ?? [];
       // Ordinary source-order rows are updated in place. Annotation-dependent
       // result membership needs a fresh query after a single-row edit.
-      if (get(bookmarkedOnly) || (selectedFlags.length > 0 && selectedFlags.length < 4)) {
+      if (get(bookmarkedOnly) || get(appliedFilters).search.toLowerCase().includes('@tag:')
+        || (selectedFlags.length > 0 && selectedFlags.length < 4)) {
         queueAnnotationRefresh();
       }
     },

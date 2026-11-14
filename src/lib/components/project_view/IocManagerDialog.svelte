@@ -204,7 +204,7 @@
       </div>
       {#if error}<p class="memo-error" role="alert">{error}</p>{:else if notice || busy}<p class="condition-count" role="status">{busy ? 'Working…' : notice}</p>{/if}
       <div class="ioc-footer">
-        <button type="button" class="ghost" on:click={() => void undo()} disabled={busy} title="Restore the last bulk operation in this case">Undo last bulk</button>
+        <button type="button" class="ghost" on:click={() => void undo()} disabled={busy} title="Restore the last bulk operation in this case">Undo</button>
         <span class="condition-count ioc-save-hint">Save keeps rules. Apply changes annotations.</span>
         <button type="button" class="ghost" on:click={() => void close()} disabled={busy}>Cancel</button>
         <button type="button" class="primary" on:click={() => void saveRules()} disabled={busy}>Save rules</button>

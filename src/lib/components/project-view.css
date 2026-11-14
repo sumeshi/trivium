@@ -957,6 +957,41 @@ button.primary:disabled {
   opacity: 0.4;
 }
 
+.data-row > .memo-cell {
+  gap: 4px;
+  padding: 0 6px 0 12px;
+  cursor: default;
+}
+
+.memo-cell .memo-button {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.row-tags-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 20px;
+  min-width: 25px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-weak);
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.row-tags-button:hover,
+.row-tags-button[aria-expanded='true'] { border-color: var(--accent-border); }
+.row-tags-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
 .memo-button {
   display: inline-flex;
   align-items: center;

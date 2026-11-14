@@ -8,12 +8,14 @@
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { formatIsoCell } from '../../dateDisplay';
+  import { tagSearch } from '../../tagSearch';
+  import RowTagsMenu from './RowTagsMenu.svelte';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
   import { useWorkspace } from '../../workspaceContext';
 
   // Functions are stable. This row never subscribes to scroll or page stores.
-  const { setFlag, editMemo, openCell, handleCellKeydown, toggleRowSelection, columnFormats } = useWorkspace();
+  const { setFlag, editMemo, openCell, handleCellKeydown, toggleRowSelection, columnFormats, search } = useWorkspace();
   export let row: CachedRow | null;
   export let position: number;
   export let projectId: string;
@@ -35,10 +37,39 @@
   });
 
   let rowElement: HTMLDivElement | null = null;
+  let memoButton: HTMLButtonElement | null = null;
+  let tagButton: HTMLButtonElement | null = null;
+  let tagMenu: { projectId: string; rowIndex: number; tags: string[]; trigger: HTMLButtonElement } | null = null;
+  const ownsTagMenu = (owner: NonNullable<typeof tagMenu>) =>
+    owner.projectId === projectId && owner.rowIndex === row?.row_index;
+  const toggleTags = () => {
+    if (tagMenu) { tagMenu = null; return; }
+    if (!row?.tags.length || !tagButton) return;
+    tagMenu = { projectId, rowIndex: row.row_index, tags: [...row.tags], trigger: tagButton };
+  };
+  const closeTags = (detail: { restoreFocus: boolean; tab?: KeyboardEvent }) => {
+    const owner = tagMenu;
+    tagMenu = null;
+    if (!owner || !ownsTagMenu(owner)) return;
+    if (detail.tab) {
+      if (detail.tab.shiftKey) memoButton?.focus({ preventScroll: true });
+      else if (columnCount === 0) owner.trigger.focus({ preventScroll: true });
+      else columnTab(detail.tab, -1, position);
+    } else if (detail.restoreFocus && owner.trigger.isConnected) owner.trigger.focus({ preventScroll: true });
+  };
+  const searchTag = (tag: string) => {
+    const owner = tagMenu;
+    tagMenu = null;
+    if (!owner || !ownsTagMenu(owner) || !row?.tags.includes(tag)) return;
+    search.set(tagSearch(tag));
+    document.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')?.focus();
+  };
   let renderedRowIndex = row?.row_index ?? null;
   let renderedProjectId = projectId;
   beforeUpdate(() => {
     const nextRowIndex = row?.row_index ?? null;
+    if (tagMenu && (!ownsTagMenu(tagMenu) || tagMenu.tags.length !== row?.tags.length
+      || tagMenu.tags.some((tag, index) => tag !== row?.tags[index]))) tagMenu = null;
     if ((nextRowIndex !== renderedRowIndex || projectId !== renderedProjectId)
       && document.activeElement instanceof HTMLElement && rowElement?.contains(document.activeElement)) {
       // A recycled control must never apply an annotation to a new evidence row.
@@ -114,9 +145,12 @@
         <div class="flag-buttons loading-placeholder">…</div>
       {/if}
     </div>
-    <button
-      class="cell memo-button sticky sticky-memo"
+    <div class="cell memo-cell sticky sticky-memo"
       class:frozenDataEdge={frozenOffsets.size === 0}
+    >
+    <button
+      class="memo-button"
+      bind:this={memoButton}
       class:has-memo={Boolean(row?.memo?.trim())}
       aria-label={row?.memo?.trim() ? `Edit note for row ${row.row_index + 1}: ${row.memo}` : row ? `Add note for row ${row.row_index + 1}` : 'Loading note'}
       on:click={() =>
@@ -132,7 +166,7 @@
       }
       disabled={!row}
       on:keydown={(event) => {
-        if (isTabKey(event) && !event.shiftKey) columnTab(event, -1, position);
+        if (isTabKey(event) && !event.shiftKey && !row?.tags.length) columnTab(event, -1, position);
       }}
     >
       {#if row && row.memo && row.memo.trim().length}
@@ -145,6 +179,19 @@
         <span class="memo-placeholder">Loading…</span>
       {/if}
     </button>
+    {#if row && row.tags.length > 0}
+      <button type="button" class="row-tags-button" bind:this={tagButton}
+        aria-label={`Tags for row ${row.row_index + 1} (${row.tags.length})`}
+        aria-haspopup="menu" aria-expanded={Boolean(tagMenu)}
+        aria-controls={tagMenu ? `row-tags-${projectId}-${row.row_index}` : undefined}
+        title="Show tags"
+        on:click={toggleTags}
+        on:keydown={(event) => { if (isTabKey(event) && !event.shiftKey) columnTab(event, -1, position); }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M20 13 11 22 2 13V2h11l9 9Z" /><circle cx="7.5" cy="7.5" r="1" /></svg>
+        <span>{row.tags.length}</span>
+      </button>
+    {/if}
+    </div>
     {#each columns as column (column.id)}
       {@const cellValue =
         row && column.id in row.displayCache
@@ -208,3 +255,11 @@
     {/each}
   {/if}
 </div>
+
+{#if tagMenu}
+  {#key `${tagMenu.projectId}:${tagMenu.rowIndex}`}
+    <RowTagsMenu projectId={tagMenu.projectId} rowIndex={tagMenu.rowIndex} tags={tagMenu.tags}
+      trigger={tagMenu.trigger} menuId={`row-tags-${tagMenu.projectId}-${tagMenu.rowIndex}`}
+      on:close={(event) => closeTags(event.detail)} on:search={(event) => searchTag(event.detail.tag)} />
+  {/key}
+{/if}

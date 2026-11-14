@@ -34,8 +34,12 @@ Text search is case-insensitive. Combine terms with spaces for AND, `|` for OR, 
 | `beacon -test` | Include beacon, exclude test |
 | `user:administrator` | Search one column |
 | `command:"powershell -enc"` | A phrase in one column |
+| `@tag:review` | Rows labelled with the annotation tag `review` |
+| `@tag:*` | Rows with any annotation tag |
 
 Use Filters for nested AND/OR groups, numeric or datetime comparisons, and regular expressions. Text search and structured conditions combine with AND. Text search itself does not interpret regex or parentheses.
+
+Tags label related findings. Click a row's tag count to search a label, then analyze or export the current result.
 
 ## Saved data
 

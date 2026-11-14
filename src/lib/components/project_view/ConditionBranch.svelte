@@ -50,7 +50,9 @@
         <button type="button" class="group-add" on:click={() => addCondition(node.id, columns[0] ?? "")} aria-label="Add condition" title="Add condition">
           <span aria-hidden="true">＋</span><span>Condition</span>
         </button>
-        <button type="button" class="branch-icon" on:click={() => addGroup(node.id)} aria-label="Add group" title="Add nested AND/OR group"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H4v16h4m8-16h4v16h-4M8 12h8m-4-4v8" /></svg></button>
+        <button type="button" class="group-add" on:click={() => addGroup(node.id)} aria-label="Add group" title="Add nested AND/OR group">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H4v16h4m8-16h4v16h-4M8 12h8m-4-4v8" /></svg><span>Group</span>
+        </button>
         {#if !isRoot}
           <button type="button" class="branch-icon" disabled={index === 0} on:click={() => moveNode(node.id, -1)} aria-label="Move group up" title="Move group up">
             <span aria-hidden="true">↑</span>
@@ -152,9 +154,11 @@
   .condition-actions { display: flex; align-self: start; gap: 1px; justify-content: flex-end; }
   .branch-icon, .group-add { display: inline-flex; align-items: center; justify-content: center; gap: 3px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 3px; color: var(--muted); background: transparent; font-size: 13px; }
   .branch-icon { flex: 0 0 24px; width: 24px; }
-  .group-add { padding: 0 4px; font-size: 10px; }
-  .branch-icon:hover:not(:disabled), .group-add:hover { border-color: var(--border); color: var(--fg); background: var(--surface-weak); }
+  .group-add { flex: 0 0 auto; gap: 4px; padding: 0 6px; border-color: var(--border); background: var(--surface-weak); color: var(--fg); font-size: 10px; white-space: nowrap; }
+  .branch-icon:hover:not(:disabled) { border-color: var(--border); color: var(--fg); background: var(--surface-weak); }
+  .group-add:hover { border-color: var(--border-strong); background: var(--hover); }
   .branch-icon:focus-visible, .group-add:focus-visible { outline: 1px solid var(--accent-border); outline-offset: 1px; }
+  .group-add:focus-visible { outline-width: 2px; }
   .branch-icon:disabled { opacity: .35; }
   .empty-group { margin: 3px 0; font-size: 10px; color: var(--muted); }
 </style>
