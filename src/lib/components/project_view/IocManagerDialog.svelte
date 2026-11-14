@@ -123,7 +123,8 @@
       const stem = ($projectDetail?.project.meta.source_file_name ?? $projectDetail?.project.meta.name ?? 'rules').replace(/\.[^.]+$/, '');
       const destination = await save({ filters: [{ name: 'IOC rules', extensions: ['csv'] }], defaultPath: `trivium-iocs-${stem}.csv` });
       if (!destination || !active.isCurrent()) return;
-      await active.api.exportIocs({ projectId: active.owner, destination, entries });
+      // The native Save dialog confirms replacement before returning a path.
+      await active.api.exportIocs({ projectId: active.owner, destination, entries, allowOverwrite: true });
       if (active.isCurrent()) notice = 'Rules exported.';
     } catch (err) { if (active.isCurrent()) error = errorMessage(err, 'Could not export rules.'); }
     finally { if (active.isCurrent()) busy = false; }

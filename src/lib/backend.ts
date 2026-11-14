@@ -2,9 +2,9 @@ import type * as Wire from "./generated/engine";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites";
-import { queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites";
-import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions";
+import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites.ts";
+import { queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
+import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import type {
   CellKind,
   ColorRule,
@@ -81,6 +81,8 @@ export type ExportScope = "all" | "filtered" | "selected";
 export interface ExportProjectArgs extends RequestOwned {
   projectId: string;
   destination?: string;
+  /** Explicit approval to replace an existing output file. */
+  allowOverwrite?: boolean;
   /** `"filtered"` (default) uses the query fields; `"selected"` intersects `rowIndices`. */
   scope?: ExportScope;
   search?: string;
@@ -120,6 +122,7 @@ export interface ImportIocsArgs {
 export interface ExportIocsArgs {
   projectId: string;
   destination: string;
+  allowOverwrite?: boolean;
   entries?: IocEntry[];
 }
 
@@ -133,6 +136,7 @@ export interface SavePresetArgs {
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
   destination: string;
+  allowOverwrite?: boolean;
 }
 
 export interface LoadPresetArgs {
@@ -565,6 +569,7 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+        allowOverwrite: args.allowOverwrite ?? false,
         entries: args.entries ?? null,
       },
     });
@@ -582,6 +587,7 @@ class NativeBackend implements Backend {
         ...(args.columnOrder !== undefined ? { columnOrder: args.columnOrder } : {}),
         ...(args.columnWidths !== undefined ? { columnWidths: args.columnWidths } : {}),
         destination: args.destination,
+        allowOverwrite: args.allowOverwrite ?? false,
       },
     });
   }
@@ -660,6 +666,7 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+        allowOverwrite: args.allowOverwrite ?? false,
         scope: args.scope ?? "filtered",
         search: args.search ?? null,
         searchColumns: args.searchColumns ?? null,
