@@ -323,3 +323,37 @@ fn string_query_allocations_are_bounded_as_row_count_increases() {
         eprintln!("1000/20000-row allocations: {small_allocations}/{large_allocations}; owned adapter={former_allocations}");
     }
 }
+
+#[test]
+fn selective_sort_allocations_follow_matches_instead_of_source_rows() {
+    let frame = |rows: usize| {
+        let mut selected = vec!["drop"; rows];
+        let mut rank = vec!["not selected"; rows];
+        for (index, value) in [(0, "10.5"), (rows / 2, "2.5"), (rows - 1, "2.5")] {
+            selected[index] = "keep";
+            rank[index] = value;
+        }
+        DataFrame::new(vec![
+            Series::new("selected", selected),
+            Series::new("rank", rank),
+        ])
+        .unwrap()
+    };
+    let small = frame(1000);
+    let large = frame(20000);
+    let spec = QuerySpec {
+        condition: Some(condition("selected", Op::Eq, &["keep"], false)),
+        sort_key: Some("rank".into()),
+        sort_direction: Some("asc".into()),
+        ..Default::default()
+    };
+    borrowed_rows(&small, &spec).unwrap();
+    let (small_rows, small_allocations) = allocations(|| borrowed_rows(&small, &spec).unwrap());
+    let (large_rows, large_allocations) = allocations(|| borrowed_rows(&large, &spec).unwrap());
+    assert_eq!(small_rows, vec![500, 999, 0]);
+    assert_eq!(large_rows, vec![10000, 19999, 0]);
+    assert!(
+        large_allocations <= small_allocations + 8,
+        "sort allocated for excluded rows: {small_allocations} -> {large_allocations}"
+    );
+}

@@ -10,7 +10,7 @@ use crate::models::FlagEntry;
 
 use super::page::{flag_population, is_unrestricted_flag_filter, FlagFilterMask};
 use super::search::prepare_search;
-use super::sort::ordered_row_indices;
+use super::sort::sort_row_indices;
 
 /// Number of `resolve_target` calls since process start.
 ///
@@ -112,29 +112,25 @@ pub fn resolve_target(
         }
         true
     };
-    // Source order is implicit; a search does not need a second N-row ordering
-    // vector or N owned flag strings/bookmark bools.
-    let mut filtered = if spec
-        .sort_key
-        .as_deref()
-        .is_some_and(|key| df.column(key).is_ok())
-    {
-        ordered_row_indices(df, spec.sort_key.as_deref(), spec.sort_direction.as_deref())
-    } else {
-        (0..df.height()).collect()
-    };
-    let mut cancelled = None;
-    let mut visited = 0usize;
-    filtered.retain(|index| {
-        if visited.is_multiple_of(1024) && cancelled.is_none() {
-            cancelled = job.check_cancelled().err();
+    // Resolve membership before ordering: a selective query must not build
+    // sort keys or an ordering vector for every source row. Source order also
+    // supplies the stable tie order for both ascending and descending sorts.
+    let mut filtered = Vec::new();
+    for index in 0..df.height() {
+        if index.is_multiple_of(1024) {
+            job.check_cancelled()?;
         }
-        visited += 1;
-        cancelled.is_none() && matches(*index)
-    });
-    if let Some(error) = cancelled {
-        return Err(error);
+        if matches(index) {
+            filtered.push(index);
+        }
     }
+    let filtered = sort_row_indices(
+        df,
+        filtered,
+        spec.sort_key.as_deref(),
+        spec.sort_direction.as_deref(),
+        job,
+    )?;
     let annotated_total = flags
         .iter()
         .filter(|(index, entry)| **index < df.height() && flag_population(&entry.flag) != 8)

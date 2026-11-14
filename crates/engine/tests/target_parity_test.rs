@@ -17,13 +17,20 @@ use trivium_engine::ops::bulk::{bulk_preview, bulk_update, BulkAnnotatePayload};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
+use trivium_engine::ops::rows::{
+    locate_project_row, query_project_rows, LocateRowPayload, QueryRowsPayload, QuerySpec,
+};
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
 mod common;
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
+fn setup() -> (
+    PathBuf,
+    ProjectsStore,
+    Uuid,
+    std::collections::HashMap<String, String>,
+) {
     let root = std::env::temp_dir().join(format!("trivium-target-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let csv = root.join("targets.csv");
@@ -219,7 +226,9 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
     let missing = bulk_update(&store, bulk_payload(id, spec(&ids)))
         .expect_err("update without a preview token must fail");
     assert!(
-        missing.to_string().contains("Target changed; preview again."),
+        missing
+            .to_string()
+            .contains("Target changed; preview again."),
         "unexpected error: {missing}"
     );
 
@@ -227,7 +236,9 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
     stale.preview_token = Some("not-the-token".to_string());
     let mismatch = bulk_update(&store, stale).expect_err("stale token must fail");
     assert!(
-        mismatch.to_string().contains("Target changed; preview again."),
+        mismatch
+            .to_string()
+            .contains("Target changed; preview again."),
         "unexpected error: {mismatch}"
     );
 
@@ -275,7 +286,8 @@ fn bulk_preview_token_detects_annotation_changes_in_the_target() {
         ..Default::default()
     };
 
-    let preview = bulk_preview(&store, bulk_payload(id, open_spec.clone())).expect("preview failed");
+    let preview =
+        bulk_preview(&store, bulk_payload(id, open_spec.clone())).expect("preview failed");
     assert_eq!(preview.count, 10);
 
     // Clearing row 12's flag does not remove it from this target, but it does
@@ -295,7 +307,8 @@ fn bulk_preview_token_detects_annotation_changes_in_the_target() {
 
     let mut stale = bulk_payload(id, open_spec);
     stale.preview_token = Some(preview.preview_token);
-    let error = bulk_update(&store, stale).expect_err("annotation change must invalidate the token");
+    let error =
+        bulk_update(&store, stale).expect_err("annotation change must invalidate the token");
     assert!(
         error.to_string().contains("Target changed; preview again."),
         "unexpected error: {error}"
@@ -327,5 +340,69 @@ fn scope_all_applies_the_requested_sort_order() {
     assert_eq!(ids.first().map(String::as_str), Some("r19"));
     assert_eq!(ids.last().map(String::as_str), Some("r00"));
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn filtered_sort_ties_keep_source_order_across_targets_and_annotation_revisions() {
+    let (root, store, id, ids) = setup();
+    let mut filtered_spec = spec(&ids);
+    // Both surviving rows contain "keep" in this column. Filtering before
+    // sorting must retain original row order for ties in either direction.
+    filtered_spec.sort_key = Some(common::id(&ids, "cond"));
+    for direction in ["asc", "desc"] {
+        filtered_spec.sort_direction = Some(direction.to_string());
+        assert_eq!(query_ids(&store, id, filtered_spec.clone()), vec![0, 6]);
+        for (row_index, position) in [(0, Some(0)), (6, Some(1)), (12, None)] {
+            let located = locate_project_row(
+                &store,
+                LocateRowPayload {
+                    project_id: id,
+                    row_index,
+                    spec: filtered_spec.clone(),
+                },
+            )
+            .expect("locate failed");
+            assert_eq!(located.position, position);
+            assert_eq!(located.total_filtered_rows, 2);
+        }
+        assert_eq!(
+            export_column(
+                &store,
+                &root,
+                id,
+                "id",
+                "filtered",
+                filtered_spec.clone(),
+                vec![common::id(&ids, "id")],
+            ),
+            vec!["r00", "r06"]
+        );
+        let preview =
+            bulk_preview(&store, bulk_payload(id, filtered_spec.clone())).expect("preview failed");
+        assert_eq!(preview.count, 2);
+    }
+
+    // A shared cached result must not outlive a membership-changing bookmark
+    // edit, even though the search, sort key, and tie values stay unchanged.
+    update_flag(
+        &store,
+        UpdateFlagPayload {
+            project_id: id,
+            row_index: 6,
+            flag: None,
+            memo: None,
+            tags: None,
+            bookmarked: Some(false),
+        },
+    )
+    .expect("bookmark update failed");
+    assert_eq!(query_ids(&store, id, filtered_spec.clone()), vec![0]);
+    assert_eq!(
+        bulk_preview(&store, bulk_payload(id, filtered_spec))
+            .expect("preview after edit failed")
+            .count,
+        1
+    );
     let _ = fs::remove_dir_all(root);
 }

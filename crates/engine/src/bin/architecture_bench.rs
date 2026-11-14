@@ -7,6 +7,7 @@ use serde_json::json;
 use trivium_engine::{
     ops::{
         export::{export_project, ExportProjectPayload},
+        flags::{update_flag, UpdateFlagPayload},
         projects::{
             create_project, delete_project, load_project, CreateProjectPayload, ProjectRequest,
         },
@@ -59,7 +60,7 @@ fn measure<T>(label: &str, runs: usize, mut operation: impl FnMut() -> Result<T>
     result.context("benchmark did not run")
 }
 
-fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec, offset: usize) -> Result<()> {
+fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec, offset: usize) -> Result<usize> {
     let result = query_project_rows(
         store,
         QueryRowsPayload {
@@ -70,7 +71,7 @@ fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec, offset: usize) -> Res
         },
     )?;
     assert!(result.rows.len() <= PAGE);
-    Ok(())
+    Ok(result.total_filtered_rows)
 }
 
 fn run_fixture(fixture: &str) -> Result<()> {
@@ -177,11 +178,62 @@ fn run_fixture(fixture: &str) -> Result<()> {
         )?;
         Ok(result)
     })?;
+    // Fixed selectivity for every fixture: compare the same 100 source rows
+    // with/without sorting. Annotation setup is outside the measurements.
+    let sparse_count = meta.total_records.min(100);
+    for index in 0..sparse_count {
+        update_flag(
+            &store,
+            UpdateFlagPayload {
+                project_id: id,
+                row_index: index * meta.total_records / sparse_count,
+                flag: None,
+                memo: None,
+                tags: None,
+                bookmarked: Some(true),
+            },
+        )?;
+    }
+    for (label, sort_key) in [
+        ("query_sparse_100_cold", None),
+        ("query_sparse_100_sorted_cold", Some(column("ts"))),
+    ] {
+        let sparse_spec = QuerySpec {
+            bookmarked_only: Some(true),
+            sort_key,
+            sort_direction: Some("desc".into()),
+            ..QuerySpec::default()
+        };
+        measure(label, TRIALS, || {
+            clear_result_cache();
+            let matched = query(&store, id, sparse_spec.clone(), 0)?;
+            anyhow::ensure!(matched == sparse_count, "unexpected sparse target size");
+            Ok(())
+        })?;
+    }
     let sort = QuerySpec {
         sort_key: Some(column("ts")),
         sort_direction: Some("desc".into()),
         ..QuerySpec::default()
     };
+    measure("query_all_integer_sorted_cold", TRIALS, || {
+        clear_result_cache();
+        let matched = query(
+            &store,
+            id,
+            QuerySpec {
+                sort_key: Some(column("EventID")),
+                sort_direction: Some("desc".into()),
+                ..QuerySpec::default()
+            },
+            0,
+        )?;
+        anyhow::ensure!(
+            matched == meta.total_records,
+            "unexpected all-row target size"
+        );
+        Ok(())
+    })?;
     measure("export_sorted_all", TRIALS, || {
         clear_result_cache();
         let result = export_project(
