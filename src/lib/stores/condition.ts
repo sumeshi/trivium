@@ -27,6 +27,8 @@ export interface EditorCondition {
   value: string;
   /** One `in` value, kept whole when it contains a comma. Cleared once the field is edited. */
   exact?: boolean;
+  /** Structured preset values remain literal until the value field is edited. */
+  sourceValues?: string[];
   negated: boolean;
 }
 
@@ -41,12 +43,13 @@ export interface EditorGroup {
 export type EditorNode = EditorCondition | EditorGroup;
 
 /** Newly added text-match rules stay inactive until their value is entered. */
-export function isIncompleteTextCondition(row: Pick<EditorCondition, "op" | "value">): boolean {
-  return row.value.length === 0
+export function isIncompleteTextCondition(row: Pick<EditorCondition, "op" | "value" | "sourceValues">): boolean {
+  return row.sourceValues === undefined && row.value.length === 0
     && (row.op === "contains" || row.op === "startsWith" || row.op === "endsWith");
 }
 
 export function conditionValues(row: EditorCondition): string[] {
+  if (row.sourceValues !== undefined) return [...row.sourceValues];
   if (row.op === "in" && row.exact === true) {
     return [row.value];
   }
@@ -250,7 +253,12 @@ export function createConditionState() {
   function patchCondition(id: string, patch: Partial<EditorCondition>): void {
     edit((root) => mapNode(root, (node) => {
       if (node.type === "condition" && node.id === id) {
-        return { ...node, ...patch, id: node.id, type: "condition" };
+        return {
+          ...node, ...patch,
+          // Operator, column and NOT edits keep the same literal values.
+          ...(Object.hasOwn(patch, "value") ? { sourceValues: undefined } : {}),
+          id: node.id, type: "condition",
+        };
       }
       return node;
     }) as EditorGroup);
@@ -311,8 +319,9 @@ function conditionFromNode(value: unknown): EditorCondition | null {
     id: crypto.randomUUID(),
     column: typeof value.column === "string" ? value.column : "",
     op: typedOp,
-    value: typedOp === "in" && !exact ? values.join(",") : values[0] ?? "",
+    value: values.length > 1 ? values.join(",") : values[0] ?? "",
     exact,
+    sourceValues: values,
     negated: value.negated === true,
   };
 }

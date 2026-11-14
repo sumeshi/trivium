@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import { applyPresetView, changedPresetLayout } from '../../presetView';
+  import { applyPresetAndSaveColumns, changedPresetLayout } from '../../presetView';
   import { presetFileName } from '../../presetFileName';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
@@ -53,11 +53,13 @@
         return;
       }
       const fileName = destination.split(/[\\/]/).pop() ?? '';
+      // The native Save dialog confirms replacing an existing destination.
       await service.savePreset({
         projectId,
         name: fileName.replace(/\.json$/i, '') || null,
         ...snapshot,
         destination,
+        allowOverwrite: true,
       });
       if (isCurrent()) notice = 'Preset saved.';
     } catch (err) {
@@ -76,6 +78,7 @@
     const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
     busy = true;
+    let applied = false;
     try {
       const selected = await open({
         multiple: false,
@@ -94,14 +97,17 @@
         warning = `Unknown columns: ${preset.unknown_columns.join(', ')}`;
         return;
       }
-      await service.setHiddenColumns({ projectId, hiddenColumns: preset.hiddenColumns });
-      if (!isCurrent()) return;
-      applyPresetView(workspace, preset);
-      if (preset.columnWidths !== undefined) dispatch('columnWidths', preset.columnWidths);
-      notice = 'Preset applied.';
+      applied = true;
+      await applyPresetAndSaveColumns(workspace, preset, {
+        setColumnWidths: widths => dispatch('columnWidths', widths),
+        saveHiddenColumns: hiddenColumns => service.setHiddenColumns({ projectId, hiddenColumns }),
+      });
+      if (isCurrent()) notice = 'Preset applied.';
     } catch (err) {
       console.error(err);
-      if (isCurrent()) error = errorMessage(err, 'Failed to apply preset.');
+      if (isCurrent()) error = applied
+        ? `Preset applied. ${errorMessage(err, 'Could not save visible columns.')}`
+        : errorMessage(err, 'Failed to apply preset.');
     } finally {
       busy = false;
     }

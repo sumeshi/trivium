@@ -21,9 +21,11 @@ export function changedPresetLayout(
   return layout;
 }
 
+type PresetWorkspace = Pick<WorkspaceController,
+  "conditionTree" | "hiddenColumns" | "sortKey" | "sortDirection" | "sortRevision" | "columnOrder">;
+
 /** Apply exactly the view fields saved by the preset, in this case only. */
-export function applyPresetView(workspace: Pick<WorkspaceController,
-  "conditionTree" | "hiddenColumns" | "sortKey" | "sortDirection" | "sortRevision" | "columnOrder">, preset: PresetData): void {
+export function applyPresetView(workspace: PresetWorkspace, preset: PresetData): void {
   workspace.conditionTree.set(presetCondition(preset.condition) ?? {
     type: "group", id: "root", kind: "and", collapsed: false, children: [],
   });
@@ -34,4 +36,19 @@ export function applyPresetView(workspace: Pick<WorkspaceController,
   workspace.sortKey.set(preset.sortKey);
   workspace.sortDirection.set(nextDirection);
   if (sortChanged) workspace.sortRevision.update((revision) => revision + 1);
+}
+
+/** Publish the entire validated view before enqueueing its metadata save.
+ * Completion must never reapply the preset over subsequent user edits. */
+export function applyPresetAndSaveColumns(
+  workspace: PresetWorkspace,
+  preset: PresetData,
+  options: {
+    setColumnWidths: (widths: Record<string, number>) => void;
+    saveHiddenColumns: (columns: string[]) => Promise<void>;
+  },
+): Promise<void> {
+  applyPresetView(workspace, preset);
+  if (preset.columnWidths !== undefined) options.setColumnWidths({ ...preset.columnWidths });
+  return options.saveHiddenColumns([...preset.hiddenColumns]);
 }

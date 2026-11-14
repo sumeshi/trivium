@@ -30,8 +30,11 @@
 
   $: kind = ($projectDetail?.column_kinds?.[node.column] ?? "string") as ColumnKind;
   $: help = conditionValueHelp(kind, node.op, node.exact);
+  $: savedValues = node.sourceValues !== undefined && node.sourceValues.length !== 1;
+  $: savedValuesHint = savedValues
+    ? `Saved values: ${JSON.stringify(node.sourceValues)}. Editing replaces this list.` : undefined;
   $: ordered = isOrderedCondition(node.op);
-  $: key = JSON.stringify([$projectDetail?.project.meta.id, node.id, node.column, kind, node.op, node.value, node.exact]);
+  $: key = JSON.stringify([$projectDetail?.project.meta.id, node.id, node.column, kind, node.op, node.value, node.exact, node.sourceValues]);
   $: if ($backend && (key !== checkedKey || $backend !== checkedBackend)) {
     checkedKey = key;
     checkedBackend = $backend;
@@ -67,6 +70,7 @@
       inputmode={kind === "int" && ordered ? "numeric" : undefined}
       value={node.value}
       placeholder={help.placeholder}
+      title={savedValuesHint}
       on:input={(event) => setValue(event.currentTarget.value)}
       aria-label="Value"
       aria-describedby={`condition-help-${node.id} condition-check-${node.id}`}
@@ -83,7 +87,7 @@
       </button>
     {/if}
   </div>
-  <p id={`condition-help-${node.id}`} class="value-help">{help.hint}</p>
+  <p id={`condition-help-${node.id}`} class="value-help">{savedValues ? 'Saved values stay exact. Editing replaces the list.' : help.hint}</p>
   <div id={`condition-check-${node.id}`} class="value-check" class:invalid role="status" aria-live="polite" aria-atomic="true">
     {#if draft}
       <span>Enter text to apply this rule.</span>

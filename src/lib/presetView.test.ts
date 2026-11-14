@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
-import { applyPresetView, changedPresetLayout } from "./presetView.ts";
+import { applyPresetAndSaveColumns, applyPresetView, changedPresetLayout } from "./presetView.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
+import { queueHiddenColumnWrite } from "./hiddenColumnWrites.ts";
 
 function setup() {
   const workspace = createWorkspaceController();
@@ -27,6 +28,72 @@ test("a preset restores only documented rules/columns/sort and emits a per-case 
   applyPresetView(a, preset);
   assert.equal(get(a.sortRevision), 1, "an unchanged sort does not force a duplicate query");
   a.dispose(); b.dispose();
+});
+
+test("a slow preset metadata save cannot overwrite subsequent investigation and column edits", async () => {
+  const workspace = setup();
+  const preset = { condition: { column: "c2", op: "in" as const, values: ["alice,bob", " carol "], negated: false },
+    hiddenColumns: ["c1"], sortKey: "c2", sortDirection: "asc" as const,
+    columnOrder: ["c2", "c1"], columnWidths: { c2: 347 }, unknown_columns: [] };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let widths: Record<string, number> = {}, persisted: string[] = [];
+  const writes: string[][] = [];
+  const pending = applyPresetAndSaveColumns(workspace, preset, {
+    setColumnWidths: next => { widths = next; },
+    saveHiddenColumns: columns => {
+      assert.deepEqual(get(workspace.conditionPayload), preset.condition);
+      assert.deepEqual([...get(workspace.hiddenColumns)], ["c1"]);
+      assert.deepEqual(get(workspace.columnOrder), ["c2", "c1"]);
+      assert.deepEqual(widths, { c2: 347 }, "all view fields must publish before metadata is queued");
+      return queueHiddenColumnWrite("preset-latest-edit", columns, async snapshot => {
+        writes.push(snapshot); await held; persisted = snapshot;
+      });
+    },
+  });
+  workspace.filterByValue("c1", "later rule");
+  workspace.hiddenColumns.set(new Set(["c2"]));
+  workspace.sortKey.set("c1"); workspace.sortDirection.set("desc");
+  workspace.columnOrder.set(["c1", "c2"]); widths = { c1: 400 };
+  const latest = queueHiddenColumnWrite("preset-latest-edit", ["c2"], async snapshot => {
+    writes.push(snapshot); persisted = snapshot;
+  });
+  release();
+  await Promise.all([pending, latest]);
+  assert.deepEqual(writes, [["c1"], ["c2"]]);
+  assert.deepEqual([...get(workspace.hiddenColumns)], persisted);
+  assert.deepEqual(persisted, ["c2"]);
+  assert.deepEqual(get(workspace.conditionPayload), { column: "c1", op: "in", values: ["later rule"], negated: false });
+  assert.equal(get(workspace.sortKey), "c1"); assert.equal(get(workspace.sortDirection), "desc");
+  assert.deepEqual(get(workspace.columnOrder), ["c1", "c2"]);
+  assert.deepEqual(widths, { c1: 400 });
+  workspace.dispose();
+});
+
+test("preset application is complete before a panel can close and failure never rolls back newer edits", async () => {
+  const workspace = setup();
+  let reject!: (error: Error) => void;
+  const held = new Promise<void>((_, fail) => { reject = fail; });
+  const preset = { condition: null, hiddenColumns: ["c3"], sortKey: null,
+    sortDirection: null, columnWidths: { c1: 160 }, unknown_columns: [] };
+  let callbacks = 0;
+  const pending = applyPresetAndSaveColumns(workspace, preset, {
+    setColumnWidths: () => { callbacks += 1; },
+    saveHiddenColumns: () => held,
+  });
+  assert.equal(get(workspace.conditionPayload), null);
+  assert.deepEqual([...get(workspace.hiddenColumns)], ["c3"]);
+  assert.equal(get(workspace.sortKey), null);
+  assert.equal(callbacks, 1, "closing the panel after this call cannot leave only metadata applied");
+  workspace.hiddenColumns.set(new Set(["later-column"]));
+  workspace.filterByValue("c2", "later rule");
+  const failed = assert.rejects(pending, /disk unavailable/);
+  reject(new Error("disk unavailable"));
+  await failed;
+  assert.deepEqual([...get(workspace.hiddenColumns)], ["later-column"]);
+  assert.equal(get(workspace.conditionTree).children[0].type, "condition");
+  assert.equal(callbacks, 1, "neither success nor failure may publish the old layout again");
+  workspace.dispose();
 });
 
 test("loading an empty-rule preset clears old rules and restores source-order sorting", () => {

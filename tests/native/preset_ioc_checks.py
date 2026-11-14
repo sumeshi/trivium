@@ -11,6 +11,7 @@ from column_presentation_checks import _focus_resize, _order, _reorder, _width
 from feedback_checks import _settle
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
+from preset_state_checks import verify_preset_state
 
 
 def _picker(web, destination: Path) -> None:
@@ -182,6 +183,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         assert saved["version"] == 2 and [item["source"] for item in saved["columns"]] == ["host", "message", "score"], saved
         assert "columnOrder" not in saved and "columnWidths" not in saved, "Default layouts need no preset overrides"
         layout = _layout_presets(web, ids, saved, preset_path, root)
+        preset_state = verify_preset_state(web, data, case, source, ids, saved, preset_path, root)
         # A reference the file cannot identify must not partially replace the view.
         invalid = {**saved, "condition": {"column": "not-known", "op": "eq", "values": ["alpha"], "negated": False},
             "hiddenColumns": [ids["score"]], "sortKey": ids["message"], "sortDirection": "desc"}
@@ -253,6 +255,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         invalid_flags = _invalid_ioc_flags(web, data, case, source, root, original)
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
             "layout": layout,
+            "state": preset_state,
             "unknown_reference_leaves_view_unchanged": True, "preset_rules_columns_sort_applied": True,
             "ioc_saved_without_annotations": True, "direct_apply_matches_all_rows": 2, "no_visible_preview": True,
             "query_help": help_text,

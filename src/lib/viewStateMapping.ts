@@ -34,7 +34,9 @@ function isNode(value: unknown): boolean {
       COMPARE_OPS.has(value.op) &&
       typeof value.value === "string" &&
       typeof value.negated === "boolean" &&
-      (value.exact === undefined || typeof value.exact === "boolean")
+      (value.exact === undefined || typeof value.exact === "boolean") &&
+      (value.sourceValues === undefined || (Array.isArray(value.sourceValues) &&
+        value.sourceValues.every((item) => typeof item === "string")))
     );
   }
   if (value.type === "group") {

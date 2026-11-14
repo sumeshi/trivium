@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { get } from "svelte/store";
 
 import {
   savedViewFromUnknown,
@@ -8,6 +9,7 @@ import {
   viewStateWarnings,
 } from "./viewStateMapping.ts";
 import type { EditorGroup } from "./stores/condition.ts";
+import { createConditionState, presetCondition } from "./stores/condition.ts";
 import type { SavedView } from "./viewState.ts";
 
 const condition: EditorGroup = {
@@ -51,6 +53,26 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   const restored = viewStateToSavedView(state, columns);
 
   assert.deepEqual(restored, saved());
+});
+
+test("preset literal arrays survive engine view JSON and saved-view restoration", () => {
+  for (const values of [[], [""], ["alice,bob", " carol ", ""]]) {
+    const literal = { column: columns[0], op: "in" as const, values, negated: true };
+    const tree = presetCondition(literal)!;
+    const wire = JSON.parse(JSON.stringify(savedViewToViewState(saved({ condition: tree }))));
+    const restored = viewStateToSavedView(wire, columns);
+    assert.ok(restored);
+    const state = createConditionState();
+    state.conditionTree.set(restored.condition);
+    assert.deepEqual(get(state.conditionPayload), literal);
+  }
+});
+
+test("malformed saved literal arrays are rejected without silently changing the rule", () => {
+  for (const sourceValues of [null, "a,b", ["a", null], [1], {}]) {
+    const malformed = { ...condition, children: [{ ...condition.children[0], sourceValues }] };
+    assert.equal(savedViewFromUnknown(saved({ condition: malformed as EditorGroup }), columns), null);
+  }
 });
 
 test('display order and ISO settings survive save/restore without changing query scope', () => {
