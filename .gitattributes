@@ -1,0 +1,4 @@
+# Evidence fixtures must retain their exact committed bytes on every platform.
+crates/engine/tests/fixtures/** -text
+# The generated contract check compares against deterministic LF output.
+src/lib/generated/engine.ts text eol=lf
