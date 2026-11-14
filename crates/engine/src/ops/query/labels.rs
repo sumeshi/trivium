@@ -20,6 +20,9 @@ impl QuerySpec {
 }
 
 fn resolve_label<'a>(name: &str, columns: &'a [ColumnMeta]) -> Result<Option<&'a str>, AppError> {
+    if crate::search::is_tag_scope(name) {
+        return Ok(None);
+    }
     // An empty scope has the tokenizer's joined-text meaning, even when the
     // source contains an unnamed CSV header.
     if name.is_empty() {
@@ -139,6 +142,22 @@ mod tests {
         assert_eq!(
             rewrite_scopes("unknown:value \"duplicate:value\"", &columns).unwrap(),
             "unknown:value \"duplicate:value\""
+        );
+    }
+
+    #[test]
+    fn reserved_tag_scope_does_not_steal_the_real_tag_source_column() {
+        let columns = vec![
+            column("c000001", "@tag", "@tag"),
+            column("c000002", "tag", "tag"),
+        ];
+        assert_eq!(
+            rewrite_scopes(
+                "@tag:review tag:review c000001:source \"@tag:literal\"",
+                &columns
+            )
+            .unwrap(),
+            "@tag:review c000002:review c000001:source \"@tag:literal\""
         );
     }
 }

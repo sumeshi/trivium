@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
+use crate::search::{TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
 
 use super::model::{GroupKind, Node, Op};
 
@@ -37,7 +38,32 @@ pub fn reset_regex_compile_count() {
 #[derive(Debug)]
 pub enum PreparedNode {
     Condition(PreparedCondition),
+    Tag(PreparedTag),
     Group(PreparedGroup),
+}
+
+#[derive(Debug)]
+pub struct PreparedTag {
+    value: String,
+    any: bool,
+    negated: bool,
+}
+
+impl PreparedTag {
+    fn eval(&self, tags: &[String]) -> bool {
+        let matched = if self.any {
+            !tags.is_empty()
+        } else {
+            tags.iter().any(|tag| {
+                if tag.is_ascii() && self.value.is_ascii() {
+                    tag.eq_ignore_ascii_case(&self.value)
+                } else {
+                    tag.to_lowercase() == self.value
+                }
+            })
+        };
+        self.negated ^ matched
+    }
 }
 
 #[derive(Debug)]
@@ -72,7 +98,34 @@ impl PreparedNode {
     }
 
     pub fn prepare(node: &Node) -> Result<Self, EvalError> {
+        Self::prepare_inner(node, false)
+    }
+
+    /// Metadata markers come only from the search tokenizer; structured
+    /// conditions continue to address source columns without a new wire op.
+    pub(crate) fn prepare_search(node: &Node) -> Result<Self, EvalError> {
+        Self::prepare_inner(node, true)
+    }
+
+    pub(crate) fn and(self, other: Self) -> Self {
+        Self::Group(PreparedGroup {
+            kind: GroupKind::And,
+            children: vec![self, other],
+        })
+    }
+
+    fn prepare_inner(node: &Node, metadata: bool) -> Result<Self, EvalError> {
         match node {
+            Node::Condition(condition)
+                if metadata
+                    && matches!(condition.column.as_str(), TAG_EXACT_COLUMN | TAG_ANY_COLUMN) =>
+            {
+                Ok(Self::Tag(PreparedTag {
+                    value: condition.values.first().cloned().unwrap_or_default(),
+                    any: condition.column == TAG_ANY_COLUMN,
+                    negated: condition.negated,
+                }))
+            }
             Node::Condition(condition) => {
                 let regexes = if condition.op == Op::Regex {
                     condition
@@ -101,7 +154,7 @@ impl PreparedNode {
                 children: group
                     .children
                     .iter()
-                    .map(PreparedNode::prepare)
+                    .map(|node| Self::prepare_inner(node, metadata))
                     .collect::<Result<Vec<_>, _>>()?,
             })),
         }
@@ -111,6 +164,7 @@ impl PreparedNode {
     pub fn eval(&self, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
         match self {
             Self::Condition(condition) => condition.eval(row),
+            Self::Tag(condition) => Ok(condition.eval(&[])),
             Self::Group(group) => match group.kind {
                 GroupKind::And => {
                     for child in &group.children {
@@ -143,6 +197,7 @@ impl PreparedNode {
     fn collect_columns<'a>(&'a self, columns: &mut Vec<&'a str>) {
         match self {
             Self::Condition(condition) => columns.push(condition.column.as_str()),
+            Self::Tag(_) => {}
             Self::Group(group) => {
                 for child in &group.children {
                     child.collect_columns(columns);

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::{
     page::{flag_population, is_unrestricted_flag_filter},
-    page_read::{is_source_order_unsearched, is_unconditional_page, resolution_projection},
+    page_read::{is_unconditional_page, resolution_projection},
     result_cache::{self, CachedResult},
     singleflight,
     target::{resolve_target, QuerySpec},
@@ -80,15 +80,15 @@ pub fn resolve_project_target(
     let token = result_cache::spec_depends_on_annotations(&spec).then(|| revision.to_string());
     let key = result_cache::query_cache_key(project_id, &spec, &path, token);
     let result = singleflight::resolve_once(key.clone(), job, || {
-        let mut projection = resolution_projection(
+        let projection = resolution_projection(
             &spec,
             &columns,
             schema.iter().any(|name| name == INTERNAL_ROW_ID),
         );
         job.report_progress(1, Some(3), Some("Evaluating query".into()));
-        let frame = if is_source_order_unsearched(&spec) {
-            // Flags/bookmarks are sparse metadata. A null anchor retains the
-            // row count without reading or allocating any N-row source column.
+        let frame = if projection.iter().all(|column| column == INTERNAL_ROW_ID) {
+            // Flags, bookmarks and tag-only expressions are sparse metadata.
+            // A null anchor keeps row count without reading source columns.
             DataFrame::new(vec![Series::full_null(
                 INTERNAL_ROW_ID,
                 total_rows,
@@ -96,11 +96,6 @@ pub fn resolve_project_target(
             )])
             .map_err(|error| AppError::from(anyhow::Error::from(error)))?
         } else {
-            // Genuine legacy Parquet can omit __rowid; even a constant empty
-            // group predicate still needs an existing column as row anchor.
-            if projection.is_empty() {
-                projection.extend(schema.first().cloned());
-            }
             read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?
         };
         let target = resolve_target(&frame, &spec, &columns, &flags, job)?;

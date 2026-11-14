@@ -246,11 +246,15 @@ fn normalized_spec_json(spec: &QuerySpec) -> String {
 
 /// True when the resolved ids depend on annotation state.
 ///
-/// Memo and tag edits do not change which rows match, so they must not
-/// invalidate a result. A flag filter reads final flags (user flags plus IOC
-/// flags) and bookmark-only reads bookmarks.
+/// Data-only searches retain their ids across annotation edits. Flag,
+/// bookmark and reserved tag predicates must use the current revision.
 pub(crate) fn spec_depends_on_annotations(spec: &QuerySpec) -> bool {
-    !is_unrestricted_flag_filter(spec.flag_filter.as_deref()) || spec.bookmarked_only == Some(true)
+    !is_unrestricted_flag_filter(spec.flag_filter.as_deref())
+        || spec.bookmarked_only == Some(true)
+        || spec
+            .search
+            .as_deref()
+            .is_some_and(crate::search::search_reads_tags)
 }
 
 pub(crate) fn query_cache_key(
@@ -426,6 +430,33 @@ mod tests {
             bookmarked_only: Some(true),
             ..Default::default()
         }));
+    }
+
+    #[test]
+    fn annotation_dependencies_follow_tag_operands_not_literal_source_text() {
+        for search in [
+            "@tag:review",
+            "-@tag:*",
+            "@TAG:\"triage: mail|review\"",
+            "@tag:one|two",
+        ] {
+            assert!(
+                spec_depends_on_annotations(&QuerySpec {
+                    search: Some(search.into()),
+                    ..Default::default()
+                }),
+                "{search}"
+            );
+        }
+        for search in ["tag:review", "\"@tag:review\"", "message:@tag:review"] {
+            assert!(
+                !spec_depends_on_annotations(&QuerySpec {
+                    search: Some(search.into()),
+                    ..Default::default()
+                }),
+                "{search}"
+            );
+        }
     }
 
     #[test]

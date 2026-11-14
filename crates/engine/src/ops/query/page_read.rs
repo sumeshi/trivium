@@ -14,7 +14,7 @@ use crate::{
     error::AppError,
     models::{ColorRule, ProjectRow},
     project_io::{is_internal_column, INTERNAL_ROW_ID},
-    search::{tokenize_search_query, SearchToken},
+    search::{is_tag_scope, tokenize_search_query, SearchToken},
     storage::load_color_rules,
 };
 
@@ -58,8 +58,8 @@ pub(super) fn resolution_projection(
     {
         let tokens = tokenize_search_query(search);
         let has_unscoped_term = tokens.iter().any(|token| match token {
-            SearchToken::Term { col: None, text } | SearchToken::QuotedTerm { col: None, text } => {
-                !text.is_empty()
+            SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
+                col.as_deref().is_none_or(str::is_empty) && !text.is_empty()
             }
             _ => false,
         });
@@ -80,7 +80,7 @@ pub(super) fn resolution_projection(
                 }
                 | SearchToken::QuotedTerm {
                     col: Some(column), ..
-                } => {
+                } if !is_tag_scope(column) => {
                     requested.push(column.clone());
                 }
                 _ => {}

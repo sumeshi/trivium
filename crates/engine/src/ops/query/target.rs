@@ -89,6 +89,7 @@ pub fn resolve_target(
         all_columns,
         spec.search.as_deref(),
         spec.condition.as_ref(),
+        flags,
         job,
     )?;
     let restrict_flags = !is_unrestricted_flag_filter(spec.flag_filter.as_deref());

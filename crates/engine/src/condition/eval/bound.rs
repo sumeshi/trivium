@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{EvalError, GroupKind, PreparedCondition, PreparedNode};
+use super::{EvalError, GroupKind, PreparedCondition, PreparedNode, PreparedTag};
 
 /// Prepared predicates reference column slots, not per-row maps. `None` is
 /// the already joined unscoped search text; values remain original strings.
@@ -9,6 +9,7 @@ pub enum BoundNode<'a> {
         condition: &'a PreparedCondition,
         slot: Option<usize>,
     },
+    Tag(&'a PreparedTag),
     Group {
         kind: GroupKind,
         children: Vec<BoundNode<'a>>,
@@ -22,6 +23,7 @@ impl PreparedNode {
                 slot: (!condition.column.is_empty()).then(|| resolve(&condition.column)),
                 condition,
             },
+            Self::Tag(condition) => BoundNode::Tag(condition),
             Self::Group(group) => BoundNode::Group {
                 kind: group.kind,
                 children: group
@@ -40,17 +42,27 @@ impl BoundNode<'_> {
         cells: &[Option<Cow<'_, str>>],
         joined: Option<&str>,
     ) -> Result<bool, EvalError> {
+        self.eval_with_tags(cells, joined, &[])
+    }
+
+    pub(crate) fn eval_with_tags(
+        &self,
+        cells: &[Option<Cow<'_, str>>],
+        joined: Option<&str>,
+        tags: &[String],
+    ) -> Result<bool, EvalError> {
         match self {
             Self::Condition { condition, slot } => condition.eval_text(match slot {
                 Some(slot) => cells.get(*slot).and_then(Option::as_deref),
                 None => joined,
             }),
+            Self::Tag(condition) => Ok(condition.eval(tags)),
             Self::Group {
                 kind: GroupKind::And,
                 children,
             } => {
                 for child in children {
-                    if !child.eval(cells, joined)? {
+                    if !child.eval_with_tags(cells, joined, tags)? {
                         return Ok(false);
                     }
                 }
@@ -61,7 +73,7 @@ impl BoundNode<'_> {
                 children,
             } => {
                 for child in children {
-                    if child.eval(cells, joined)? {
+                    if child.eval_with_tags(cells, joined, tags)? {
                         return Ok(true);
                     }
                 }

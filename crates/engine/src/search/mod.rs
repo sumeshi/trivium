@@ -1,6 +1,7 @@
 mod mask;
 mod rpn;
 mod text;
+mod tags;
 mod tokenize;
 
 pub use mask::build_search_mask_boolean;
@@ -10,3 +11,4 @@ pub use text::{
     reset_searchable_text_build_count, searchable_text_build_count,
 };
 pub use tokenize::{tokenize_search_query, SearchToken};
+pub(crate) use tags::{is_tag_scope, prepare_tag_tokens, search_reads_tags, TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
