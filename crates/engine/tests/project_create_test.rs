@@ -8,9 +8,7 @@ use polars::prelude::AnyValue;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use trivium_engine::ops::projects::{
-    create_project, delete_project, CreateProjectPayload, ProjectRequest,
-};
+use trivium_engine::ops::projects::{create_project, CreateProjectPayload};
 use trivium_engine::project_io::read_project_dataframe;
 use trivium_engine::storage::{load_setting_bytes, project_database_path};
 use trivium_engine::store::ProjectsStore;
@@ -271,6 +269,7 @@ fn failed_metadata_update_does_not_change_saved_state() {
 #[test]
 fn failed_delete_keeps_the_project_and_its_directory() {
     use std::os::unix::fs::PermissionsExt;
+    use trivium_engine::ops::projects::{delete_project, ProjectRequest};
 
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
