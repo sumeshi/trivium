@@ -128,7 +128,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.applied(projectId=project_id, condition=original_or)
         web.results(9)
         web.close_drawer()
-        web.named("Open Analysis")
+        web.named("Open Analyze")
         web.click(web.element("#tool-tab-groups"))
         wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 9, "groups respect the existing OR filter")
         web.click(web.script("return arguments[0].querySelector('.expand-group');", _row(web, 0, "alpha")))

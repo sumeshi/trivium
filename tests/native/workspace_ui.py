@@ -30,7 +30,7 @@ from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
 from scroll_render_checks import verify_scroll_rendering
-from toolbar_checks import verify_toolbar, verify_condition_buttons
+from toolbar_checks import verify_toolbar, verify_condition_buttons, verify_drawer_interaction
 from datetime_group_checks import verify_datetime_groups
 from preset_ioc_checks import verify_presets_iocs
 from column_presentation_checks import verify_column_presentation
@@ -228,7 +228,7 @@ class WorkspaceView(WebView):
     def drawer(self, name: str) -> None:
         before = self.view().get("viewportHeight")
         tool = TOOLS[name]
-        group = "Filters" if tool in {"conditions", "presets"} else "Annotations" if tool in {"bulk", "iocs"} else "Analysis"
+        group = "Filter" if tool in {"conditions", "presets"} else "Annotate" if tool in {"bulk", "iocs"} else "Analyze"
         if not self.script("return !!document.querySelector(arguments[0]);", f"#tool-tab-{tool}"):
             self.named(f"Open {group}")
         self.click(self.element(f"#tool-tab-{tool}"))
@@ -374,12 +374,21 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
             active = next((token for token in ["safe", "suspicious", "critical"] if row[f"trivium-{token}"] == "1"), "none")
             assert not tokens or active in tokens, (tokens, row)
         web.drawer("Bulk annotation")
+        web.write('input[aria-label="Bulk tag"]', f"filter-check-{mask}")
         before = len(web.trace())
-        web.named("Preview", "#analysis-drawer")
-        preview = wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_preview" and "result" in entry), None), bool, "actual bulk preview")
+        web.named("Apply", ".bulk-form")
+        applied = wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "actual direct bulk annotation")
+        preview = next(entry for entry in web.trace()[before:] if entry["name"] == "bulk_preview" and "result" in entry)
         assert preview["result"]["count"] == expected and preview["request"]["flagFilter"] == wire, preview
+        assert applied["result"]["updated"] == expected and applied["request"]["flagFilter"] == wire, applied
+        web.refreshed(before)
+        before = len(web.trace())
+        web.named("Undo", ".bulk-form")
+        restored = wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "direct bulk annotation is reversible")
+        assert restored["result"]["updated"] == expected, restored
+        web.refreshed(before)
         web.close_drawer()
-        checked.append({"selection": tokens, "rows": expected, "export_rows": len(rows), "bulk_preview": expected})
+        checked.append({"selection": tokens, "rows": expected, "export_rows": len(rows), "bulk_applied_and_restored": expected})
     web.flags(["safe", "critical"])
     web.results(total // 2)
     web.drawer("Bulk annotation")
@@ -399,11 +408,9 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.flags([])
     web.results(total)
     web.drawer("Bulk annotation")
-    web.choose('select[aria-label="Bulk flag"]', "safe")
+    web.named("Set bulk flag Safe", ".bulk-form")
     web.write('input[aria-label="Bulk note"]', "delayed bulk audit")
     before = len(web.trace())
-    web.named("Preview", "#analysis-drawer")
-    wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_preview" and "result" in entry), None), bool, "delayed bulk preview")
     web.script("window.__workspaceHold={name:'bulk_update',projectId:arguments[0],ready:false,release:null};", data["id"])
     try:
         web.named("Apply", "#analysis-drawer")
@@ -865,6 +872,7 @@ def main() -> None:
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
                 ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
+                ("drawer switching and blank-area dismissal", lambda: verify_drawer_interaction(web, data, evidence, report)),
                 ("condition add button affordance", lambda: verify_condition_buttons(web, evidence, report)),
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),

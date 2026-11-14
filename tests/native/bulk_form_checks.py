@@ -1,4 +1,4 @@
-"""One bulk form: optional preview, atomic patch, exact tags and owned writes."""
+"""One direct bulk form: optional fields, atomic patches and owned writes."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,7 +34,14 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.write('input[aria-label="Search rows"]', "match")
         web.applied(search="match"); web.results(2)
         web.drawer("Bulk annotation")
-        assert web.script("return document.querySelector('[aria-label=\"Bulk flag\"]').value;") == "keep"
+        assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');")
+        assert not web.script("return [...document.querySelectorAll('.bulk-form button')].some(e=>e.textContent.trim()==='Preview');")
+        assert not web.script("return [...document.querySelectorAll('.bulk-form input')].some(e=>e.placeholder==='Keep');")
+        assert web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
+        web.named("Set bulk flag Safe", ".bulk-form")
+        assert web.script("return document.querySelector('[aria-label=\"Set bulk flag Safe\"]').getAttribute('aria-pressed');") == "true"
+        web.named("Set bulk flag Safe", ".bulk-form")
+        assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');"), "Clicking an active optional flag removes the requested flag change"
         assert web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
         web.write('input[aria-label="Bulk tag"]', "review, exact")
         start = len(web.trace())
@@ -52,13 +59,9 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
         assert _rows(web, project_id) == original
 
-        web.choose('select[aria-label="Bulk flag"]', "critical")
+        web.named("Set bulk flag Critical", ".bulk-form")
         web.write('input[aria-label="Bulk note"]', "combined note")
-        web.write('input[aria-label="Bulk tag"]', "before preview")
-        web.named("Preview", ".bulk-form"); _status(web, "2 rows")
-        assert _rows(web, project_id) == original
         web.write('input[aria-label="Bulk tag"]', "combined tag")
-        assert not web.script("return !!document.querySelector('.bulk-form [role=status]');"), "A draft edit discards the visible preview"
         start = len(web.trace())
         web.named("Apply", ".bulk-form"); _status(web, "2 rows applied")
         updates = _calls(web, start, project_id, "bulk_update")
@@ -82,7 +85,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert _rows(web, project_id) == original
 
         web.choose('select[aria-label="Bulk target"]', "filtered")
-        web.choose('select[aria-label="Bulk flag"]', "")
+        web.named("Clear bulk flags", ".bulk-form")
         web.click(web.element('.bulk-clear input'))
         web.write('input[aria-label="Bulk tag"]', "manual")
         web.choose('select[aria-label="Bulk tag action"]', "remove")
@@ -95,7 +98,8 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
         assert _rows(web, project_id) == original
 
-        web.choose('select[aria-label="Bulk flag"]', "keep")
+        web.named("Clear bulk flags", ".bulk-form")
+        assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');")
         web.click(web.element('.bulk-clear input'))
         web.choose('select[aria-label="Bulk tag action"]', "add")
         web.write('input[aria-label="Bulk tag"]', "closed panel")
@@ -131,9 +135,9 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             lambda value: value == "Target changed. Apply again.", "an in-panel target change cancels the pending pre-commit Apply")
         assert not _calls(web, start, project_id, "bulk_update")
         assert _rows(web, project_id) == original
-        web.screenshot(evidence / "bulk-unified-optional-preview.png")
+        web.screenshot(evidence / "bulk-direct-apply.png")
         report["bulk_form"] = {"direct_apply": True, "default_flag_kept": True, "single_exact_tag": "review, exact",
-            "combined_single_operation": True, "preview_optional_and_invalidated_on_edit": True,
+            "combined_single_operation": True, "preview_hidden": True, "optional_flag_toggles": True,
             "identical_reapply_keeps_previous_undo": True,
             "undo_with_empty_selection": True, "clear_flag_note_remove_tag_atomic": True,
             "closed_panel_and_case_apply_keeps_captured_scope": True, "alive_target_change_aborts_precommit": True}

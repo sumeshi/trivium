@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import uuid
 
+from column_pin_checks import _key
+from column_presentation_checks import _action, _order, _width
+from feedback_checks import _settle
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 
@@ -23,9 +26,79 @@ def _rows(web, project_id: str) -> list[dict]:
     return web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 10})["rows"]
 
 
+def _load_preset(web, source: Path) -> None:
+    start = len(web.trace())
+    _picker(web, source)
+    web.named("Load preset file", "#analysis-drawer")
+    wait_for(lambda: [entry for entry in web.trace()[start:]
+                     if entry["name"] == "set_hidden_columns" and "result" in entry],
+             bool, "the loaded preset's presentation is applied")
+    wait_for(lambda: web.script("return document.querySelector('#analysis-drawer').textContent;"),
+             lambda text: "Preset applied." in text, "preset application completes")
+    _settle(web)
+
+
+def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, root: Path) -> dict:
+    web.close_drawer()
+    original_query = web.query()
+    defaults = {column: _width(web, column)["header"] for column in ids.values()}
+    source_order = [ids[name] for name in ["host", "message", "score"]]
+    custom_order = [ids[name] for name in ["score", "host", "message"]]
+    _action(web, ids["score"], "Move left")
+    _action(web, ids["score"], "Move left")
+    _action(web, ids["host"], "Resize column")
+    _key(web, "\ue014", 2)
+    custom_width = defaults[ids["host"]] + 20
+    wait_for(lambda: _width(web, ids["host"]),
+             lambda widths: all(abs(width - custom_width) <= 1 for width in widths.values()),
+             "custom width affects both header and data cells")
+    assert _order(web) == custom_order, _order(web)
+    web.drawer("Presets")
+    changed_path = root / "changed-layout-preset.json"
+    _picker(web, changed_path)
+    web.named("Save preset file", "#analysis-drawer")
+    wait_for(changed_path.exists, bool, "the custom-layout preset is written")
+    saved = json.loads(changed_path.read_text(encoding="utf-8"))
+    assert saved["columnOrder"] == custom_order, saved
+    assert saved["columnWidths"] == {ids["host"]: custom_width}, saved
+
+    web.close_drawer()
+    _action(web, ids["score"], "Move right")
+    _action(web, ids["score"], "Move right")
+    _action(web, ids["host"], "Resize column")
+    _key(web, "\ue014")
+    wait_for(lambda: _width(web, ids["host"])["header"],
+             lambda width: abs(width - custom_width - 10) <= 1, "the current layout differs from the saved preset")
+    assert _order(web) == source_order, _order(web)
+    web.drawer("Presets")
+    _load_preset(web, changed_path)
+    wait_for(lambda: _order(web), lambda order: order == custom_order, "loading the preset restores column order")
+    wait_for(lambda: _width(web, ids["host"]),
+             lambda widths: all(abs(width - custom_width) <= 1 for width in widths.values()),
+             "loading the preset restores column width")
+
+    # Earlier files omit the optional layout fields and must not reset a
+    # user's current arrangement. Explicit empty values request defaults.
+    _load_preset(web, plain_path)
+    assert _order(web) == custom_order
+    assert all(abs(width - custom_width) <= 1 for width in _width(web, ids["host"]).values())
+    reset_path = root / "reset-layout-preset.json"
+    reset_path.write_text(json.dumps({**preset, "columnOrder": [], "columnWidths": {}}), encoding="utf-8")
+    _load_preset(web, reset_path)
+    wait_for(lambda: _order(web), lambda order: order == source_order, "explicit empty order restores source order")
+    wait_for(lambda: _width(web, ids["host"]),
+             lambda widths: all(abs(width - defaults[ids["host"]]) <= 1 for width in widths.values()),
+             "explicit empty widths restore automatic widths")
+    assert web.query() == original_query, "Column layout presets do not change the search scope"
+    return {"custom_order": custom_order, "changed_widths_only": saved["columnWidths"],
+            "save_modify_load_restores_layout": True, "omitted_layout_preserves_current": True,
+            "explicit_empty_layout_resets": True}
+
+
 def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> None:
     source = root / f"preset-ioc-{uuid.uuid4().hex[:8]}.csv"
     source.write_text("host,message,score\nalpha,beacon,1\nbeta,clear,2\ngamma,beacon,3\n", encoding="utf-8")
+    original_source = source.read_bytes()
     case = web.command("create_project", {"path": str(source)})
     project_id = case["meta"]["id"]
     columns = case["meta"]["columns"]
@@ -58,6 +131,8 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         picker = web.script("return window.__presetIocPicker.calls[0];")
         assert picker["options"]["defaultPath"] == f"trivium-preset-{source.stem}.json", picker
         assert saved["version"] == 2 and [item["source"] for item in saved["columns"]] == ["host", "message", "score"], saved
+        assert "columnOrder" not in saved and "columnWidths" not in saved, "Default layouts need no preset overrides"
+        layout = _layout_presets(web, ids, saved, preset_path, root)
         # A reference the file cannot identify must not partially replace the view.
         invalid = {**saved, "condition": {"column": "not-known", "op": "eq", "values": ["alpha"], "negated": False},
             "hiddenColumns": [ids["score"]], "sortKey": ids["message"], "sortDirection": "desc"}
@@ -89,7 +164,11 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.named("Add rule", ".ioc-dialog")
         web.write('input[aria-label="Rule tag 1"]', "IOC")
         web.write('input[aria-label="Rule query 1"]', "message:beacon")
-        assert web.script("return document.querySelector('.ioc-rule-actions button:nth-of-type(2)').disabled;")
+        assert not web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
+        assert not web.script("return [...document.querySelectorAll('.ioc-dialog button')].some(e=>e.textContent.trim()==='Preview');")
+        help_text = web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').title;")
+        assert all(term in help_text for term in ["AND", "OR", "-noise", '"failed login"', "column:value", "@tag:review", "@tag:*"]), help_text
+        assert help_text == web.script("return document.querySelector('input[aria-label=\"Search rows\"]').title;"), "IOC queries share the main search's full help"
         web.named("Save rules", ".ioc-dialog")
         wait_for(lambda: web.script("return !document.querySelector('.ioc-dialog');"), bool, "saving definitions closes the editor")
         web.results(1)
@@ -97,17 +176,17 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         assert [row["flag"] for row in original] == ["safe", "", ""], original
         _open_iocs(web)
         assert web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').value;") == "message:beacon"
-        web.named("Preview", ".ioc-row")
-        wait_for(lambda: web.script("return document.querySelector('.ioc-rule-actions [role=status]')?.textContent;"),
-            lambda value: value == "2 rows", "IOC preview counts all matches independent of current search")
-        assert _rows(web, project_id) == original, "Preview cannot change annotations"
-        web.write('input[aria-label="Rule query 1"]', "message:clear")
-        assert web.script("return document.querySelector('.ioc-rule-actions button:nth-of-type(2)').disabled;"), "Editing a rule invalidates its preview"
+        web.write('input[aria-label="Rule query 1"]', "")
+        assert web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;"), "A blank rule cannot apply"
         web.write('input[aria-label="Rule query 1"]', "message:beacon")
-        web.named("Preview", ".ioc-row")
-        wait_for(lambda: web.script("return document.querySelector('.ioc-rule-actions [role=status]')?.textContent;"), lambda value: value == "2 rows", "edited rule requires a fresh preview")
+        start = len(web.trace())
         web.named("Apply", ".ioc-row")
         wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "2 rows annotated." in text, "IOC apply stays open and reports its committed count")
+        operations = [entry for entry in web.trace()[start:] if entry["name"] in {"bulk_preview", "bulk_update"}]
+        assert [entry["name"] for entry in operations] == ["bulk_preview", "bulk_update"], operations
+        assert all(entry["request"]["target"] == "filtered" and entry["request"]["search"] == "message:beacon"
+                   for entry in operations), "A direct rule uses its own all-row query, independent of the current table search"
+        assert operations[0]["result"]["count"] == 2
         applied = _rows(web, project_id)
         assert [row["flag"] for row in applied] == ["critical", "", "critical"], applied
         assert applied[0]["memo"] == "human note" and applied[0]["tags"] == ["manual", "IOC"] and applied[0]["bookmarked"], applied[0]
@@ -120,11 +199,14 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         wait_for(lambda: export_path.exists(), bool, "native IOC export writes a guarded CSV")
         wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "Rules exported." in text, "IOC export completes before closing")
         assert "critical,IOC,message:beacon" in export_path.read_text(encoding="utf-8")
-        web.screenshot(evidence / "ioc-preview-apply-undo.png")
+        assert source.read_bytes() == original_source
+        web.screenshot(evidence / "ioc-direct-apply-undo.png")
         web.named("Close IOC rules", ".ioc-dialog")
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
+            "layout": layout,
             "unknown_reference_leaves_view_unchanged": True, "preset_rules_columns_sort_applied": True,
-            "ioc_saved_without_annotations": True, "preview_matches_all_rows": 2, "edited_preview_invalidated": True,
+            "ioc_saved_without_annotations": True, "direct_apply_matches_all_rows": 2, "no_visible_preview": True,
+            "query_help": help_text,
             "apply_preserves_other_fields": True, "undo_restores_complete_annotations": True, "native_csv_export": True}
     finally:
         web.script("window.__presetIocPicker?.restore();delete window.__presetIocPicker;")

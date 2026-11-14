@@ -77,7 +77,7 @@ def _header_and_search(web, data, evidence, report) -> None:
     """)
     assert header["filename"] == data["filename"] and data["sha"] in header["hash"], header
     assert header["sameLine"] and header["hashAfterName"] and header["headerHeight"] <= 40, header
-    assert web.script("return [...document.querySelectorAll('.tool-groups > button')].map(e=>e.textContent.trim());") == ["Filters", "Analysis", "Annotations"]
+    assert web.script("return [...document.querySelectorAll('.tool-groups > button')].map(e=>e.textContent.trim());") == ["Filter", "Analyze", "Annotate"]
     assert web.script("return document.querySelector('button[aria-controls=\"flag-filter-menu\"]').textContent.trim();") == "", "Flags uses an accessible icon without the redundant All/count label"
     assert web.script("return [...document.querySelectorAll('.history-buttons button,.row-jump button')].every(e=>!e.textContent.trim()&&e.getAttribute('aria-label')&&e.title);")
     assert web.script("return document.querySelector('.history-buttons').textContent.trim();") == "", "Rule history keeps its accessible name without a visible heading"
