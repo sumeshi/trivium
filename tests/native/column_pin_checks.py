@@ -32,9 +32,20 @@ def _geometry(web):
     return web.script(_GEOMETRY)
 
 
+def _menu_items(web) -> list[str]:
+    items = wait_for(lambda: web.script("return [...document.querySelectorAll('.column-context-menu [role=menuitem]')].map(e=>e.textContent.trim());"),
+                     bool, "column menu items mount")
+    assert items[:4] == ["Search this column", "Add rule for this column…", "Group by this column", "Hide this column"], items
+    assert len(items) == 6 and items[4] in ["Freeze columns through this column", "Unfreeze data columns"], items
+    assert items[5] in ["Show ISO datetime", "Show original values"], items
+    assert not web.script("return !!document.querySelector('.column-context-menu button:disabled');"), items
+    return items
+
+
 def _action(web, label: str, name: str) -> None:
     _horizontal_to(web, 0)
     web.named(f"Actions for column {label}")
+    _menu_items(web)
     web.named(name, ".column-context-menu")
     wait_for(lambda: web.script("return !document.querySelector('.column-context-menu');"), bool, "column action closes menu")
 
@@ -142,6 +153,10 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         assert not original.get("hiddenColumns"), original
         assert original.get("frozenThrough") is None, "Existing views retain the original first-visible-column default"
         checks["legacy_default"] = _prefix(web, [first], "legacy view freezes first visible data column")
+        _action(web, "source_id", "Unfreeze data columns")
+        _prefix(web, [], "the default frozen first column offers unfreeze")
+        _action(web, "source_id", "Freeze columns through this column")
+        _prefix(web, [first], "the same menu toggles an unfrozen column back on")
         before, checkpoint = web.query(), len(web.trace())
         _action(web, "score", "Hide this column")
         wait_for(lambda: {"headers": web.state()["headers"], "count": web.visible_column_count()},
@@ -166,6 +181,11 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         assert moving["position"] != "sticky", moving
         _unchanged_query(web, checkpoint, before)
         web.screenshot(evidence / "columns-frozen-through-timestamp.png")
+
+        _action(web, "cohort", "Unfreeze data columns")
+        _prefix(web, [], "an earlier column inside the frozen prefix offers unfreeze")
+        _action(web, "timestamp", "Freeze columns through this column")
+        _prefix(web, [first, third, boundary], "the frozen prefix can be restored after toggling")
 
         checkpoint = len(web.trace())
         _action(web, "timestamp", "Hide this column")

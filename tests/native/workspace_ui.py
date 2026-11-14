@@ -36,6 +36,7 @@ from preset_ioc_checks import verify_presets_iocs
 from column_presentation_checks import verify_column_presentation
 from bulk_form_checks import verify_bulk_form
 from tag_usage_checks import verify_tag_usage
+from table_text_checks import verify_table_text
 from wide_table_checks import verify_wide_table
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
@@ -851,7 +852,7 @@ def main() -> None:
     parser.add_argument("--driver", default=shutil.which("tauri-driver") or "/workspace/.trivium-tools/bin/tauri-driver")
     parser.add_argument("--native-driver", default=native_driver_default())
     parser.add_argument("--output", type=Path, default=Path("target/native-workspace-ui"))
-    parser.add_argument("--column-presentation-only", action="store_true")
+    parser.add_argument("--table-presentation-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -892,9 +893,10 @@ def main() -> None:
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
+                ("table text size without layout changes", lambda: verify_table_text(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
-                if args.column_presentation_only and stage != "column ordering, widths and ISO display":
+                if args.table_presentation_only and stage not in {"column ordering, widths and ISO display", "table text size without layout changes"}:
                     continue
                 print(f"CHECK: {stage}", flush=True)
                 run()

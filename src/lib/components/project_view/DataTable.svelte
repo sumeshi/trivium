@@ -28,6 +28,7 @@
     virtualWindow
   } from '../../virtualScroll';
   import { useWorkspace } from "../../workspaceContext";
+  import { tableTextSize } from '../../tableTextSize';
   const {
     rowsCache, pendingPages, totalRows, totalFilteredRows, filteredFlaggedCount, visibleColumns,
     orderedColumns, columnOrder, columnFormats,
@@ -205,7 +206,10 @@
     };
   };
 
-  const columnMenuKey = (event: KeyboardEvent, columnId: string) => {
+  const columnHeaderKey = (event: KeyboardEvent, columnId: string) => {
+    if (event.key === 'F2' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault(); event.stopPropagation(); void focusColumnResize(columnId); return;
+    }
     if (event.key === 'ContextMenu' || event.key === 'ArrowDown' || (event.shiftKey && event.key === 'F10')) {
       openColumnMenu(event, columnId);
     }
@@ -259,17 +263,17 @@
     await tick();
     await focusHeaderColumn(columnId);
   };
-  const moveColumnBy = (columnId: string, direction: -1 | 1) => {
-    const visible = get(visibleColumns);
-    const target = visible[visible.indexOf(columnId) + direction];
-    if (target) void moveColumn(columnId, target, direction > 0);
-  };
-  const resizeColumn = async (columnId: string) => {
-    columnMenu = null;
+  const focusColumnResize = async (columnId: string) => {
     await focusHeaderColumn(columnId);
     [...(get(headerScrollEl)?.querySelectorAll<HTMLElement>('.column-heading') ?? [])]
       .find((element) => element.dataset.columnId === columnId)
       ?.querySelector<HTMLElement>('.column-resize-handle')?.focus({ preventScroll: true });
+  };
+  const resizeKeydown = (event: KeyboardEvent, columnId: string, index: number) => {
+    if (event.defaultPrevented) return;
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); void focusHeaderColumn(columnId);
+    } else columnTab(event, index);
   };
   const dragColumn = (event: DragEvent, columnId: string) => {
     if (!event.dataTransfer || !projectId) return;
@@ -559,7 +563,7 @@
       <span>Adjust the search or clear a filter to see more rows.</span>
     </div>
   {:else}
-    <div class="table-scroll">
+    <div class="table-scroll" style={`--table-text-scale: ${$tableTextSize / 100};`}>
       <div
         class="table-header-scroll"
         role="presentation"
@@ -613,9 +617,10 @@
                 on:click={() => _toggleSort(column.id)}
                 on:focus={() => focusColumn(column.index)}
                 on:contextmenu={(event) => openColumnMenu(event, column.id)}
-                on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnMenuKey(event, column.id); }}
+                on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnHeaderKey(event, column.id); }}
                 aria-pressed={$sortKey === column.id}
-                title={`Sort ${$columnLabels.get(column.id) ?? column.id}; drag to move; right-click for actions`}>
+                aria-keyshortcuts="F2"
+                title={`Sort ${$columnLabels.get(column.id) ?? column.id}; drag to move; F2 to resize; right-click for actions`}>
                 <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
                 {#if $sortKey === column.id}
                   <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
@@ -631,6 +636,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
               </button>
               <ColumnResizeHandle label={$columnLabels.get(column.id) ?? column.id} width={column.width}
+                on:keydown={(event) => resizeKeydown(event, column.id, column.index)}
                 on:resize={(event) => dispatch('columnWidth', { columnId: column.id, width: event.detail.width })} />
             </div>
           {/each}
@@ -700,17 +706,13 @@
   {#key columnMenu}
     <ColumnContextMenu columnId={columnMenu.columnId}
       label={$columnLabels.get(columnMenu.columnId) ?? columnMenu.columnId}
-      frozenThrough={$frozenThrough}
+      frozen={frozenLayout.offsets.has(columnMenu.columnId)}
       displayFormat={$columnFormats[columnMenu.columnId] ?? 'original'}
-      canMoveLeft={$visibleColumns.indexOf(columnMenu.columnId) > 0}
-      canMoveRight={$visibleColumns.indexOf(columnMenu.columnId) < $visibleColumns.length - 1}
       x={columnMenu.x} y={columnMenu.y}
       on:search={(event) => searchColumn(event.detail.columnId)}
       on:hide={(event) => void hideColumn(event.detail.columnId)}
       on:freeze={(event) => freezeColumn(event.detail.columnId)}
       on:unfreeze={unfreezeColumns}
-      on:move={(event) => moveColumnBy(event.detail.columnId, event.detail.direction)}
-      on:resize={(event) => resizeColumn(event.detail.columnId)}
       on:format={(event) => { columnMenu = null; dispatch('columnFormat', event.detail); }}
       on:rule={(event) => { columnMenu = null; dispatch('columnRule', event.detail); }}
       on:group={(event) => { columnMenu = null; dispatch('columnGroup', event.detail); }}

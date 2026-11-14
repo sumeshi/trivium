@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import uuid
 
-from column_pin_checks import _key, _prefix, _saved
+from column_pin_checks import _key, _menu_items, _prefix, _saved
 from feedback_checks import _horizontal_to, _settle
 from row_navigation import open_project, wait_for
 
@@ -17,6 +17,9 @@ def _action(web, column: str, command: str) -> None:
     assert header, column
     web.script("arguments[0].focus({preventScroll:true});", header)
     _key(web, "\ue015")
+    items = _menu_items(web)
+    if command in ["Show ISO datetime", "Show original values"]:
+        assert items[-1] == command, items
     web.named(command, ".column-context-menu")
     _settle(web)
 
@@ -73,16 +76,17 @@ def _native_drag(web, start: dict, end: dict) -> None:
         x11.XCloseDisplay(display)
 
 
-def _drag(web, source: str, target: str) -> dict:
+def _drag(web, source: str, target: str, after: bool = False) -> dict:
     _horizontal_to(web, 0)
+    # Match dragOverColumn's midpoint on the full heading, not its narrower sort button.
     points = web.script("""
       const a=document.querySelector('.data-header [data-column-id="'+arguments[0]+'"] .column-sort'),
-        b=document.querySelector('.data-header [data-column-id="'+arguments[1]+'"] .column-sort'),
+        b=document.querySelector('.data-header [data-column-id="'+arguments[1]+'"]'),
         r=a.getBoundingClientRect(),t=b.getBoundingClientRect();
       const start={x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)},
-        end={x:Math.round(t.left+t.width/4),y:Math.round(t.top+t.height/2)};
+        end={x:Math.round(t.left+t.width*(arguments[2] ? .75 : .25)),y:Math.round(t.top+t.height/2)};
       return {start,end,reachable:a.contains(document.elementFromPoint(start.x,start.y))&&b.contains(document.elementFromPoint(end.x,end.y))};
-    """, source, target)
+    """, source, target, after)
     assert points["reachable"], points
     web.script("""
       window.__columnDrag=[];
@@ -112,6 +116,20 @@ def _drag(web, source: str, target: str) -> dict:
         web.script("for(const name of ['dragstart','drop','dragend'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;")
 
 
+def _reorder(web, source: str, target: str, expected: list[str], after: bool = False) -> dict:
+    drag = _drag(web, source, target, after)
+    assert drag["delivered"], f"Native column reordering requires an actual trusted HTML5 drop: {drag}"
+    wait_for(lambda: _order(web), lambda order: order == expected, "the trusted drag changes the display order")
+    return drag
+
+
+def _focus_resize(web, column: str) -> None:
+    web.script("document.querySelector('.data-header [data-column-id=\"'+arguments[0]+'\"] .column-sort').focus({preventScroll:true});", column)
+    _key(web, "\ue032")  # F2 enters the same resize handle used by pointer dragging.
+    wait_for(lambda: web.script("return document.activeElement.classList.contains('column-resize-handle')&&document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
+             lambda value: value == column, "F2 focuses the column's resize handle")
+
+
 def verify_column_presentation(web, data, root: Path, evidence: Path, report: dict) -> None:
     source = root / f"column-presentation-{uuid.uuid4().hex[:8]}.csv"
     timestamps = ["2024/04/01 09:02:03.123456789+09:00", "2024-04-01 00:02:04.000000001Z", "2024-04-01T00:03:00Z"]
@@ -133,23 +151,13 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         query = web.query()
         web.click(web.element('input[aria-label="Select row 2"]'))
 
-        drag = _drag(web, columns["message"], columns["created"])
         moved = [columns[name] for name in ["record", "message", "created", "not_time"]]
-        if drag["delivered"]:
-            assert _order(web) == moved, (drag, _order(web))
-        else:
-            drag["unverified"] = "The native driver did not deliver an HTML5 drop; menu reordering is checked below."
-            report.setdefault("unverified", []).append("Native HTML5 column drag (the driver did not deliver a drop event)")
-            _action(web, columns["message"], "Move left")
-        assert _order(web) == moved, _order(web)
+        drag = _reorder(web, columns["message"], columns["created"], moved)
         _unchanged(web, query)
-        _action(web, columns["created"], "Move left")
-        _action(web, columns["created"], "Move left")
         desired = [columns[name] for name in ["created", "record", "message", "not_time"]]
-        assert _order(web) == desired, _order(web)
-        _action(web, columns["created"], "Move right")
-        _action(web, columns["created"], "Move left")
-        assert _order(web) == desired, _order(web)
+        _reorder(web, columns["created"], columns["record"], desired)
+        _reorder(web, columns["created"], columns["message"], moved, after=True)
+        _reorder(web, columns["created"], columns["record"], desired)
 
         initial_width = _width(web, columns["created"])["header"]
         handle = web.script("const e=document.querySelector('[aria-label=\"Resize column created\"]'),r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),hit:e.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))};")
@@ -160,12 +168,24 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
                 {"type": "pointerMove", "x": handle["x"] + 64, "y": handle["y"], "origin": "viewport", "duration": 200},
                 {"type": "pointerUp", "button": 0}]}]})
         wait_for(lambda: _width(web, columns["created"]), lambda value: abs(value["header"] - initial_width - 64) <= 1, "drag resizes the source column")
-        _action(web, columns["created"], "Resize column")
-        assert web.script("return document.activeElement.getAttribute('aria-label');") == "Resize column created"
+        _focus_resize(web, columns["created"])
         _key(web, "\ue014")
         final_width = initial_width + 74
         widths = wait_for(lambda: _width(web, columns["created"]),
             lambda value: all(abs(width - final_width) <= 1 for width in value.values()), "header and body share keyboard-adjusted column width")
+        _key(web, "\ue00c")
+        wait_for(lambda: web.script("return document.activeElement.classList.contains('column-sort')&&document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
+                 lambda value: value == columns["created"], "Escape returns from resizing to the same header")
+        _focus_resize(web, columns["created"])
+        _key(web, "\ue004")
+        wait_for(lambda: web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
+                 lambda value: value == columns["record"], "Tab leaves resizing for the next logical header")
+        _focus_resize(web, columns["record"])
+        web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "presentation-resize-back", "actions": [
+            {"type": "keyDown", "value": "\ue008"}, {"type": "keyDown", "value": "\ue004"},
+            {"type": "keyUp", "value": "\ue004"}, {"type": "keyUp", "value": "\ue008"}]}]})
+        wait_for(lambda: web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
+                 lambda value: value == columns["created"], "Shift+Tab leaves resizing for the previous logical header")
         assert _order(web) == desired, _order(web)
         _action(web, columns["record"], "Freeze columns through this column")
         frozen = _prefix(web, desired[:2], "frozen prefix follows the display order")
@@ -209,6 +229,7 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         assert source.read_bytes() == original
         web.screenshot(evidence / "column-presentation.png")
         report["column_presentation"] = {"drag": drag, "display_order": desired, "widths": widths,
+            "six_item_menu_and_single_toggles": True, "keyboard_resize_f2_escape_tab": True,
             "frozen_prefix": [item["id"] for item in frozen["headers"] if item["pinned"]],
             "iso_nanoseconds_and_offset": True, "raw_get_cell_and_export_preserved": True,
             "invalid_timestamp_rejected": True, "query_and_selection_unchanged": True,

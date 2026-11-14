@@ -50,6 +50,9 @@
     window.addEventListener('blur', finish);
   };
   const keydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && start) {
+      cancel(event); event.stopPropagation(); return;
+    }
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const step = event.shiftKey ? 1 : 10;
     const next = event.key === 'ArrowLeft' ? width - step
@@ -69,7 +72,7 @@
   aria-valuemin={MIN_DATA_WIDTH} aria-valuemax={MAX_DATA_WIDTH} aria-valuenow={Math.round(width)}
   aria-valuetext={`${Math.round(width)} pixels`}
   title={`Resize ${label} (drag or arrow keys)`} draggable="false" tabindex="-1"
-  on:mousedown={begin} on:keydown={keydown} on:click|stopPropagation></div>
+  on:mousedown={begin} on:keydown={keydown} on:keydown on:click|stopPropagation></div>
 
 <style>
   .column-resize-handle {

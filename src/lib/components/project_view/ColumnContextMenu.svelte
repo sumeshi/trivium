@@ -5,10 +5,8 @@
   export let label: string;
   export let x: number;
   export let y: number;
-  export let frozenThrough: string | undefined = undefined;
+  export let frozen = false;
   export let displayFormat: 'original' | 'iso' = 'original';
-  export let canMoveLeft = false;
-  export let canMoveRight = false;
 
   const dispatch = createEventDispatcher<{
     close: { restoreFocus: boolean };
@@ -18,8 +16,6 @@
     hide: { columnId: string };
     freeze: { columnId: string };
     unfreeze: void;
-    move: { columnId: string; direction: -1 | 1 };
-    resize: { columnId: string };
     format: { columnId: string; format: 'original' | 'iso' };
   }>();
   let menu: HTMLDivElement;
@@ -69,32 +65,23 @@
     Group by this column
   </button>
   <div class="column-menu-separator" role="separator"></div>
-  <button type="button" role="menuitem" disabled={!canMoveLeft}
-    on:click={() => dispatch('move', { columnId, direction: -1 })}>Move left</button>
-  <button type="button" role="menuitem" disabled={!canMoveRight}
-    on:click={() => dispatch('move', { columnId, direction: 1 })}>Move right</button>
-  <button type="button" role="menuitem" on:click={() => dispatch('resize', { columnId })}>Resize column</button>
-  <div class="column-menu-separator" role="separator"></div>
-  <button type="button" role="menuitem" disabled={displayFormat === 'iso'}
-    on:click={() => dispatch('format', { columnId, format: 'iso' })}>Show ISO datetime</button>
-  <button type="button" role="menuitem" disabled={displayFormat === 'original'}
-    on:click={() => dispatch('format', { columnId, format: 'original' })}>Show original values</button>
-  <div class="column-menu-separator" role="separator"></div>
   <button type="button" role="menuitem" on:click={() => dispatch('hide', { columnId })}>
     Hide this column
   </button>
-  <button type="button" role="menuitem" disabled={frozenThrough === columnId}
-    on:click={() => dispatch('freeze', { columnId })}>
-    Freeze columns through this column
+  <button type="button" role="menuitem"
+    on:click={() => frozen ? dispatch('unfreeze') : dispatch('freeze', { columnId })}>
+    {frozen ? 'Unfreeze data columns' : 'Freeze columns through this column'}
   </button>
-  <button type="button" role="menuitem" disabled={frozenThrough === ''} on:click={() => dispatch('unfreeze')}>
-    Unfreeze data columns
+  <div class="column-menu-separator" role="separator"></div>
+  <button type="button" role="menuitem"
+    title="Changes display only; source values stay unchanged"
+    on:click={() => dispatch('format', { columnId, format: displayFormat === 'iso' ? 'original' : 'iso' })}>
+    {displayFormat === 'iso' ? 'Show original values' : 'Show ISO datetime'}
   </button>
 </div>
 
 <style>
   .column-context-menu { min-width: 190px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
   .column-menu-separator { border-top: 1px solid var(--border); margin: 3px 0; }
-  button:disabled { opacity: .45; cursor: default; }
   .column-menu-label { display: block; padding: 4px 7px 5px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 </style>

@@ -29,7 +29,7 @@ The application's **Workspace options** menu shows its version and source commit
 
 Open projects use tabs. Closing a tab preserves its saved case and annotations; reopen it from Projects. The `#` column and row-jump input refer to original, one-based row numbers even after filtering or sorting. First / Last move within the current result.
 
-Move or resize column headings; right-click for freezing and UTC ISO date display. These settings affect presentation, not search scope or source values. **Search in** chooses text-search columns. **Analyze** opens the timeline, time analysis, column statistics and nested grouping. **Annotate** applies flags, notes and tags to multiple rows, with Undo; IOC rules use the same operations. Themes are available in Workspace options.
+Move or resize column headings; right-click for freezing and UTC ISO date display. These settings affect presentation, not search scope or source values. **Search in** chooses text-search columns. **Analyze** opens the timeline, time analysis, column statistics and nested grouping. **Annotate** applies flags, notes and tags to multiple rows, with Undo; IOC rules use the same operations. Themes and table text size are available in Workspace options.
 
 Presets save rules, hidden columns, sort and any changed column order or widths. Blank annotation fields and unselected flags leave existing values unchanged.
 

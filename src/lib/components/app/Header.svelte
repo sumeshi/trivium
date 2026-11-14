@@ -4,6 +4,7 @@
   import { theme, setTheme, THEME_OPTIONS } from '../../theme';
   import { parseTheme } from '../../themeModel';
   import { BUILD_LABEL } from '../../buildInfo';
+  import { tableTextSize, TABLE_TEXT_SIZES, DEFAULT_TABLE_TEXT_SIZE, adjustTableTextSize, setTableTextSize } from '../../tableTextSize';
 
   export let projectDetail: LoadProjectResponse | null;
 
@@ -129,6 +130,23 @@
             {/each}
           </select>
         </label>
+        <div class="table-text-setting" role="group" aria-label="Table text size">
+          <span title="Change text size inside the table">Table text</span>
+          <div class="table-text-controls">
+            <button type="button" aria-label="Decrease table text size" title="Smaller table text"
+              disabled={$tableTextSize === TABLE_TEXT_SIZES[0]} on:click={() => adjustTableTextSize(-1)}>
+              <span aria-hidden="true">A−</span>
+            </button>
+            <button type="button" class="table-text-reset" aria-label="Reset table text size" title="Reset table text to 100%"
+              disabled={$tableTextSize === DEFAULT_TABLE_TEXT_SIZE} on:click={() => setTableTextSize(DEFAULT_TABLE_TEXT_SIZE)}>
+              <span aria-live="polite">{$tableTextSize}%</span>
+            </button>
+            <button type="button" aria-label="Increase table text size" title="Larger table text"
+              disabled={$tableTextSize === TABLE_TEXT_SIZES[TABLE_TEXT_SIZES.length - 1]} on:click={() => adjustTableTextSize(1)}>
+              <span aria-hidden="true">A+</span>
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           class="menu-action"
@@ -245,6 +263,12 @@
     box-shadow: var(--shadow-soft);
   }
   .theme-setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 5px 6px; font-size: 12px; }
+  .table-text-setting { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 5px 6px; font-size: 12px; }
+  .table-text-controls { display: inline-flex; gap: 2px; }
+  .table-text-controls button { height: 25px; min-width: 28px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-weak); color: var(--fg); font-size: 12px; }
+  .table-text-controls .table-text-reset { min-width: 47px; font-variant-numeric: tabular-nums; }
+  .table-text-controls button:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-soft); }
+  .table-text-controls button:disabled { color: var(--muted); opacity: .5; cursor: default; }
   select { max-width: 132px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-weak); color: var(--fg); }
   .menu-action { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); text-align: left; font-size: 12px; }
   .menu-action:hover { background: var(--surface-weak); }

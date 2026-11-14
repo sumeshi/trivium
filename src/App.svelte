@@ -10,6 +10,7 @@
   import Toast from './lib/components/app/Toast.svelte';
   import { showToast } from './lib/utils/toast';
   import { initTheme } from './lib/theme';
+  import { initTableTextSize } from './lib/tableTextSize';
   import { createProjectController } from './lib/stores/projects';
   import { errorMessage } from './lib/errors';
   import { copyWorkspaceSession } from './lib/workspaceSession';
@@ -140,6 +141,7 @@
   };
 
   onMount(() => {
+    initTableTextSize();
     void initTheme();
     void projectController.loadProjects().catch((error) => {
       console.error(error);

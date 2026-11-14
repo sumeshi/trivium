@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 
 from column_pin_checks import _key
-from column_presentation_checks import _action, _order, _width
+from column_presentation_checks import _focus_resize, _order, _reorder, _width
 from feedback_checks import _settle
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
@@ -44,9 +44,8 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
     defaults = {column: _width(web, column)["header"] for column in ids.values()}
     source_order = [ids[name] for name in ["host", "message", "score"]]
     custom_order = [ids[name] for name in ["score", "host", "message"]]
-    _action(web, ids["score"], "Move left")
-    _action(web, ids["score"], "Move left")
-    _action(web, ids["host"], "Resize column")
+    _reorder(web, ids["score"], ids["host"], custom_order)
+    _focus_resize(web, ids["host"])
     _key(web, "\ue014", 2)
     custom_width = defaults[ids["host"]] + 20
     wait_for(lambda: _width(web, ids["host"]),
@@ -63,9 +62,8 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
     assert saved["columnWidths"] == {ids["host"]: custom_width}, saved
 
     web.close_drawer()
-    _action(web, ids["score"], "Move right")
-    _action(web, ids["score"], "Move right")
-    _action(web, ids["host"], "Resize column")
+    _reorder(web, ids["score"], ids["message"], source_order, after=True)
+    _focus_resize(web, ids["host"])
     _key(web, "\ue014")
     wait_for(lambda: _width(web, ids["host"])["header"],
              lambda width: abs(width - custom_width - 10) <= 1, "the current layout differs from the saved preset")
