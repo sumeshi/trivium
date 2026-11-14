@@ -27,6 +27,7 @@ from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
 from scroll_render_checks import verify_scroll_rendering
+from wide_table_checks import verify_wide_table
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -109,6 +110,7 @@ class WorkspaceView(WebView):
               const hold=window.__workspaceHold;
               if(hold&&!hold.ready&&entry.result&&hold.name===name&&hold.projectId===request.projectId
                 &&(!('search' in hold)||hold.search===request.search)
+                &&(!('offset' in hold)||hold.offset===request.offset)
                 &&(!('total' in hold)||hold.total===entry.result.total_filtered_rows)){
                 hold.request=structuredClone(request);hold.result=entry.result;hold.ready=true;
                 return new Promise(resolve=>{hold.release=()=>resolve(response);});
@@ -121,6 +123,9 @@ class WorkspaceView(WebView):
 
     def trace(self) -> list[dict[str, Any]]:
         return self.script("return window.__workspaceIpc;")
+
+    def visible_column_count(self) -> int:
+        return self.script("return Number(document.querySelector('[aria-label=\"Choose visible columns\"] .count-chip').textContent.split('/')[0]);")
 
     def diagnostics(self) -> dict[str, Any]:
         return self.script("return {js_errors:window.__workspaceErrors??[],ipc:window.__workspaceIpc??[]};")
@@ -393,7 +398,7 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     web.click(web.element('#visible-column-menu li input'))
     wait_for(lambda: web.state()["headers"], lambda value: value == ["col_27"], "one matching column visible")
     web.named("Select all", "#visible-column-menu")
-    wait_for(lambda: len(web.state()["headers"]), lambda value: value == 27, "all27columns visible")
+    wait_for(web.visible_column_count, lambda value: value == 27, "all27columns configured visible")
     web.write('input[aria-label="Find a column"]', "")
     assert web.script("return document.querySelectorAll('#visible-column-menu li').length;") == 27
     assert web.script("return [...document.querySelectorAll('#visible-column-menu li input')].every(e=>e.checked);")
@@ -800,6 +805,7 @@ def main() -> None:
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
                 ("stable stripes while scrolling", lambda: verify_scroll_rendering(web, data, evidence, report)),
+                ("virtualized wide table and unchanged rows", lambda: verify_wide_table(web, data, root, evidence, report)),
                 ("saved arbitrary column pinning", lambda: verify_column_pinning(web, data, root, evidence, report)),
                 ("compact scrollable row detail", lambda: verify_compact_detail(web, data, root, evidence, report)),
                 ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),

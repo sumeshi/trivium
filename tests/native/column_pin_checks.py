@@ -80,7 +80,8 @@ def _focus_column(web, index: int, column_id: str):
     _key(web, "\ue004", index)
     _settle(web)
     state = _geometry(web)
-    assert web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;") == column_id
+    active = web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;")
+    assert active == column_id, {"logical_index": index, "expected": column_id, "active": active, "geometry": state}
     target = next(item for item in state["headers"] if item["id"] == column_id)
     assert target["left"] >= state["viewport"]["left"] + state["staticWidth"] - 1, state
     assert target["right"] <= state["viewport"]["right"] + 1 and target["topmost"], state
@@ -116,10 +117,14 @@ def _oversized_prefix(web, data, evidence: Path, checks: dict) -> None:
             assert abs(item["left"] - left) <= 1, item
             left += item["width"]
     keyboard = [_focus_column(web, index, column_id) for index, column_id in enumerate(wide)]
-    following = next(item["id"] for item in panned["headers"] if not item["pinned"])
+    # The panned DOM contains only the horizontal window. Tab follows the
+    # configured source order, including columns currently outside that window.
+    following = next(column for column in data["columns"].values() if column not in wide)
     keyboard.append(_focus_column(web, 4, following))
     _unchanged_query(web, checkpoint, before)
     checks["oversized_prefix"] = {"requested_frozen_columns": wide, "trusted_wheel": panned,
+        "first_configured_scrolling_column": following,
+        "first_mounted_scrolling_column": next(item["id"] for item in panned["headers"] if not item["pinned"]),
         "keyboard_reveals_each_frozen_and_next_scrolling_column": keyboard}
     web.screenshot(evidence / "columns-oversized-frozen-prefix.png")
 
@@ -139,7 +144,9 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         checks["legacy_default"] = _prefix(web, [first], "legacy view freezes first visible data column")
         before, checkpoint = web.query(), len(web.trace())
         _action(web, "score", "Hide this column")
-        wait_for(lambda: web.state()["headers"], lambda names: "score" not in names and len(names) == 26, "header hide action removes only its column")
+        wait_for(lambda: {"headers": web.state()["headers"], "count": web.visible_column_count()},
+            lambda state: "score" not in state["headers"] and state["count"] == 26,
+            "header hide action removes only its column from the configured set")
         _unchanged_query(web, checkpoint, before)
         _saved(web, data["id"], lambda state: state.get("hiddenColumns") == [hidden], "hidden column persisted")
 
@@ -202,7 +209,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         web.named("Select all", "#visible-column-menu")
         web.named("Done", "#visible-column-menu")
         checks["all_hidden_unfreeze"] = _prefix(web, [], "showing columns after all-hidden unfreeze does not repin")
-        assert len(web.state()["headers"]) == 27
+        assert web.visible_column_count() == 27
         checks["query_unchanged_by_visibility_and_freeze"] = True
         _oversized_prefix(web, data, evidence, checks)
         report["column_pinning"] = checks

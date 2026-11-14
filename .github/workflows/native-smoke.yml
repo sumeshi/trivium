@@ -58,6 +58,9 @@ jobs:
       - name: Linux native navigation smoke
         if: runner.os == 'Linux'
         run: xvfb-run -a python tests/native/row_navigation.py --binary target/debug/trivium-desktop --rows 5199
+      - name: Linux native investigation and wide-table checks
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python tests/native/workspace_ui.py --binary target/debug/trivium-desktop
       - name: Windows native navigation smoke
         if: runner.os == 'Windows'
         run: python tests/native/row_navigation.py --binary target/debug/trivium-desktop.exe --rows 5199
@@ -66,6 +69,8 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: native-smoke-${{ runner.os }}
-          path: target/native-row-navigation/
+          path: |
+            target/native-row-navigation/
+            target/native-workspace-ui/
           if-no-files-found: warn
           retention-days: 3

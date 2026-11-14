@@ -100,6 +100,17 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
             web.screenshot(evidence / f"dense-detail-last-{height}.png")
             checks.append({"height": height, "before": before, "wheel_end": wheel_end, "keyboard_end": keyboard_end})
             if height == 827:
+                web.script("document.querySelector('.row-detail-dialog [aria-label=Close]').focus();")
+                web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "dense-row-detail-keys", "actions": [{"type": "keyDown", "value": "\ue008"}]}]})
+                try:
+                    _key(web, "\ue004")
+                finally:
+                    web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "dense-row-detail-keys", "actions": [{"type": "keyUp", "value": "\ue008"}]}]})
+                wait_for(lambda: web.script("return document.activeElement.getAttribute('aria-label');"),
+                    lambda label: label == "Filter in last_field", "Shift+Tab wraps within the row inspector")
+                _key(web, "\ue004")
+                wait_for(lambda: web.script("return document.activeElement.getAttribute('aria-label');"),
+                    lambda label: label == "Close", "Tab returns from the last field action to Close")
                 web.named("Close", ".row-detail-dialog")
         if not measure_only:
             _copy_audit(web)
