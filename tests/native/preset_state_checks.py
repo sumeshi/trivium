@@ -29,6 +29,8 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
     from preset_ioc_checks import _load_preset, _picker
 
     project_id = case["meta"]["id"]
+    base_query = {"projectId": project_id, "condition": base.get("condition"),
+        "sortKey": base.get("sortKey"), "sortDirection": "desc" if base.get("sortDirection") == "desc" else "asc"}
     literal = {"kind": "and", "children": [
         {"column": ids["host"], "op": "eq", "values": ["alpha", "gamma"], "negated": False},
         {"kind": "or", "children": [
@@ -83,8 +85,10 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
 
         for index, (condition, expected_count) in enumerate([
             ({"column": ids["host"], "op": "in", "values": ["alpha,beta", "gamma", " beta ", ""], "negated": False}, 1),
+            # An empty values array matches no rows. text_any also ignores an
+            # empty needle, so negating contains [""] matches all three rows.
             ({"column": ids["host"], "op": "contains", "values": [], "negated": False}, 0),
-            ({"column": ids["host"], "op": "contains", "values": [""], "negated": True}, 0),
+            ({"column": ids["host"], "op": "contains", "values": [""], "negated": True}, 3),
         ]):
             path = root / f"literal-edge-{index}.json"
             path.write_text(json.dumps({**base, "condition": condition}), encoding="utf-8")
@@ -95,6 +99,9 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
             checked.append({"values": condition["values"], "rows": expected_count})
 
         _load_preset(web, base_path)
+        # Different conditions can produce the same count. Wait for the actual
+        # query, beyond the filter debounce, before capturing its baseline.
+        web.applied(**base_query)
         web.results(3)
         baseline_query = web.query()
         delayed_path = root / "delayed-column-preset.json"
@@ -105,7 +112,8 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
         wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool,
                  "the native preset metadata response is held after commit")
         assert web.visible_column_count() == 2, "the entire preset must apply before waiting for metadata"
-        assert web.query() == baseline_query
+        actual_query = web.query()
+        assert actual_query == baseline_query, {"actual": actual_query, "baseline": baseline_query}
         web.named("Choose visible columns")
         web.click(web.element(f'#column-{ids["host"]}'))
         web.named("Done", "#visible-column-menu")
@@ -116,7 +124,9 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
                  "the subsequent user column choice wins the native write queue")
         wait_for(lambda: _view_hidden(web, project_id), lambda value: value == latest_hidden,
                  "the same latest choice is stored in the saved view")
-        assert web.visible_column_count() == 1 and web.query() == baseline_query
+        assert web.visible_column_count() == 1
+        actual_query = web.query()
+        assert actual_query == baseline_query, {"actual": actual_query, "baseline": baseline_query}
 
         # Closing the panel during another save must not leave only the durable
         # hidden-column metadata updated while the visible investigation stays old.
@@ -131,7 +141,9 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
                  "metadata matches the already applied view after its panel closes")
         wait_for(lambda: _view_hidden(web, project_id), lambda value: value == {ids["score"]},
                  "saved view remains consistent after closing the preset panel")
-        assert web.visible_column_count() == 2 and web.query() == baseline_query
+        assert web.visible_column_count() == 2
+        actual_query = web.query()
+        assert actual_query == baseline_query, {"actual": actual_query, "baseline": baseline_query}
         assert not web.script("return !!document.querySelector('#analysis-drawer');")
         return {"literal_arrays_saved_and_reopened": expected_values, "nested_rows": 2,
             "operator_edit_keeps_values": True, "text_edit_replaces_values": True,
@@ -141,4 +153,5 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
         web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;")
         web.drawer("Presets")
         _load_preset(web, base_path)
+        web.applied(**base_query)
         web.results(3)
