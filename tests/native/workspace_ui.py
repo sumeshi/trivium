@@ -127,24 +127,34 @@ class WorkspaceView(WebView):
                 if(released)return;released=true;resolve(perform());
               };});
             }else promise=perform();
-            return promise.then(async response=>{
-              const value=await response.clone().json();
-              entry.elapsed_ms=performance.now()-entry.started;
-              if(response.headers.get('Tauri-Response')==='ok'){
-                entry.result=name==='histogram'?value:{count:value?.count,updated:value?.updated,
-                  rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
-                  total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
-              }else entry.error=String(value);
-              const hold=window.__workspaceHold;
-              if(hold&&!hold.ready&&entry.result&&hold.name===name&&hold.projectId===request.projectId
-                &&(!('search' in hold)||hold.search===request.search)
-                &&(!('offset' in hold)||hold.offset===request.offset)
-                &&(!('total' in hold)||hold.total===entry.result.total_filtered_rows)){
-                hold.request=structuredClone(request);hold.result=entry.result;hold.ready=true;
-                return new Promise(resolve=>{hold.release=()=>resolve(response);});
-              }
+            return promise.then(response=>{
+              entry.fetch_received=performance.now();
+              // Observe the app's only JSON decode; do not clone or drain the IPC body.
+              const json=response.json.bind(response);
+              response.json=function(...args){
+                entry.decode_started=performance.now();
+                return json(...args).then(value=>{
+                  entry.decode_done=performance.now();entry.elapsed_ms=entry.decode_done-entry.started;
+                  if(response.headers.get('Tauri-Response')==='ok'){
+                    entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,
+                      rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
+                      total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
+                  }else entry.error=String(value);
+                  const hold=window.__workspaceHold;
+                  if(hold&&!hold.ready&&entry.result&&hold.name===name&&hold.projectId===request.projectId
+                    &&(!('search' in hold)||hold.search===request.search)
+                    &&(!('offset' in hold)||hold.offset===request.offset)
+                    &&(!('total' in hold)||hold.total===entry.result.total_filtered_rows)){
+                    hold.request=structuredClone(request);hold.result=entry.result;hold.ready=true;
+                    return new Promise(resolve=>{hold.release=()=>resolve(value);});
+                  }
+                  return value;
+                },error=>{
+                  entry.decode_failed=performance.now();entry.error=String(error);throw error;
+                });
+              };
               return response;
-            },error=>{entry.error=String(error);throw error;});
+            },error=>{entry.fetch_failed=performance.now();entry.error=String(error);throw error;});
           };
           window.fetch=wrapped;return window.fetch===wrapped;
         """), "Real native IPC instrumentation must be active"

@@ -221,21 +221,31 @@ class WebView:
               .filter(key=>key in payload).map(key=>[key,payload[key]]))};
             window.__navigationIpc.push(entry);
             if(window.__navigationIpc.length>300)window.__navigationIpc.shift();
-            return promise.then(async response=>{
-              const result=await response.clone().json();
-              entry.elapsed_ms=performance.now()-entry.started;
-              if(response.headers.get('Tauri-Response')==='ok'){
-                entry.result={total_rows:result?.total_rows,total_filtered_rows:result?.total_filtered_rows,
-                  position:result?.position,rows:Array.isArray(result?.rows)?result.rows.length:result?.rows};
-              }else entry.error=String(result);
-              if(name==='locate_project_row'&&window.__navigationHold){
-                return new Promise(resolve=>{
-                  window.__navigationHold.ready=true;
-                  window.__navigationHold.release=()=>resolve(response);
+            return promise.then(response=>{
+              entry.fetch_received=performance.now();
+              // Observe the app's only JSON decode; do not clone or drain the IPC body.
+              const json=response.json.bind(response);
+              response.json=function(...args){
+                entry.decode_started=performance.now();
+                return json(...args).then(result=>{
+                  entry.decode_done=performance.now();entry.elapsed_ms=entry.decode_done-entry.started;
+                  if(response.headers.get('Tauri-Response')==='ok'){
+                    entry.result={total_rows:result?.total_rows,total_filtered_rows:result?.total_filtered_rows,
+                      position:result?.position,rows:Array.isArray(result?.rows)?result.rows.length:result?.rows};
+                  }else entry.error=String(result);
+                  const hold=window.__navigationHold;
+                  if(name==='locate_project_row'&&hold){
+                    return new Promise(resolve=>{
+                      hold.ready=true;hold.release=()=>resolve(result);
+                    });
+                  }
+                  return result;
+                },error=>{
+                  entry.decode_failed=performance.now();entry.error=String(error);throw error;
                 });
-              }
+              };
               return response;
-            },error=>{entry.error=String(error);throw error;});
+            },error=>{entry.fetch_failed=performance.now();entry.error=String(error);throw error;});
           };
           window.fetch=wrapped;
           return window.fetch===wrapped;
