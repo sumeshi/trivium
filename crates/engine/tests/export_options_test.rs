@@ -50,6 +50,7 @@ fn run_export(store: &ProjectsStore, root: &Path, payload: ExportProjectPayload)
     export_project(
         store,
         ExportProjectPayload {
+            allow_overwrite: true,
             destination: destination.to_string_lossy().to_string(),
             ..payload
         },
@@ -68,6 +69,7 @@ fn default_scope_exports_every_row() {
         &store,
         &root,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: String::new(),
             scope: None,
@@ -119,6 +121,7 @@ fn filtered_scope_row_count_matches_query_total() {
         &store,
         &root,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: String::new(),
             scope: Some("filtered".to_string()),
@@ -160,6 +163,7 @@ fn columns_option_limits_output_columns() {
         &store,
         &root,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: String::new(),
             scope: None,
@@ -183,7 +187,7 @@ fn columns_option_limits_output_columns() {
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
-            "trivium-tags",
+            "trivium-tags-json",
             "trivium-bookmarked",
             "msg"
         ],
@@ -233,6 +237,7 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
         &store,
         &root,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: String::new(),
             scope: None,
@@ -248,15 +253,17 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             include_annotations: None,
         },
     );
-    let lines: Vec<&str> = exported.lines().collect();
+    let mut csv = csv::Reader::from_reader(exported.as_bytes());
+    let headers = csv.headers().expect("export headers").clone();
+    let records = csv.records().collect::<Result<Vec<_>, _>>().expect("export records");
     assert_eq!(
-        lines[0].split(',').collect::<Vec<_>>(),
+        headers.iter().collect::<Vec<_>>(),
         vec![
             "trivium-safe",
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
-            "trivium-tags",
+            "trivium-tags-json",
             "trivium-bookmarked",
             "flag",
             "memo",
@@ -265,7 +272,7 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
         "input flag/memo columns must coexist with the trivium annotation columns"
     );
 
-    let first: Vec<&str> = lines[1].split(',').collect();
+    let first: Vec<&str> = records[0].iter().collect();
     assert_eq!(
         first,
         vec![
@@ -273,7 +280,7 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
             "0",
             "0",
             "investigated",
-            "alpha",
+            r#"["alpha"]"#,
             "0",
             "safe",
             "original memo one",
@@ -282,12 +289,12 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
         "user tags are a separate column and must not be copied into the memo"
     );
 
-    let second: Vec<&str> = lines[2].split(',').collect();
+    let second: Vec<&str> = records[1].iter().collect();
     assert_eq!(second[6], "review", "unannotated input flag must be kept");
     assert_eq!(second[7], "original memo two", "unannotated input memo must be kept");
     assert_eq!(second[8], "second message");
 
-    let third: Vec<&str> = lines[3].split(',').collect();
+    let third: Vec<&str> = records[2].iter().collect();
     assert_eq!(third[6], "hold");
     assert_eq!(third[7], "original memo three");
     assert_eq!(third[8], "third message");
@@ -304,6 +311,7 @@ fn sort_options_reflect_exported_row_order() {
     let event_id = common::id(&ids, "eventid");
 
     let build_payload = |direction: &str|     ExportProjectPayload {
+        allow_overwrite: false,
         project_id: id,
         destination: String::new(),
         scope: None,

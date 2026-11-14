@@ -252,6 +252,7 @@ fn export_bulk_and_panels_apply_the_same_label_search_as_the_table() {
     let exported = export_project(
         &fixture.store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: fixture.id,
             destination: destination.to_string_lossy().into_owned(),
             scope: Some("filtered".into()),

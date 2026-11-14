@@ -320,3 +320,76 @@ fn protocol_errors_are_structured_and_do_not_desynchronize_following_requests() 
     cli.finish();
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn invalid_annotation_flags_and_filters_fail_without_changing_the_saved_investigation() {
+    let root = std::env::temp_dir().join(format!("trivium-cli-validation-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.csv");
+    fs::write(&source, "name\nalpha\nbeta\ngamma\n").unwrap();
+    let mut cli = Session::start(&root.join("workspace"));
+    let id = cli.call("import", json!({"path":source}))["meta"]["id"].clone();
+    cli.call(
+        "update_flag",
+        json!({"projectId":id,"row_index":0,"flag":"critical","memo":"saved"}),
+    );
+
+    for (method, params, message) in [
+        (
+            "update_flag",
+            json!({"projectId":id,"row_index":0,"flag":"critcal","memo":"wrong"}),
+            "Invalid flag value",
+        ),
+        (
+            "bulk_preview",
+            json!({"projectId":id,"target":"all","flag":"critcal"}),
+            "Invalid flag value",
+        ),
+        (
+            "bulk_apply",
+            json!({"projectId":id,"target":"all","flag":"critcal","previewToken":"unused"}),
+            "Invalid flag value",
+        ),
+        (
+            "query",
+            json!({"projectId":id,"flagFilter":"critcal"}),
+            "Invalid flag filter value",
+        ),
+        (
+            "locate",
+            json!({"projectId":id,"rowIndex":0,"flagFilter":"critical|future"}),
+            "Invalid flag filter value",
+        ),
+        (
+            "bulk_preview",
+            json!({"projectId":id,"target":"filtered","flagFilter":"critcal","flag":"safe"}),
+            "Invalid flag filter value",
+        ),
+        (
+            "bulk_apply",
+            json!({"projectId":id,"target":"filtered","flagFilter":"critcal","flag":"safe","previewToken":"unused"}),
+            "Invalid flag filter value",
+        ),
+    ] {
+        let mut request =
+            serde_json::to_vec(&json!({"id":"invalid","method":method,"params":params})).unwrap();
+        request.push(b'\n');
+        let response = cli.raw(&request);
+        assert_eq!(response["ok"], false, "{response}");
+        assert_eq!(response["error"]["code"], "operation_failed");
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(message),
+            "{response}"
+        );
+    }
+    let page = cli.call("query", json!({"projectId":id,"flagFilter":"critical"}));
+    assert_eq!(page["total_filtered_rows"], 1);
+    assert_eq!(page["annotated_total"], 1);
+    assert_eq!(page["rows"][0]["row_index"], 0);
+    assert_eq!(page["rows"][0]["memo"], "saved");
+    cli.finish();
+    fs::remove_dir_all(root).unwrap();
+}

@@ -118,6 +118,7 @@ fn csv_cell_text_is_stored_and_exported_verbatim() {
     export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,

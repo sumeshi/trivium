@@ -276,7 +276,14 @@ fn unknown_flags_are_unflagged_without_losing_raw_annotations() {
         .unwrap()
     };
     assert_eq!(update("✗").flagged_records, 1);
-    let changed = update("unrecognized legacy label");
+    // Seed a legacy value through raw storage; new public annotation writes
+    // reject unknown flags before reaching this layer.
+    let changed = patch_flag_atomic(
+        &store.flags_path(&id),
+        0,
+        &patch("unrecognized legacy label"),
+    )
+    .unwrap();
     assert_eq!(changed.flagged_records, 0);
     let reopened = ProjectsStore::new(fixture.path().into()).unwrap();
     assert_eq!(reopened.try_find(&id).unwrap().unwrap().flagged_records, 0);

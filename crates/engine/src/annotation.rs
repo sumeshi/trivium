@@ -32,6 +32,17 @@ pub struct AnnotationPatch {
     pub bookmarked: Option<bool>,
 }
 
+impl AnnotationPatch {
+    /// Validate requested changes without rejecting unrelated legacy values
+    /// already stored on a row.
+    pub fn validate(&self) -> Result<(), crate::error::AppError> {
+        if let Some(flag) = self.flag.as_deref() {
+            crate::flags::validate_flag_value(flag)?;
+        }
+        Ok(())
+    }
+}
+
 /// Distinguishes a missing field (`None`) from an explicit JSON `null`
 /// (`Some(None)`). Serde applies this only when the key is present, so
 /// `#[serde(default)]` supplies the missing case.

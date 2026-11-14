@@ -439,6 +439,7 @@ fn tag_result_scope_is_shared_by_group_stats_export_and_bulk_preview() {
     let exported = ops::export::export_project(
         &f.store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: f.id,
             destination: destination.to_string_lossy().into_owned(),
             scope: Some("filtered".into()),

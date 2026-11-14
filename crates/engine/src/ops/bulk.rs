@@ -66,6 +66,8 @@ fn resolve_bulk_target(
     job: &JobContext,
 ) -> Result<BulkTarget, AppError> {
     job.check_cancelled()?;
+    payload.patch.validate()?;
+    payload.spec.validate_filter()?;
     let meta = store
         .try_find(&payload.project_id)
         .map_err(AppError::from)?

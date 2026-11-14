@@ -1,5 +1,5 @@
-//! Protect evidence and every case-managed file before opening an output.
-use crate::{error::AppError, models::ProjectMeta, store::ProjectsStore};
+//! Require explicit overwrite consent and protect every case-managed file.
+use crate::{error::AppError, store::ProjectsStore};
 use anyhow::Context;
 use std::{
     collections::HashSet,
@@ -53,27 +53,26 @@ fn canonical_path(path: &Path) -> io::Result<PathBuf> {
     }
 }
 
-pub(crate) fn ensure_destination_is_not_source(
+/// Existing outputs, including original evidence files, require explicit
+/// consent. Application storage remains protected even when consent is given.
+/// Re-run immediately before replacement to catch a newly created destination.
+pub(crate) fn validate_destination(
     destination: &Path,
-    meta: &ProjectMeta,
+    store: &ProjectsStore,
+    allow_overwrite: bool,
 ) -> Result<(), AppError> {
-    if let Some(source) = &meta.source_path {
-        let source = Path::new(source);
-        let same_path = canonical_path(source)
-            .ok()
-            .zip(canonical_path(destination).ok())
-            .is_some_and(|(a, b)| a == b);
-        let same_file = source.exists()
-            && destination.exists()
-            && same_file::is_same_file(source, destination)
-                .context("failed to compare evidence/output identity")?;
-        if same_path || same_file {
-            return Err(AppError::Message(
-                "Choose a different file name: the destination is the source evidence file.".into(),
-            ));
-        }
+    ensure_destination_is_not_managed(destination, store)?;
+    match fs::symlink_metadata(destination) {
+        Ok(_) if !allow_overwrite => Err(AppError::Message(format!(
+            "Overwrite confirmation required: {}",
+            destination.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(anyhow::Error::new(error)
+            .context("failed to inspect output destination")
+            .into()),
     }
-    Ok(())
 }
 
 /// The projects/staging trees are application storage, not user output

@@ -132,6 +132,7 @@ fn export_column(
     export_project(
         store,
         ExportProjectPayload {
+            allow_overwrite: true,
             project_id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some(scope.to_string()),

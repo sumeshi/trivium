@@ -53,6 +53,13 @@ pub struct QuerySpec {
     pub sort_direction: Option<String>,
 }
 
+impl QuerySpec {
+    /// Validate options before a metadata/cache fast path can omit resolution.
+    pub fn validate_filter(&self) -> Result<(), AppError> {
+        FlagFilterMask::parse(self.flag_filter.as_deref()).map(|_| ())
+    }
+}
+
 /// Rows selected by a `QuerySpec`, in display order, plus annotation counts
 /// that share the query path's definitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +84,7 @@ pub fn resolve_target(
     flags: &HashMap<usize, FlagEntry>,
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
+    spec.validate_filter()?;
     RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
     // An empty search scope is the same as "every data column".
     let search_columns = spec
@@ -93,7 +101,7 @@ pub fn resolve_target(
         job,
     )?;
     let restrict_flags = !is_unrestricted_flag_filter(spec.flag_filter.as_deref());
-    let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref());
+    let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref())?;
     let matches = |index: usize| {
         if search_state.mask.as_ref().is_some_and(|mask| !mask[index]) {
             return false;

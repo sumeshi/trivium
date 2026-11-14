@@ -21,7 +21,7 @@ use trivium_engine::{
         stats::{column_stats, ColumnStatsPayload},
     },
     project_io::{project_full_reads, project_page_reads, reset_project_read_counters},
-    storage::load_flags,
+    storage::{load_flag_snapshot, load_flags},
     store::ProjectsStore,
 };
 
@@ -177,6 +177,7 @@ impl Fixture {
                 columns: Some(vec![common::id(&self.columns, "id")]),
                 row_indices: None,
                 include_annotations: Some(false),
+                allow_overwrite: true,
             },
         )
         .unwrap();
@@ -255,22 +256,133 @@ fn all_sixteen_flag_selections_share_query_stats_histogram_export_and_bulk_targe
 }
 
 #[test]
-fn legacy_and_malformed_filters_keep_their_compatible_meaning() {
+fn legacy_filters_keep_their_compatible_meaning() {
     let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new();
     fixture.assert_population("priority", &[6, 5, 2, 1]);
     fixture.assert_population("none", &[7, 3]);
     fixture.assert_population(" critical | none | critical ", &[7, 6, 3, 2]);
+    for filter in ["", "all"] {
+        fixture.assert_population(filter, &[7, 6, 5, 4, 3, 2, 1, 0]);
+    }
+}
+
+#[test]
+fn malformed_filters_are_rejected_before_query_export_analysis_or_bulk_can_expand_targets() {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new();
+    let snapshot = load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap();
+    let destination = fixture.root.join("invalid-filter.csv");
     for filter in [
-        "",
-        "all",
         "future",
+        "critcal",
         "safe|future",
         "safe|",
         "safe|all",
         "safe|priority",
     ] {
-        fixture.assert_population(filter, &[7, 6, 5, 4, 3, 2, 1, 0]);
+        let spec = QuerySpec {
+            flag_filter: Some(filter.into()),
+            ..Default::default()
+        };
+        let errors = [
+            query_project_rows(
+                &fixture.store,
+                QueryRowsPayload {
+                    project_id: fixture.project,
+                    spec: spec.clone(),
+                    offset: None,
+                    limit: None,
+                },
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            locate_project_row(
+                &fixture.store,
+                LocateRowPayload {
+                    project_id: fixture.project,
+                    row_index: 0,
+                    spec: spec.clone(),
+                },
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            column_stats(
+                &fixture.store,
+                ColumnStatsPayload {
+                    project_id: fixture.project,
+                    column: common::id(&fixture.columns, "id"),
+                    rare_max: 1,
+                    spec: spec.clone(),
+                },
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+        ];
+        for error in errors {
+            assert!(
+                error.contains("Invalid flag filter value"),
+                "{filter}: {error}"
+            );
+        }
+        for scope in ["filtered", "selected", "all"] {
+            let error = export_project(
+                &fixture.store,
+                ExportProjectPayload {
+                    project_id: fixture.project,
+                    destination: destination.to_string_lossy().into_owned(),
+                    scope: Some(scope.into()),
+                    spec: spec.clone(),
+                    columns: None,
+                    row_indices: Some(vec![0]),
+                    include_annotations: Some(false),
+                    allow_overwrite: false,
+                },
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(
+                error.contains("Invalid flag filter value"),
+                "{scope} {filter}: {error}"
+            );
+            assert!(!destination.exists());
+        }
+        for target in ["filtered", "selection", "all"] {
+            let payload = BulkAnnotatePayload {
+                project_id: fixture.project,
+                target: target.into(),
+                row_indices: Some(vec![0]),
+                spec: spec.clone(),
+                patch: AnnotationPatch {
+                    flag: Some("safe".into()),
+                    ..Default::default()
+                },
+                preview_token: Some("unused".into()),
+            };
+            for error in [
+                bulk_preview(&fixture.store, payload.clone())
+                    .err()
+                    .unwrap()
+                    .to_string(),
+                bulk_update(&fixture.store, payload)
+                    .err()
+                    .unwrap()
+                    .to_string(),
+            ] {
+                assert!(
+                    error.contains("Invalid flag filter value"),
+                    "{target} {filter}: {error}"
+                );
+            }
+        }
+        assert_eq!(
+            load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap(),
+            snapshot
+        );
     }
 }
 

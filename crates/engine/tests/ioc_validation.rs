@@ -171,6 +171,7 @@ fn invalid_legacy_rules_remain_visible_without_blocking_the_case_or_becoming_saf
     let error = export_iocs(
         &store,
         ExportIocsPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().into(),
             entries: None,

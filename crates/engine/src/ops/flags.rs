@@ -52,6 +52,8 @@ pub fn update_flag(
     store: &ProjectsStore,
     payload: UpdateFlagPayload,
 ) -> Result<UpdateFlagResponse, AppError> {
+    let patch = payload.annotation();
+    patch.validate()?;
     let Some(meta) = store
         .try_find(&payload.project_id)
         .map_err(AppError::from)?
@@ -65,7 +67,7 @@ pub fn update_flag(
     patch_flag_atomic(
         &store.flags_path(&payload.project_id),
         payload.row_index,
-        &payload.annotation(),
+        &patch,
     )
     .map_err(AppError::from)
 }

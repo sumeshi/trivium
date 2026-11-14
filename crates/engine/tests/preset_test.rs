@@ -102,6 +102,7 @@ fn save_payload(
     destination: &Path,
 ) -> SavePresetPayload {
     SavePresetPayload {
+        allow_overwrite: false,
         project_id,
         name: Some("Hunt".into()),
         condition: Some(nested_condition(ids)),
@@ -164,6 +165,7 @@ fn preset_reports_unknown_columns_case_insensitively() {
     save_preset(
         &store,
         SavePresetPayload {
+            allow_overwrite: false,
             project_id: id_a,
             name: None,
             condition: Some(condition),
@@ -205,6 +207,7 @@ fn preset_without_condition_loads_sort_and_columns() {
     save_preset(
         &store,
         SavePresetPayload {
+            allow_overwrite: false,
             project_id: id_a,
             name: None,
             condition: None,
@@ -294,6 +297,7 @@ fn matching_duplicate_header_schemas_preserve_their_source_positions() {
     save_preset(
         &store,
         SavePresetPayload {
+            allow_overwrite: false,
             project_id: projects[0],
             name: None,
             condition: None,
@@ -353,7 +357,7 @@ fn an_unmapped_id_never_silently_binds_to_an_extra_target_column() {
 }
 
 #[test]
-fn preset_output_cannot_replace_source_evidence_or_case_storage() {
+fn preset_output_requires_source_overwrite_consent_and_preserves_case_storage() {
     let (root, store, id_a, _id_b, ids) = setup();
     let source = root.join("a.csv");
     let parquet = store.project_dir(&id_a).join("data.parquet");
@@ -363,7 +367,7 @@ fn preset_output_cannot_replace_source_evidence_or_case_storage() {
         let error = save_preset(&store, save_payload(id_a, &ids, destination)).unwrap_err();
         let message = String::from(error);
         assert!(
-            message.contains("source evidence") || message.contains("managed"),
+            message.contains("Overwrite confirmation required:") || message.contains("managed"),
             "{message}"
         );
         assert_eq!(fs::read(destination).unwrap(), before);
@@ -395,6 +399,7 @@ fn preset_layout_remaps_reordered_sources_and_preserves_omission_and_resets() {
     assert!(loaded.unknown_columns.is_empty());
 
     let mut payload = save_payload(source, &ids, &destination);
+    payload.allow_overwrite = true;
     payload.column_order = Some(Vec::new());
     payload.column_widths = Some(Default::default());
     save_preset(&store, payload).unwrap();
@@ -402,7 +407,9 @@ fn preset_layout_remaps_reordered_sources_and_preserves_omission_and_resets() {
     assert_eq!(loaded.column_order, Some(Vec::new()));
     assert_eq!(loaded.column_widths, Some(Default::default()));
 
-    save_preset(&store, save_payload(source, &ids, &destination)).unwrap();
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.allow_overwrite = true;
+    save_preset(&store, payload).unwrap();
     let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
     assert!(file.get("columnOrder").is_none());
     assert!(file.get("columnWidths").is_none());
@@ -463,6 +470,7 @@ fn preset_layout_unknown_ids_and_ambiguous_names_cannot_bind_silently() {
     );
 
     let mut payload = save_payload(source, &ids, &destination);
+    payload.allow_overwrite = true;
     payload.condition = None;
     payload.hidden_columns.clear();
     payload.sort_key = None;

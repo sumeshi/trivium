@@ -203,6 +203,7 @@ pub fn export(
     export_project_with_job(
         store,
         ExportProjectPayload {
+            allow_overwrite: true,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some(scope.to_string()),

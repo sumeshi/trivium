@@ -1,8 +1,6 @@
 use super::{
     annotations,
-    atomic::{
-        ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
-    },
+    atomic::{validate_destination, write_atomically},
     ranks::RowRanks,
     record_sink::RecordSink,
     sorted_runs::ExternalSorter,
@@ -35,6 +33,8 @@ pub struct ExportProjectPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub destination: String,
+    #[serde(default, rename = "allowOverwrite")]
+    pub allow_overwrite: bool,
     #[serde(default)]
     pub scope: Option<String>,
     #[serde(flatten)]
@@ -76,6 +76,7 @@ pub fn export_project_with_job(
     payload: ExportProjectPayload,
     job: &JobContext,
 ) -> Result<ExportResult, AppError> {
+    payload.spec.validate_filter()?;
     let scope = payload.scope.as_deref().unwrap_or("filtered");
     let all_spec;
     let spec = if scope == "all" {
@@ -97,10 +98,7 @@ pub fn export_project_with_job(
         &source.target.ids,
     )?;
     let destination = PathBuf::from(&payload.destination);
-    let validate = || {
-        ensure_destination_is_not_source(&destination, &source.meta)?;
-        ensure_destination_is_not_managed(&destination, store)
-    };
+    let validate = || validate_destination(&destination, store, payload.allow_overwrite);
     let columns = match &payload.columns {
         Some(requested) => requested
             .iter()
@@ -199,7 +197,8 @@ pub fn export_project_with_job(
                 .context("failed to select export batch")?;
             let mut output = if include_annotations {
                 annotations::annotation_series(
-                    annotations::build_annotations(&ids, &source.target.flags),
+                    annotations::build_annotations(&ids, &source.target.flags)
+                        .context("failed to encode annotation tags")?,
                     &plan,
                 )
             } else {

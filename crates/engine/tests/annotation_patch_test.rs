@@ -352,6 +352,7 @@ fn note_text_survives_update_reopen_query_export_and_restore() {
         export_project(
             &reopened,
             ExportProjectPayload {
+                allow_overwrite: false,
                 project_id: id,
                 destination: destination.to_string_lossy().to_string(),
                 scope: Some("all".into()),

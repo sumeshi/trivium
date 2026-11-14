@@ -325,6 +325,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
     let report = build_report(
         &store,
         BuildReportPayload {
+            allow_overwrite: false,
             project_id: id,
             search: None,
             columns: None,
@@ -361,6 +362,7 @@ fn export_writes_user_tags_as_a_separate_column_and_reimport_restores_them() {
     ops::export::export_project(
         &store,
         ops::export::ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,
@@ -385,7 +387,7 @@ fn export_writes_user_tags_as_a_separate_column_and_reimport_restores_them() {
     let headers = reader.headers().expect("headers").clone();
     let tag_index = headers
         .iter()
-        .position(|header| header == "trivium-tags")
+        .position(|header| header == "trivium-tags-json")
         .expect("tags column");
     let bookmark_index = headers
         .iter()
@@ -396,7 +398,7 @@ fn export_writes_user_tags_as_a_separate_column_and_reimport_restores_them() {
         .position(|header| header == "trivium-memo")
         .expect("memo column");
     let first = reader.records().next().expect("row").expect("record");
-    assert_eq!(&first[tag_index], "pc");
+    assert_eq!(&first[tag_index], r#"["pc"]"#);
     assert_eq!(&first[bookmark_index], "1");
     assert_eq!(
         &first[memo_index], "manual note",

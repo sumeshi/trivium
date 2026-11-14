@@ -174,6 +174,7 @@ fn csv_display_and_export_keep_the_t00_source_strings() {
     let result = export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -414,6 +415,7 @@ fn sorted_pages_selection_bulk_and_selected_export_agree() {
     let result = export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("selected".to_string()),
@@ -436,8 +438,8 @@ fn sorted_pages_selection_bulk_and_selected_export_agree() {
         "selected export must follow the query order"
     );
     assert!(exported.iter().all(|row| row[critical_column] == "1"));
-    let tags_column = column_index(&headers, "trivium-tags");
-    assert!(exported.iter().all(|row| row[tags_column] == "reviewed"));
+    let tags_column = column_index(&headers, "trivium-tags-json");
+    assert!(exported.iter().all(|row| row[tags_column] == r#"["reviewed"]"#));
 
     let _ = fs::remove_dir_all(root);
 }

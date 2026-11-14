@@ -41,6 +41,7 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
     let first = create();
     let other = create();
     let payload = |destination: PathBuf, columns: Option<Vec<String>>| ExportProjectPayload {
+        allow_overwrite: false,
         project_id: first,
         destination: destination.to_string_lossy().into(),
         scope: None,
@@ -86,7 +87,7 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
         ops::export::export_project(&store, payload(evidence_alias, None))
             .unwrap_err()
             .to_string()
-            .contains("source evidence")
+            .contains("Overwrite confirmation required:")
     );
     #[cfg(unix)]
     {
@@ -115,8 +116,9 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
         .unwrap();
     let output = root.0.join("annotations.csv");
     fs::write(&output, b"previous destination").unwrap();
-    let result =
-        ops::export::export_project(&store, payload(output.clone(), Some(Vec::new()))).unwrap();
+    let mut overwrite = payload(output.clone(), Some(Vec::new()));
+    overwrite.allow_overwrite = true;
+    let result = ops::export::export_project(&store, overwrite).unwrap();
     assert_eq!(result.rows, 2);
     assert_eq!(result.columns.len(), 6);
     assert_eq!(

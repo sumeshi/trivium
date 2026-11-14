@@ -127,6 +127,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     let result = ops::export::export_project_with_job(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().into(),
             scope: None,
@@ -170,6 +171,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     reset_project_read_stats();
     let report = root.0.join("report.html");
     let report_payload = |destination: &std::path::Path| ops::report::BuildReportPayload {
+        allow_overwrite: false,
         project_id: id,
         destination: destination.to_string_lossy().into(),
         search: spec.search.clone(),
@@ -203,7 +205,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     assert!(ops::report::build_report(&store, report_payload(&path))
         .unwrap_err()
         .to_string()
-        .contains("source evidence"));
+        .contains("Overwrite confirmation required:"));
     assert_eq!(fs::metadata(&path).unwrap().len(), source_size);
     reset_project_read_stats();
     let selected = root.0.join("selected.csv");
@@ -211,6 +213,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     let result = ops::export::export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: selected.to_string_lossy().into(),
             scope: Some("selected".into()),

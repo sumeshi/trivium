@@ -6,9 +6,7 @@ use crate::{
     analysis::stats::StatsAccumulator,
     error::AppError,
     export::{
-        atomic::{
-            ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
-        },
+        atomic::{validate_destination, write_atomically},
         ranks::RowRanks,
         sorted_runs::ExternalSorter,
     },
@@ -46,6 +44,8 @@ pub struct BuildReportPayload {
     #[serde(default)]
     pub condition: Option<crate::condition::Node>,
     pub destination: String,
+    #[serde(default, rename = "allowOverwrite")]
+    pub allow_overwrite: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,10 +133,7 @@ pub fn build_report_with_job(
         .cloned()
         .collect::<Vec<_>>();
     let destination = PathBuf::from(&payload.destination);
-    let validate = || {
-        ensure_destination_is_not_source(&destination, &source.meta)?;
-        ensure_destination_is_not_managed(&destination, store)
-    };
+    let validate = || validate_destination(&destination, store, payload.allow_overwrite);
     write_atomically(&destination, job, validate, |workspace, writer| {
         writer
             .write_all(

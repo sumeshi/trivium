@@ -8,9 +8,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::export::atomic::{
-    ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
-};
+use crate::export::atomic::{validate_destination, write_atomically};
 use crate::jobs::JobContext;
 use crate::models::ProjectMeta;
 use crate::project_io::{read_project_schema_columns, ProjectBatchReader};
@@ -27,6 +25,8 @@ pub struct DiffProjectsPayload {
     pub key_columns: Vec<String>,
     #[serde(default)]
     pub destination: Option<String>,
+    #[serde(default, rename = "allowOverwrite")]
+    pub allow_overwrite: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -71,11 +71,11 @@ pub fn diff_projects_with_job(
         return Err(AppError::Message("Key columns must not be empty.".into()));
     }
 
-    let (meta_a, mut reader_a, names_a) =
+    let (_meta_a, mut reader_a, names_a) =
         load_keys(store, &payload.project_id_a, &requested, "A", job)?;
     let accum_a = count_keys(&mut reader_a, &names_a, job)?;
     drop(reader_a);
-    let (meta_b, mut reader_b, names_b) =
+    let (_meta_b, mut reader_b, names_b) =
         load_keys(store, &payload.project_id_b, &requested, "B", job)?;
     let accum_b = count_keys(&mut reader_b, &names_b, job)?;
     drop(reader_b);
@@ -128,11 +128,7 @@ pub fn diff_projects_with_job(
 
     if let Some(destination) = payload.destination {
         let path = PathBuf::from(destination);
-        let validate = || {
-            ensure_destination_is_not_managed(&path, store)?;
-            ensure_destination_is_not_source(&path, &meta_a)?;
-            ensure_destination_is_not_source(&path, &meta_b)
-        };
+        let validate = || validate_destination(&path, store, payload.allow_overwrite);
         write_diff_csv(&keyed, &names_a, &path, job, validate)?;
     }
 

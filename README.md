@@ -85,6 +85,8 @@ Trivium automatically saves each investigation as a local project, including you
 
 Export **all rows, the current results, or selected rows** to CSV. You can also include flags, notes, tags, and bookmarks in the exported data.
 
+The Save dialog asks before replacing an existing file. Automation requests must set `allowOverwrite: true` to overwrite a file.
+
 ## Installation
 
 Prebuilt binaries are available for **Windows (x64)** and **Linux (x64)**:

@@ -11,17 +11,17 @@ use crate::value_utils::{build_row_cells, CellColumns};
 use super::ioc::append_ioc_tags;
 
 /// Parse once per query population, rather than splitting a combination for
-/// every row. Unknown legacy values retain the old match-all fallback.
+/// every row. Unknown options must never expand a filtered operation to all rows.
 pub(super) struct FlagFilterMask(u8);
 
 impl FlagFilterMask {
     const ALL: Self = Self(u8::MAX);
 
-    pub(super) fn parse(filter: Option<&str>) -> Self {
+    pub(super) fn parse(filter: Option<&str>) -> Result<Self, AppError> {
         let filter = filter.unwrap_or("all").trim();
         match filter {
-            "" | "all" => return Self::ALL,
-            "priority" => return Self(2 | 4),
+            "" | "all" => return Ok(Self::ALL),
+            "priority" => return Ok(Self(2 | 4)),
             _ => {}
         }
         let mut mask = 0;
@@ -31,10 +31,14 @@ impl FlagFilterMask {
                 "suspicious" => 2,
                 "critical" => 4,
                 "none" => 8,
-                _ => return Self::ALL,
+                invalid => {
+                    return Err(AppError::Message(format!(
+                        "Invalid flag filter value: {invalid:?}."
+                    )))
+                }
             };
         }
-        Self(mask)
+        Ok(Self(mask))
     }
 
     pub(super) fn matches_population(&self, population: u8) -> bool {
@@ -59,7 +63,7 @@ pub(super) fn flag_population(flag: &str) -> u8 {
 /// No selection and selecting every normalized flag population are both
 /// unrestricted, while the UI can retain their distinct checkbox state.
 pub(super) fn is_unrestricted_flag_filter(filter: Option<&str>) -> bool {
-    matches!(FlagFilterMask::parse(filter).0, 15 | u8::MAX)
+    FlagFilterMask::parse(filter).is_ok_and(|filter| matches!(filter.0, 15 | u8::MAX))
 }
 
 /// Final flag for one row: a non-empty user flag wins, otherwise the IOC flag.

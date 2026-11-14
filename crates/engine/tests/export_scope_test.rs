@@ -118,6 +118,7 @@ fn selected_scope_uses_query_order_and_drops_duplicates() {
     let result = export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("selected".to_string()),
@@ -148,6 +149,7 @@ fn selected_scope_rejects_rows_outside_the_applied_result() {
     let error = export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("selected".to_string()),
@@ -179,6 +181,7 @@ fn empty_selection_is_an_error_and_never_falls_back() {
         let error = export_project(
             &store,
             ExportProjectPayload {
+                allow_overwrite: false,
                 project_id: id,
                 destination: destination.to_string_lossy().to_string(),
                 scope: Some("selected".to_string()),
@@ -230,6 +233,7 @@ fn filtered_scope_matches_query_row_ids_order_and_count() {
     let result = export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("filtered".to_string()),
@@ -271,6 +275,7 @@ fn annotation_columns_are_independent_and_optional() {
     export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: without.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -290,6 +295,7 @@ fn annotation_columns_are_independent_and_optional() {
     export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: with.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -301,15 +307,15 @@ fn annotation_columns_are_independent_and_optional() {
     );
     let (headers, exported) = read_csv(&with);
     let memo = column_index(&headers, "trivium-memo");
-    let tags = column_index(&headers, "trivium-tags");
+    let tags = column_index(&headers, "trivium-tags-json");
     let bookmarked = column_index(&headers, "trivium-bookmarked");
     assert_eq!(
         exported[0][memo], "note",
         "tags must not be copied into the memo"
     );
-    assert_eq!(exported[0][tags], "alpha;beta");
+    assert_eq!(exported[0][tags], r#"["alpha","beta"]"#);
     assert_eq!(exported[0][bookmarked], "1");
-    assert_eq!(exported[1][tags], "");
+    assert_eq!(exported[1][tags], "[]");
     assert_eq!(exported[1][bookmarked], "0");
 
     let _ = fs::remove_dir_all(root);
@@ -320,7 +326,7 @@ fn data_column_with_trivium_name_renames_the_annotation_column() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let path = root.join("collision.csv");
-    let text = "id,msg,trivium-tags\n\
+    let text = "id,msg,trivium-tags-json\n\
                 0,alpha,source-a\n\
                 1,beta,source-b\n";
     fs::write(&path, text).expect("failed to write fixture");
@@ -353,6 +359,7 @@ fn data_column_with_trivium_name_renames_the_annotation_column() {
     let result = export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -363,15 +370,15 @@ fn data_column_with_trivium_name_renames_the_annotation_column() {
         },
     );
     let (headers, exported) = read_csv(&destination);
-    let source = column_index(&headers, "trivium-tags");
-    let added = column_index(&headers, "trivium-tags_2");
+    let source = column_index(&headers, "trivium-tags-json");
+    let added = column_index(&headers, "trivium-tags-json_2");
     assert_eq!(exported[0][source], "source-a", "source data must survive");
-    assert_eq!(exported[0][added], "user-tag", "annotation uses the alias");
+    assert_eq!(exported[0][added], r#"["user-tag"]"#, "annotation uses the alias");
     assert!(
         result
             .warnings
             .iter()
-            .any(|warning| warning.contains("trivium-tags_2")),
+            .any(|warning| warning.contains("trivium-tags-json_2")),
         "the alias mapping must be reported: {:?}",
         result.warnings
     );
@@ -380,7 +387,7 @@ fn data_column_with_trivium_name_renames_the_annotation_column() {
 }
 
 #[test]
-fn destination_equal_to_source_evidence_is_rejected() {
+fn destination_equal_to_source_evidence_requires_confirmation() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
     let path = root.join("events.csv");
@@ -390,6 +397,7 @@ fn destination_equal_to_source_evidence_is_rejected() {
     let error = export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: path.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -399,9 +407,9 @@ fn destination_equal_to_source_evidence_is_rejected() {
             include_annotations: None,
         },
     )
-    .expect_err("destination equal to the source must fail");
+    .expect_err("replacing the source requires explicit approval");
     assert!(
-        error.to_string().contains("Choose a different file name"),
+        error.to_string().starts_with("Overwrite confirmation required:"),
         "unexpected error: {error}"
     );
     assert_eq!(
@@ -426,6 +434,7 @@ fn failed_finalize_keeps_the_existing_destination_and_removes_the_temporary_file
     let error = export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -469,6 +478,7 @@ fn cancelled_export_leaves_the_destination_untouched() {
     let error = export_project_with_job(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -520,6 +530,7 @@ fn export_then_restore_roundtrips_tags_bookmark_and_memo() {
     export_rows(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),

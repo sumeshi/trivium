@@ -7,9 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) use super::destination::{
-    ensure_destination_is_not_managed, ensure_destination_is_not_source,
-};
+pub(crate) use super::destination::validate_destination;
 
 struct Workspace(PathBuf);
 impl Drop for Workspace {
@@ -63,34 +61,29 @@ pub(crate) fn write_atomically<T>(
 mod tests {
     use super::*;
     #[test]
-    fn evidence_alias_changed_during_write_is_rechecked_before_replacement() {
+    fn destination_created_during_write_requires_confirmation_before_replacement() {
         let directory =
             std::env::temp_dir().join(format!("trivium-revalidate-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
-        let source = directory.join("source.csv");
         let destination = directory.join("output.csv");
-        fs::write(&source, b"original evidence").unwrap();
-        fs::write(&destination, b"old output").unwrap();
-        let meta:crate::models::ProjectMeta=serde_json::from_value(serde_json::json!({
-            "id":uuid::Uuid::new_v4(),"name":"test","description":null,"created_at":chrono::Utc::now(),
-            "total_records":0,"hidden_columns":[],"source_path":source.to_string_lossy()
-        })).unwrap();
+        let store = crate::store::ProjectsStore::new(directory.clone()).unwrap();
         let result = write_atomically(
             &destination,
             &JobContext::none(),
-            || ensure_destination_is_not_source(&destination, &meta),
+            || validate_destination(&destination, &store, false),
             |workspace, writer| {
                 writer.write_all(b"replacement").context("output")?;
                 fs::write(workspace.join("run"), b"temporary").context("run")?;
-                // Simulate another program replacing the evidence path with a
-                // hardlink to the chosen destination while export is in progress.
-                fs::remove_file(&source).context("remove source alias")?;
-                fs::hard_link(&destination, &source).context("retarget source alias")?;
+                fs::write(&destination, b"concurrent output")
+                    .context("create concurrent output")?;
                 Ok(())
             },
         );
-        assert!(result.unwrap_err().to_string().contains("source evidence"));
-        assert_eq!(fs::read(&destination).unwrap(), b"old output");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .starts_with("Overwrite confirmation required:"));
+        assert_eq!(fs::read(&destination).unwrap(), b"concurrent output");
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 2);
         fs::remove_dir_all(directory).unwrap();
     }

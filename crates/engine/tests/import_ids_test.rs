@@ -70,6 +70,7 @@ fn export(store: &ProjectsStore, id: Uuid, destination: &Path, columns: Option<V
     export_project(
         store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,
@@ -280,7 +281,7 @@ fn csv_original_cells_and_duplicate_columns_keep_their_values() {
             "trivium-suspicious",
             "trivium-critical_2",
             "trivium-memo_2",
-            "trivium-tags",
+            "trivium-tags-json",
             "trivium-bookmarked",
             "msg",
             "msg",

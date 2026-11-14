@@ -5,9 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    export::atomic::{
-        ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
-    },
+    export::atomic::{validate_destination, write_atomically},
     ioc::{
         load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_ioc_entries,
         write_ioc_csv_to_writer,
@@ -39,6 +37,8 @@ pub struct ExportIocsPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub destination: String,
+    #[serde(default, rename = "allowOverwrite")]
+    pub allow_overwrite: bool,
 }
 
 /// Normalizes and persists IOC definitions.
@@ -99,10 +99,7 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
     write_atomically(
         &destination,
         &JobContext::none(),
-        || {
-            ensure_destination_is_not_source(&destination, &meta)?;
-            ensure_destination_is_not_managed(&destination, store)
-        },
+        || validate_destination(&destination, store, payload.allow_overwrite),
         |_, writer| write_ioc_csv_to_writer(&entries, writer).map_err(AppError::from),
     )
 }

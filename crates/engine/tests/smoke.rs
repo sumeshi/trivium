@@ -1396,6 +1396,7 @@ fn export_and_reimport_roundtrip() {
     ops::export::export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,

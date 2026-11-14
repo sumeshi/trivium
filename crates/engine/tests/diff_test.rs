@@ -69,6 +69,7 @@ fn payload(
     destination: Option<PathBuf>,
 ) -> DiffProjectsPayload {
     DiffProjectsPayload {
+        allow_overwrite: false,
         project_id_a: id_a,
         project_id_b: id_b,
         key_columns: vec![common::id(ids, "user"), common::id(ids, "proc")],
@@ -213,6 +214,7 @@ fn compound_keys_with_embedded_separators_remain_distinct() {
     let result = diff_projects(
         &store,
         DiffProjectsPayload {
+            allow_overwrite: false,
             project_id_a: id_a,
             project_id_b: id_b,
             key_columns: vec![common::id(&ids, "/left"), common::id(&ids, "/right")],
@@ -228,13 +230,13 @@ fn compound_keys_with_embedded_separators_remain_distinct() {
 }
 
 #[test]
-fn diff_export_cannot_replace_either_source_evidence_file() {
+fn diff_export_requires_confirmation_before_replacing_either_source_file() {
     let (root, store, id_a, id_b, ids) = setup();
     for source in [root.join("a.csv"), root.join("b.csv")] {
         let before = fs::read(&source).unwrap();
         let error =
             diff_projects(&store, payload(id_a, id_b, &ids, Some(source.clone()))).unwrap_err();
-        assert!(error.to_string().contains("source evidence"));
+        assert!(error.to_string().contains("Overwrite confirmation required:"));
         assert_eq!(fs::read(source).unwrap(), before);
     }
     let _ = fs::remove_dir_all(root);

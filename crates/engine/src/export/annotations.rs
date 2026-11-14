@@ -2,17 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use polars::prelude::{NamedFrom, Series};
 
-use crate::{flags::normalize_flag_value, models::FlagEntry};
-
-/// Derived annotation columns in export order.
-pub(crate) const ANNOTATION_COLUMNS: [&str; 6] = [
-    "trivium-safe",
-    "trivium-suspicious",
-    "trivium-critical",
-    "trivium-memo",
-    "trivium-tags",
-    "trivium-bookmarked",
-];
+use crate::{
+    annotation_columns::ANNOTATION_COLUMNS, flags::normalize_flag_value, models::FlagEntry,
+};
 
 pub(crate) struct PlannedColumn {
     internal: String,
@@ -70,16 +62,16 @@ pub(crate) struct AnnotationSeries {
 }
 
 /// Builds the independent annotation columns from user annotations only.
-/// Tags stay in `trivium-tags` and are never stored as memo text.
+/// Tags use an explicit JSON-array column and are never stored as memo text.
 pub(crate) fn build_annotations(
     rows: &[usize],
     flags: &HashMap<usize, FlagEntry>,
-) -> AnnotationSeries {
+) -> serde_json::Result<AnnotationSeries> {
     let mut safe = vec![0; rows.len()];
     let mut suspicious = vec![0; rows.len()];
     let mut critical = vec![0; rows.len()];
     let mut memo = vec![String::new(); rows.len()];
-    let mut tags = vec![String::new(); rows.len()];
+    let mut tags = vec!["[]".to_string(); rows.len()];
     let mut bookmarked = vec![0; rows.len()];
 
     for (i, row) in rows.iter().enumerate() {
@@ -101,19 +93,19 @@ pub(crate) fn build_annotations(
         memo[i] = final_memo;
 
         if let Some(entry) = flags.get(row) {
-            tags[i] = entry.tags.join(";");
+            tags[i] = serde_json::to_string(&entry.tags)?;
             bookmarked[i] = if entry.bookmarked { 1 } else { 0 };
         }
     }
 
-    AnnotationSeries {
+    Ok(AnnotationSeries {
         safe,
         suspicious,
         critical,
         memo,
         tags,
         bookmarked,
-    }
+    })
 }
 
 /// Renames the derived series to the planned internal names so they cannot

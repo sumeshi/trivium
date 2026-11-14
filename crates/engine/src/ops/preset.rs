@@ -9,9 +9,7 @@ use uuid::Uuid;
 
 use crate::condition::Node;
 use crate::error::AppError;
-use crate::export::atomic::{
-    ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
-};
+use crate::export::atomic::{validate_destination, write_atomically};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, ProjectMeta};
 use crate::project_io::{read_project_schema_columns, ProjectColumns};
@@ -65,6 +63,8 @@ pub struct SavePresetPayload {
     #[serde(default, rename = "columnWidths")]
     pub column_widths: Option<HashMap<String, f64>>,
     pub destination: String,
+    #[serde(default, rename = "allowOverwrite")]
+    pub allow_overwrite: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,10 +127,7 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
     write_atomically(
         &destination,
         &JobContext::none(),
-        || {
-            ensure_destination_is_not_source(&destination, &meta)?;
-            ensure_destination_is_not_managed(&destination, store)
-        },
+        || validate_destination(&destination, store, payload.allow_overwrite),
         |_, writer| {
             writer
                 .write_all(&data)

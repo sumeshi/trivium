@@ -828,7 +828,7 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
 }
 
 #[test]
-fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_read_only_evidence() {
+fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_requires_source_overwrite_consent() {
     use trivium_engine::ops::iocs::{export_iocs, ExportIocsPayload};
     let (root, store, id, _) = setup(false);
     let rule = IocEntry {
@@ -843,18 +843,34 @@ fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_read_only_evidence() {
         store.project_dir(&id).join("data.parquet"),
         store.flags_path(&id),
     ] {
+        let before = fs::read(&path).ok();
         let error = export_iocs(
             &store,
             ExportIocsPayload {
+                allow_overwrite: false,
                 project_id: id,
                 destination: path.to_string_lossy().into(),
                 entries: Some(vec![rule.clone()]),
             },
         )
         .unwrap_err();
-        assert!(
-            error.to_string().contains("source evidence")
-                || error.to_string().contains("managed case")
+        if path == source {
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("Overwrite confirmation required:"),
+                "{error}"
+            );
+        } else {
+            assert!(
+                error.to_string().contains("managed case storage"),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            fs::read(&path).ok(),
+            before,
+            "refused output must preserve {path:?}"
         );
     }
     assert_eq!(fs::read(source).unwrap(), original);
@@ -862,6 +878,7 @@ fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_read_only_evidence() {
     export_iocs(
         &store,
         ExportIocsPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().into(),
             entries: Some(vec![rule]),

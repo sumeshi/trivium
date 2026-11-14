@@ -113,6 +113,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
     export::export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,

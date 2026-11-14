@@ -9,6 +9,7 @@ impl QuerySpec {
     /// request's search is normalized; condition and sort IDs stay untouched.
     /// Legacy projects without column metadata already use their source names.
     pub fn resolve_search_labels(&mut self, columns: &[ColumnMeta]) -> Result<(), AppError> {
+        self.validate_filter()?;
         if columns.is_empty() {
             return Ok(());
         }

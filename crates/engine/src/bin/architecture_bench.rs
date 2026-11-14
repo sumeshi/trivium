@@ -239,6 +239,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         let result = export_project(
             &store,
             ExportProjectPayload {
+                allow_overwrite: true,
                 project_id: id,
                 destination: root.join("sorted.csv").to_string_lossy().to_string(),
                 scope: Some("filtered".into()),

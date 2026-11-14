@@ -198,6 +198,7 @@ fn query_export_and_load_show_user_annotations_only() {
     ops::export::export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: None,

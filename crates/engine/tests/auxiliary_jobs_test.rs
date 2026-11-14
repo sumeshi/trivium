@@ -120,6 +120,7 @@ fn diff_scan_cancels_before_reading_the_second_project_or_replacing_output() {
     let error = ops::diff::diff_projects_with_job(
         &data.store,
         DiffProjectsPayload {
+            allow_overwrite: false,
             project_id_a: data.id,
             project_id_b: data.id,
             key_columns: vec![data.key.clone()],

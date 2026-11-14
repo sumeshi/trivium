@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 import uuid
 
@@ -98,7 +99,7 @@ def verify_tag_usage(web, data, root: Path, evidence: Path, report: dict) -> Non
         with exported.open(encoding="utf-8", newline="") as handle:
             output = list(csv.DictReader(handle))
         assert [row["id"] for row in output] == ["r1", "r2"], output
-        assert "trivium-tags" in output[0] and all("review" in row["trivium-tags"] for row in output)
+        assert "trivium-tags-json" in output[0] and all("review" in json.loads(row["trivium-tags-json"]) for row in output)
 
         _scope(web, "id")
         web.applied(search='@tag:"review"', searchColumns=[])

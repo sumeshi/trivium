@@ -97,6 +97,7 @@ fn exact_numeric_and_datetime_sort_survive_reopen_and_export_original_spellings(
             export_project(
                 &store,
                 ExportProjectPayload {
+                    allow_overwrite: false,
                     project_id: project,
                     destination: destination.to_string_lossy().into_owned(),
                     scope: Some("filtered".into()),

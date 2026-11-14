@@ -94,6 +94,7 @@ fn report_payload(
     destination: &Path,
 ) -> BuildReportPayload {
     BuildReportPayload {
+        allow_overwrite: false,
         project_id: id,
         search: Some("alice".to_string()),
         columns: None,

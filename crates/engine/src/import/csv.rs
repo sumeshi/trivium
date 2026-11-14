@@ -5,6 +5,7 @@ use std::path::Path;
 
 use polars::prelude::*;
 
+use crate::annotation_columns::{leading_block, TagFormat, ANNOTATION_COLUMNS};
 use crate::error::AppError;
 use crate::import::utf16::{detect_bom, Encoding, Utf16Reader};
 use crate::import::{column_id, empty_frame};
@@ -89,6 +90,7 @@ struct FlagColumns {
     critical: Option<usize>,
     memo: Option<usize>,
     tags: Option<usize>,
+    tags_json: Option<usize>,
     bookmarked: Option<usize>,
 }
 
@@ -101,12 +103,30 @@ impl FlagColumns {
     }
 
     fn from_columns(columns: &[ColumnMeta]) -> Self {
+        if let Some(block) = columns.get(..ANNOTATION_COLUMNS.len()) {
+            let headers = block
+                .iter()
+                .map(|column| column.source.as_str())
+                .collect::<Vec<_>>();
+            if let Some(tags) = leading_block(&headers) {
+                return Self {
+                    safe: Some(block[0].order),
+                    suspicious: Some(block[1].order),
+                    critical: Some(block[2].order),
+                    memo: Some(block[3].order),
+                    tags: matches!(tags, TagFormat::Legacy).then_some(block[4].order),
+                    tags_json: matches!(tags, TagFormat::Json).then_some(block[4].order),
+                    bookmarked: Some(block[5].order),
+                };
+            }
+        }
         Self {
             safe: Self::find(columns, "trivium-safe"),
             suspicious: Self::find(columns, "trivium-suspicious"),
             critical: Self::find(columns, "trivium-critical"),
             memo: Self::find(columns, "trivium-memo"),
             tags: Self::find(columns, "trivium-tags"),
+            tags_json: Self::find(columns, "trivium-tags-json"),
             bookmarked: Self::find(columns, "trivium-bookmarked"),
         }
     }
@@ -117,6 +137,7 @@ impl FlagColumns {
             || self.critical.is_some()
             || self.memo.is_some()
             || self.tags.is_some()
+            || self.tags_json.is_some()
             || self.bookmarked.is_some()
     }
 }
@@ -128,7 +149,10 @@ fn flag_value(record: &csv::StringRecord, index: Option<usize>) -> Option<String
         .filter(|text| !text.is_empty() && text != "0")
 }
 
-fn flag_entry(columns: FlagColumns, record: &csv::StringRecord) -> Option<FlagEntry> {
+fn flag_entry(
+    columns: FlagColumns,
+    record: &csv::StringRecord,
+) -> Result<Option<FlagEntry>, AppError> {
     let flag = flag_value(record, columns.critical)
         .map(|_| "critical".to_string())
         .or_else(|| flag_value(record, columns.suspicious).map(|_| "suspicious".to_string()))
@@ -139,33 +163,39 @@ fn flag_entry(columns: FlagColumns, record: &csv::StringRecord) -> Option<FlagEn
         .and_then(|column| record.get(column))
         .filter(|text| !text.is_empty())
         .map(str::to_string);
-    // `trivium-tags` is a `;`-separated list. A tag that itself contains `;`
-    // is split on re-import; the export format has no escaping for it.
-    let tags: Vec<String> = columns
-        .tags
-        .and_then(|column| record.get(column))
-        .map(|text| {
-            text.split(';')
-                .map(str::trim)
-                .filter(|tag| !tag.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    // The explicit JSON column wins, including [] (which clears legacy tags).
+    // Never guess JSON syntax inside an old semicolon-separated tag cell.
+    let tags = if let Some(column) = columns.tags_json {
+        serde_json::from_str::<Vec<String>>(record.get(column).unwrap_or_default()).map_err(
+            |e| AppError::Message(format!("Invalid trivium-tags-json annotation: {}", e)),
+        )?
+    } else {
+        columns
+            .tags
+            .and_then(|column| record.get(column))
+            .map(|text| {
+                text.split(';')
+                    .map(str::trim)
+                    .filter(|tag| !tag.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let bookmarked = columns
         .bookmarked
         .and_then(|column| record.get(column))
         .map(|text| text.trim() == "1")
         .unwrap_or(false);
     if flag.is_empty() && memo_value.is_none() && tags.is_empty() && !bookmarked {
-        return None;
+        return Ok(None);
     }
-    Some(FlagEntry {
+    Ok(Some(FlagEntry {
         flag,
         memo: memo_value,
         tags,
         bookmarked,
-    })
+    }))
 }
 
 /// Summary of a completed streaming import.
@@ -366,7 +396,18 @@ impl CsvImporter {
                 );
 
                 if *restore_annotations && flag_columns.any() {
-                    if let Some(entry) = flag_entry(*flag_columns, &record) {
+                    let annotation = flag_entry(*flag_columns, &record).map_err(|e| {
+                        AppError::Message(format!(
+                            "Invalid annotation at CSV record {} (line {}): {}",
+                            row_index + 1,
+                            record
+                                .position()
+                                .map(|position| position.line())
+                                .unwrap_or((row_index as u64) + 2),
+                            e
+                        ))
+                    })?;
+                    if let Some(entry) = annotation {
                         flags.insert(row_index, entry);
                     }
                 }

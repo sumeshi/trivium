@@ -272,6 +272,7 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
     export_project(
         &store,
         ExportProjectPayload {
+            allow_overwrite: false,
             project_id: id,
             destination: destination.to_string_lossy().to_string(),
             scope: Some("all".to_string()),
@@ -304,7 +305,7 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
             "trivium-suspicious",
             "trivium-critical",
             "trivium-memo",
-            "trivium-tags",
+            "trivium-tags-json",
             "trivium-bookmarked",
             "name",
             "name"
