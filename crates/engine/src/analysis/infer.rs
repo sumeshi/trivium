@@ -185,6 +185,26 @@ fn looks_integer(text: &str) -> bool {
 }
 
 pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {
+    // Normalize only an unambiguous year-first prefix for parsing. Evidence
+    // remains unchanged; day/month ordering and numeric epochs are not guessed.
+    let bytes = text.as_bytes();
+    let year_first = bytes.len() >= 10
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+        && ((bytes[4] == b'/' && bytes[7] == b'/') || (bytes[4] == b'-' && bytes[7] == b'-'));
+    let mut normalized;
+    let text = if year_first && (bytes[4] == b'/' || bytes.get(10) == Some(&b' ')) {
+        normalized = text.to_owned();
+        normalized.replace_range(4..5, "-");
+        normalized.replace_range(7..8, "-");
+        if bytes.get(10) == Some(&b' ') && bytes.get(11).is_some_and(u8::is_ascii_digit) {
+            normalized.replace_range(10..11, "T");
+        }
+        normalized.as_str()
+    } else {
+        text
+    };
     if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(text) {
         return datetime.timestamp_nanos_opt();
     }
@@ -209,4 +229,48 @@ pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {
 
 fn is_datetime(text: &str) -> bool {
     parse_datetime_nanos(text).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn year_first_slash_dates_share_exact_utc_nanoseconds_with_iso_forms() {
+        let precise = parse_datetime_nanos("2026-11-14T03:04:05.123456789Z").unwrap();
+        for text in [
+            "2026/11/14T03:04:05.123456789Z",
+            "2026/11/14 03:04:05.123456789",
+            "2026-11-14   03:04:05.123456789",
+            "2026/11/14T12:04:05.123456789+09:00",
+            "2026/11/14 12:04:05.123456789+09:00",
+            "2026-11-14 12:04:05.123456789+09:00",
+        ] {
+            assert_eq!(parse_datetime_nanos(text), Some(precise), "{text}");
+        }
+        assert_eq!(
+            parse_datetime_nanos("2026/11/14"),
+            parse_datetime_nanos("2026-11-14T00:00:00Z")
+        );
+        assert_eq!(
+            classify_text("2026/11/14 03:04:05.123456789"),
+            Some(ColumnKind::Datetime)
+        );
+        assert_eq!(precise % 1_000_000_000, 123_456_789);
+    }
+
+    #[test]
+    fn slash_aliases_do_not_guess_ambiguous_or_invalid_dates_and_epochs() {
+        for text in [
+            "11/14/2026",
+            "14/11/2026",
+            "2026/1/14",
+            "2026/13/14",
+            "2026/02/30",
+            "1700000000",
+            "2026/11/14/path",
+        ] {
+            assert_eq!(parse_datetime_nanos(text), None, "{text}");
+        }
+    }
 }

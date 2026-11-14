@@ -67,6 +67,7 @@ fn payload(id: Uuid, group_columns: Vec<&str>, search: Option<&str>) -> GroupTre
             .into_iter()
             .map(|name| name.to_string())
             .collect(),
+        group_granularities: Vec::new(),
     }
 }
 

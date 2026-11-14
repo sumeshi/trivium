@@ -735,3 +735,144 @@ fn selection_preview_and_update_read_only_metadata_not_project_cells() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_fields() {
+    let _guard = undo_guard();
+    let (root, store, id, _) = setup(false);
+    update_flag(
+        &store,
+        UpdateFlagPayload {
+            project_id: id,
+            row_index: 2,
+            flag: Some("safe".into()),
+            memo: Some(Some("human note".into())),
+            tags: Some(vec!["manual".into()]),
+            bookmarked: Some(true),
+        },
+    )
+    .unwrap();
+    let flags_path = store.flags_path(&id);
+    let before = serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap();
+    let rule = IocEntry {
+        flag: "critical".into(),
+        tag: "logon-fail".into(),
+        query: "EventID:4625".into(),
+    };
+    ops::iocs::save_iocs(
+        &store,
+        SaveIocsPayload {
+            project_id: id,
+            entries: vec![rule],
+        },
+    )
+    .unwrap();
+    let rule = trivium_engine::ioc::load_ioc_entries(&store.project_dir(&id))
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        before,
+        "saving rules must not annotate rows"
+    );
+    let mut args = payload(id, "filtered", Some(&rule.query), None, &rule.flag, None);
+    args.patch.add_tags = vec![rule.tag];
+    let preview = bulk_preview(&store, args.clone()).unwrap();
+    assert_eq!(preview.count, 4);
+    assert_eq!(
+        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        before,
+        "preview must leave every annotation unchanged"
+    );
+    args.preview_token = Some(preview.preview_token);
+    let mut changed_query = args.clone();
+    changed_query.spec.search = Some("EventID:4624".into());
+    assert!(bulk_update(&store, changed_query)
+        .unwrap_err()
+        .to_string()
+        .contains("preview again"));
+    assert_eq!(
+        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(bulk_update(&store, args).unwrap().updated, 4);
+    let result = query(&store, id, None);
+    let row = result.rows.iter().find(|row| row.row_index == 2).unwrap();
+    assert_eq!(row.flag, "critical");
+    assert_eq!(row.memo.as_deref(), Some("human note"));
+    assert_eq!(row.tags, ["manual", "logon-fail"]);
+    assert!(row.bookmarked);
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .filter(|row| row.flag == "critical")
+            .count(),
+        4
+    );
+    assert_eq!(
+        store.find(&id).unwrap().ioc_applied_records,
+        0,
+        "explicit annotation does not revive the old computed IOC overlay"
+    );
+    assert_eq!(undo(&store, id), 4);
+    assert_eq!(
+        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        before
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_read_only_evidence() {
+    use trivium_engine::ops::iocs::{export_iocs, ExportIocsPayload};
+    let (root, store, id, _) = setup(false);
+    let rule = IocEntry {
+        flag: "suspicious".into(),
+        tag: "comma,tag".into(),
+        query: "host:\"one,two\" | beacon".into(),
+    };
+    let source = root.join("bulk.csv");
+    let original = fs::read(&source).unwrap();
+    for path in [
+        source.clone(),
+        store.project_dir(&id).join("data.parquet"),
+        store.flags_path(&id),
+    ] {
+        let error = export_iocs(
+            &store,
+            ExportIocsPayload {
+                project_id: id,
+                destination: path.to_string_lossy().into(),
+                entries: Some(vec![rule.clone()]),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("source evidence")
+                || error.to_string().contains("managed case")
+        );
+    }
+    assert_eq!(fs::read(source).unwrap(), original);
+    let destination = root.join("trivium-iocs-test.csv");
+    export_iocs(
+        &store,
+        ExportIocsPayload {
+            project_id: id,
+            destination: destination.to_string_lossy().into(),
+            entries: Some(vec![rule]),
+        },
+    )
+    .unwrap();
+    let loaded = trivium_engine::ioc::read_ioc_csv(&destination).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].tag, "comma,tag");
+    assert_eq!(loaded[0].query, "host:\"one,two\" | beacon");
+    assert!(
+        trivium_engine::ioc::load_ioc_entries(&store.project_dir(&id))
+            .unwrap()
+            .is_empty(),
+        "exporting the draft must not implicitly save it"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

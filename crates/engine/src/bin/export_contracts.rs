@@ -49,6 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         analysis::histogram::Histogram,
         analysis::time::TimeSpan,
         analysis::time::TimeAnalysis,
+        analysis::group_time::GroupGranularity,
+        analysis::group_time::GroupTimeRange,
         ops::group::GroupTreeNode,
         ops::group::GroupTreeResponse,
         ops::bulk::BulkCount,

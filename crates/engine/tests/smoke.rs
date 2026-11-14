@@ -1705,6 +1705,7 @@ fn grouping_counts_match_the_query_path() {
             flag_filter: None,
             condition: None,
             group_columns: vec![common::id(&ids, "EventID")],
+            group_granularities: Vec::new(),
         },
     )
     .expect("grouping failed");

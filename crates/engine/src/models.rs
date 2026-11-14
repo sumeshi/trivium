@@ -105,7 +105,7 @@ pub struct ViewState {
     #[serde(default, rename = "hiddenColumns")]
     pub hidden_columns: Vec<String>,
     /// Missing keeps first-visible-column freezing; empty unfreezes data.
-    /// A column id freezes the source prefix through that id, excluding hidden widths.
+    /// A column id freezes the display prefix through that id, excluding hidden widths.
     #[serde(
         default,
         rename = "frozenThrough",
@@ -115,6 +115,12 @@ pub struct ViewState {
     pub frozen_through: Option<String>,
     #[serde(default, rename = "columnWidths")]
     pub column_widths: HashMap<String, f64>,
+    #[serde(default, rename = "columnOrder", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub column_order: Option<Vec<String>>,
+    #[serde(default, rename = "columnFormats", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub column_formats: Option<HashMap<String, String>>,
     #[serde(default, rename = "logicalRow")]
     pub logical_row: usize,
 }
@@ -137,6 +143,8 @@ impl Default for ViewState {
             hidden_columns: Vec::new(),
             frozen_through: None,
             column_widths: HashMap::new(),
+            column_order: None,
+            column_formats: None,
             logical_row: 0,
         }
     }

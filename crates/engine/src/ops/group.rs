@@ -4,6 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::analysis::group::{GroupNode, GroupTreeBuilder, MAX_GROUP_LEVELS};
+use crate::analysis::group_time::{bucket, GroupGranularity, GroupTimeRange};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::store::ProjectsStore;
@@ -31,6 +32,8 @@ pub struct GroupTreePayload {
     pub condition: Option<crate::condition::Node>,
     #[serde(rename = "groupColumns")]
     pub group_columns: Vec<String>,
+    #[serde(default, rename = "groupGranularities")]
+    pub group_granularities: Vec<GroupGranularity>,
 }
 
 #[derive(Debug, Serialize, ts_rs::TS)]
@@ -39,6 +42,9 @@ pub struct GroupTreeNode {
     pub label: String,
     pub count: usize,
     pub children: Vec<GroupTreeNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub range: Option<GroupTimeRange>,
 }
 
 #[derive(Debug, Serialize, ts_rs::TS)]
@@ -73,6 +79,13 @@ pub fn group_tree_with_job(
     if requested.len() > MAX_GROUP_LEVELS {
         return Err(AppError::Message(
             "Grouping supports at most 8 column levels.".into(),
+        ));
+    }
+    if !payload.group_granularities.is_empty()
+        && payload.group_granularities.len() != requested.len()
+    {
+        return Err(AppError::Message(
+            "Each group column must have a matching granularity.".into(),
         ));
     }
 
@@ -115,17 +128,42 @@ pub fn group_tree_with_job(
             }
             let mut labels = Vec::with_capacity(group_series.len());
             let mut values = Vec::with_capacity(group_series.len());
-            for series in &group_series {
+            let mut ranges = Vec::with_capacity(group_series.len());
+            for (index, series) in group_series.iter().enumerate() {
                 let value = series.get(row_idx).ok();
-                labels.push(
-                    value
-                        .as_ref()
-                        .and_then(anyvalue_to_search_string)
-                        .unwrap_or_default(),
-                );
-                values.push(value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null));
+                let label = value
+                    .as_ref()
+                    .and_then(anyvalue_to_search_string)
+                    .unwrap_or_default();
+                let original = value.as_ref().map(anyvalue_to_json).unwrap_or(Value::Null);
+                let granularity = payload
+                    .group_granularities
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
+                // Keep missing, empty and whitespace-only values distinct;
+                // their exact drill-down remains useful even for a time level.
+                let time = if original.is_null() || label.trim().is_empty() {
+                    None
+                } else {
+                    bucket(label.trim(), granularity).map_err(|message| {
+                        AppError::Message(format!(
+                        "Group level {}: {} (row {}). Choose Exact or filter invalid timestamps.",
+                        index + 1, message, batch.offset + row_idx + 1,
+                    ))
+                    })?
+                };
+                if let Some(time) = time {
+                    values.push(Value::String(time.label.clone()));
+                    labels.push(time.label);
+                    ranges.push(Some(time.range));
+                } else {
+                    labels.push(label);
+                    values.push(original);
+                    ranges.push(None);
+                }
             }
-            tree.add_row(&labels, &values)
+            tree.add_row_with_ranges(&labels, &values, &ranges)
                 .map_err(|message| AppError::Message(message.into()))?;
         }
     }
@@ -144,5 +182,6 @@ fn to_response(node: GroupNode) -> GroupTreeNode {
         label: node.label,
         count: node.count,
         children: node.children.into_iter().map(to_response).collect(),
+        range: node.range,
     }
 }

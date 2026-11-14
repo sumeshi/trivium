@@ -81,7 +81,7 @@ export type ViewState = { version: number, search: string, searchColumns: Array<
  * Missing keeps first-visible-column freezing; empty unfreezes data.
  * A column id freezes the source prefix through that id, excluding hidden widths.
  */
-frozenThrough?: string, columnWidths: { [key in string]?: number }, logicalRow: number, };
+frozenThrough?: string, columnWidths: { [key in string]?: number }, columnOrder?: Array<string>, columnFormats?: { [key in string]?: string }, logicalRow: number, };
 export type Cell = {
 /**
  * Preview text for list responses; full text from `get_cell`. `None` for
@@ -189,7 +189,9 @@ export type HistogramRangeInfo = { min: string, max: string, };
 export type Histogram = { column: string, kind: string, buckets: Array<HistogramBucket>, missing: number, outside: number, full_range: HistogramRangeInfo | null, auto_focused: boolean, };
 export type TimeSpan = { start: string, end: string, count: number, };
 export type TimeAnalysis = { column: string, gaps: Array<TimeSpan>, sessions: Array<TimeSpan>, bursts: Array<TimeSpan>, };
-export type GroupTreeNode = { value: JsonValue, label: string, count: number, children: Array<GroupTreeNode>, };
+export type GroupGranularity = "exact" | "year" | "month" | "day" | "hour" | "minute";
+export type GroupTimeRange = { start: string, end: string, };
+export type GroupTreeNode = { value: JsonValue, label: string, count: number, children: Array<GroupTreeNode>, range?: GroupTimeRange, };
 export type GroupTreeResponse = { columns: Array<string>, nodes: Array<GroupTreeNode>, total: number, };
 export type BulkCount = { count: number,
 /**

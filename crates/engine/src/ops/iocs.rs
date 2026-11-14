@@ -5,7 +5,14 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    ioc::{load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_ioc_entries, write_ioc_csv},
+    export::atomic::{
+        ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
+    },
+    ioc::{
+        load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_ioc_entries,
+        write_ioc_csv_to_writer,
+    },
+    jobs::JobContext,
     models::IocEntry,
     store::ProjectsStore,
 };
@@ -26,6 +33,9 @@ pub struct ImportIocsPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct ExportIocsPayload {
+    /// Unsaved editor entries; absent exports the stored definitions.
+    #[serde(default)]
+    pub entries: Option<Vec<IocEntry>>,
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub destination: String,
@@ -33,8 +43,8 @@ pub struct ExportIocsPayload {
 
 /// Normalizes and persists IOC definitions.
 ///
-/// Definitions are kept as legacy settings. Saving them does not re-evaluate
-/// rows or change `ioc_applied_records`; the existing stored count is kept.
+/// Saving a definition never changes row annotations. The UI applies a chosen
+/// rule through the ordinary bulk preview/update/undo transaction.
 pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), AppError> {
     let Some(meta) = store
         .try_find(&payload.project_id)
@@ -49,7 +59,7 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
     Ok(())
 }
 
-/// Imports IOC rules from a CSV, replacing the current legacy set.
+/// Imports IOC rules from a CSV, replacing the current saved definitions.
 pub fn import_iocs(
     store: &ProjectsStore,
     payload: ImportIocsPayload,
@@ -81,8 +91,18 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
-    let entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
+    let entries = match payload.entries {
+        Some(entries) => prepare_ioc_entries(entries),
+        None => load_ioc_entries(&project_dir).map_err(AppError::from)?,
+    };
     let destination = PathBuf::from(payload.destination);
-    write_ioc_csv(&entries, &destination).map_err(AppError::from)?;
-    Ok(())
+    write_atomically(
+        &destination,
+        &JobContext::none(),
+        || {
+            ensure_destination_is_not_source(&destination, &meta)?;
+            ensure_destination_is_not_managed(&destination, store)
+        },
+        |_, writer| write_ioc_csv_to_writer(&entries, writer).map_err(AppError::from),
+    )
 }

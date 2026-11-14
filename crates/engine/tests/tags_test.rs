@@ -274,6 +274,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             flag_filter: None,
             condition: None,
             group_columns: vec![event_id.clone()],
+            group_granularities: Vec::new(),
         },
     )
     .expect("group failed");

@@ -120,6 +120,7 @@ export interface ImportIocsArgs {
 export interface ExportIocsArgs {
   projectId: string;
   destination: string;
+  entries?: IocEntry[];
 }
 
 export interface SavePresetArgs {
@@ -229,6 +230,7 @@ export interface GetCellResult {
 export interface GroupTreeArgs extends RequestOwned {
   projectId: string;
   groupColumns: string[];
+  groupGranularities?: Wire.GroupGranularity[];
   search?: string;
   searchColumns?: string[];
   flagFilter?: FlagFilterValue;
@@ -479,6 +481,7 @@ class NativeBackend implements Backend {
         columns: args.columns ?? null,
         condition: args.condition ?? null,
         groupColumns: args.groupColumns,
+        groupGranularities: args.groupGranularities ?? [],
       },
     }, args);
   }
@@ -560,6 +563,7 @@ class NativeBackend implements Backend {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
+        entries: args.entries ?? null,
       },
     });
   }

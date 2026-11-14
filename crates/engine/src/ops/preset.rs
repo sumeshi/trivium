@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Context as _;
@@ -8,7 +9,12 @@ use uuid::Uuid;
 
 use crate::condition::Node;
 use crate::error::AppError;
-use crate::project_io::read_project_schema_columns;
+use crate::export::atomic::{
+    ensure_destination_is_not_managed, ensure_destination_is_not_source, write_atomically,
+};
+use crate::jobs::JobContext;
+use crate::models::{ColumnMeta, ProjectMeta};
+use crate::project_io::{read_project_schema_columns, ProjectColumns};
 use crate::store::ProjectsStore;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,6 +30,9 @@ pub struct PresetFile {
     pub sort_key: Option<String>,
     #[serde(default, rename = "sortDirection")]
     pub sort_direction: Option<String>,
+    /// Source identities make v2 presets portable across reordered columns.
+    #[serde(default)]
+    pub columns: Vec<ColumnMeta>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,8 +69,8 @@ pub struct PresetData {
     pub sort_key: Option<String>,
     #[serde(rename = "sortDirection")]
     pub sort_direction: Option<String>,
-    /// Columns in the condition that the project does not have. Empty when no
-    /// project id was supplied.
+    /// References in rules, hidden columns or sorting that could not be
+    /// resolved. Empty when no project id was supplied.
     #[serde(default)]
     pub unknown_columns: Vec<String>,
 }
@@ -73,37 +82,39 @@ pub fn extract_columns(node: &Node) -> Vec<String> {
 
 /// Writes the current view as a portable preset file.
 pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<(), AppError> {
-    if store
+    let meta = store
         .try_find(&payload.project_id)
         .map_err(AppError::from)?
-        .is_none()
-    {
-        return Err(AppError::Message("Project not found.".into()));
-    }
+        .ok_or_else(|| AppError::Message("Project not found.".into()))?;
 
     let preset = PresetFile {
-        version: 1,
+        version: 2,
         name: payload.name,
         condition: payload.condition,
         hidden_columns: payload.hidden_columns,
         sort_key: payload.sort_key,
         sort_direction: payload.sort_direction,
+        columns: project_columns(store, &meta)?,
     };
     let data = serde_json::to_vec_pretty(&preset)
         .with_context(|| "failed to serialize preset")
         .map_err(AppError::from)?;
 
     let destination = PathBuf::from(&payload.destination);
-    if let Some(parent) = destination.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create preset output dir {:?}", parent))
-                .map_err(AppError::from)?;
-        }
-    }
-    fs::write(&destination, data)
-        .with_context(|| format!("failed to write preset {}", payload.destination))
-        .map_err(AppError::from)
+    write_atomically(
+        &destination,
+        &JobContext::none(),
+        || {
+            ensure_destination_is_not_source(&destination, &meta)?;
+            ensure_destination_is_not_managed(&destination, store)
+        },
+        |_, writer| {
+            writer
+                .write_all(&data)
+                .context("failed to write preset")
+                .map_err(AppError::from)
+        },
+    )
 }
 
 /// Reads a preset file and reports columns unknown to the selected project.
@@ -115,10 +126,10 @@ pub fn load_preset(
     let data = fs::read(&path)
         .with_context(|| format!("failed to read preset {}", payload.source))
         .map_err(AppError::from)?;
-    let preset: PresetFile = serde_json::from_slice(&data)
+    let mut preset: PresetFile = serde_json::from_slice(&data)
         .with_context(|| format!("failed to parse preset {}", payload.source))
         .map_err(AppError::from)?;
-    if preset.version != 1 {
+    if !matches!(preset.version, 1 | 2) {
         return Err(AppError::Message("Unsupported preset version.".into()));
     }
 
@@ -128,10 +139,7 @@ pub fn load_preset(
                 .try_find(&id)
                 .map_err(AppError::from)?
                 .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-            match preset.condition.as_ref() {
-                Some(condition) => unknown_columns(store, &meta.id, condition)?,
-                None => Vec::new(),
-            }
+            resolve_columns(&mut preset, &project_columns(store, &meta)?)?
         }
         None => Vec::new(),
     };
@@ -146,23 +154,113 @@ pub fn load_preset(
     })
 }
 
-fn unknown_columns(
-    store: &ProjectsStore,
-    project_id: &Uuid,
-    condition: &Node,
-) -> Result<Vec<String>, AppError> {
-    let parquet_path = store.project_dir(project_id).join("data.parquet");
+fn project_columns(store: &ProjectsStore, meta: &ProjectMeta) -> Result<Vec<ColumnMeta>, AppError> {
+    let parquet_path = store.project_dir(&meta.id).join("data.parquet");
     if !parquet_path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
     let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-    let known: HashSet<String> = schema.iter().map(|name| name.to_lowercase()).collect();
+    Ok(ProjectColumns::from_meta_and_names(meta, &schema)
+        .columns()
+        .to_vec())
+}
 
-    let mut missing: Vec<String> = extract_columns(condition)
-        .into_iter()
-        .filter(|column| !known.contains(&column.to_lowercase()))
-        .collect();
+fn resolve_columns(
+    preset: &mut PresetFile,
+    target: &[ColumnMeta],
+) -> Result<Vec<String>, AppError> {
+    let mut references = preset
+        .condition
+        .as_ref()
+        .map(extract_columns)
+        .unwrap_or_default();
+    references.extend(preset.hidden_columns.iter().cloned());
+    references.extend(preset.sort_key.iter().cloned());
+    let same_sources = preset
+        .columns
+        .iter()
+        .map(|column| &column.source)
+        .eq(target.iter().map(|column| &column.source));
+    let mut ids = HashSet::new();
+    if preset.version == 2
+        && preset
+            .columns
+            .iter()
+            .any(|column| !ids.insert(column.id.to_lowercase()))
+    {
+        return Err(AppError::Message("Invalid preset column mapping.".into()));
+    }
+    let mut mapping = HashMap::new();
+    let mut missing = Vec::new();
+    for reference in references {
+        let key = reference.to_lowercase();
+        let resolved = if preset.version == 1 {
+            // Old presets use source positions, as before.
+            target
+                .iter()
+                .find(|column| column.id == reference)
+                .or_else(|| target.iter().find(|column| column.id.to_lowercase() == key))
+        } else if let Some(index) = preset
+            .columns
+            .iter()
+            .position(|column| column.id.to_lowercase() == key)
+        {
+            let source = &preset.columns[index].source;
+            if same_sources {
+                Some(&target[index])
+            } else {
+                let mut matches = target.iter().filter(|column| &column.source == source);
+                let first = matches.next();
+                if first.is_none()
+                    || matches.next().is_some()
+                    || preset
+                        .columns
+                        .iter()
+                        .filter(|column| &column.source == source)
+                        .count()
+                        != 1
+                {
+                    return Err(AppError::Message(format!(
+                        "Preset column is missing or ambiguous: {source}"
+                    )));
+                }
+                first
+            }
+        } else {
+            None
+        };
+        if let Some(column) = resolved {
+            mapping.insert(reference, column.id.clone());
+        } else {
+            missing.push(reference);
+        }
+    }
+    let remap = |column: &mut String| {
+        if let Some(id) = mapping.get(column.as_str()) {
+            column.clone_from(id);
+        }
+    };
+    if let Some(condition) = &mut preset.condition {
+        remap_condition(condition, &remap);
+    }
+    for column in &mut preset.hidden_columns {
+        remap(column);
+    }
+    if let Some(column) = &mut preset.sort_key {
+        remap(column);
+    }
     missing.sort();
     missing.dedup();
     Ok(missing)
+}
+
+fn remap_condition(node: &mut Node, remap: &impl Fn(&mut String)) {
+    match node {
+        Node::Condition(condition) => remap(&mut condition.column),
+        Node::Group(group) => {
+            for child in &mut group.children {
+                remap_condition(child, remap);
+            }
+        }
+    }
 }

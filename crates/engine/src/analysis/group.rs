@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use super::group_time::GroupTimeRange;
+
 pub const MAX_GROUP_LEVELS: usize = 8;
 pub const MAX_GROUP_NODES: usize = 10_000;
 const MAX_LABEL_BYTES: usize = 32 * 1024 * 1024;
@@ -10,6 +12,7 @@ const MAX_LABEL_BYTES: usize = 32 * 1024 * 1024;
 struct PartialNode {
     count: usize,
     value: Value,
+    range: Option<GroupTimeRange>,
     children: HashMap<(String, bool), PartialNode>,
 }
 
@@ -20,6 +23,7 @@ pub struct GroupNode {
     pub label: String,
     pub count: usize,
     pub children: Vec<GroupNode>,
+    pub range: Option<GroupTimeRange>,
 }
 
 /// Bounded aggregation. Exceeding a limit rejects the entire result rather
@@ -36,6 +40,18 @@ impl GroupTreeBuilder {
         self.add_with_limits(labels, values, MAX_GROUP_NODES, MAX_LABEL_BYTES)
     }
 
+    pub fn add_row_with_ranges(
+        &mut self,
+        labels: &[String],
+        values: &[Value],
+        ranges: &[Option<GroupTimeRange>],
+    ) -> Result<(), &'static str> {
+        if ranges.len() != labels.len() {
+            return Err("Each group level must have a matching time range.");
+        }
+        self.add_with_range_limits(labels, values, ranges, MAX_GROUP_NODES, MAX_LABEL_BYTES)
+    }
+
     fn add_with_limits(
         &mut self,
         labels: &[String],
@@ -43,11 +59,22 @@ impl GroupTreeBuilder {
         max_nodes: usize,
         max_bytes: usize,
     ) -> Result<(), &'static str> {
+        self.add_with_range_limits(labels, values, &[], max_nodes, max_bytes)
+    }
+
+    fn add_with_range_limits(
+        &mut self,
+        labels: &[String],
+        values: &[Value],
+        ranges: &[Option<GroupTimeRange>],
+        max_nodes: usize,
+        max_bytes: usize,
+    ) -> Result<(), &'static str> {
         if labels.len() != values.len() || labels.len() > MAX_GROUP_LEVELS {
             return Err("Grouping supports at most 8 matching column levels.");
         }
         let mut node = &mut self.root;
-        for (label, value) in labels.iter().zip(values) {
+        for (index, (label, value)) in labels.iter().zip(values).enumerate() {
             let key = (label.clone(), value.is_null() && label.is_empty());
             if !node.children.contains_key(&key) {
                 if self.nodes >= max_nodes
@@ -60,6 +87,7 @@ impl GroupTreeBuilder {
             }
             let child = node.children.entry(key).or_insert_with(|| PartialNode {
                 value: value.clone(),
+                range: ranges.get(index).cloned().flatten(),
                 ..PartialNode::default()
             });
             child.count += 1;
@@ -83,6 +111,7 @@ fn finalize(children: HashMap<(String, bool), PartialNode>) -> Vec<GroupNode> {
             label,
             count: child.count,
             children: finalize(child.children),
+            range: child.range,
         })
         .collect()
 }

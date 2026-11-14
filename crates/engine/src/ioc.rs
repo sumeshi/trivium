@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -92,10 +93,13 @@ pub fn write_ioc_csv(entries: &[IocEntry], path: &Path) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create export dir {:?}", parent))?;
     }
-    let mut writer = WriterBuilder::new()
-        .has_headers(true)
-        .from_path(path)
-        .with_context(|| format!("failed to create IOC CSV {:?}", path))?;
+    let writer =
+        fs::File::create(path).with_context(|| format!("failed to create IOC CSV {:?}", path))?;
+    write_ioc_csv_to_writer(entries, writer)
+}
+
+pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) -> Result<()> {
+    let mut writer = WriterBuilder::new().has_headers(true).from_writer(writer);
     writer
         .write_record(["flag", "tag", "query"])
         .context("failed to write IOC CSV header")?;

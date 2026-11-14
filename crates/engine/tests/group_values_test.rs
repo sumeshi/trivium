@@ -53,6 +53,7 @@ fn payload(id: Uuid, columns: &[String]) -> GroupTreePayload {
         bookmarked_only: None,
         condition: None,
         group_columns: columns.to_vec(),
+        group_granularities: Vec::new(),
     }
 }
 

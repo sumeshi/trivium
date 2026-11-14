@@ -43,7 +43,13 @@ fn write_csv(path: &Path, rows: usize) {
     fs::write(path, text).expect("failed to write fixture");
 }
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid, Uuid, std::collections::HashMap<String, String>) {
+fn setup() -> (
+    PathBuf,
+    ProjectsStore,
+    Uuid,
+    Uuid,
+    std::collections::HashMap<String, String>,
+) {
     let root = std::env::temp_dir().join(format!("trivium-preset-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");
@@ -175,9 +181,9 @@ fn preset_reports_unknown_columns_case_insensitively() {
 fn preset_rejects_unsupported_version() {
     let (root, store, _id_a, id_b, _ids) = setup();
     let destination = root.join("preset.json");
-    fs::write(&destination, r#"{"version":2,"hiddenColumns":[]}"#).expect("failed to write");
+    fs::write(&destination, r#"{"version":99,"hiddenColumns":[]}"#).expect("failed to write");
     let error = load_preset(&store, load_payload(Some(id_b), &destination))
-        .expect_err("version 2 must fail");
+        .expect_err("unknown versions must fail");
     match error {
         AppError::Message(message) => assert_eq!(message, "Unsupported preset version."),
         other => panic!("unexpected error: {other:?}"),
@@ -211,5 +217,146 @@ fn preset_without_condition_loads_sort_and_columns() {
     assert_eq!(loaded.sort_direction.as_deref(), Some("asc"));
     assert_eq!(loaded.unknown_columns, Vec::<String>::new());
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preset_maps_rules_hidden_columns_and_sort_after_source_reordering() {
+    let (root, store, id_a, _id_b, ids) = setup();
+    let reordered = root.join("reordered.csv");
+    fs::write(
+        &reordered,
+        "proc,user,EventID,host\npowershell,alice,1,WS01\n",
+    )
+    .unwrap();
+    let target = create_project(&store, &reordered);
+    let target_ids = common::column_ids(&store, target);
+    let destination = root.join("preset.json");
+    save_preset(&store, save_payload(id_a, &ids, &destination)).unwrap();
+    let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(file["version"], 2);
+    assert_eq!(file["columns"][1]["source"], "host");
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_ne!(ids["host"], target_ids["host"]);
+    assert_eq!(loaded.condition, Some(nested_condition(&target_ids)));
+    assert_eq!(loaded.hidden_columns, vec![target_ids["host"].clone()]);
+    assert_eq!(loaded.sort_key, Some(target_ids["EventID"].clone()));
+    assert!(loaded.unknown_columns.is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preset_rejects_missing_or_ambiguous_source_names_in_a_different_schema() {
+    let (root, store, id_a, _id_b, ids) = setup();
+    let destination = root.join("preset.json");
+    save_preset(&store, save_payload(id_a, &ids, &destination)).unwrap();
+    for (name, header) in [
+        ("missing", "EventID,other,user,proc"),
+        ("ambiguous", "host,EventID,user,proc,host"),
+    ] {
+        let input = root.join(format!("{name}.csv"));
+        let values = if name == "ambiguous" {
+            "WS01,1,alice,cmd,WS02"
+        } else {
+            "1,WS01,alice,cmd"
+        };
+        fs::write(&input, format!("{header}\n{values}\n")).unwrap();
+        let target = create_project(&store, &input);
+        let error = load_preset(&store, load_payload(Some(target), &destination)).unwrap_err();
+        assert!(
+            String::from(error).contains("missing or ambiguous: host"),
+            "{name}"
+        );
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn matching_duplicate_header_schemas_preserve_their_source_positions() {
+    let (root, store, _id_a, _id_b, _ids) = setup();
+    let mut projects = Vec::new();
+    for name in ["first", "second"] {
+        let input = root.join(format!("duplicate-{name}.csv"));
+        fs::write(&input, "host,host,score\nleft,right,1\n").unwrap();
+        projects.push(create_project(&store, &input));
+    }
+    let source = store.try_find(&projects[0]).unwrap().unwrap();
+    let target = store.try_find(&projects[1]).unwrap().unwrap();
+    let destination = root.join("duplicate.json");
+    save_preset(
+        &store,
+        SavePresetPayload {
+            project_id: projects[0],
+            name: None,
+            condition: None,
+            hidden_columns: vec![source.columns[1].id.clone()],
+            sort_key: Some(source.columns[0].id.clone()),
+            sort_direction: Some("asc".into()),
+            destination: destination.to_string_lossy().to_string(),
+        },
+    )
+    .unwrap();
+    let loaded = load_preset(&store, load_payload(Some(projects[1]), &destination)).unwrap();
+    assert_eq!(loaded.hidden_columns, vec![target.columns[1].id.clone()]);
+    assert_eq!(loaded.sort_key, Some(target.columns[0].id.clone()));
+    assert!(loaded.unknown_columns.is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn old_presets_still_load_by_internal_source_position() {
+    let (root, store, _id_a, id_b, ids) = setup();
+    let destination = root.join("old-preset.json");
+    fs::write(
+        &destination,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1, "condition": nested_condition(&ids),
+            "hiddenColumns": [ids["host"]], "sortKey": ids["EventID"], "sortDirection": "desc",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let loaded = load_preset(&store, load_payload(Some(id_b), &destination)).unwrap();
+    assert_eq!(loaded.condition, Some(nested_condition(&ids)));
+    assert_eq!(loaded.hidden_columns, vec![ids["host"].clone()]);
+    assert_eq!(loaded.sort_key, Some(ids["EventID"].clone()));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn an_unmapped_id_never_silently_binds_to_an_extra_target_column() {
+    let (root, store, id_a, _id_b, ids) = setup();
+    let destination = root.join("preset.json");
+    let mut payload = save_payload(id_a, &ids, &destination);
+    payload.hidden_columns = vec!["c000005".into()];
+    save_preset(&store, payload).unwrap();
+    let input = root.join("extra.csv");
+    fs::write(
+        &input,
+        "EventID,host,user,proc,extra\n1,WS01,alice,cmd,data\n",
+    )
+    .unwrap();
+    let target = create_project(&store, &input);
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_eq!(loaded.unknown_columns, vec!["c000005"]);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preset_output_cannot_replace_source_evidence_or_case_storage() {
+    let (root, store, id_a, _id_b, ids) = setup();
+    let source = root.join("a.csv");
+    let parquet = store.project_dir(&id_a).join("data.parquet");
+    let database = store.project_dir(&id_a).join("project.sqlite");
+    for destination in [&source, &parquet, &database] {
+        let before = fs::read(destination).unwrap();
+        let error = save_preset(&store, save_payload(id_a, &ids, destination)).unwrap_err();
+        let message = String::from(error);
+        assert!(
+            message.contains("source evidence") || message.contains("managed"),
+            "{message}"
+        );
+        assert_eq!(fs::read(destination).unwrap(), before);
+    }
     let _ = fs::remove_dir_all(root);
 }
