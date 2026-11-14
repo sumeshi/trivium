@@ -25,10 +25,11 @@ export function createWorkspaceNavigation(
   let sequence = 0;
   let disposed = false;
 
-  const rowOffset = () => clampRow(logicalRowAt(
-    get(workspace.bodyScrollEl)?.scrollTop ?? get(workspace.scrollTop),
-    get(workspace.totalFilteredRows), get(workspace.viewportHeight),
-  ), get(workspace.totalFilteredRows));
+  const rowOffset = () => {
+    const body = get(workspace.bodyScrollEl);
+    return clampRow(logicalRowAt(body?.isConnected ? body.scrollTop : get(workspace.scrollTop),
+      get(workspace.totalFilteredRows), get(workspace.viewportHeight)), get(workspace.totalFilteredRows));
+  };
 
   const applyScrollOffset = (offset: number, totalOverride?: number) => {
     const total = totalOverride ?? get(workspace.totalFilteredRows);

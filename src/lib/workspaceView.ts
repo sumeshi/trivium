@@ -26,8 +26,26 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
   let watching = false;
   const subscriptions: Array<() => void> = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let viewportRevision = 0;
+  let lastViewport: { projectId: string | null; generation: number; signature: string; total: number;
+    revision: number; logicalRow: number; scrollLeft: number } | null = null;
   const notify = (message: string) => { if (!disposed) options.notify(message); };
   const cancelScheduled = () => { if (timer) clearTimeout(timer); timer = null; };
+  const viewportSnapshot = () => {
+    const projectId = get(workspace.currentProjectId), generation = get(workspace.viewGeneration);
+    const signature = options.signature(), total = get(workspace.totalFilteredRows);
+    const connected = get(workspace.bodyScrollEl)?.isConnected === true;
+    // Svelte can detach the parent's wrapper before this view's onDestroy.
+    // Detached scroll getters read 0; retain the last live capture, including
+    // input ahead of the rAF-published stores, for both the tab and final save.
+    if (!connected && lastViewport?.projectId === projectId && lastViewport.generation === generation
+      && lastViewport.signature === signature && lastViewport.total === total
+      && lastViewport.revision === viewportRevision) return lastViewport;
+    const current = { projectId, generation, signature, total,
+      revision: viewportRevision, logicalRow: options.logicalRow(), scrollLeft: options.scrollLeft() };
+    if (connected) lastViewport = current;
+    return current;
+  };
   const buildViewState = (): ViewState => ({
     version: 1,
     search: get(workspace.search),
@@ -40,16 +58,17 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     hiddenColumns: Array.from(get(workspace.hiddenColumns)),
     ...(get(workspace.frozenThrough) !== undefined ? { frozenThrough: get(workspace.frozenThrough) } : {}),
     columnWidths: Object.fromEntries(options.columnWidths()),
-    logicalRow: options.logicalRow(),
+    logicalRow: viewportSnapshot().logicalRow,
   });
   const snapshotSession = (): WorkspaceSession | null => {
     const projectId = get(workspace.currentProjectId);
     if (disposed || !options.isReady() || !projectId) return null;
-    workspace.rememberOffset(options.logicalRow());
+    const viewport = viewportSnapshot();
+    workspace.rememberOffset(viewport.logicalRow);
     return {
       projectId, view: buildViewState(), selectedRowIds: [...get(workspace.selectedRowIds)],
       selectionSignature: options.signature(), history: workspace.snapshotHistory(),
-      scrollLeft: options.scrollLeft(), writable,
+      scrollLeft: viewport.scrollLeft, writable,
     };
   };
   const flushPersist = async (projectId: string | null, notifyOnError = true) => {
@@ -79,6 +98,9 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
       let initial = true;
       subscriptions.push(store.subscribe(() => {
         if (initial) { initial = false; return; }
+        // An asynchronous import may leave this view interactive after its
+        // last tab capture. Prefer newer published offsets at teardown.
+        if (store === workspace.scrollTop || store === workspace.scrollLeft) viewportRevision += 1;
         schedulePersist();
       }));
     }
@@ -139,6 +161,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
   };
   workspace.onDispose(() => {
     disposed = true;
+    lastViewport = null;
     cancelScheduled();
     for (const unsubscribe of subscriptions) unsubscribe();
   });

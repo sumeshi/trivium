@@ -135,3 +135,52 @@ test("scroll and control changes save one latest view after idle and unsubscribe
   await Promise.resolve(); await Promise.resolve();
   assert.equal(writes.length, 1);
 });
+
+test("tab teardown preserves the last live viewport ahead of its published stores", async () => {
+  const workspace = createWorkspaceController(), writes: ViewState[] = [];
+  workspace.currentProjectId.set("detach");
+  workspace.projectDetail.set(detail("detach"));
+  workspace.totalFilteredRows.set(5199);
+  workspace.scrollTop.set(32);
+  workspace.scrollLeft.set(10);
+  const body = { isConnected: true, scrollTop: 320, scrollLeft: 200 };
+  workspace.bodyScrollEl.set(body as HTMLDivElement);
+  let signature = "first";
+  const view = createWorkspaceView(workspace, {
+    backend: { saveViewState: async ({ state }: { state: ViewState }) => { writes.push(state); } } as unknown as Backend,
+    isReady: () => true, columnWidths: () => new Map(), signature: () => signature,
+    logicalRow: () => Math.floor((body.isConnected ? body.scrollTop : get(workspace.scrollTop)) / 32),
+    scrollLeft: () => body.isConnected ? body.scrollLeft : get(workspace.scrollLeft), notify: () => {},
+  });
+  view.watch();
+  const live = view.snapshotSession()!;
+  assert.equal(live.view.logicalRow, 10);
+  assert.equal(live.scrollLeft, 200);
+  body.isConnected = false;
+  body.scrollTop = body.scrollLeft = 0;
+  workspace.bodyScrollEl.set(null);
+  const detached = view.snapshotSession()!;
+  assert.equal(detached.view.logicalRow, 10);
+  assert.equal(detached.scrollLeft, 200);
+  assert.equal(detached.history.entries[detached.history.index].offset, 10);
+  await view.flushPersist("detach");
+  assert.equal(writes[0].logicalRow, 10, "the teardown save must agree with the retained tab");
+  body.isConnected = true;
+  body.scrollTop = 640;
+  body.scrollLeft = 350;
+  workspace.bodyScrollEl.set(body as HTMLDivElement);
+  workspace.scrollTop.set(640);
+  workspace.scrollLeft.set(350);
+  body.isConnected = false;
+  body.scrollTop = body.scrollLeft = 0;
+  workspace.bodyScrollEl.set(null);
+  const afterImport = view.snapshotSession()!;
+  assert.equal(afterImport.view.logicalRow, 20, "scrolling after an earlier import capture must use its newer published position");
+  assert.equal(afterImport.scrollLeft, 350);
+  await view.flushPersist("detach");
+  assert.equal(writes[1].logicalRow, 20);
+  signature = "different query";
+  workspace.scrollTop.set(0);
+  assert.equal(view.snapshotSession()?.view.logicalRow, 0, "a new result scope must not reuse the previous viewport");
+  workspace.dispose();
+});

@@ -245,7 +245,7 @@ test("First/Last cancel their replaced Go request without cancelling independent
 test("tab snapshots use native viewport offsets before a queued render frame publishes its stores", () => {
   const { workspace, queries, backend } = setup();
   workspace.totalFilteredRows.set(5199);
-  const viewport = { scrollTop: 3207, scrollLeft: 700 } as HTMLDivElement;
+  const viewport = { isConnected: true, scrollTop: 3207, scrollLeft: 700 } as HTMLDivElement;
   workspace.bodyScrollEl.set(viewport);
   assert.equal(get(workspace.scrollTop), 0);
   const navigation = createWorkspaceNavigation(workspace, queries, {

@@ -171,7 +171,11 @@
     isReady: () => initialized && !destroyed,
     columnWidths: () => columnWidths,
     logicalRow: () => pendingScrollRow ?? rowOffset(),
-    scrollLeft: () => pendingScrollLeft ?? get(bodyScrollEl)?.scrollLeft ?? get(scrollLeft),
+    scrollLeft: () => {
+      if (pendingScrollLeft !== null) return pendingScrollLeft;
+      const body = get(bodyScrollEl);
+      return body?.isConnected ? body.scrollLeft : get(scrollLeft);
+    },
     signature: () => queries.signature,
     notify: (message) => dispatch('notify', { message, tone: 'error' }),
   });
