@@ -1,11 +1,13 @@
 use polars::prelude::Series;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 mod annotated;
+mod integer;
 mod values;
 
 pub use annotated::histogram_series_annotated;
 pub(crate) use annotated::histogram_series_annotated_with_job;
+use integer::IntegerBins;
 use values::{datetime_point, finite, float_point, format_nanos, int_point};
 
 pub const DEFAULT_BUCKETS: usize = 50;
@@ -81,7 +83,7 @@ pub fn histogram_series_ranged(
         row_indices,
         buckets,
         range,
-        series_kind_with_job(series, &job).map_err(|e| e.to_string())?,
+        series_kind_for_rows_with_job(series, row_indices, &job).map_err(|e| e.to_string())?,
         &job,
     )
 }
@@ -218,19 +220,7 @@ fn histogram_i128(
 ) -> Histogram {
     let (counts, range, missing) = counts_i128(points, buckets);
     let buckets = match range {
-        Some((min, max)) => bucket_labels(&counts, buckets, |index| {
-            let start = if min == max {
-                min
-            } else {
-                min + (max - min) * index as i128 / buckets as i128
-            };
-            let end = if min == max || index + 1 == buckets {
-                max
-            } else {
-                min + (max - min) * (index + 1) as i128 / buckets as i128
-            };
-            (label(start), label(end))
-        }),
+        Some((min, max)) => integer_buckets(&counts, &IntegerBins::new(min, max, buckets), label),
         None => empty_buckets(buckets),
     };
     Histogram {
@@ -256,9 +246,7 @@ fn histogram_i128_range(
     if min > max {
         return Err("Invalid range: min is greater than max.".into());
     }
-    let span = max
-        .checked_sub(min)
-        .ok_or_else(|| "Invalid range: span is too wide.".to_string())?;
+    let bins = IntegerBins::new(min, max, buckets);
     let mut counts = vec![0u64; buckets];
     let mut missing = 0u64;
     let mut outside = 0u64;
@@ -267,39 +255,13 @@ fn histogram_i128_range(
             missing += 1;
             continue;
         };
-        if *value < min || *value > max {
+        if let Some(index) = bins.index(*value) {
+            counts[index] += 1;
+        } else {
             outside += 1;
-            continue;
         }
-        let index = if span == 0 {
-            0
-        } else {
-            let offset = value - min;
-            let scaled = offset
-                .checked_mul(buckets as i128)
-                .ok_or_else(|| "Invalid range: span is too wide.".to_string())?;
-            ((scaled / span) as usize).min(buckets - 1)
-        };
-        counts[index] += 1;
     }
-    let edge = |index: usize| -> i128 {
-        if span == 0 {
-            return min;
-        }
-        span.checked_mul(index as i128)
-            .and_then(|delta| delta.checked_div(buckets as i128))
-            .and_then(|delta| min.checked_add(delta))
-            .unwrap_or(max)
-    };
-    let buckets_out = bucket_labels(&counts, buckets, |index| {
-        let start = edge(index);
-        let end = if index + 1 == buckets {
-            max
-        } else {
-            edge(index + 1)
-        };
-        (label(start), label(end))
-    });
+    let buckets_out = integer_buckets(&counts, &bins, label);
     Ok(Histogram {
         column: column.to_string(),
         kind: kind.as_str().to_string(),
@@ -426,33 +388,31 @@ fn histogram_f64_range(
 }
 
 fn counts_i128(points: &[Option<i128>], buckets: usize) -> (Vec<u64>, Option<(i128, i128)>, u64) {
-    let mut missing = 0u64;
-    let mut present = Vec::new();
-    for point in points {
-        match point {
-            Some(value) => present.push(*value),
-            None => missing += 1,
-        }
-    }
+    let missing = points.iter().filter(|value| value.is_none()).count() as u64;
     let mut counts = vec![0u64; buckets];
-    if present.is_empty() {
+    let Some(min) = points.iter().flatten().min().copied() else {
         return (counts, None, missing);
-    }
-    let min = *present.iter().min().expect("present");
-    let max = *present.iter().max().expect("present");
-    if min == max {
-        counts[0] = present.len() as u64;
-    } else {
-        let span = max - min;
-        for value in present {
-            let mut index = ((value - min) * buckets as i128 / span) as usize;
-            if index >= buckets {
-                index = buckets - 1;
-            }
-            counts[index] += 1;
-        }
+    };
+    let max = points.iter().flatten().max().copied().expect("present");
+    let bins = IntegerBins::new(min, max, buckets);
+    for value in points.iter().flatten() {
+        counts[bins.index(*value).expect("value within computed range")] += 1;
     }
     (counts, Some((min, max)), missing)
+}
+
+fn integer_buckets(
+    counts: &[u64],
+    bins: &IntegerBins,
+    label: impl Fn(i128) -> String,
+) -> Vec<HistogramBucket> {
+    let mut buckets = bucket_labels(counts, counts.len(), |index| {
+        (label(bins.edge(index)), label(bins.edge(index + 1)))
+    });
+    for (index, bucket) in buckets.iter_mut().enumerate() {
+        bucket.end_inclusive = bins.end_inclusive(index);
+    }
+    buckets
 }
 
 fn bucket_labels(

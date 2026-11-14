@@ -1,7 +1,7 @@
 use polars::prelude::Series;
 use serde_json::Value;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 use crate::value_utils::anyvalue_to_json;
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
@@ -60,7 +60,9 @@ pub(crate) fn analyze_series_with_job(
     burst_min: u64,
     job: &crate::jobs::JobContext,
 ) -> Result<TimeAnalysis, String> {
-    if series_kind_with_job(series, job).map_err(|e| e.to_string())? != ColumnKind::Datetime {
+    if series_kind_for_rows_with_job(series, row_indices, job).map_err(|e| e.to_string())?
+        != ColumnKind::Datetime
+    {
         return Err("Column is not datetime.".into());
     }
     let mut events = Vec::new();

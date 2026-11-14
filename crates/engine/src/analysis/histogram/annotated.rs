@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use polars::prelude::Series;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind_with_job, ColumnKind};
+use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 use crate::models::FlagEntry;
 
+use super::integer::IntegerBins;
 use super::values::{datetime_point, float_point, format_nanos, int_point};
 use super::{Histogram, HistogramBucket, HistogramFlags, HistogramRangeInfo};
 
@@ -42,7 +43,7 @@ pub(crate) fn histogram_series_annotated_with_job(
     focus: bool,
     job: &crate::jobs::JobContext,
 ) -> Result<Histogram, String> {
-    let kind = series_kind_with_job(series, job).map_err(|e| e.to_string())?;
+    let kind = series_kind_for_rows_with_job(series, rows, job).map_err(|e| e.to_string())?;
     if kind == ColumnKind::Datetime {
         return datetime_histogram(
             column,
@@ -66,15 +67,16 @@ pub(crate) fn histogram_series_annotated_with_job(
         if !first.start.is_empty() {
             let min = first.start.clone();
             let max = last.end.clone();
-            let int_bounds = if result.kind == "int" {
-                Some((
+            let int_bins = if result.kind == "int" {
+                Some(IntegerBins::new(
                     min.parse::<i128>().map_err(|error| error.to_string())?,
                     max.parse::<i128>().map_err(|error| error.to_string())?,
+                    result.buckets.len(),
                 ))
             } else {
                 None
             };
-            let float_bounds = if int_bounds.is_none() {
+            let float_bounds = if int_bins.is_none() {
                 Some((
                     min.parse::<f64>().map_err(|error| error.to_string())?,
                     max.parse::<f64>().map_err(|error| error.to_string())?,
@@ -86,9 +88,8 @@ pub(crate) fn histogram_series_annotated_with_job(
                 if position % 1024 == 0 {
                     job.check_cancelled().map_err(|e| e.to_string())?;
                 }
-                let index = if let Some((low, high)) = int_bounds {
-                    int_point(series, *row)
-                        .and_then(|point| integer_index(point, low, high, result.buckets.len()))
+                let index = if let Some(bins) = &int_bins {
+                    int_point(series, *row).and_then(|point| bins.index(point))
                 } else {
                     let (low, high) = float_bounds.expect("numeric bounds");
                     float_point(series, *row).and_then(|point| {
@@ -122,17 +123,6 @@ fn add_flag(counts: &mut HistogramFlags, entry: Option<&FlagEntry>) {
         "critical" => counts.critical += 1,
         _ => counts.unflagged += 1,
     }
-}
-
-fn integer_index(value: i128, min: i128, max: i128, buckets: usize) -> Option<usize> {
-    if value < min || value > max {
-        return None;
-    }
-    Some(if min == max {
-        0
-    } else {
-        (((value - min) * buckets as i128 / (max - min)) as usize).min(buckets - 1)
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -196,21 +186,21 @@ fn datetime_histogram(
     if min > max && (explicit.is_some() || !points.is_empty()) {
         return Err("Invalid range: min is greater than max.".into());
     }
+    let bins =
+        (explicit.is_some() || !points.is_empty()).then(|| IntegerBins::new(min, max, buckets));
     let mut output = (0..buckets)
         .map(|index| HistogramBucket {
-            start: if points.is_empty() && explicit.is_none() {
-                String::new()
-            } else {
-                format_nanos(edge(min, max, index, buckets))
-            },
-            end: if points.is_empty() && explicit.is_none() {
-                String::new()
-            } else {
-                format_nanos(edge(min, max, index + 1, buckets))
-            },
+            start: bins
+                .as_ref()
+                .map(|bins| format_nanos(bins.edge(index)))
+                .unwrap_or_default(),
+            end: bins
+                .as_ref()
+                .map(|bins| format_nanos(bins.edge(index + 1)))
+                .unwrap_or_default(),
             count: 0,
             flags: HistogramFlags::default(),
-            end_inclusive: min == max || index + 1 == buckets,
+            end_inclusive: bins.as_ref().is_none_or(|bins| bins.end_inclusive(index)),
         })
         .collect::<Vec<_>>();
     let mut outside = 0;
@@ -218,7 +208,7 @@ fn datetime_histogram(
         if position % 1024 == 0 {
             job.check_cancelled().map_err(|e| e.to_string())?;
         }
-        if let Some(index) = integer_index(point, min, max, buckets) {
+        if let Some(index) = bins.as_ref().and_then(|bins| bins.index(point)) {
             output[index].count += 1;
             add_flag(&mut output[index].flags, flags.get(&row));
         } else {
@@ -234,17 +224,6 @@ fn datetime_histogram(
         full_range,
         auto_focused: suggested.is_some(),
     })
-}
-
-// Integer nanosecond bucket boundaries round up. Every bucket is [start,end),
-// except the final bucket includes the exact maximum. This agrees with index
-// floor((value-min)*buckets/span), even when span is smaller than bucket count.
-fn edge(min: i128, max: i128, index: usize, buckets: usize) -> i128 {
-    if min == max || index == 0 {
-        min
-    } else {
-        min + ((max - min) * index as i128 + buckets as i128 - 1) / buckets as i128
-    }
 }
 
 fn dense_window(sample: &mut [i128], full_min: i128, full_max: i128) -> Option<(i128, i128)> {

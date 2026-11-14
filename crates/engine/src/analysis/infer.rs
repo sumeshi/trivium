@@ -97,13 +97,37 @@ pub(crate) fn series_kind_with_job(
     series: &Series,
     job: &crate::jobs::JobContext,
 ) -> Result<ColumnKind, crate::error::AppError> {
+    series_kind_from_rows(series, 0..series.len(), job)
+}
+
+/// Analysis describes the selected result. Values outside it must not turn a
+/// valid numeric/datetime result into a string column. With no present values,
+/// retain the source kind so empty/missing-only results keep their chart shape.
+pub(crate) fn series_kind_for_rows_with_job(
+    series: &Series,
+    rows: &[usize],
+    job: &crate::jobs::JobContext,
+) -> Result<ColumnKind, crate::error::AppError> {
+    let kind = series_kind_from_rows(series, rows.iter().copied(), job)?;
+    if kind == ColumnKind::Null && rows.len() != series.len() {
+        series_kind_with_job(series, job)
+    } else {
+        Ok(kind)
+    }
+}
+
+fn series_kind_from_rows(
+    series: &Series,
+    rows: impl IntoIterator<Item = usize>,
+    job: &crate::jobs::JobContext,
+) -> Result<ColumnKind, crate::error::AppError> {
     job.check_cancelled()?;
     if let Some(kind) = dtype_kind(series.dtype()) {
         return Ok(kind);
     }
     let mut flags = KindFlags::default();
-    for idx in 0..series.len() {
-        if idx % 1024 == 0 {
+    for (position, idx) in rows.into_iter().enumerate() {
+        if position % 1024 == 0 {
             job.check_cancelled()?;
         }
         let Ok(value) = series.get(idx) else {
