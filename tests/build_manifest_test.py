@@ -34,6 +34,26 @@ class Manifest(unittest.TestCase):
             self.assertIn('Desktop application', summary)
             self.assertIn(digest, summary)
 
+    def test_desktop_instructions_identify_each_package_and_its_launch_method(self):
+        for filename, platform, expected, absent in [
+            ('Trivium_0.2.0_amd64.AppImage', 'linux-x86_64', ['chmod +x', '--appimage-extract-and-run'], ['package manager', 'Windows:']),
+            ('Trivium-v0.2.0.exe', 'windows-x86_64', ['open the .exe', 'WebView2 Runtime'], ['chmod +x', 'package manager']),
+            ('trivium_0.2.0_amd64.deb', 'linux-x86_64', ['package manager'], ['chmod +x', 'Windows:']),
+        ]:
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / filename
+                source.write_bytes(b'package')
+                output = root / 'artifact'
+                subprocess.run([sys.executable, str(ROOT / 'scripts/build_manifest.py'), '--kind', 'desktop-app',
+                                '--platform', platform, '--output', str(output), str(source)],
+                               check=True, capture_output=True, text=True)
+                usage = (output / 'README.txt').read_text()
+                for phrase in expected:
+                    self.assertIn(phrase, usage)
+                for phrase in absent:
+                    self.assertNotIn(phrase, usage)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -7,8 +7,16 @@ Search, narrow the table, inspect full values, and record your findings with **S
 
 ## Install
 
-- **Windows:** download `Trivium-v*.exe` from [Releases](https://github.com/sumeshi/trivium/releases). The portable application requires Microsoft's [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
-- **Linux:** download `trivium-deb` from a successful [Debian build](https://github.com/sumeshi/trivium/actions/workflows/debian.yml), extract it, then run `sudo apt install ./package.deb` with the actual filename. Development artifacts expire after three days.
+- **Windows x86_64:** download `trivium-windows-exe` from a successful [Windows build](https://github.com/sumeshi/trivium/actions/workflows/build.yml), extract it, and open `Trivium-v*.exe`. The portable application requires Microsoft's [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Stable versions are also available in [Releases](https://github.com/sumeshi/trivium/releases).
+- **Linux x86_64 / AppImage:** download `trivium-appimage` from a successful [Linux build](https://github.com/sumeshi/trivium/actions/workflows/debian.yml), extract it, then run the commands below. GTK and WebKit are included. CI builds on Ubuntu 22.04 (glibc 2.35 minimum) and tests the extracted application on Ubuntu 24.04.
+- **Linux / .deb:** download `trivium-deb` from the same Linux build, extract it, then run `sudo apt install ./package.deb` with the actual filename.
+
+```sh
+chmod +x Trivium_*.AppImage
+./Trivium_*.AppImage
+```
+
+Without FUSE, use `./Trivium_*.AppImage --appimage-extract-and-run`. Artifacts from `develop` expire after three days. The `trivium-cli-*` artifacts are optional automation tools.
 
 The application's **Workspace options** menu shows its version and source commit. CI artifact ZIPs include `BUILD-INFO.json` and `SHA256SUMS` for the extracted package or executable; GitHub's artifact ZIP has a separate checksum. The hash beside an opened filename identifies the source data, not the application build.
 
@@ -77,8 +85,10 @@ npm run tauri dev
 `npm run dev` starts the frontend only. Build a native package for your platform:
 
 ```sh
-# Linux .deb
-npm run tauri build -- --bundles deb
+# Linux .deb and AppImage
+npm run tauri build -- --bundles deb,appimage
+# Windows portable executable in target/release/
+npm run tauri build -- --no-bundle
 # Windows installer; the portable executable is also in target/release/
 npm run tauri build -- --bundles nsis
 ```
