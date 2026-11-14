@@ -14,6 +14,7 @@ import tempfile
 import uuid
 
 from column_pin_checks import _key
+from feedback_checks import _settle
 from row_navigation import open_project, wait_for
 from runtime import native_driver_default
 
@@ -38,6 +39,15 @@ def _saved(web) -> None:
 
 def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -> None:
     web = app.web
+    # Earlier full-suite stages may intentionally leave this case filtered to
+    # zero rows. Restore its real investigation state, not its source row count.
+    if web.state()["active"] != f'project-tab-{data["id"]}':
+        open_project(web, data["name"])
+    web.applied(projectId=data["id"])
+    _settle(web)
+    outer_query = web.query()
+    outer_total = web.state()["total"]
+    web.results(outer_total)
     source = root / f"memo-plain-text-{uuid.uuid4().hex[:8]}.csv"
     source.write_text("id,message\n1,first\n2,second\n3,third\n", encoding="utf-8")
     original = source.read_bytes()
@@ -154,7 +164,8 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
         if web.script("return !!document.querySelector('.memo-dialog');"):
             web.named("Cancel", ".memo-dialog")
         open_project(web, data["name"])
-        web.results(data["total"])
+        web.applied(**outer_query)
+        web.results(outer_total)
         if web.script("return !!document.querySelector(arguments[0]);", f'#project-tab-{owner}'):
             web.named(f"Close {source.name}")
         web.command("delete_project", {"projectId": owner}, request=True)
