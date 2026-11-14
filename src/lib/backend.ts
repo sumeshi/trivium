@@ -130,6 +130,8 @@ export interface SavePresetArgs {
   hiddenColumns: string[];
   sortKey?: string | null;
   sortDirection?: "asc" | "desc" | null;
+  columnOrder?: string[];
+  columnWidths?: Record<string, number>;
   destination: string;
 }
 
@@ -577,6 +579,8 @@ class NativeBackend implements Backend {
         hiddenColumns: args.hiddenColumns,
         sortKey: args.sortKey ?? null,
         sortDirection: args.sortDirection ?? null,
+        ...(args.columnOrder !== undefined ? { columnOrder: args.columnOrder } : {}),
+        ...(args.columnWidths !== undefined ? { columnWidths: args.columnWidths } : {}),
         destination: args.destination,
       },
     });

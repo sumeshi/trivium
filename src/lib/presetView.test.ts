@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
-import { applyPresetView } from "./presetView.ts";
+import { applyPresetView, changedPresetLayout } from "./presetView.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 
 function setup() {
@@ -39,4 +39,39 @@ test("loading an empty-rule preset clears old rules and restores source-order so
   assert.equal(get(workspace.search), "keep current search");
   assert.equal(get(workspace.flagFilter), "critical");
   workspace.dispose();
+});
+
+test("preset saving includes only changed known column layout with owned snapshots", () => {
+  const columns = ["c1", "c2", "c3"];
+  const baseline = new Map([["c1", 100], ["c2", 200], ["c3", 300]]);
+  assert.deepEqual(changedPresetLayout(columns, [], baseline, baseline), {});
+  const order = ["c3", "c1", "c1", "removed"];
+  const widths = new Map([["c1", 100], ["c2", 347], ["removed", 600], ["c3", NaN]]);
+  const saved = changedPresetLayout(columns, order, widths, baseline);
+  assert.deepEqual(saved.columnOrder, ["c3", "c1", "c2"]);
+  assert.deepEqual(Object.entries(saved.columnWidths!), [["c2", 347]]);
+  widths.set("c2", 600); order.reverse();
+  assert.deepEqual(saved.columnOrder, ["c3", "c1", "c2"]);
+  assert.equal(saved.columnWidths!.c2, 347);
+  const unusual = changedPresetLayout(["__proto__"], [], new Map([["__proto__", 347]]), new Map([["__proto__", 100]]));
+  assert.equal(Object.getOwnPropertyDescriptor(unusual.columnWidths, "__proto__")?.value, 347);
+});
+
+test("presets restore only present column order fields and can explicitly reset order", () => {
+  const workspace = setup(), other = setup();
+  workspace.columnOrder.set(["c3", "c1", "c2"]);
+  other.columnOrder.set(["other-order"]);
+  const preset = { condition: null, hiddenColumns: ["c3"], sortKey: null, sortDirection: null, unknown_columns: [] };
+  applyPresetView(workspace, preset);
+  assert.deepEqual(get(workspace.columnOrder), ["c3", "c1", "c2"], "older/omitted layout retains the current order");
+  const order = ["c2", "c3", "c1"];
+  applyPresetView(workspace, { ...preset, columnOrder: order });
+  order.reverse();
+  assert.deepEqual(get(workspace.columnOrder), ["c2", "c3", "c1"]);
+  assert.deepEqual(get(other.columnOrder), ["other-order"]);
+  applyPresetView(workspace, { ...preset, columnOrder: [] });
+  assert.deepEqual(get(workspace.columnOrder), []);
+  assert.equal(get(workspace.search), "keep current search");
+  assert.equal(get(workspace.flagFilter), "critical");
+  workspace.dispose(); other.dispose();
 });

@@ -30,6 +30,18 @@ pub struct PresetFile {
     pub sort_key: Option<String>,
     #[serde(default, rename = "sortDirection")]
     pub sort_direction: Option<String>,
+    #[serde(
+        default,
+        rename = "columnOrder",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub column_order: Option<Vec<String>>,
+    #[serde(
+        default,
+        rename = "columnWidths",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub column_widths: Option<HashMap<String, f64>>,
     /// Source identities make v2 presets portable across reordered columns.
     #[serde(default)]
     pub columns: Vec<ColumnMeta>,
@@ -48,6 +60,10 @@ pub struct SavePresetPayload {
     pub sort_key: Option<String>,
     #[serde(default, rename = "sortDirection")]
     pub sort_direction: Option<String>,
+    #[serde(default, rename = "columnOrder")]
+    pub column_order: Option<Vec<String>>,
+    #[serde(default, rename = "columnWidths")]
+    pub column_widths: Option<HashMap<String, f64>>,
     pub destination: String,
 }
 
@@ -69,7 +85,11 @@ pub struct PresetData {
     pub sort_key: Option<String>,
     #[serde(rename = "sortDirection")]
     pub sort_direction: Option<String>,
-    /// References in rules, hidden columns or sorting that could not be
+    #[serde(rename = "columnOrder", skip_serializing_if = "Option::is_none")]
+    pub column_order: Option<Vec<String>>,
+    #[serde(rename = "columnWidths", skip_serializing_if = "Option::is_none")]
+    pub column_widths: Option<HashMap<String, f64>>,
+    /// References in rules, columns, layout or sorting that could not be
     /// resolved. Empty when no project id was supplied.
     #[serde(default)]
     pub unknown_columns: Vec<String>,
@@ -94,8 +114,11 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
         hidden_columns: payload.hidden_columns,
         sort_key: payload.sort_key,
         sort_direction: payload.sort_direction,
+        column_order: payload.column_order,
+        column_widths: payload.column_widths,
         columns: project_columns(store, &meta)?,
     };
+    validate_layout(&preset)?;
     let data = serde_json::to_vec_pretty(&preset)
         .with_context(|| "failed to serialize preset")
         .map_err(AppError::from)?;
@@ -132,6 +155,7 @@ pub fn load_preset(
     if !matches!(preset.version, 1 | 2) {
         return Err(AppError::Message("Unsupported preset version.".into()));
     }
+    validate_layout(&preset)?;
 
     let unknown_columns = match payload.project_id {
         Some(id) => {
@@ -150,6 +174,8 @@ pub fn load_preset(
         hidden_columns: preset.hidden_columns,
         sort_key: preset.sort_key,
         sort_direction: preset.sort_direction,
+        column_order: preset.column_order,
+        column_widths: preset.column_widths,
         unknown_columns,
     })
 }
@@ -176,6 +202,14 @@ fn resolve_columns(
         .unwrap_or_default();
     references.extend(preset.hidden_columns.iter().cloned());
     references.extend(preset.sort_key.iter().cloned());
+    references.extend(preset.column_order.iter().flatten().cloned());
+    references.extend(
+        preset
+            .column_widths
+            .iter()
+            .flat_map(|widths| widths.keys())
+            .cloned(),
+    );
     let same_sources = preset
         .columns
         .iter()
@@ -249,9 +283,45 @@ fn resolve_columns(
     if let Some(column) = &mut preset.sort_key {
         remap(column);
     }
+    if let Some(order) = &mut preset.column_order {
+        order.iter_mut().for_each(&remap);
+    }
+    if let Some(widths) = &mut preset.column_widths {
+        *widths = std::mem::take(widths)
+            .into_iter()
+            .map(|(mut column, width)| {
+                remap(&mut column);
+                (column, width)
+            })
+            .collect();
+    }
     missing.sort();
     missing.dedup();
     Ok(missing)
+}
+
+fn validate_layout(preset: &PresetFile) -> Result<(), AppError> {
+    let unique_columns = |columns: Vec<&str>| {
+        let mut seen = HashSet::new();
+        columns
+            .into_iter()
+            .all(|column| !column.trim().is_empty() && seen.insert(column.to_lowercase()))
+    };
+    if let Some(order) = &preset.column_order {
+        if !unique_columns(order.iter().map(String::as_str).collect()) {
+            return Err(AppError::Message("Invalid preset column order.".into()));
+        }
+    }
+    if let Some(widths) = &preset.column_widths {
+        if !unique_columns(widths.keys().map(String::as_str).collect())
+            || widths
+                .values()
+                .any(|width| !width.is_finite() || *width <= 0.0)
+        {
+            return Err(AppError::Message("Invalid preset column widths.".into()));
+        }
+    }
+    Ok(())
 }
 
 fn remap_condition(node: &mut Node, remap: &impl Fn(&mut String)) {

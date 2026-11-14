@@ -108,6 +108,8 @@ fn save_payload(
         hidden_columns: vec![common::id(ids, "host")],
         sort_key: Some(common::id(ids, "EventID")),
         sort_direction: Some("desc".into()),
+        column_order: None,
+        column_widths: None,
         destination: destination.to_string_lossy().to_string(),
     }
 }
@@ -132,6 +134,8 @@ fn preset_round_trips_between_projects() {
     assert_eq!(loaded.sort_key, Some(common::id(&ids, "EventID")));
     assert_eq!(loaded.sort_direction.as_deref(), Some("desc"));
     assert_eq!(loaded.unknown_columns, Vec::<String>::new());
+    assert!(loaded.column_order.is_none());
+    assert!(loaded.column_widths.is_none());
 
     let _ = fs::remove_dir_all(root);
 }
@@ -166,6 +170,8 @@ fn preset_reports_unknown_columns_case_insensitively() {
             hidden_columns: Vec::new(),
             sort_key: None,
             sort_direction: None,
+            column_order: None,
+            column_widths: None,
             destination: destination.to_string_lossy().to_string(),
         },
     )
@@ -205,6 +211,8 @@ fn preset_without_condition_loads_sort_and_columns() {
             hidden_columns: vec![common::id(&ids, "host")],
             sort_key: Some(common::id(&ids, "EventID")),
             sort_direction: Some("asc".into()),
+            column_order: None,
+            column_widths: None,
             destination: destination.to_string_lossy().to_string(),
         },
     )
@@ -292,6 +300,8 @@ fn matching_duplicate_header_schemas_preserve_their_source_positions() {
             hidden_columns: vec![source.columns[1].id.clone()],
             sort_key: Some(source.columns[0].id.clone()),
             sort_direction: Some("asc".into()),
+            column_order: None,
+            column_widths: None,
             destination: destination.to_string_lossy().to_string(),
         },
     )
@@ -358,5 +368,111 @@ fn preset_output_cannot_replace_source_evidence_or_case_storage() {
         );
         assert_eq!(fs::read(destination).unwrap(), before);
     }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preset_layout_remaps_reordered_sources_and_preserves_omission_and_resets() {
+    let (root, store, source, _other, ids) = setup();
+    let input = root.join("reordered-layout.csv");
+    fs::write(&input, "proc,user,EventID,host\ncmd,alice,1,WS01\n").unwrap();
+    let target = create_project(&store, &input);
+    let target_ids = common::column_ids(&store, target);
+    let destination = root.join("layout.json");
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.column_order = Some(vec![ids["proc"].clone(), ids["host"].clone()]);
+    payload.column_widths = Some([(ids["host"].clone(), 347.0)].into());
+    save_preset(&store, payload).unwrap();
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_eq!(
+        loaded.column_order,
+        Some(vec![target_ids["proc"].clone(), target_ids["host"].clone()])
+    );
+    assert_eq!(
+        loaded.column_widths,
+        Some([(target_ids["host"].clone(), 347.0)].into())
+    );
+    assert!(loaded.unknown_columns.is_empty());
+
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.column_order = Some(Vec::new());
+    payload.column_widths = Some(Default::default());
+    save_preset(&store, payload).unwrap();
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_eq!(loaded.column_order, Some(Vec::new()));
+    assert_eq!(loaded.column_widths, Some(Default::default()));
+
+    save_preset(&store, save_payload(source, &ids, &destination)).unwrap();
+    let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert!(file.get("columnOrder").is_none());
+    assert!(file.get("columnWidths").is_none());
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert!(loaded.column_order.is_none());
+    assert!(loaded.column_widths.is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn invalid_preset_layout_is_rejected_before_replacing_a_file_or_applying() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("invalid-layout.json");
+    fs::write(&destination, "keep existing output").unwrap();
+    let mut invalid_order = save_payload(source, &ids, &destination);
+    invalid_order.column_order = Some(vec![ids["host"].clone(), ids["host"].to_uppercase()]);
+    assert!(save_preset(&store, invalid_order).is_err());
+    assert_eq!(
+        fs::read_to_string(&destination).unwrap(),
+        "keep existing output"
+    );
+    for width in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut invalid = save_payload(source, &ids, &destination);
+        invalid.column_widths = Some([(ids["host"].clone(), width)].into());
+        assert!(save_preset(&store, invalid).is_err(), "{width}");
+        assert_eq!(
+            fs::read_to_string(&destination).unwrap(),
+            "keep existing output"
+        );
+    }
+    for layout in [
+        serde_json::json!({"columnOrder": [ids["host"], ids["host"]]}),
+        serde_json::json!({"columnWidths": {ids["host"].clone(): 0}}),
+        serde_json::json!({"columnWidths": {"": 200}}),
+    ] {
+        let mut file = serde_json::json!({"version": 1, "hiddenColumns": []});
+        file.as_object_mut()
+            .unwrap()
+            .extend(layout.as_object().unwrap().clone());
+        fs::write(&destination, serde_json::to_vec(&file).unwrap()).unwrap();
+        assert!(load_preset(&store, load_payload(Some(target), &destination)).is_err());
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn preset_layout_unknown_ids_and_ambiguous_names_cannot_bind_silently() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("unknown-layout.json");
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.column_order = Some(vec!["missing-order".into()]);
+    payload.column_widths = Some([("missing-width".into(), 347.0)].into());
+    save_preset(&store, payload).unwrap();
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_eq!(
+        loaded.unknown_columns,
+        vec!["missing-order", "missing-width"]
+    );
+
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    payload.column_order = Some(vec![ids["host"].clone()]);
+    payload.column_widths = Some([(ids["host"].clone(), 347.0)].into());
+    save_preset(&store, payload).unwrap();
+    let input = root.join("duplicate-layout.csv");
+    fs::write(&input, "proc,host,user,host\ncmd,left,alice,right\n").unwrap();
+    let ambiguous = create_project(&store, &input);
+    let error = load_preset(&store, load_payload(Some(ambiguous), &destination)).unwrap_err();
+    assert!(String::from(error).contains("missing or ambiguous: host"));
     let _ = fs::remove_dir_all(root);
 }

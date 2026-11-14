@@ -37,6 +37,8 @@ export interface PresetData {
   hiddenColumns: string[];
   sortKey: string | null;
   sortDirection: "asc" | "desc" | null;
+  columnOrder?: string[];
+  columnWidths?: Record<string, number>;
   unknown_columns: string[];
 }
 export type LoadProjectResponse = Omit<Wire.LoadProjectResponse,
