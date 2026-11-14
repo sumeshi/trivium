@@ -188,15 +188,24 @@ def verify_table_text(app, data, root: Path, evidence: Path, report: dict) -> No
         assert abs(web.script("return parseFloat(getComputedStyle(document.querySelector('.data-row .cell-text')).fontSize);") - 10.5 * 1.45) <= .03
         web.tab(owner); web.results(300)
         assert web.state()["selectionTotal"] == 1
+        def saved_sizes():
+            try:
+                return [json.loads(path.read_text(encoding="utf-8")) for path in root.rglob("table-text-size.json")]
+            except (OSError, json.JSONDecodeError):
+                return []
+        wait_for(saved_sizes, lambda sizes: 145 in sizes, "145% is saved in the native preference file before restart")
+        web.script("localStorage.setItem('trivium:table-text-size','130');")
         app.end_session(); web = app.start()
         _size(web, None, 145)
+        assert web.script("return localStorage.getItem('trivium:table-text-size');") == "145"
         open_project(web, case["meta"]["name"]); web.results(300)
         _sample(web, 145)
         _size(web, "Reset", 100); _sample(web, 100)
         assert source.read_bytes() == original
         report["table_text"] = {"sizes_and_positions": checks, "default_fonts": baseline["fonts"], "row_height": 32,
             "header_height": 38, "seven_digit_row_number_fits": True, "toolbar_sidebar_and_dialog_unchanged": True,
-            "annotation_controls_clickable": True, "global_across_tabs": True, "restored_after_native_restart": 145,
+            "annotation_controls_clickable": True, "global_across_tabs": True, "native_file_overrides_stale_cache": True,
+            "restored_after_native_restart": 145,
             "reset_to_default": True, "source_unchanged": True}
         web.screenshot(evidence / "table-text-size.png")
     except Exception:

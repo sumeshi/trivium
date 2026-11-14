@@ -141,7 +141,7 @@
   };
 
   onMount(() => {
-    initTableTextSize();
+    void initTableTextSize();
     void initTheme();
     void projectController.loadProjects().catch((error) => {
       console.error(error);
