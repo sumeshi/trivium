@@ -39,7 +39,7 @@ def main():
     (args.output / 'SHA256SUMS').write_text(''.join(f"{record['sha256']}  {record['name']}\n" for record in records), encoding='utf-8')
     usage = ('This is the desktop application for normal investigation. Install the .deb on Linux or open the .exe on Windows.'
              if args.kind == 'desktop-app' else
-             'This is the optional command-line tool for automation. For the graphical application, download the desktop artifact instead. See https://github.com/sumeshi/trivium#automation.')
+             f'This is the optional command-line tool for automation. For the graphical application, download the desktop artifact instead. See https://github.com/sumeshi/trivium/blob/{commit}/README.md#automation.')
     (args.output / 'README.txt').write_text(f'Trivium {version}\nSource commit: {commit}\nPlatform: {args.platform}\n\n{usage}\n\nSHA256SUMS identifies the files inside this artifact. GitHub displays a separate digest for its downloadable ZIP.\n', encoding='utf-8')
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
