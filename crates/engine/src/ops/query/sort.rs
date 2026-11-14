@@ -11,6 +11,8 @@ use crate::value_utils::anyvalue_to_search_string;
 
 use number::ExactNumber;
 
+const SORT_RUN_ROWS: usize = 262_144;
+
 enum SortKey {
     Int(i128),
     Number(Box<ExactNumber>),
@@ -93,7 +95,7 @@ fn key_rank(key: &SortKey) -> u8 {
 /// Sort only the selected original row ids, retaining source order for ties.
 pub fn sort_row_indices(
     df: &DataFrame,
-    indices: Vec<usize>,
+    mut indices: Vec<usize>,
     sort_key: Option<&str>,
     sort_direction: Option<&str>,
     job: &JobContext,
@@ -105,6 +107,20 @@ pub fn sort_row_indices(
     let Ok(series) = df.column(sort_key) else {
         return Ok(indices);
     };
+    // Query targets already arrive in source order. Normalize only an unusual
+    // caller-provided subset, then stable value comparisons retain that order
+    // without making every equal value a distinct key.
+    if !indices.is_sorted() {
+        let source_order = cancellable_order(
+            indices.len(),
+            |a, b| indices[a].cmp(&indices[b]),
+            || job.check_cancelled(),
+        )?;
+        indices = source_order
+            .into_iter()
+            .map(|position| indices[position])
+            .collect();
+    }
     let mut keys = Vec::with_capacity(indices.len());
     for (position, &row) in indices.iter().enumerate() {
         if position.is_multiple_of(1024) {
@@ -115,9 +131,11 @@ pub fn sort_row_indices(
     let descending = sort_direction == Some("desc");
     let compare = |a: usize, b: usize| {
         let order = compare_keys(&keys[a], &keys[b]);
-        let order = if descending { order.reverse() } else { order };
-        // Apply the direction only to values, never to the source-order tie.
-        order.then_with(|| indices[a].cmp(&indices[b]))
+        if descending {
+            order.reverse()
+        } else {
+            order
+        }
     };
     let order = cancellable_order(indices.len(), compare, || job.check_cancelled())?;
     Ok(order
@@ -133,18 +151,22 @@ fn cancellable_order(
     compare: impl Fn(usize, usize) -> Ordering,
     mut checkpoint: impl FnMut() -> Result<(), AppError>,
 ) -> Result<Vec<usize>, AppError> {
-    const RUN: usize = 4096;
     checkpoint()?;
     let mut order: Vec<usize> = (0..len).collect();
     // Common source-ordered columns should keep the standard sort's O(n)
     // best case rather than doing a sequence of unnecessary merge passes.
     let mut sorted = true;
+    let mut reversed = true;
     for index in 1..len {
         if index.is_multiple_of(1024) {
             checkpoint()?;
         }
-        if compare(index - 1, index).is_gt() {
-            sorted = false;
+        match compare(index - 1, index) {
+            Ordering::Less => reversed = false,
+            Ordering::Greater => sorted = false,
+            Ordering::Equal => {}
+        }
+        if !sorted && !reversed {
             break;
         }
     }
@@ -152,11 +174,27 @@ fn cancellable_order(
         checkpoint()?;
         return Ok(order);
     }
-    for run in order.chunks_mut(RUN) {
+    if reversed {
+        order.reverse();
+        // Reverse the value order without reversing rows that share a key.
+        let mut start = 0;
+        for end in 1..=len {
+            if end.is_multiple_of(1024) {
+                checkpoint()?;
+            }
+            if end == len || compare(order[start], order[end]) != Ordering::Equal {
+                order[start..end].reverse();
+                start = end;
+            }
+        }
         checkpoint()?;
-        run.sort_unstable_by(|a, b| compare(*a, *b));
+        return Ok(order);
     }
-    let mut width = RUN;
+    for run in order.chunks_mut(SORT_RUN_ROWS) {
+        checkpoint()?;
+        run.sort_by(|a, b| compare(*a, *b));
+    }
+    let mut width = SORT_RUN_ROWS;
     if width >= len {
         checkpoint()?;
         return Ok(order);
@@ -270,6 +308,17 @@ mod tests {
             .unwrap(),
             [1, 3, 0]
         );
+        assert_eq!(
+            sort_row_indices(
+                &frame,
+                selected.clone(),
+                Some("value"),
+                Some("desc"),
+                &JobContext::none(),
+            )
+            .unwrap(),
+            [0, 1, 3]
+        );
         for key in [None, Some("unknown")] {
             assert_eq!(
                 sort_row_indices(&frame, selected.clone(), key, None, &JobContext::none()).unwrap(),
@@ -280,9 +329,8 @@ mod tests {
 
     #[test]
     fn merge_passes_match_standard_sort_and_observe_cancellation() {
-        let len = 20_003;
-        let compare =
-            |a: usize, b: usize| ((a * 7919) % 193).cmp(&((b * 7919) % 193)).then(a.cmp(&b));
+        let len = SORT_RUN_ROWS * 2 + 3;
+        let compare = |a: usize, b: usize| ((a * 7919) % 193).cmp(&((b * 7919) % 193));
         let mut expected: Vec<_> = (0..len).collect();
         expected.sort_by(|a, b| compare(*a, *b));
         assert_eq!(
@@ -303,5 +351,17 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "Cancelled.");
         assert_eq!(checks, 12);
+    }
+
+    #[test]
+    fn reverse_monotonic_values_keep_equal_rows_in_source_order() {
+        let len = 20_003;
+        let compare = |a: usize, b: usize| (b / 7).cmp(&(a / 7));
+        let mut expected: Vec<_> = (0..len).collect();
+        expected.sort_by(|a, b| compare(*a, *b));
+        assert_eq!(
+            cancellable_order(len, compare, || Ok(())).unwrap(),
+            expected
+        );
     }
 }
