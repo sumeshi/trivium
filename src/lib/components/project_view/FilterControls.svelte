@@ -28,6 +28,8 @@
   export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
 
   let toolbarHeight = 0;
+  let toolbarEl: HTMLElement;
+  let toolbarObserver: ResizeObserver | null = null;
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
   let columnSearch = '';
@@ -219,19 +221,26 @@
   };
 
   onMount(() => {
+    // Svelte's offsetHeight binding makes static elements positioned for its
+    // resize sensor, which would anchor the drawer to this short toolbar.
+    const measureToolbar = () => { toolbarHeight = toolbarEl.offsetHeight; };
+    toolbarObserver = new ResizeObserver(measureToolbar);
+    toolbarObserver.observe(toolbarEl);
+    measureToolbar();
     document.addEventListener('click', handleClickOutside);
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleEscape);
   });
 
   onDestroy(() => {
+    toolbarObserver?.disconnect();
     document.removeEventListener('click', handleClickOutside);
     document.removeEventListener('pointerdown', handlePointerDown, true);
     document.removeEventListener('keydown', handleEscape);
   });
 </script>
 
-<section class="filters" bind:offsetHeight={toolbarHeight}>
+<section class="filters" bind:this={toolbarEl}>
   <div class="filter-row">
     <div class="filter-primary">
       <slot name="history" />
@@ -433,7 +442,7 @@
     top: 0;
     right: 0;
     bottom: calc(var(--filter-status-height, 26px) + 4px);
-    z-index: 35;
+    z-index: 25;
     display: flex;
     flex-direction: column;
     width: min(560px, calc(100% - 16px));

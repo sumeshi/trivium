@@ -101,7 +101,7 @@
 </script>
 
 <div class="stats-panel bulk-form">
-  <p class="condition-count bulk-wide bulk-intro">Annotate multiple rows. Unselected flags and blank fields stay unchanged.</p>
+  <p class="condition-count bulk-wide bulk-intro">Apply flags, notes and tags to multiple rows. Unselected flags and blank fields stay unchanged.</p>
   <label class="bulk-field">Rows
     <select bind:value={target} aria-label="Bulk target" disabled={busy} on:change={invalidate}>
       <option value="selection" disabled={$selectedCount === 0}>Selected ({$selectedCount})</option>
