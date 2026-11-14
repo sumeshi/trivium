@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 import time
 import uuid
@@ -43,6 +44,35 @@ def _unchanged(web, query: dict) -> None:
     assert state["selectionTotal"] == 1 and state["selectedIds"] == [2], state
 
 
+def _native_drag(web, start: dict, end: dict) -> None:
+    # WebKitWebDriver does not reliably begin HTML5 dragging. As with the
+    # native context-click check, XTest delivers actual OS button input.
+    from ctypes import CDLL, c_char_p, c_int, c_ulong, c_void_p
+    x11, xtest = CDLL("libX11.so.6"), CDLL("libXtst.so.6")
+    x11.XOpenDisplay.argtypes, x11.XOpenDisplay.restype = [c_char_p], c_void_p
+    x11.XSync.argtypes, x11.XCloseDisplay.argtypes = [c_void_p, c_int], [c_void_p]
+    xtest.XTestFakeMotionEvent.argtypes = [c_void_p, c_int, c_int, c_int, c_ulong]
+    xtest.XTestFakeButtonEvent.argtypes = [c_void_p, c_int, c_int, c_ulong]
+    display = x11.XOpenDisplay(None)
+    assert display, "Native column dragging requires the owned Xvfb display"
+    rect = web.request("GET", web.route("window/rect"))
+    try:
+        assert xtest.XTestFakeMotionEvent(display, -1, rect["x"] + start["x"], rect["y"] + start["y"], 0)
+        assert xtest.XTestFakeButtonEvent(display, 1, 1, 0)
+        x11.XSync(display, 0)
+        time.sleep(.1)
+        for step in range(1, 13):
+            x = rect["x"] + round(start["x"] + (end["x"] - start["x"]) * step / 12)
+            y = rect["y"] + round(start["y"] + (end["y"] - start["y"]) * step / 12)
+            assert xtest.XTestFakeMotionEvent(display, -1, x, y, 0)
+            x11.XSync(display, 0)
+            time.sleep(.025)
+    finally:
+        xtest.XTestFakeButtonEvent(display, 1, 0, 0)
+        x11.XSync(display, 0)
+        x11.XCloseDisplay(display)
+
+
 def _drag(web, source: str, target: str) -> dict:
     _horizontal_to(web, 0)
     points = web.script("""
@@ -61,17 +91,22 @@ def _drag(web, source: str, target: str) -> dict:
     """)
     start, end = points["start"], points["end"]
     try:
-        web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "presentation-drag",
-            "parameters": {"pointerType": "mouse"}, "actions": [
-                {"type": "pointerMove", **start, "origin": "viewport", "duration": 0},
-                {"type": "pointerDown", "button": 0},
-                {"type": "pointerMove", "x": start["x"] - 12, "y": start["y"], "origin": "viewport", "duration": 150},
-                {"type": "pointerMove", **end, "origin": "viewport", "duration": 350},
-                {"type": "pause", "duration": 150}, {"type": "pointerUp", "button": 0},
-            ]}]})
+        if os.name != "nt":
+            _native_drag(web, start, end)
+            method = "XTest native drag"
+        else:
+            web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "presentation-drag",
+                "parameters": {"pointerType": "mouse"}, "actions": [
+                    {"type": "pointerMove", **start, "origin": "viewport", "duration": 0},
+                    {"type": "pointerDown", "button": 0},
+                    {"type": "pointerMove", "x": start["x"] - 12, "y": start["y"], "origin": "viewport", "duration": 150},
+                    {"type": "pointerMove", **end, "origin": "viewport", "duration": 350},
+                    {"type": "pause", "duration": 150}, {"type": "pointerUp", "button": 0},
+                ]}]})
+            method = "WebDriver pointer"
         _settle(web)
         events = web.script("return window.__columnDrag;")
-        return {"events": events, "delivered": any(event["type"] == "drop" and event["trusted"] for event in events)}
+        return {"events": events, "delivered": any(event["type"] == "drop" and event["trusted"] for event in events), "input": method}
     finally:
         web.request("DELETE", web.route("actions"))
         web.script("for(const name of ['dragstart','drop','dragend'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;")
