@@ -48,12 +48,16 @@ def _horizontal_to(web, target: int) -> None:
         try:
             wait_for(lambda: web.script("return {body:document.querySelector('.virtual-viewport').scrollLeft,header:document.querySelector('.table-header-scroll').scrollLeft};"),
                 lambda value: value["body"] == target and value["header"] == target, "trusted horizontal wheel moves body and header", timeout=2)
-            return
         except AssertionError as error:
             if attempt == 2:
                 probe=web.script("return window.__feedbackWheelProbe;")
                 raise AssertionError(f"{error}; trusted wheel probe: {probe}") from error
             _settle(web)
+        else:
+            _settle(web)
+            stable = web.script("return [document.querySelector('.virtual-viewport'),document.querySelector('.table-header-scroll'),document.querySelector('.table-horizontal-scroll')].map(e=>e.scrollLeft);")
+            assert all(abs(value - target) <= 1 for value in stable), f"Horizontal intent must survive deferred publication: {stable} != {target}"
+            return
 
 
 def _clear(web, total: int) -> None:

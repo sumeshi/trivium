@@ -105,8 +105,11 @@
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: horizontalMaximum = Math.max(0, effectiveTableWidth - $tableWidth);
-  $: if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== $scrollLeft) {
-    horizontalScrollEl.scrollLeft = $scrollLeft;
+  // Until rAF publishes the body's latest offset, the store is intentionally
+  // older. Feeding it through the external scrollbar would undo that gesture.
+  $: if (!pendingScrollEl && horizontalScrollEl && horizontalScrollEl.scrollLeft !== $scrollLeft) {
+    const footer = horizontalScrollEl;
+    footer.scrollLeft = $scrollLeft;
   }
   $: gridTemplate = [
     `${SELECT_COL_WIDTH}px`,
@@ -293,8 +296,9 @@
   };
 
   const mirrorHorizontal = (left: number) => {
-    if ($headerScrollEl && $headerScrollEl.scrollLeft !== left) $headerScrollEl.scrollLeft = left;
-    if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== left) horizontalScrollEl.scrollLeft = left;
+    const header = get(headerScrollEl), footer = horizontalScrollEl;
+    if (header && header.scrollLeft !== left) header.scrollLeft = left;
+    if (footer && footer.scrollLeft !== left) footer.scrollLeft = left;
   };
 
   const syncHeader = (left: number) => {
@@ -317,7 +321,7 @@
     if (!target.isConnected) return;
     rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
     mirrorHorizontal(target.scrollLeft);
-    pendingScrollEl = target;
+    if (pendingScrollEl !== target) pendingScrollEl = target;
     if (scrollFrame === null) scrollFrame = requestAnimationFrame(flushScroll);
   };
 
@@ -327,9 +331,10 @@
   // an older offset back into it; only the body and external scrollbar publish.
   const handleHorizontalScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
-    if (!$bodyScrollEl || !target.isConnected) return;
-    $bodyScrollEl.scrollLeft = target.scrollLeft;
-    queueScroll($bodyScrollEl);
+    const body = get(bodyScrollEl);
+    if (!body || !target.isConnected) return;
+    body.scrollLeft = target.scrollLeft;
+    queueScroll(body);
   };
 
   const handleHorizontalKey = (event: KeyboardEvent) => {
@@ -405,21 +410,22 @@
   };
 
   const forwardWheel = (event: WheelEvent) => {
-    if (!$bodyScrollEl) return;
+    const body = get(bodyScrollEl);
+    if (!body) return;
     const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
     const deltaY = event.shiftKey && !event.deltaX ? 0 : event.deltaY;
-    if (event.currentTarget === $bodyScrollEl && !deltaX) return;
+    if (event.currentTarget === body && !deltaX) return;
     let handled = false;
     if (deltaY !== 0) {
-      const previousTop = $bodyScrollEl.scrollTop;
-      $bodyScrollEl.scrollTop += deltaY;
-      handled = handled || $bodyScrollEl.scrollTop !== previousTop;
+      const previousTop = body.scrollTop;
+      body.scrollTop += deltaY;
+      handled = handled || body.scrollTop !== previousTop;
     }
     if (deltaX !== 0) {
-      const previousLeft = $bodyScrollEl.scrollLeft;
-      $bodyScrollEl.scrollLeft += deltaX;
-      handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
-      queueScroll($bodyScrollEl);
+      const previousLeft = body.scrollLeft;
+      body.scrollLeft += deltaX;
+      handled = handled || body.scrollLeft !== previousLeft;
+      queueScroll(body);
     }
     if (handled) {
       event.preventDefault();
@@ -431,10 +437,8 @@
       const target = $bodyScrollEl;
       if (!target?.isConnected || top > maxScrollTop($totalFilteredRows, $viewportHeight)
         || Math.abs(target.scrollTop - top) <= 1) return;
-      // An explicit Go/history/restore supersedes a queued native scroll.
-      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
-      scrollFrame = null;
-      pendingScrollEl = null;
+      // The queued frame reads this live element, so a Go/history move wins
+      // without discarding a horizontal gesture awaiting the same frame.
       target.scrollTop = top;
     });
     resizeObserver = new ResizeObserver((entries) => {
