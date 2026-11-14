@@ -607,6 +607,7 @@
               class:dropBefore={dropTarget?.id === column.id && !dropTarget.after}
               class:dropAfter={dropTarget?.id === column.id && dropTarget.after}
               on:dragstart={(event) => dragColumn(event, column.id)}
+              on:dragenter={(event) => dragOverColumn(event, column.id)}
               on:dragover={(event) => dragOverColumn(event, column.id)}
               on:drop={(event) => dropColumn(event, column.id)}
               on:dragend={finishDrag}

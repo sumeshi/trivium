@@ -70,6 +70,7 @@ def _native_drag(web, start: dict, end: dict) -> None:
             assert xtest.XTestFakeMotionEvent(display, -1, x, y, 0)
             x11.XSync(display, 0)
             time.sleep(.025)
+        time.sleep(.15)  # Match the Windows pointer's final-target dwell before releasing.
     finally:
         xtest.XTestFakeButtonEvent(display, 1, 0, 0)
         x11.XSync(display, 0)
@@ -78,20 +79,26 @@ def _native_drag(web, start: dict, end: dict) -> None:
 
 def _drag(web, source: str, target: str, after: bool = False) -> dict:
     _horizontal_to(web, 0)
-    # Match dragOverColumn's midpoint on the full heading, not its narrower sort button.
+    # Match the full heading's midpoint, while dropping on its sort button rather than the actions button.
     points = web.script("""
       const a=document.querySelector('.data-header [data-column-id="'+arguments[0]+'"] .column-sort'),
         b=document.querySelector('.data-header [data-column-id="'+arguments[1]+'"]'),
-        r=a.getBoundingClientRect(),t=b.getBoundingClientRect();
+        sort=b.querySelector('.column-sort'),r=a.getBoundingClientRect(),t=b.getBoundingClientRect(),s=sort.getBoundingClientRect();
       const start={x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)},
-        end={x:Math.round(t.left+t.width*(arguments[2] ? .75 : .25)),y:Math.round(t.top+t.height/2)};
-      return {start,end,reachable:a.contains(document.elementFromPoint(start.x,start.y))&&b.contains(document.elementFromPoint(end.x,end.y))};
+        end={x:arguments[2] ? Math.floor(s.right-2) : Math.round(t.left+t.width/4),y:Math.round(t.top+t.height/2)};
+      return {start,end,midpoint:t.left+t.width/2,
+        reachable:a.contains(document.elementFromPoint(start.x,start.y))&&sort.contains(document.elementFromPoint(end.x,end.y))};
     """, source, target, after)
     assert points["reachable"], points
+    assert (points["end"]["x"] >= points["midpoint"]) == after, points
     web.script("""
-      window.__columnDrag=[];
-      window.__columnDragAudit=e=>window.__columnDrag.push({type:e.type,trusted:e.isTrusted});
-      for(const name of ['dragstart','drop','dragend'])document.addEventListener(name,window.__columnDragAudit,true);
+      window.__columnDrag=[];window.__columnDragOver=null;
+      window.__columnDragAudit=e=>{
+        const h=e.target.closest?.('.column-heading'),r=h?.getBoundingClientRect();
+        const item={type:e.type,trusted:e.isTrusted,columnId:h?.dataset.columnId??null,x:e.clientX,midpoint:r?r.left+r.width/2:null};
+        if(e.type==='dragover')window.__columnDragOver=item;else window.__columnDrag.push(item);
+      };
+      for(const name of ['dragstart','dragover','drop','dragend'])document.addEventListener(name,window.__columnDragAudit,true);
     """)
     start, end = points["start"], points["end"]
     try:
@@ -110,10 +117,11 @@ def _drag(web, source: str, target: str, after: bool = False) -> dict:
             method = "WebDriver pointer"
         _settle(web)
         events = web.script("return window.__columnDrag;")
-        return {"events": events, "delivered": any(event["type"] == "drop" and event["trusted"] for event in events), "input": method}
+        return {"events": events, "last_over": web.script("return window.__columnDragOver;"),
+                "delivered": any(event["type"] == "drop" and event["trusted"] for event in events), "input": method}
     finally:
         web.request("DELETE", web.route("actions"))
-        web.script("for(const name of ['dragstart','drop','dragend'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;")
+        web.script("for(const name of ['dragstart','dragover','drop','dragend'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;delete window.__columnDragOver;")
 
 
 def _reorder(web, source: str, target: str, expected: list[str], after: bool = False) -> dict:
