@@ -49,7 +49,7 @@
   $: accepted = state?.status === "checked" && state.result.valid && (ordered || node.op === "regex");
   $: acceptedLabel = node.op === "regex" ? "Regular expression accepted."
     : kind === "datetime" ? "Timestamp format accepted."
-      : kind === "int" ? "Integer format accepted." : "Comparison format accepted.";
+      : kind === "int" || kind === "float" ? "Number format accepted." : "Comparison format accepted.";
   $: pickerValue = utcPickerValue(pickedDate, pickedTime);
 
   const setValue = (value: string) => patchCondition(node.id, { value, exact: false });

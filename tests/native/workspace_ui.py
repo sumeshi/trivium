@@ -40,6 +40,7 @@ from table_text_checks import verify_table_text
 from wide_table_checks import verify_wide_table
 from memo_ime_checks import verify_memo_ime
 from history_scroll_checks import verify_history_scroll
+from decimal_filter_checks import verify_decimal_filters
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -888,6 +889,7 @@ def main() -> None:
                 ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("deep rule history scroll restoration", lambda: verify_history_scroll(web, data, root, report)),
+                ("decimal rule comparisons and format checks", lambda: verify_decimal_filters(web, data, root, report)),
                 ("unified bulk annotation form", lambda: verify_bulk_form(web, data, root, evidence, report)),
                 ("visible tags and annotation search", lambda: verify_tag_usage(web, data, root, evidence, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),

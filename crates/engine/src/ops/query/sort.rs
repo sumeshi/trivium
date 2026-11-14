@@ -1,5 +1,3 @@
-mod number;
-
 use std::cmp::Ordering;
 
 use polars::prelude::*;
@@ -7,9 +5,8 @@ use polars::prelude::*;
 use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
 use crate::jobs::JobContext;
+use crate::number::ExactNumber;
 use crate::value_utils::anyvalue_to_search_string;
-
-use number::ExactNumber;
 
 const SORT_RUN_ROWS: usize = 262_144;
 

@@ -2,14 +2,14 @@ use std::cmp::Ordering;
 
 /// Exact finite base-ten key. Keeping significant digits and their decimal
 /// position avoids f64 rounding and never allocates zeroes for an exponent.
-pub(super) struct ExactNumber {
+pub(crate) struct ExactNumber {
     negative: bool,
     digits: String,
     position: i128,
 }
 
 impl ExactNumber {
-    pub(super) fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let (negative, unsigned) = match text.as_bytes().first()? {
             b'-' => (true, &text[1..]),
             b'+' => (false, &text[1..]),
@@ -22,18 +22,27 @@ impl ExactNumber {
             }
             None => (unsigned, 0),
         };
+        // Reject timestamps and other non-numeric text before allocating.
+        // Ordered datetime conditions also pass through this shared parser.
         let mut before_point = None;
-        let mut digits = String::with_capacity(mantissa.len());
+        let mut digit_count = 0;
         for byte in mantissa.bytes() {
             match byte {
-                b'0'..=b'9' => digits.push(char::from(byte)),
-                b'.' if before_point.is_none() => before_point = Some(digits.len()),
+                b'0'..=b'9' => digit_count += 1,
+                b'.' if before_point.is_none() => before_point = Some(digit_count),
                 _ => return None,
             }
         }
-        if digits.is_empty() {
+        if digit_count == 0 {
             return None;
         }
+        let mut digits = String::with_capacity(digit_count);
+        digits.extend(
+            mantissa
+                .bytes()
+                .filter(|byte| *byte != b'.')
+                .map(char::from),
+        );
         let integer_digits = before_point.unwrap_or(digits.len());
         let leading_zeroes = digits.bytes().take_while(|byte| *byte == b'0').count();
         if leading_zeroes == digits.len() {
@@ -56,13 +65,13 @@ impl ExactNumber {
         })
     }
 
-    pub(super) fn cmp(&self, other: &Self) -> Ordering {
+    pub(crate) fn cmp(&self, other: &Self) -> Ordering {
         self.cmp_parts(other.negative, &other.digits, other.position)
     }
 
     /// The common integer key stays inline. A mixed integer/decimal comparison
     /// needs only a stack buffer, never a temporary allocation or a float.
-    pub(super) fn cmp_integer(&self, integer: i128) -> Ordering {
+    pub(crate) fn cmp_integer(&self, integer: i128) -> Ordering {
         let mut buffer = [b'0'; 39];
         let mut start = buffer.len();
         let mut magnitude = integer.unsigned_abs();
@@ -132,7 +141,20 @@ mod tests {
                 "{a} and {b}"
             );
         }
-        for invalid in ["", ".", "NaN", "inf", "1.2.3", "1e", "1e2e3", "--1", "1 2"] {
+        for invalid in [
+            "",
+            ".",
+            "NaN",
+            "inf",
+            "1.2.3",
+            "1e",
+            "1e2e3",
+            "--1",
+            "1 2",
+            "2026-11-14T00:00:00.000000001Z",
+            "2026/11/14",
+            "not a number",
+        ] {
             assert!(ExactNumber::parse(invalid).is_none(), "{invalid}");
         }
     }

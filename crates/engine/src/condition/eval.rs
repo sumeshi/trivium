@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
+use crate::number::ExactNumber;
 use crate::search::{TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
 
 use super::model::{GroupKind, Node, Op};
@@ -207,8 +208,8 @@ impl PreparedNode {
     }
 }
 
-/// A condition that cannot be evaluated as requested. Numeric comparisons are
-/// limited to signed 128-bit integers so values are never rounded.
+/// A condition that cannot be evaluated as requested. Numeric comparisons keep
+/// decimal digits exact and never round through a floating-point value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvalError {
     message: String,
@@ -218,7 +219,7 @@ impl EvalError {
     fn numeric(value: &str) -> Self {
         Self {
             message: format!(
-                "Numeric comparison requires integers within i128: {}",
+                "Numeric comparison requires an exact finite number: {}",
                 value
             ),
         }
@@ -260,9 +261,9 @@ impl From<EvalError> for AppError {
 /// query paths use [`PreparedNode`] instead. Column names match
 /// case-insensitively. An empty column reads the `""` entry, which callers set
 /// to the joined searchable text when they want an unscoped term. Equality and
-/// text operators use the original cell string. Ordered comparisons use i128
-/// integers or parsed datetimes, and return an error instead of falling back to
-/// f64. Invalid regex patterns are reported as errors.
+/// text operators use the original cell string. Ordered comparisons use exact
+/// base-ten numbers or parsed datetimes, and return an error instead of falling
+/// back to f64. Invalid regex patterns are reported as errors.
 pub fn eval(node: &Node, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
     PreparedNode::prepare(node)?.eval(row)
 }
@@ -368,26 +369,33 @@ fn numeric_any(
     Ok(matched)
 }
 
-/// Compares an integer cell or a datetime cell without a float round trip.
+/// Compares numeric source text or a datetime without a float round trip.
 fn numeric_cmp(cell: &str, raw: &str) -> Result<Option<Ordering>, EvalError> {
     let left = cell.trim();
+    let right = raw.trim();
 
     if let Ok(left) = left.parse::<i128>() {
-        let right = parse_i128(raw)?;
-        return Ok(Some(left.cmp(&right)));
+        // Keep the common integer path inline and allocation-free.
+        return match right.parse::<i128>() {
+            Ok(right) => Ok(Some(left.cmp(&right))),
+            Err(_) => ExactNumber::parse(right)
+                .map(|right| Some(right.cmp_integer(left).reverse()))
+                .ok_or_else(|| EvalError::numeric(right)),
+        };
+    }
+    if let Some(left) = ExactNumber::parse(left) {
+        return match right.parse::<i128>() {
+            Ok(right) => Ok(Some(left.cmp_integer(right))),
+            Err(_) => ExactNumber::parse(right)
+                .map(|right| Some(left.cmp(&right)))
+                .ok_or_else(|| EvalError::numeric(right)),
+        };
     }
     if let Some(left) = parse_datetime_nanos(left) {
-        let right_text = raw.trim();
-        let right =
-            parse_datetime_nanos(right_text).ok_or_else(|| EvalError::datetime(right_text))?;
+        let right = parse_datetime_nanos(right).ok_or_else(|| EvalError::datetime(right))?;
         return Ok(Some(left.cmp(&right)));
     }
     Err(EvalError::numeric(left))
-}
-
-fn parse_i128(raw: &str) -> Result<i128, EvalError> {
-    let text = raw.trim();
-    text.parse::<i128>().map_err(|_| EvalError::numeric(text))
 }
 
 fn compile_regex(pattern: &str) -> Result<Regex, EvalError> {

@@ -181,9 +181,9 @@ fn classify_text(text: &str) -> Option<ColumnKind> {
             ColumnKind::String
         });
     }
-    // Integer-looking text beyond i128 is not classified as a number: the
-    // numeric mode cannot compare it exactly, so it stays a string instead of
-    // being rounded through f64.
+    // Integer analysis buckets are limited to i128. Larger integer text stays
+    // a string here rather than being rounded through f64; ordered conditions
+    // can still compare it exactly.
     if looks_integer(text) {
         return Some(ColumnKind::String);
     }

@@ -9,6 +9,7 @@ use crate::{
     analysis::infer::parse_datetime_nanos,
     condition::{Condition, Node, Op, PreparedNode},
     error::AppError,
+    number::ExactNumber,
 };
 
 #[derive(Debug, Deserialize, ts_rs::TS)]
@@ -52,9 +53,8 @@ pub fn validate_condition_values(
         (Op::Regex, _) => "Use a Rust regular expression. Patterns are case-sensitive unless a flag such as (?i) is included.".into(),
         (_, "datetime") if ordered => DATETIME_HINT.into(),
         (Op::Eq | Op::Ne | Op::In, "datetime") => "Equality compares the original timestamp text exactly, including its time zone and fractional digits. Use <, ≤, > or ≥ to compare instants.".into(),
-        (_, "int") if ordered => "Enter an exact integer within the signed 128-bit range. No decimal or float rounding is used.".into(),
-        (_, "float") if ordered => "Ordered comparisons currently support exact integers and datetimes, not decimal-valued columns. Text equality remains available.".into(),
-        (_, _) if ordered => "Ordered comparisons require an exact integer or a recognized datetime. Text is not sorted lexicographically by these conditions.".into(),
+        (_, "int" | "float") if ordered => "Enter a finite number: integers, decimals and exponent notation keep their full precision.".into(),
+        (_, _) if ordered => "Ordered comparisons require an exact number or a recognized datetime. Text is not sorted lexicographically by these conditions.".into(),
         (Op::Contains | Op::StartsWith | Op::EndsWith, _) => "Matches text without case sensitivity; this is not a numeric or datetime comparison.".into(),
         _ => "Matches the original text exactly. Empty text, null and missing values remain distinct.".into(),
     };
@@ -83,19 +83,14 @@ pub fn validate_condition_values(
                                 .into()
                         })
                     }
-                    "int" => {
-                        value.trim().parse::<i128>().err().map(|_| {
-                            "Enter an exact integer within the signed 128-bit range.".into()
-                        })
-                    }
-                    "float" => Some(
-                        "Ordered comparison is not supported for a decimal-valued column.".into(),
-                    ),
+                    "int" | "float" => ExactNumber::parse(value.trim())
+                        .is_none()
+                        .then(|| "Enter a finite number (integer, decimal or exponent).".into()),
                     _ => {
                         parsed_nanos =
                             parse_datetime_nanos(value.trim()).map(|nanos| nanos.to_string());
-                        (value.trim().parse::<i128>().is_err() && parsed_nanos.is_none())
-                            .then(|| "Enter an exact integer or a recognized date/time.".into())
+                        (ExactNumber::parse(value.trim()).is_none() && parsed_nanos.is_none())
+                            .then(|| "Enter an exact number or a recognized date/time.".into())
                     }
                 }
             } else {

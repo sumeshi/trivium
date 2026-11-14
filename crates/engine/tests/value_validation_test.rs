@@ -98,7 +98,7 @@ fn date_only_and_fractional_naive_values_use_the_existing_utc_interpretation() {
 }
 
 #[test]
-fn ordered_integer_validation_has_the_same_exact_i128_limits_as_evaluation() {
+fn numeric_validation_and_evaluation_share_exact_decimal_parsing() {
     let result = validate(
         "int",
         Op::Gt,
@@ -111,14 +111,12 @@ fn ordered_integer_validation_has_the_same_exact_i128_limits_as_evaluation() {
             "1e3",
         ],
     );
-    assert!(!result.valid);
-    for checked in &result.values[..3] {
+    assert!(result.valid);
+    for checked in &result.values {
         assert!(checked.valid);
     }
-    for checked in &result.values[3..] {
-        assert!(!checked.valid);
-    }
-    assert!(evaluated("0", Op::Gt, "170141183460469231731687303715884105728").is_err());
+    assert!(!evaluated("0", Op::Gt, "170141183460469231731687303715884105728").unwrap());
+    assert!(evaluated("1.500000000000000000001", Op::Gt, "1.5").unwrap());
 }
 
 #[test]
@@ -175,17 +173,18 @@ fn regex_validation_uses_the_prepared_query_patterns() {
 }
 
 #[test]
-fn unsupported_ordered_decimals_and_text_are_explained_without_changing_the_query() {
-    let decimal = validate("float", Op::Ge, &["1.5"]);
+fn ordered_decimals_work_while_invalid_numbers_and_text_are_explained() {
+    let decimal = validate("float", Op::Ge, &["1.5", "-0", "1e3", "NaN", "Infinity"]);
     assert!(!decimal.valid);
-    assert!(decimal.values[0]
-        .error
-        .as_deref()
-        .unwrap()
-        .contains("decimal"));
-    assert!(evaluated("1.5", Op::Ge, "1.5").is_err());
-    let mixed = validate("string", Op::Gt, &["42", "2026-11-12", "alpha"]);
-    assert!(mixed.values[0].valid && mixed.values[1].valid && !mixed.values[2].valid);
+    assert!(decimal.values[..3].iter().all(|value| value.valid));
+    for value in &decimal.values[3..] {
+        assert!(!value.valid);
+        assert!(value.error.as_deref().unwrap().contains("finite number"));
+    }
+    assert!(evaluated("1.5", Op::Ge, "1.5").unwrap());
+    let mixed = validate("string", Op::Gt, &["42", "1.5", "2026-11-12", "alpha"]);
+    assert!(mixed.values[..3].iter().all(|value| value.valid));
+    assert!(!mixed.values[3].valid);
 }
 
 #[test]

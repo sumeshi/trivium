@@ -22,9 +22,9 @@ export function conditionValueHelp(kind: ColumnKind, op: CompareOp, exact = fals
     placeholder: "2026-11-12T09:30:00.123456789Z",
     hint: "Timestamp: YYYY-MM-DDTHH:mm:ss[.fraction]Z or ±HH:mm; date-only and YYYY-MM-DD HH:mm:ss also work. No timezone means UTC. Up to 9 fractional digits.",
   };
-  if (isOrderedCondition(op) && kind === "int") return {
-    placeholder: "e.g. 18446744073709551615",
-    hint: "Whole integer; large values stay exact text.",
+  if (isOrderedCondition(op) && (kind === "int" || kind === "float")) return {
+    placeholder: kind === "int" ? "e.g. 18446744073709551615" : "e.g. 1.5 or 1e3",
+    hint: "Exact numbers; integers, decimals and exponents keep their precision.",
   };
   if (op === "in") return {
     placeholder: exact ? "One exact source value" : "a, b, c",
@@ -38,13 +38,9 @@ export function conditionValueHelp(kind: ColumnKind, op: CompareOp, exact = fals
       ? "Exact text comparison: timezone spelling and fractional digits must match the source. Use <, ≤, > or ≥ for time comparison."
       : "Exact text comparison; spelling is preserved.",
   };
-  if (isOrderedCondition(op) && kind === "float") return {
-    placeholder: "Comparison value",
-    hint: "Decimal ordered comparisons are not supported by this evaluator. Check the engine guidance below before relying on the result.",
-  };
   if (isOrderedCondition(op)) return {
-    placeholder: "Integer or timestamp",
-    hint: "Ordered comparisons accept integers or timestamps. The engine checks the value below.",
+    placeholder: "Number or timestamp",
+    hint: "Ordered comparisons accept exact numbers or timestamps. The engine checks the value below.",
   };
   return { placeholder: "Text to match", hint: "Case-insensitive text match; dates and numbers are searched as text." };
 }

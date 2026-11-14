@@ -180,7 +180,7 @@ fn contains_and_or_not_match_search_mask() {
 }
 
 #[test]
-fn numeric_compare_uses_i128_and_rejects_decimals() {
+fn numeric_compare_keeps_integer_and_decimal_precision() {
     // Integers compare exactly through i128; adjacent long integers never
     // collapse into the same value.
     let exact = "1700000000123456789";
@@ -190,7 +190,11 @@ fn numeric_compare_uses_i128_and_rejects_decimals() {
         Value::Number(Number::from(1_700_000_000_123_456_789_i64)),
     );
     assert!(eval(&condition("n", Op::Eq, &[exact], false), &cells).expect("eval"));
-    assert!(eval(&condition("n", Op::Gt, &["1700000000123456788"], false), &cells).expect("eval"));
+    assert!(eval(
+        &condition("n", Op::Gt, &["1700000000123456788"], false),
+        &cells
+    )
+    .expect("eval"));
     assert!(!eval(&condition("n", Op::Gt, &[exact], false), &cells).expect("eval"));
     assert!(eval(&condition("n", Op::Ge, &[exact], false), &cells).expect("eval"));
 
@@ -224,19 +228,35 @@ fn numeric_compare_uses_i128_and_rejects_decimals() {
     id.insert("id".to_string(), Value::String("001".to_string()));
     assert!(!eval(&condition("id", Op::Eq, &["1"], false), &id).expect("eval"));
 
-    // Decimal spellings and values outside i128 are explicit errors, never a
-    // silent f64 comparison.
+    // Decimals and integers beyond i128 compare their exact digits too.
     let mut fraction = HashMap::new();
     fraction.insert("n".to_string(), Value::String("1.5".to_string()));
-    assert!(eval(&condition("n", Op::Gt, &["1.25"], false), &fraction).is_err());
-    assert!(eval(&condition("n", Op::Lt, &["2"], false), &fraction).is_err());
+    assert!(eval(&condition("n", Op::Gt, &["1.25"], false), &fraction).unwrap());
+    assert!(eval(&condition("n", Op::Lt, &["2"], false), &fraction).unwrap());
 
     let mut huge = HashMap::new();
     huge.insert(
         "n".to_string(),
         Value::String("170141183460469231731687303715884105728".to_string()),
     );
-    assert!(eval(&condition("n", Op::Gt, &["0"], false), &huge).is_err());
+    assert!(eval(&condition("n", Op::Gt, &["0"], false), &huge).unwrap());
+    assert!(!eval(
+        &condition(
+            "n",
+            Op::Gt,
+            &["170141183460469231731687303715884105728"],
+            false
+        ),
+        &huge
+    )
+    .unwrap());
+
+    // Unsupported values remain errors, rather than lexical/float fallbacks.
+    for invalid in ["", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
+        let invalid_cell = row(&[("n", invalid)]);
+        assert!(eval(&condition("n", Op::Gt, &["0"], false), &invalid_cell).is_err());
+        assert!(eval(&condition("n", Op::Lt, &[invalid], false), &fraction).is_err());
+    }
 }
 
 #[test]
@@ -244,7 +264,11 @@ fn regex_starts_with_and_group_edges() {
     let cells = row(&[("msg", "Alpha-Beacon")]);
     assert!(eval(&condition("msg", Op::StartsWith, &["alpha"], false), &cells).expect("eval"));
     assert!(eval(&condition("msg", Op::EndsWith, &["beacon"], false), &cells).expect("eval"));
-    assert!(eval(&condition("msg", Op::Regex, &["(?i)alpha-.*"], false), &cells).expect("eval"));
+    assert!(eval(
+        &condition("msg", Op::Regex, &["(?i)alpha-.*"], false),
+        &cells
+    )
+    .expect("eval"));
     assert!(eval(&condition("msg", Op::Regex, &["["], false), &cells).is_err());
     assert!(eval(
         &Node::Group(Group {
@@ -252,21 +276,35 @@ fn regex_starts_with_and_group_edges() {
             children: vec![],
         }),
         &cells
-    ).expect("eval"));
+    )
+    .expect("eval"));
     assert!(!eval(
         &Node::Group(Group {
             kind: GroupKind::Or,
             children: vec![],
         }),
         &cells
-    ).expect("eval"));
+    )
+    .expect("eval"));
 }
 
 #[test]
 fn datetime_ordering_compares_parsed_timestamps() {
     let cells = row(&[("ts", "2024-01-01T00:00:02")]);
-    assert!(eval(&condition("ts", Op::Ge, &["2024-01-01T00:00:01"], false), &cells).expect("eval"));
-    assert!(eval(&condition("ts", Op::Le, &["2024-01-01T00:00:02"], false), &cells).expect("eval"));
-    assert!(!eval(&condition("ts", Op::Gt, &["2024-01-01T00:00:02"], false), &cells).expect("eval"));
+    assert!(eval(
+        &condition("ts", Op::Ge, &["2024-01-01T00:00:01"], false),
+        &cells
+    )
+    .expect("eval"));
+    assert!(eval(
+        &condition("ts", Op::Le, &["2024-01-01T00:00:02"], false),
+        &cells
+    )
+    .expect("eval"));
+    assert!(!eval(
+        &condition("ts", Op::Gt, &["2024-01-01T00:00:02"], false),
+        &cells
+    )
+    .expect("eval"));
     assert!(eval(&condition("ts", Op::Lt, &["2024-01-02"], false), &cells).expect("eval"));
 }

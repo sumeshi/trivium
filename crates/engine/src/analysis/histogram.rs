@@ -141,7 +141,7 @@ pub(crate) fn histogram_series_ranged_kind(
                     let max = parse_float_bound(max)?;
                     histogram_f64_range(column, &values, buckets, min, max)
                 }
-                None => Ok(histogram_f64(column, &values, buckets)),
+                None => histogram_f64(column, &values, buckets),
             }
         }
         ColumnKind::Datetime => {
@@ -273,57 +273,26 @@ fn histogram_i128_range(
     })
 }
 
-fn histogram_f64(column: &str, points: &[Option<f64>], buckets: usize) -> Histogram {
-    let mut missing = 0u64;
-    let mut present = Vec::new();
-    for point in points {
-        match point {
-            Some(value) => present.push(*value),
-            None => missing += 1,
-        }
-    }
-    let mut counts = vec![0u64; buckets];
-    let buckets_out = if let (Some(min), Some(max)) = (
-        present.iter().copied().reduce(f64::min),
-        present.iter().copied().reduce(f64::max),
+fn histogram_f64(
+    column: &str,
+    points: &[Option<f64>],
+    buckets: usize,
+) -> Result<Histogram, String> {
+    if let (Some(min), Some(max)) = (
+        points.iter().flatten().copied().reduce(f64::min),
+        points.iter().flatten().copied().reduce(f64::max),
     ) {
-        if min == max {
-            counts[0] = present.len() as u64;
-        } else {
-            let span = max - min;
-            for value in &present {
-                let mut index = ((value - min) / span * buckets as f64) as usize;
-                if index >= buckets {
-                    index = buckets - 1;
-                }
-                counts[index] += 1;
-            }
-        }
-        bucket_labels(&counts, buckets, |index| {
-            let start = if min == max {
-                min
-            } else {
-                min + (max - min) * index as f64 / buckets as f64
-            };
-            let end = if min == max || index + 1 == buckets {
-                max
-            } else {
-                min + (max - min) * (index + 1) as f64 / buckets as f64
-            };
-            (start.to_string(), end.to_string())
-        })
-    } else {
-        empty_buckets(buckets)
-    };
-    Histogram {
+        return histogram_f64_range(column, points, buckets, min, max);
+    }
+    Ok(Histogram {
         column: column.to_string(),
         kind: ColumnKind::Float.as_str().to_string(),
-        buckets: buckets_out,
-        missing,
+        buckets: empty_buckets(buckets),
+        missing: points.len() as u64,
         outside: 0,
         full_range: None,
         auto_focused: false,
-    }
+    })
 }
 
 fn histogram_f64_range(
@@ -363,19 +332,30 @@ fn histogram_f64_range(
         };
         counts[index] += 1;
     }
-    let buckets_out = bucket_labels(&counts, buckets, |index| {
-        let start = if span == 0.0 {
-            min
-        } else {
-            min + span * index as f64 / buckets as f64
-        };
-        let end = if span == 0.0 || index + 1 == buckets {
-            max
-        } else {
-            min + span * (index + 1) as f64 / buckets as f64
-        };
-        (start.to_string(), end.to_string())
-    });
+    let buckets_out = bucket_labels(
+        &counts,
+        buckets,
+        |index| {
+            let start = if span == 0.0 {
+                min
+            } else {
+                min + span * (index as f64 / buckets as f64)
+            };
+            let end = if span == 0.0 || index + 1 == buckets {
+                max
+            } else {
+                min + span * ((index + 1) as f64 / buckets as f64)
+            };
+            (start.to_string(), end.to_string())
+        },
+        |index| {
+            if span == 0.0 {
+                index == 0
+            } else {
+                index + 1 == buckets
+            }
+        },
+    );
     Ok(Histogram {
         column: column.to_string(),
         kind: ColumnKind::Float.as_str().to_string(),
@@ -406,24 +386,23 @@ fn integer_buckets(
     bins: &IntegerBins,
     label: impl Fn(i128) -> String,
 ) -> Vec<HistogramBucket> {
-    let mut buckets = bucket_labels(counts, counts.len(), |index| {
-        (label(bins.edge(index)), label(bins.edge(index + 1)))
-    });
-    for (index, bucket) in buckets.iter_mut().enumerate() {
-        bucket.end_inclusive = bins.end_inclusive(index);
-    }
-    buckets
+    bucket_labels(
+        counts,
+        counts.len(),
+        |index| (label(bins.edge(index)), label(bins.edge(index + 1))),
+        |index| bins.end_inclusive(index),
+    )
 }
 
 fn bucket_labels(
     counts: &[u64],
     buckets: usize,
     edge: impl Fn(usize) -> (String, String),
+    end_inclusive: impl Fn(usize) -> bool,
 ) -> Vec<HistogramBucket> {
     (0..buckets)
         .map(|index| {
             let (start, end) = edge(index);
-            let end_inclusive = index + 1 == buckets || start == end;
             HistogramBucket {
                 start,
                 end,
@@ -432,7 +411,7 @@ fn bucket_labels(
                     unflagged: counts[index],
                     ..Default::default()
                 },
-                end_inclusive,
+                end_inclusive: end_inclusive(index),
             }
         })
         .collect()

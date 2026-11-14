@@ -34,6 +34,8 @@ test("date picker composes an explicit UTC value and text equality does not clai
   assert.match(conditionValueHelp("datetime", "ge").hint, /9 fractional digits/);
   assert.match(conditionValueHelp("datetime", "ge").hint, /date-only/);
   assert.match(conditionValueHelp("string", "in", true).hint, /commas are part of it/);
+  assert.match(conditionValueHelp("float", "ge").hint, /decimals and exponents/);
+  assert.match(conditionValueHelp("int", "lt").hint, /keep their precision/);
 });
 
 test("changing column/operator/value cannot publish an old parser response", async () => {

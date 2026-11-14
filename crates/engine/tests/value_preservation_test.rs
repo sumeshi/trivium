@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use trivium_engine::condition::{Condition, Group, GroupKind, Node, Op};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
-use trivium_engine::ops::projects::{create_project, load_project, CreateProjectPayload, ProjectRequest};
+use trivium_engine::ops::projects::{
+    create_project, load_project, CreateProjectPayload, ProjectRequest,
+};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::project_io::read_original_records;
 use trivium_engine::store::ProjectsStore;
@@ -46,7 +48,11 @@ fn column_ids(store: &ProjectsStore, id: Uuid) -> std::collections::HashMap<Stri
         .collect()
 }
 
-fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> trivium_engine::ops::rows::QueryRowsResponse {
+fn query(
+    store: &ProjectsStore,
+    id: Uuid,
+    spec: QuerySpec,
+) -> trivium_engine::ops::rows::QueryRowsResponse {
     query_project_rows(
         store,
         QueryRowsPayload {
@@ -68,7 +74,11 @@ fn condition(column: &str, op: Op, value: &str) -> Node {
     })
 }
 
-fn cell(response: &trivium_engine::ops::rows::QueryRowsResponse, row: usize, column: &str) -> serde_json::Value {
+fn cell(
+    response: &trivium_engine::ops::rows::QueryRowsResponse,
+    row: usize,
+    column: &str,
+) -> serde_json::Value {
     response.rows[row]
         .cells
         .get(column)
@@ -176,7 +186,10 @@ fn json_scalars_keep_exact_text_and_null_stays_null() {
 
     let originals = read_original_records(&store.project_dir(&id)).expect("originals");
     assert_eq!(originals[0]["n"], json!(9007199254740993_u64));
-    assert_eq!(originals[1]["n"].to_string(), "170141183460469231731687303715884105728");
+    assert_eq!(
+        originals[1]["n"].to_string(),
+        "170141183460469231731687303715884105728"
+    );
     assert_eq!(originals[1]["small"], serde_json::Value::Null);
     assert!(originals[2].get("small").is_some());
 }
@@ -236,7 +249,7 @@ fn adjacent_long_integers_compare_without_rounding() {
 }
 
 #[test]
-fn decimal_or_out_of_range_numeric_comparison_is_an_error() {
+fn decimals_and_large_numeric_comparisons_preserve_exact_source_values() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("store");
     let csv = root.join("mixed.csv");
@@ -245,7 +258,7 @@ fn decimal_or_out_of_range_numeric_comparison_is_an_error() {
     let ids = column_ids(&store, id);
     let n = ids.get("n").expect("n");
 
-    for op in [Op::Gt, Op::Lt, Op::Ge, Op::Le] {
+    for (op, expected) in [(Op::Gt, 2), (Op::Lt, 0), (Op::Ge, 2), (Op::Le, 0)] {
         let result = query_project_rows(
             &store,
             QueryRowsPayload {
@@ -258,7 +271,7 @@ fn decimal_or_out_of_range_numeric_comparison_is_an_error() {
                 limit: None,
             },
         );
-        assert!(result.is_err(), "{:?} must reject decimals/out-of-range", op);
+        assert_eq!(result.unwrap().total_filtered_rows, expected, "{op:?}");
     }
 
     // Text equality still works without any numeric conversion.
