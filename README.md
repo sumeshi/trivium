@@ -1,127 +1,101 @@
-<h1 align="center"><img src="assets/branding/banner.png" alt="Trivium" width="720"></h1>
+# Trivium
 
-Trivium is a desktop application for manually investigating CSV / JSON / JSONL / NDJSON data.
-Search, narrow the table, inspect full values, and record your findings with **Safe / Suspicious / Critical**, notes, tags and bookmarks.
+**"For the trivial bits of log analysis."**
+
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
+
+## Introduction
+
+**Trivium** is a desktop application for searching, analyzing, and investigating logs in CSV and JSON formats.
+
+Designed with incident response in mind, it provides search, filtering, flags, annotations, timeline analysis, IOC management, and other tools for working through log data.
+
+It also provides an automation interface that can be used for LLM-assisted investigations. Let's spend as little time as possible on the trivial stuff.
 
 ![Trivium Screenshot](screenshot.jpeg)
 
-## Install
+## Themes
 
-- **Windows x86_64:** download `trivium-windows-exe` from a successful [Windows build](https://github.com/sumeshi/trivium/actions/workflows/build.yml), extract it, and open `Trivium-v*.exe`. The portable application requires Microsoft's [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Stable versions are also available in [Releases](https://github.com/sumeshi/trivium/releases).
-- **Linux x86_64 / AppImage:** download `trivium-appimage` from a successful [Linux build](https://github.com/sumeshi/trivium/actions/workflows/debian.yml), extract it, then run the commands below. GTK and WebKit are included. CI builds on Ubuntu 22.04 (glibc 2.35 minimum) and tests the extracted application on Ubuntu 24.04.
-- **Linux / .deb:** download `trivium-deb` from the same Linux build, extract it, then run `sudo apt install ./package.deb` with the actual filename.
+Choose from a variety of color themes to suit your preferences.
 
-```sh
-chmod +x Trivium_*.AppImage
-./Trivium_*.AppImage
-```
+<!-- Add the color theme showcase image here. -->
 
-Without FUSE, use `./Trivium_*.AppImage --appimage-extract-and-run`. Artifacts from `develop` expire after three days. The `trivium-cli-*` artifacts are optional automation tools.
+## Features
 
-The application's **Workspace options** menu shows its version and source commit. CI artifact ZIPs include `BUILD-INFO.json` and `SHA256SUMS` for the extracted package or executable; GitHub's artifact ZIP has a separate checksum. The hash beside an opened filename identifies the source data, not the application build.
+### Log Viewer
 
-## Investigate
+View CSV files and even nested JSON, JSONL, and NDJSON data in a table. Click a cell to inspect the full record without having to scroll across all its columns.
 
-1. Open **Projects**, choose a data file, and open it. CSV delimiter options apply only to CSV; the first record supplies column names. The source stays read-only.
-2. Search or use **Filter** to narrow the result. Click a row value for its full record; right-click cells and column headings for contextual actions.
-3. Record flags, notes, tags and bookmarks. These annotations are independent; unflagged rows are not Safe.
-4. Export all rows, the current result, or selected rows to CSV. Optional `trivium-*` columns include annotations.
+You can open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
-Open projects use tabs. Closing a tab preserves its saved case and annotations; reopen it from Projects. The `#` column and row-jump input refer to original, one-based row numbers even after filtering or sorting. First / Last move within the current result.
+### Search & Filter
 
-Move or resize column headings; right-click for freezing and UTC ISO date display. These settings affect presentation, not search scope or source values. **Search in** chooses text-search columns. **Analyze** opens the timeline, time analysis, column statistics and nested grouping. **Annotate** applies flags, notes and tags to multiple rows, with Undo; IOC rules use the same operations. Themes and table text size are available in Workspace options.
+Search for keywords, limit searches to specific columns, or build more complex conditions using AND, OR, and NOT. The view history lets you go backward and forward through your investigation steps.
 
-Presets save rules, hidden columns, sort and any changed column order or widths. Blank annotation fields and unselected flags leave existing values unchanged.
+You can also save your filter and view settings as presets, making it easy to reproduce the same view across different files and compare results.
 
-### Search
+### Search Syntax
 
-Text search is case-insensitive. Combine terms with spaces for AND, `|` for OR, and a leading `-` for NOT; NOT takes precedence over AND, then OR. Quote literal phrases and special characters. Scope a term with `column:value`.
+Text search is intended for quickly narrowing down the data. It is case-insensitive and does not interpret parentheses or regular expressions directly. For regular expressions, numeric or datetime comparisons, and more complex AND/OR conditions, use **Filter → Rules**.
 
-| Example | Meaning |
+| Example | Description |
 | --- | --- |
-| `error timeout` | Both terms |
-| `error\|warn` | Either term |
-| `beacon -test` | Include beacon, exclude test |
-| `user:administrator` | Search one column |
-| `command:"powershell -enc"` | A phrase in one column |
-| `@tag:review` | Rows labelled with the annotation tag `review` |
-| `@tag:*` | Rows with any annotation tag |
+| `powershell` | Find rows containing the specified text |
+| `error timeout` | Find rows containing both terms (AND) |
+| `error\|warn` | Find rows containing either term (OR) |
+| `-test` | Exclude rows containing `test` (NOT) |
+| `EventID:4624` | Search only the `EventID` column |
+| `"powershell -enc"` | Search for an exact phrase |
+| `@tag:review` | Find rows tagged with `review` |
+| `@tag:*` | Find rows with any tag |
 
-Use Filter for nested AND/OR groups, numeric or datetime comparisons, and regular expressions. Text search and structured conditions combine with AND. Text search itself does not interpret regex or parentheses.
+### Flag & Annotate
 
-Tags label related findings. Click a row's tag count to search a label, then analyze or export the current result.
+Assign one of three flags to rows as you investigate:
 
-## Saved data
+- **Safe** — Rows you have determined to be harmless
+- **Suspicious** — Rows that may warrant further investigation
+- **Critical** — Rows you have identified as significant or problematic
 
-The desktop workspace lives under:
+You can also add notes, tags, and bookmarks to individual rows. Select multiple rows to apply annotations in bulk, and undo the most recent bulk operation when needed.
 
-- Linux: `$XDG_DATA_HOME/com.trivium.app/trivium`, or `~/.local/share/com.trivium.app/trivium`.
-- Windows: `%LOCALAPPDATA%\com.trivium.app\trivium`.
+### Timeline & Analysis
 
-Each `projects/<uuid>/` contains `data.parquet` and `project.sqlite`: imported evidence plus annotations, view settings and durable bulk undo. Stop Trivium and any automation before backing up the whole workspace. Deleting a saved case removes its imported copy, leaving the original source untouched.
+For logs with a datetime column, the timeline visualizes when events occurred, including the number of events and their breakdown into Safe, Suspicious, Critical, and unflagged rows.
 
-CSV values retain their original text. JSON objects and arrays of objects become rows; nested keys use JSON Pointers. Empty strings, null and missing values stay distinct. Large integers and nanosecond timestamps retain their original precision.
+Zoom in on periods of high activity or select a time range to narrow down the table. Column value counts, uncommon values, time gaps, and grouping tools also help you investigate the data in more detail.
 
-## Automation
+### Save & Export
 
-`trivium-cli` is a separate, optional Rust program for Python or other scripts. The desktop application does not launch or require it. It uses the same engine and saved-case format, receiving JSON-line requests on stdin and returning responses on stdout; no server or embedded Python is involved.
+Your investigation is saved locally and automatically. Closing a tab does not delete its project; you can reopen it later to review your filters and annotations.
 
-```sh
-cargo build --locked --release -p trivium-engine --bin trivium-cli
-python examples/automate.py --cli target/release/trivium-cli --workspace /cases/demo --source /evidence/events.csv --search "needle"
-```
+Export **all rows, the current results, or selected rows** to CSV. You can also include flags, notes, tags, and bookmarks in the exported data.
 
-On Windows, use `target\release\trivium-cli.exe`. The [Python example](examples/automate.py) provides `Trivium.call(method, params)`. Send `{"version":1,"method":"hello"}` to list methods. Requests are sequential; inspect each response's `ok` and `result` or `error`. `query` is paged; `cell` returns a full value, and `export` writes a file. Row indices in this protocol are zero-based.
+## Installation
 
-## Develop
+Prebuilt binaries are available for **Windows (x64)** and **Linux (x64)**:
 
-The application uses Tauri 2, Svelte / TypeScript and a shared Rust engine. Polars queries Parquet evidence; SQLite stores case state. Install the Node and Rust versions pinned in [.node-version](.node-version) and [rust-toolchain.toml](rust-toolchain.toml), plus the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+- **Windows:** Portable `.exe`
+- **Linux:** `.deb` and `AppImage`
 
-```sh
-npm ci
-npm run tauri dev
-```
+Download the latest version for your platform from [GitHub Releases](https://github.com/sumeshi/trivium/releases).
 
-`npm run dev` starts the frontend only. Build a native package for your platform:
+The Windows version requires [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Please install it beforehand if it is not already available.
 
-```sh
-# Linux .deb and AppImage
-npm run tauri build -- --bundles deb,appimage
-# Windows portable executable in target/release/
-npm run tauri build -- --no-bundle
-# Windows installer; the portable executable is also in target/release/
-npm run tauri build -- --bundles nsis
-```
+## Feedback
 
-Use a release build when comparing responsiveness. Engine timings exclude IPC, state updates and WebView rendering.
+Bug reports and feature requests are welcome in [GitHub Issues](https://github.com/sumeshi/trivium/issues).
 
-Checks:
+## License
 
-```sh
-cargo test --locked -p trivium-engine
-cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
-bash scripts/check_rust_size.sh
-npm run lint
-npm run lint:test
-npm run test:ui
-npm run contracts:check
-npm run build
-```
+Trivium is released under the [MIT License](LICENSE).
 
-Native GUI checks use the actual embedded application and isolated case profiles; their setup is in [Native smoke](.github/workflows/native-smoke.yml). On Linux, with GTK / WebKitGTK, Xvfb, `libxtst6`, `tauri-driver` and `WebKitWebDriver` installed:
+## Third-party Licenses
 
-```sh
-cargo build --locked -p trivium-desktop --features custom-protocol
-xvfb-run -a python3 tests/native/row_navigation.py --binary target/debug/trivium-desktop --rows 5199 2000000
-xvfb-run -a python3 tests/native/workspace_ui.py --binary target/debug/trivium-desktop
-```
+Trivium includes third-party open-source software, which is distributed under its respective licenses.
 
-For rendering and IPC measurements with synthetic small, tall and wide datasets:
+Copyright notices and license terms for third-party components are provided in `THIRD_PARTY_LICENSES.txt`, included with each binary distribution.
 
-```sh
-xvfb-run -a python3 tests/native/render_benchmark.py --binary target/release/trivium-desktop --out target/render-performance
-```
+## Acknowledgments
 
-`scripts/gen_fixture.py` generates deterministic CSV test data. Engine benchmarks live in `crates/engine/src/bin/`; generated datasets and measurements belong outside the source tree or under ignored `target/` paths. Update Rust wire DTOs with `npm run contracts:generate`.
-
-[MIT License](LICENSE)
+Trivium was inspired by Eric Zimmerman's [Timeline Explorer](https://ericzimmerman.github.io/). Many thanks to him for his excellent work.

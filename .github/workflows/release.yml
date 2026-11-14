@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags: ['[0-9]*']
+
+permissions:
+  contents: read
+
+# A repeated run must never replace an existing release or its assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact release tag and package versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python tests/check_build_identity.py
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          if os.environ['RELEASE_TAG'] != version:
+              raise SystemExit(f'Release tag must match package version exactly: {version}')
+          PY
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/build.yml
+
+  linux:
+    needs: version
+    uses: ./.github/workflows/debian.yml
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: trivium-*
+          path: artifacts
+
+      - name: Prepare release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import zipfile
+
+          version = os.environ['RELEASE_TAG']
+          output = Path('release-assets')
+          output.mkdir()
+          packages = [
+              ('trivium-windows-exe', f'Trivium-v{version}.exe', f'trivium-windows-x64-v{version}.zip'),
+              ('trivium-deb', f'*_{version}_*.deb', f'trivium-linux-x64-v{version}.deb'),
+              ('trivium-appimage', f'*_{version}_*.AppImage', f'trivium-linux-x64-v{version}.zip'),
+              ('trivium-cli-x86_64-pc-windows-msvc', 'trivium-cli.exe', f'trivium-cli-windows-x64-v{version}.zip'),
+              ('trivium-cli-linux-x86_64', 'trivium-cli', f'trivium-cli-linux-x64-v{version}.zip'),
+          ]
+          for artifact, binary_pattern, filename in packages:
+              root = Path('artifacts') / artifact
+              binaries = list(root.glob(binary_pattern))
+              if len(binaries) != 1 or not binaries[0].is_file():
+                  raise SystemExit(f'Expected one binary in {artifact}: {binary_pattern}')
+              binary = binaries[0]
+              files = [binary, root / 'LICENSE', root / 'THIRD_PARTY_LICENSES.txt']
+              if any(not path.is_file() or not path.stat().st_size for path in files):
+                  raise SystemExit(f'Missing binary or license in {artifact}')
+              if set(root.iterdir()) != set(files):
+                  raise SystemExit(f'Unexpected files in {artifact}')
+              target = output / filename
+              if filename.endswith('.zip'):
+                  with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
+                      for path in files:
+                          info = zipfile.ZipInfo.from_file(path, arcname=path.name)
+                          info.create_system = 3
+                          executable = path == binary and 'windows' not in artifact
+                          info.external_attr = (0o100755 if executable else 0o100644) << 16
+                          info.compress_type = zipfile.ZIP_DEFLATED
+                          with path.open('rb') as source, archive.open(info, 'w') as destination:
+                              shutil.copyfileobj(source, destination)
+              else:
+                  shutil.copyfile(binary, target)
+          PY
+
+      - name: Create release without replacing an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag --title "Trivium $RELEASE_TAG" --generate-notes

@@ -3,7 +3,12 @@ name: Linux build
 on:
   push:
     branches: [ develop ]
+    paths-ignore: ['**/*.md', 'screenshot.jpeg']
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build-deb:
@@ -54,7 +59,8 @@ jobs:
       - name: Quality gates
         run: |
           python tests/check_build_identity.py
-          python tests/build_manifest_test.py
+          python scripts/third_party_licenses.py --check
+          python tests/package_artifacts_test.py
           bash scripts/check_rust_size.sh
           cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
           cargo test --locked -p trivium-engine
@@ -64,6 +70,9 @@ jobs:
           npm run test:ui
           npm run build
 
+      - name: Include bundled Linux dependency licenses
+        run: python scripts/third_party_licenses.py --include-system
+
       - name: Build deb and AppImage bundles
         run: npm run tauri build -- --bundles deb,appimage
 
@@ -72,31 +81,32 @@ jobs:
 
       - name: Prepare desktop and optional CLI artifacts
         run: |
+          rm -rf target/artifacts
           app_version=$(node -p "require('./package.json').version")
-          python scripts/build_manifest.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-deb target/release/bundle/deb/*_"$app_version"_*.deb
-          python scripts/build_manifest.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-appimage target/release/bundle/appimage/*_"$app_version"_*.AppImage
-          python scripts/build_manifest.py --kind automation-cli --platform linux-x86_64 --output target/artifacts/trivium-cli-linux target/release/trivium-cli
+          python scripts/package_artifacts.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-deb target/release/bundle/deb/*_"$app_version"_*.deb
+          python scripts/package_artifacts.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-appimage target/release/bundle/appimage/*_"$app_version"_*.AppImage
+          python scripts/package_artifacts.py --kind automation-cli --platform linux-x86_64 --output target/artifacts/trivium-cli-linux target/release/trivium-cli
 
       - name: Upload Debian application
         uses: actions/upload-artifact@v5
         with:
           name: trivium-deb
           path: target/artifacts/trivium-deb/
-          retention-days: 3
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 3 || 30 }}
 
       - name: Upload portable Linux application
         uses: actions/upload-artifact@v5
         with:
           name: trivium-appimage
           path: target/artifacts/trivium-appimage/
-          retention-days: 3
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 3 || 30 }}
 
       - name: Upload optional Linux automation CLI
         uses: actions/upload-artifact@v5
         with:
           name: trivium-cli-linux-x86_64
           path: target/artifacts/trivium-cli-linux/
-          retention-days: 3
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 3 || 30 }}
 
   appimage-smoke:
     needs: build-deb
@@ -134,7 +144,8 @@ jobs:
       - name: Verify and extract AppImage without FUSE
         working-directory: target/appimage-artifact
         run: |
-          sha256sum --check SHA256SUMS
+          test -s LICENSE
+          test -s THIRD_PARTY_LICENSES.txt
           images=(./*.AppImage)
           test "${#images[@]}" -eq 1
           chmod +x "${images[0]}"
@@ -143,7 +154,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           root = Path('squashfs-root')
-          for pattern in ['libgtk-3.so*', 'libwebkit2gtk-4.1.so*', 'libjavascriptcoregtk-4.1.so*', 'WebKitWebProcess', 'WebKitNetworkProcess', '*.desktop']:
+          for pattern in ['libgtk-3.so*', 'libwebkit2gtk-4.1.so*', 'libjavascriptcoregtk-4.1.so*', 'WebKitWebProcess', 'WebKitNetworkProcess', '*.desktop', 'THIRD_PARTY_LICENSES.txt']:
               if not any(path.is_file() for path in root.rglob(pattern)):
                   raise SystemExit(f'AppImage payload is missing {pattern}')
           PY

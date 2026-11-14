@@ -25,6 +25,10 @@
   "bundle": {
     "targets": ["deb", "appimage"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
