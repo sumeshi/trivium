@@ -57,11 +57,61 @@ jobs:
       - name: Quality gates
         shell: bash
         run: |
+          rust_gate() {
+            local rust_stage="$1"
+            shift
+            local rust_log="$RUNNER_TEMP/trivium-${rust_stage}.log"
+            set +e
+            "$@" 2>&1 | tee "$rust_log"
+            local rust_status=${PIPESTATUS[0]}
+            set -e
+            if [ "$rust_status" -ne 0 ]; then
+              python - "$rust_log" "$rust_stage" "$rust_status" <<'PY' || true
+          import re
+          import sys
+          from pathlib import Path
+
+          text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          text = re.sub(r"\x1b\][^\x1b\x07]*(?:\x07|\x1b\\)", "", text)
+          text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+          details = []
+          for line in text.splitlines():
+              error = re.match(r"\s*error(?:\[(E[0-9]{4})\])?:", line)
+              if error:
+                  details.append(f"Rust error {error[1]}" if error[1] else "Rust compiler or lint error")
+              lint = re.search(r"\bclippy::[a-z_][a-z0-9_-]*\b", line)
+              if lint:
+                  details.append(lint[0])
+              linker = re.search(r"\b(?:fatal error|error) (LNK[0-9]{4})\b", line)
+              if linker:
+                  details.append(linker[1])
+              failed = re.match(r"\s*test ([A-Za-z_][A-Za-z0-9_:]*) \.\.\. FAILED\b", line)
+              if failed:
+                  details.append(f"FAILED {failed[1]}")
+              location = re.search(r"(?:--> |panicked at )(.+?\.rs):([0-9]+):([0-9]+)", line)
+              if location:
+                  name = location[1].replace("\\", "/").rsplit("/", 1)[-1]
+                  if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}\.rs", name):
+                      details.append(f"{name}:{location[2]}:{location[3]}")
+          def escape(value):
+              return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          lines = [f"Rust {sys.argv[2]} failed (exit {sys.argv[3]})"]
+          for detail in dict.fromkeys(details):
+              candidate = lines + [detail[:120]]
+              if len(lines) == 10 or len(escape("\n".join(candidate))) > 300:
+                  break
+              lines = candidate
+          title = {"clippy": "Clippy", "tests": "Rust tests"}.get(sys.argv[2], "Rust quality gate")
+          print(f"\n::error title={title}::{escape(chr(10).join(lines))}")
+          PY
+            fi
+            return "$rust_status"
+          }
           python tests/check_build_identity.py
           python tests/build_manifest_test.py
           bash scripts/check_rust_size.sh
-          cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
-          cargo test --locked -p trivium-engine
+          rust_gate clippy cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
+          rust_gate tests cargo test --locked -p trivium-engine
           cargo run --locked -p trivium-engine --bin export_contracts -- --check
           npm run lint
           npm run lint:test
