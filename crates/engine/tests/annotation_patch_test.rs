@@ -12,9 +12,10 @@ use trivium_engine::annotation::AnnotationPatch;
 use trivium_engine::models::{FlagEntry, UpdateFlagResponse};
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{bulk_preview, bulk_update, BulkAnnotatePayload};
+use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
-use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::ops::rows::QuerySpec;
+use trivium_engine::ops::projects::{load_project, CreateProjectPayload, ProjectRequest};
+use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
@@ -226,14 +227,14 @@ fn omitted_fields_keep_values_and_explicit_empties_clear_them() {
     update(&store, id, 0, None, None, None, None);
     assert_eq!(stored(&store, id, 0), Some(original.clone()));
 
-    // Explicit empty flag, blank memo, empty tags, and false bookmark clear
+    // Explicit empty flag, empty memo, empty tags, and false bookmark clear
     // those fields. The entry survives while one field still has content.
     update(
         &store,
         id,
         0,
         Some(""),
-        Some(Some("   ")),
+        Some(Some("")),
         None,
         Some(false),
     );
@@ -299,5 +300,88 @@ fn bulk_flag_clear_keeps_tags_bookmarks_and_memos() {
     assert_eq!(row0.tags, vec!["pc".to_string(), "triage".to_string()]);
     assert!(row0.bookmarked);
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn note_text_survives_update_reopen_query_export_and_restore() {
+    let (root, store, id) = setup();
+    let notes = [
+        "Sender: <alice@example.org>",
+        "<alice@example.org>",
+        "<CommandLine>whoami & \"hostname\"</CommandLine>",
+        "<img src=x onerror=alert(1)><script>alert(1)</script>",
+        "  first line\r\n\tsecond line, \"quoted\"\n \t",
+        " \t\n ",
+        "\u{0000}\u{0008}\u{000b}\u{001f}",
+    ];
+    for (case, note) in notes.iter().enumerate() {
+        let saved = update(&store, id, 0, None, Some(Some(note)), None, None)
+            .entry
+            .expect("nonempty plain text must remain an annotation");
+        assert_eq!(saved.memo.as_deref(), Some(*note));
+
+        // A fresh store reads the durable project rather than an in-memory draft.
+        let reopened = ProjectsStore::new(root.clone()).expect("reopen project store");
+        let loaded = load_project(&reopened, ProjectRequest { project_id: id })
+            .expect("load reopened project");
+        assert_eq!(loaded.initial_rows[0].memo.as_deref(), Some(*note));
+        let rows = query_project_rows(
+            &reopened,
+            QueryRowsPayload {
+                project_id: id,
+                spec: QuerySpec::default(),
+                offset: None,
+                limit: None,
+            },
+        )
+        .expect("query reopened note");
+        assert_eq!(rows.rows[0].memo.as_deref(), Some(*note));
+        let updated = update(
+            &reopened,
+            id,
+            0,
+            None,
+            Some(rows.rows[0].memo.as_deref()),
+            None,
+            None,
+        );
+        assert_eq!(updated.entry.unwrap().memo.as_deref(), Some(*note));
+
+        let destination = root.join(format!("note-{case}.csv"));
+        export_project(
+            &reopened,
+            ExportProjectPayload {
+                project_id: id,
+                destination: destination.to_string_lossy().to_string(),
+                scope: Some("all".into()),
+                spec: QuerySpec::default(),
+                columns: None,
+                row_indices: None,
+                include_annotations: Some(true),
+            },
+        )
+        .expect("export note");
+        let mut reader = csv::Reader::from_path(&destination).expect("read exported CSV");
+        let memo_column = reader.headers().unwrap().iter()
+            .position(|header| header == "trivium-memo").expect("memo header");
+        let record = reader.records().next().unwrap().expect("exported row");
+        assert_eq!(record.get(memo_column), Some(*note));
+
+        let restored = ops::projects::create_project(
+            &reopened,
+            CreateProjectPayload {
+                path: destination.to_string_lossy().to_string(),
+                description: None,
+                delimiter: None,
+                restore_annotations: Some(true),
+            },
+        )
+        .expect("restore exported annotations");
+        assert_eq!(stored(&reopened, restored.meta.id, 0).unwrap().memo.as_deref(), Some(*note));
+    }
+    // Empty text still clears a memo without turning a whitespace-only note into deletion.
+    update(&store, id, 0, None, Some(Some("")), None, None);
+    assert_eq!(stored(&store, id, 0), None);
     let _ = fs::remove_dir_all(root);
 }

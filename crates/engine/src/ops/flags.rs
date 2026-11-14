@@ -17,7 +17,7 @@ pub struct UpdateFlagPayload {
     /// `None` keeps the stored flag; `Some("")` clears it.
     #[serde(default)]
     pub flag: Option<String>,
-    /// `None` keeps the stored memo; `Some(None)` or a blank string clears it.
+    /// `None` keeps the stored memo; `Some(None)` or an empty string clears it.
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub memo: Option<Option<String>>,
     /// `None` keeps the stored tags; `Some` replaces them.

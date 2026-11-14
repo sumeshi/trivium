@@ -137,7 +137,6 @@ fn flag_entry(columns: FlagColumns, record: &csv::StringRecord) -> Option<FlagEn
     let memo_value = columns
         .memo
         .and_then(|column| record.get(column))
-        .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string);
     // `trivium-tags` is a `;`-separated list. A tag that itself contains `;`

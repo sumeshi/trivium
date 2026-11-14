@@ -248,7 +248,7 @@ impl FlagEntry {
             || self
                 .memo
                 .as_deref()
-                .is_some_and(|memo| !memo.trim().is_empty())
+                .is_some_and(|memo| !memo.is_empty())
             || !self.tags.is_empty()
             || self.bookmarked
     }

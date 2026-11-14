@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import { sanitizeMemoInput, applyAnnotationEntry } from './state';
+  import { applyAnnotationEntry } from './state';
+  import { createCompositionGuard } from '../../keyboard';
   import { useWorkspace } from "../../workspaceContext";
   const {
     memoEditor, backend, nextAnnotationRequest, isLatestAnnotationRequest, updateCachedRow,
@@ -17,6 +18,8 @@
   let tagDraft = '';
   let tagList: string[] = [];
   let bookmarkDraft = false;
+  const memoComposition = createCompositionGuard();
+  const tagComposition = createCompositionGuard();
 
   const closeMemoEditor = () => {
     memoEditor.set(null);
@@ -26,6 +29,8 @@
     tagDraft = '';
     tagList = [];
     bookmarkDraft = false;
+    memoComposition.reset();
+    tagComposition.reset();
   };
 
   const addTags = () => {
@@ -61,7 +66,8 @@
     }
 
     addTags();
-    const sanitized = sanitizeMemoInput(memoDraft).trim();
+    // Notes are plain text, including XML, angle-bracket addresses and whitespace.
+    const memo = memoDraft;
     const tags = [...tagList];
     const bookmarked = bookmarkDraft;
     const rowIndex = editor.rowIndex;
@@ -73,17 +79,17 @@
     // project id and original row id, and display updates are skipped.
     updateCachedRow(rowIndex, (cached) => ({
       ...cached,
-      memo: sanitized,
+      memo,
       tags,
       bookmarked,
-      displayCache: { ...cached.displayCache, memo: sanitized },
+      displayCache: { ...cached.displayCache, memo },
     }));
 
     try {
       const updated = await backendInstance.updateFlag({
         projectId: editor.projectId,
         rowIndex,
-        memo: sanitized.length ? sanitized : null,
+        memo: memo.length ? memo : null,
         tags,
         bookmarked,
       });
@@ -134,10 +140,12 @@
 
   const handleMemoBackdropKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return;
+    // Escape may cancel the IME candidate window without closing the editor.
+    event.stopPropagation();
+    if (memoComposition.blocksShortcut(event) || tagComposition.blocksShortcut(event)) return;
     // Keep the dialog (and the draft) open while a save is in flight; the
     // window-level Escape handler must not close it either.
     event.preventDefault();
-    event.stopPropagation();
     if (!memoSaving) {
       closeMemoEditor();
     }
@@ -151,6 +159,8 @@
     bookmarkDraft = editor.row.bookmarked ?? false;
     memoError = null;
     memoSaving = false;
+    memoComposition.reset();
+    tagComposition.reset();
     await tick();
     // The dialog may have been closed or retargeted while tick was pending.
     if (get(memoEditor) !== editor) return;
@@ -195,7 +205,10 @@
           placeholder="Add note"
           spellcheck="true"
           disabled={memoSaving}
+          on:compositionstart={memoComposition.start}
+          on:compositionend={memoComposition.end}
           on:keydown={(event) => {
+            if (memoComposition.blocksShortcut(event)) return;
             if (event.key === 'Enter' && !event.shiftKey && !memoSaving) {
               event.preventDefault();
               event.stopPropagation();
@@ -227,8 +240,11 @@
           bind:value={tagDraft}
           placeholder="Add tags (comma separated)"
           disabled={memoSaving}
+          on:compositionstart={tagComposition.start}
+          on:compositionend={tagComposition.end}
           on:blur={addTags}
           on:keydown={(event) => {
+            if (tagComposition.blocksShortcut(event)) return;
             if (event.key === 'Enter' || event.key === ',') {
               event.preventDefault();
               addTags();

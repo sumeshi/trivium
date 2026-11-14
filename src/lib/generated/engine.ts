@@ -13,7 +13,7 @@ export type AnnotationPatch = {
  */
 flag?: string | null,
 /**
- * `None` keeps the stored memo; `Some(None)` or a blank string clears it.
+ * `None` keeps the stored memo; `Some(None)` or an empty string clears it.
  */
 memo?: string | null | null,
 /**

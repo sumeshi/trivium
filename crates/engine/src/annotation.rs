@@ -5,7 +5,7 @@ use crate::models::FlagEntry;
 /// Partial update for one row's annotation.
 ///
 /// A missing field keeps the stored value. An explicitly empty value clears it:
-/// `Some("")` for the flag, `Some(None)` or a blank string for the memo,
+/// `Some("")` for the flag, `Some(None)` or an empty string for the memo,
 /// `Some(vec![])` for tags, and `Some(false)` for the bookmark. Tags can also be
 /// changed one-directionally with `add_tags` and `remove_tags`.
 #[derive(Debug, Clone, Default, Deserialize, ts_rs::TS)]
@@ -14,7 +14,7 @@ pub struct AnnotationPatch {
     /// `None` keeps the stored flag; `Some("")` clears it.
     #[serde(default)]
     pub flag: Option<String>,
-    /// `None` keeps the stored memo; `Some(None)` or a blank string clears it.
+    /// `None` keeps the stored memo; `Some(None)` or an empty string clears it.
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub memo: Option<Option<String>>,
     /// `None` keeps the stored tags; `Some(vec![])` clears them.
@@ -67,7 +67,6 @@ pub fn apply_annotation_patch(
     if let Some(memo) = &patch.memo {
         entry.memo = memo
             .as_deref()
-            .map(str::trim)
             .filter(|memo| !memo.is_empty())
             .map(str::to_string);
     }
@@ -143,7 +142,7 @@ mod tests {
         let next = apply_annotation_patch(Some(&existing), &patch(None, Some(Some(" new "))))
             .expect("entry must remain");
         assert_eq!(next.flag, "critical");
-        assert_eq!(next.memo.as_deref(), Some("new"));
+        assert_eq!(next.memo.as_deref(), Some(" new "));
         assert_eq!(next.tags, vec!["pc".to_string()]);
         assert!(next.bookmarked);
     }

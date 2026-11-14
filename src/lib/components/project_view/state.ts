@@ -120,14 +120,6 @@ export function normalizeIocFlag(value: string): FlagSymbol {
   return "safe";
 }
 
-export function sanitizeMemoInput(value: string): string {
-  const withoutControl = value.replace(
-    /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,
-    ""
-  );
-  return withoutControl.replace(/<[^>]*>/g, "");
-}
-
 export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
   if (!f) return "";
   const lower = f.trim().toLowerCase();
@@ -155,7 +147,7 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   return {
     ...incoming,
     flag: mapStoredFlag(incoming.flag) || "",
-    memo: sanitizeMemoInput(incoming.memo ?? ""),
+    memo: incoming.memo ?? "",
     displayCache,
     previewCache,
   };
@@ -169,7 +161,7 @@ export function applyAnnotationEntry(
   row: CachedRow,
   entry: FlagEntry | null
 ): CachedRow {
-  const memo = sanitizeMemoInput(entry?.memo ?? "");
+  const memo = entry?.memo ?? "";
   return {
     ...row,
     flag: mapStoredFlag(entry?.flag),
