@@ -30,10 +30,12 @@ from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
 from scroll_render_checks import verify_scroll_rendering
-from toolbar_checks import verify_toolbar
+from toolbar_checks import verify_toolbar, verify_condition_buttons
 from datetime_group_checks import verify_datetime_groups
 from preset_ioc_checks import verify_presets_iocs
 from column_presentation_checks import verify_column_presentation
+from bulk_form_checks import verify_bulk_form
+from tag_usage_checks import verify_tag_usage
 from wide_table_checks import verify_wide_table
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
@@ -85,7 +87,7 @@ class WorkspaceView(WebView):
         ]}]})
 
     def choose(self, selector: str, value: str, index: int = 0) -> None:
-        option = self.script("return [...document.querySelectorAll(arguments[0])][arguments[2]]?.querySelector('option[value='+CSS.escape(arguments[1])+']')??null;", selector, value, index)
+        option = self.script("return [...(document.querySelectorAll(arguments[0])[arguments[2]]?.options??[])].find(option=>option.value===arguments[1])??null;", selector, value, index)
         assert option, (selector, value, index)
         self.click(option)
 
@@ -373,13 +375,13 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.drawer("Bulk annotation")
     web.write('input[aria-label="Bulk tag"]', "native-ui")
     before = len(web.trace())
-    web.named("Add tag", "#analysis-drawer")
+    web.named("Apply", ".bulk-form")
     wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "bulk adds tags to applied result")
     web.refreshed(before)
     all_rows = web.command("query_project_rows", {"projectId": data["id"], "offset": 0, "limit": total})["rows"]
     assert all(("native-ui" in row["tags"]) == ((row["row_index"] + 1) % 4 in [0, 2]) for row in all_rows)
     before = len(web.trace())
-    web.named("Undo last bulk", "#analysis-drawer")
+    web.named("Undo", ".bulk-form")
     wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "bulk undo")
     web.refreshed(before)
     assert all("native-ui" not in row["tags"] for row in web.command("query_project_rows", {"projectId": data["id"], "offset": 0, "limit": total})["rows"])
@@ -387,6 +389,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.flags([])
     web.results(total)
     web.drawer("Bulk annotation")
+    web.choose('select[aria-label="Bulk flag"]', "safe")
     web.write('input[aria-label="Bulk note"]', "delayed bulk audit")
     before = len(web.trace())
     web.named("Preview", "#analysis-drawer")
@@ -401,7 +404,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     finally:
         web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;")
     web.drawer("Bulk annotation")
-    web.named("Undo last bulk", "#analysis-drawer")
+    web.named("Undo", ".bulk-form")
     wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row')].some(row=>row.querySelector('.cell.index')?.textContent.trim()==='1'&&row.querySelector('.flag-suspicious.selected'));"), bool, "undo restores original row flag")
     web.close_drawer()
     web.results(total)
@@ -852,6 +855,7 @@ def main() -> None:
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
                 ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
+                ("condition add button affordance", lambda: verify_condition_buttons(web, evidence, report)),
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
                 ("stable stripes while scrolling", lambda: verify_scroll_rendering(web, data, evidence, report)),
@@ -861,6 +865,8 @@ def main() -> None:
                 ("compact scrollable row detail", lambda: verify_compact_detail(web, data, root, evidence, report)),
                 ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
+                ("unified bulk annotation form", lambda: verify_bulk_form(web, data, root, evidence, report)),
+                ("visible tags and annotation search", lambda: verify_tag_usage(web, data, root, evidence, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),
                 ("UTC datetime grouping", lambda: verify_datetime_groups(web, data, root, evidence, report)),

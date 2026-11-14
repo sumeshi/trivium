@@ -111,7 +111,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         applied = _rows(web, project_id)
         assert [row["flag"] for row in applied] == ["critical", "", "critical"], applied
         assert applied[0]["memo"] == "human note" and applied[0]["tags"] == ["manual", "IOC"] and applied[0]["bookmarked"], applied[0]
-        web.named("Undo last bulk", ".ioc-footer")
+        web.named("Undo", ".ioc-footer")
         wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "2 rows restored." in text, "IOC undo restores the complete previous annotation")
         assert _rows(web, project_id) == original
         export_path = root / "ioc-draft.csv"

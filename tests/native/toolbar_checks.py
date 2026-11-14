@@ -68,3 +68,33 @@ def verify_toolbar(web, data, evidence: Path, report: dict) -> None:
         web.request("POST", web.route("window/rect"), {"width": 1280, "height": 827})
         web.button("First")
         web.results(data["total"])
+
+
+def verify_condition_buttons(web, evidence: Path, report: dict) -> None:
+    web.drawer("Conditions")
+    try:
+        buttons = web.script("""
+          const root=document.querySelector('.condition-editor .group-toolbar'),c=document.createElement('canvas').getContext('2d');
+          return ['Add condition','Add group'].map(name=>{
+            const e=root.querySelector('[aria-label="'+name+'"]'),r=e.getBoundingClientRect(),s=getComputedStyle(e);
+            c.clearRect(0,0,1,1);c.fillStyle=s.borderTopColor;c.fillRect(0,0,1,1);
+            return {name,tag:e.tagName,text:e.textContent.trim(),width:r.width,height:r.height,
+              border:parseFloat(s.borderTopWidth),borderAlpha:c.getImageData(0,0,1,1).data[3],
+              reachable:e.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))};
+          });
+        """)
+        assert all(button["tag"] == "BUTTON" and button["width"] >= 40
+            and 24 <= button["height"] <= 28 and button["border"] >= 1
+            and button["borderAlpha"] > 0 and button["reachable"] for button in buttons), buttons
+        assert "Condition" in buttons[0]["text"] and "Group" in buttons[1]["text"], buttons
+        web.script("document.querySelector('.condition-editor [aria-label=\"Add condition\"]').focus();")
+        web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "condition-button-focus", "actions": [
+            {"type": "keyDown", "value": "\ue004"}, {"type": "keyUp", "value": "\ue004"},
+            {"type": "keyDown", "value": "\ue008"}, {"type": "keyDown", "value": "\ue004"},
+            {"type": "keyUp", "value": "\ue004"}, {"type": "keyUp", "value": "\ue008"}]}]})
+        focus = web.script("const e=document.activeElement,s=getComputedStyle(e);return {name:e.getAttribute('aria-label'),visible:e.matches(':focus-visible'),outline:parseFloat(s.outlineWidth)};")
+        assert focus["name"] == "Add condition" and focus["visible"] and focus["outline"] >= 2, focus
+        web.screenshot(evidence / "condition-add-buttons.png")
+        report["condition_buttons"] = {"buttons": buttons, "keyboard_focus": focus}
+    finally:
+        web.close_drawer()
