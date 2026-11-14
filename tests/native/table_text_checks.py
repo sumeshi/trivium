@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import csv
+import json
+import math
+import os
 from pathlib import Path
 import uuid
 
@@ -11,6 +14,20 @@ from row_navigation import open_project, wait_for
 
 
 BASE = {"body": 10.5, "header": 9.5, "index": 10, "note": 11, "flag": 10, "tag": 10}
+
+
+def _fit_failure(percent: int, index: int, control: dict) -> None:
+    """Public diagnostics contain only fixed labels and bounded numeric geometry."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    safe = {"control": "tag" if control["tag"] else "flag", "index": index}
+    if percent in {85, 100, 115, 130, 145}:
+        safe["percent"] = percent
+    for key in ("width", "height", "contentWidth", "contentHeight", "advanceWidth", "inkWidth", "inkHeight", "fontSize"):
+        value = control.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(value) and abs(value) <= 10_000:
+            safe[key] = round(value, 3)
+    print(f"::error title=Native table text fit::{json.dumps(safe, separators=(',', ':'))}", flush=True)
 
 
 def _size(web, action: str | None, expected: int) -> None:
@@ -37,7 +54,11 @@ def _sample(web, percent: int) -> dict:
       const row=document.querySelector('.data-row:not(.loading)'),font=e=>parseFloat(getComputedStyle(e).fontSize),
         box=e=>{const r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];},
         index=row.querySelector('.index'),s=getComputedStyle(index),canvas=document.createElement('canvas');
-      const context=canvas.getContext('2d');context.font=s.font;const sevenDigitWidth=context.measureText('2000000').width;
+      const context=canvas.getContext('2d'),canvasFont=style=>`${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
+        contentBox=e=>{const r=e.getBoundingClientRect(),c=getComputedStyle(e);return {
+          width:r.width-parseFloat(c.borderLeftWidth)-parseFloat(c.borderRightWidth)-parseFloat(c.paddingLeft)-parseFloat(c.paddingRight),
+          height:r.height-parseFloat(c.borderTopWidth)-parseFloat(c.borderBottomWidth)-parseFloat(c.paddingTop)-parseFloat(c.paddingBottom)};};
+      context.font=canvasFont(s);const sevenDigitWidth=context.measureText('2000000').width;
       return {fonts:{body:font(row.querySelector('.cell-text')),header:font(document.querySelector('.data-header .header-label')),
         index:font(index),note:font(row.querySelector('.memo-button')),flag:font(row.querySelector('.flag-safe')),
         tag:font(row.querySelector('.row-tags-button'))},
@@ -46,17 +67,26 @@ def _sample(web, percent: int) -> dict:
         grid:document.querySelector('.data-header').style.gridTemplateColumns,
         outside:[...document.querySelectorAll('.brand-name,.filter-row,.filter-row input,.aux-trigger,.table-meta')].map(e=>({font:font(e),box:box(e)})),
         controls:[...row.querySelectorAll('.flag-buttons button,.row-tags-button')].map(e=>{
-          const r=e.getBoundingClientRect(),tag=e.classList.contains('row-tags-button'),label=tag?e.querySelector('span'):e;
-          context.font=getComputedStyle(label).font;const m=context.measureText(label.textContent.trim());
-          return {height:r.height,width:r.width,tag,fits:m.width<=label.clientWidth+.1&&m.actualBoundingBoxAscent+m.actualBoundingBoxDescent<=e.clientHeight};}),
+          const r=e.getBoundingClientRect(),tag=e.classList.contains('row-tags-button'),label=tag?e.querySelector('span'):e,
+            style=getComputedStyle(label),content=contentBox(e),labelWidth=contentBox(label).width;
+          // clientWidth rounds fractional glyph widths; compare the same float CSS-pixel units.
+          context.font=canvasFont(style);const m=context.measureText(label.textContent.trim()),
+            inkWidth=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,inkHeight=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
+          return {height:r.height,width:r.width,tag,fontSize:parseFloat(style.fontSize),contentWidth:labelWidth,
+            contentHeight:content.height,advanceWidth:m.width,inkWidth,inkHeight,
+            fits:Math.max(m.width,inkWidth)<=labelWidth+.1&&inkHeight<=content.height};}),
         sevenDigitWidth,
-        indexContentWidth:index.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight)};
+        indexContentWidth:contentBox(index).width};
     """)
     for kind, base in BASE.items():
         assert abs(sample["fonts"][kind] - base * percent / 100) <= .03, (percent, kind, sample)
     assert all(height == 32 for height in sample["rowHeights"]) and sample["headerHeight"] == 38, sample
     assert sample["sevenDigitWidth"] <= sample["indexContentWidth"] + .1, sample
-    assert all(control["fits"] and control["height"] == (20 if control["tag"] else 21) for control in sample["controls"]), sample
+    failed = [(index, control) for index, control in enumerate(sample["controls"])
+              if not control["fits"] or control["height"] != (20 if control["tag"] else 21)]
+    if failed:
+        _fit_failure(percent, *failed[0])
+    assert not failed, sample
     return sample
 
 
