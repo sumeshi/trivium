@@ -96,7 +96,7 @@ def _details(web, project_id: str, columns: dict[str, str], message: str, total:
 def _timeline(web, project_id: str, evidence: Path) -> dict:
     web.drawer("Timeline")
     heading = web.script("const e=document.querySelector('#analysis-tool-label'),r=e.getBoundingClientRect(),t=document.querySelector('.analysis-tabs').getBoundingClientRect();return {tag:e.tagName,label:e.textContent.trim(),clickable:!!e.closest('button,a,summary,[role=button]'),aboveTabs:r.bottom<=t.top+1};")
-    assert heading == {"tag": "H3", "label": "Analysis", "clickable": False, "aboveTabs": True}, heading
+    assert heading == {"tag": "H3", "label": "Analyze", "clickable": False, "aboveTabs": True}, heading
     wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "real timestamp histogram opens")
     web.named("Show all", ".analysis-drawer")
     wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda count: count == 0, "all sparse and dense events included")
