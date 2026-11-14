@@ -30,7 +30,7 @@ pub fn reset_resolve_count() {
     RESOLVE_COUNT.store(0, Ordering::Relaxed);
 }
 
-/// Shared query contract (GOAL.md §4).
+/// Shared query contract for investigation operations.
 ///
 /// `search_columns` is the search scope, not the visible or output columns.
 /// `None` or an empty list means every data column.

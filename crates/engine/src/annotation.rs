@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::models::FlagEntry;
 
-/// Partial update for one row's annotation (GOAL.md §4).
+/// Partial update for one row's annotation.
 ///
 /// A missing field keeps the stored value. An explicitly empty value clears it:
 /// `Some("")` for the flag, `Some(None)` or a blank string for the memo,

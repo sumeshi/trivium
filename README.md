@@ -1,200 +1,111 @@
 <h1 align="center"><img src="assets/branding/banner.png" alt="Trivium" width="720"></h1>
 
-A desktop application for reviewing and triaging large CSV, JSON, and JSONL logs.
+Trivium is a desktop application for manually investigating CSV / JSON / JSONL / NDJSON data.
+Search, narrow the table, inspect full values, and record your findings with **Safe / Suspicious / Critical**, notes, tags and bookmarks.
 
 ![Trivium Screenshot](screenshot.jpeg)
 
-## Introduction
+## Install
 
-Trivium is a desktop tool for reviewing CSV, JSON, and JSONL data that is too large or too structured for a spreadsheet. It provides a simple interface for filtering data, flagging important rows, and recording notes, tags, and bookmarks.
+- **Windows:** download `Trivium-v*.exe` from [Releases](https://github.com/sumeshi/trivium/releases). The portable application requires Microsoft's [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+- **Linux:** download `trivium-deb` from a successful [Debian build](https://github.com/sumeshi/trivium/actions/workflows/debian.yml), extract it, then run `sudo apt install ./package.deb` with the actual filename. Development artifacts expire after three days.
 
-Its core purpose is to make manual data review and analysis faster and easier to resume. Opening a file never assigns a risk level or marks a row as reviewed; the user makes those decisions.
+The application's **Workspace options** menu shows its version and source commit. CI artifact ZIPs include `BUILD-INFO.json` and `SHA256SUMS` for the extracted package or executable; GitHub's artifact ZIP has a separate checksum. The hash beside an opened filename identifies the source data, not the application build.
 
-## Download
+## Investigate
 
-Pre-built versions for Windows are available for download from the project's **[Releases](https://github.com/sumeshi/Trivium/releases)** page. *(Note: This is a placeholder link.)*
+1. Open **Projects**, choose a data file, and open it. CSV delimiter options apply only to CSV; the first record supplies column names. The source stays read-only.
+2. Search or use **Filters** to narrow the result. Click a row value for its full record; right-click cells and column headings for contextual actions.
+3. Record flags, notes, tags and bookmarks. These annotations are independent; unflagged rows are not Safe.
+4. Export all rows, the current result, or selected rows to CSV. Optional `trivium-*` columns include annotations.
 
-## Who is this for?
+Open projects use tabs. Closing a tab preserves its saved case and annotations; reopen it from Projects. The `#` column and row-jump input refer to original, one-based row numbers even after filtering or sorting. First / Last move within the current result.
 
-This tool is primarily for anyone who needs to sift through large amounts of tabular data, such as:
+Column visibility and freezing affect presentation, not search scope. **Search in** chooses text-search columns. **Analysis** contains column statistics, nested grouping, time analysis and the timeline; **Annotations** contains bulk operations and IOC rules. Auxiliary panels calculate while open. Themes are available in Workspace options.
 
-- Security analysts reviewing logs or threat intelligence data.
-- Data analysts performing preliminary data cleaning and exploration.
-- Researchers categorizing and annotating datasets.
+### Search
 
-## Key Features
+Text search is case-insensitive. Combine terms with spaces for AND, `|` for OR, and a leading `-` for NOT; NOT takes precedence over AND, then OR. Quote literal phrases and special characters. Scope a term with `column:value`.
 
-- **Efficient Import**: Opens CSV, JSON object/array, JSONL, and NDJSON files and stores the working copy as Parquet. CSV values keep their original text; JSON null, missing keys, and empty strings stay distinct.
-- **Virtualized Scrolling**: The interface remains responsive with millions of rows.
-- **Flag Rows**: Mark any row as `Safe`, `Suspicious`, or `Critical` with a single click.
-- **Annotations**: Add memos, tags, and bookmarks independently. Clearing a flag does not clear the other annotations.
-- **Filtering & Sorting**: Filter by flag, bookmark, text search, or structured conditions, and sort by any data column.
-- **Column Management**: Hide columns or choose how many leading data columns stay pinned, independently from the search scope.
-- **Selection & Bulk Annotation**: Select rows across pages by stable row id, annotate only the selection, the current result, or all rows, and undo the last bulk change.
-- **Data Export**: Export all rows, the current result, or selected rows to CSV, with optional `trivium-*` annotation columns.
-- **Condition Editor**: Build filters from nested AND/OR groups with per-column operators (`=`, `≠`, `>`, `<`, `≥`, `≤`, `contains`, `starts`, `ends`, `regex`, `in`), while the text search bar remains available.
-- **Analysis**: Inspect per-column statistics and rare values, histograms, time gaps/sessions/bursts, duplicate or unique rows, and full row details. Time controls explain gaps, sessions, and bursts; panels calculate only while open and use the applied query. Back/forward navigation and per-project view state make it easy to move between filters.
-- **Advanced Views**: Grouping, color rules, presets, cross-project search, diffs, and HTML reports remain available as auxiliary tools outside the basic manual-review flow.
-- **Flexible Import & Export**: Choose a CSV delimiter, import UTF-16 via BOM detection, and load JSON/JSONL with nested keys flattened using JSON Pointers. The source file name, format, size, and SHA-256 are kept in project metadata. Exports preserve integer text and can include tags and bookmarks as independent columns.
+| Example | Meaning |
+| --- | --- |
+| `error timeout` | Both terms |
+| `error\|warn` | Either term |
+| `beacon -test` | Include beacon, exclude test |
+| `user:administrator` | Search one column |
+| `command:"powershell -enc"` | A phrase in one column |
 
-## Search Syntax
+Use Filters for nested AND/OR groups, numeric or datetime comparisons, and regular expressions. Text search and structured conditions combine with AND. Text search itself does not interpret regex or parentheses.
 
-Trivium provides a fast, flexible text search with boolean operators and column scoping.
+## Saved data
 
-- Basic
-  - Case-insensitive substring match
-  - Search runs across all data columns by default. Hiding a column changes display only; it does not change the search scope.
+The desktop workspace lives under:
 
-- Operators (no keywords; use symbols only)
-  - AND: whitespace (implicit between adjacent terms)
-  - OR: `|`
-  - NOT: leading `-` before a term (outside quotes)
-  - Precedence: `NOT` > `AND` > `OR` (no parentheses support)
+- Linux: `$XDG_DATA_HOME/com.trivium.app/trivium`, or `~/.local/share/com.trivium.app/trivium`.
+- Windows: `%LOCALAPPDATA%\com.trivium.app\trivium`.
 
-- Quoted phrases
-  - `"exact phrase"` matches the phrase literally
-  - Inside quotes, `|` and `-` are treated as literal characters, not operators
+Each `projects/<uuid>/` contains `data.parquet` and `project.sqlite`: imported evidence plus annotations, view settings and durable bulk undo. Stop Trivium and any automation before backing up the whole workspace. Deleting a saved case removes its imported copy, leaving the original source untouched.
 
-- Column scoping
-  - `column:term` limits the term to a specific column
-  - `column:"two words"` for a quoted phrase in a specific column
-  - Column names are case-insensitive: `EventID:4624` == `eventid:4624`
+CSV values retain their original text. JSON objects and arrays of objects become rows; nested keys use JSON Pointers. Empty strings, null and missing values stay distinct. Large integers and nanosecond timestamps retain their original precision.
 
-- Special characters
-  - To search `|`, `-`, or `-keyword` literally, wrap in quotes (e.g., `"-keyword"`)
-  - JSON-like fragments with colons should be quoted: `"hoge:fuga"` or scoped `data:"hoge:fuga"`
+## Automation
 
-- Examples
-  - `malware beacon` → `malware` AND `beacon`
-  - `error|warn` → `error` OR `warn`
-  - `beacon -test` → `beacon` AND NOT `test`
-  - `eventid:4624 user:administrator` → scoped to `eventid` and `user`
-  - `command:"powershell -enc"` → phrase in `command`
+`trivium-cli` is a separate, optional Rust program for Python or other scripts. The desktop application does not launch or require it. It uses the same engine and saved-case format, receiving JSON-line requests on stdin and returning responses on stdout; no server or embedded Python is involved.
 
-- Legacy IOC definitions
-  - IOC definitions use the same syntax and semantics as the main search, but they are preserved as old settings and are not evaluated automatically on import, page load, or export.
+```sh
+cargo build --locked --release -p trivium-engine --bin trivium-cli
+python examples/automate.py --cli target/release/trivium-cli --workspace /cases/demo --source /evidence/events.csv --search "needle"
+```
 
-Notes
-- Regular expressions are not supported in the text search bar; `regex` remains available in structured conditions.
-- Repeated page and search requests reuse prepared work; the first full-column search can still take time on very large files.
+On Windows, use `target\release\trivium-cli.exe`. The [Python example](examples/automate.py) provides `Trivium.call(method, params)`. Send `{"version":1,"method":"hello"}` to list methods. Requests are sequential; inspect each response's `ok` and `result` or `error`. `query` is paged; `cell` returns a full value, and `export` writes a file. Row indices in this protocol are zero-based.
 
-### Structured Conditions
+## Develop
 
-The condition editor builds a filter tree that the engine evaluates with the same predicate as the text search. It does not replace the search bar: both remain available, and when both are set a row must match the text search and the condition tree (AND).
+The application uses Tauri 2, Svelte / TypeScript and a shared Rust engine. Polars queries Parquet evidence; SQLite stores case state. Install the Node and Rust versions pinned in [.node-version](.node-version) and [rust-toolchain.toml](rust-toolchain.toml), plus the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-- Condition rows
-  - Each row selects a column, an operator, and a value.
-  - Operators: `=` (`Eq`), `≠` (`Ne`), `>` (`Gt`), `<` (`Lt`), `≥` (`Ge`), `≤` (`Le`), `contains`, `starts`, `ends`, `regex`, and `in`.
-  - `in` accepts a comma-separated list of values, for example `4624,4625,4688`.
-  - `Not` negates an individual row.
-
-- Groups
-  - Every group combines its children with AND or OR.
-  - Groups can be nested; the root group is an AND group.
-  - Rows and groups can be reordered with `Up`/`Down`, and groups can be collapsed.
-
-- Typed values
-  - Numeric columns use numeric input and datetime columns use `datetime-local` input.
-  - Integer and nanosecond values are sent as text, so values beyond `2^53` are not rounded.
-
-- Scope and notes
-  - Conditions name their columns explicitly, so they can target columns that are currently hidden.
-  - The text search bar does not support regular expressions; `regex` is available only as a structured condition operator.
-
-## Getting Started
-
-1.  **Import Data**: Click "Import CSV / JSON / JSONL File" in the sidebar and select a file.
-2.  **Review & Flag**: Inspect rows in the table and use the flag buttons (`✓`, `?`, `!`) to record your judgment.
-3.  **Annotate**: Add a memo, tags, or a bookmark. These fields are independent.
-4.  **Narrow the View**: Use text search, flag/bookmark filters, column conditions, and sorting.
-5.  **Select & Export**: Select rows across pages if needed, then export all rows, the current result, or the selection as CSV.
-
-## Building from Source
-
-For developers who wish to build or modify the application.
-
-#### Prerequisites
-
-- [Node.js](https://nodejs.org/) 24.22.1 (see `.node-version`; UI tests use built-in TypeScript stripping)
-- [Rust](https://www.rust-lang.org/tools/install) 1.99.1 (installed automatically by rustup from `rust-toolchain.toml`)
-- [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/)
-
-#### Development
-
-To run the application in development mode with hot-reloading:
-
-```bash
-npm install
+```sh
+npm ci
 npm run tauri dev
 ```
 
-*Note: `npm run dev` will run the Svelte frontend only, without the Rust backend.*
+`npm run dev` starts the frontend only. Build a native package for your platform:
 
-#### Production Build
-
-To build the distributable application for your platform:
-
-```bash
-npm install
-npm run tauri build
+```sh
+# Linux .deb
+npm run tauri build -- --bundles deb
+# Windows installer; the portable executable is also in target/release/
+npm run tauri build -- --bundles nsis
 ```
 
-#### Development Scripts
+Use a release build when comparing responsiveness. Engine timings exclude IPC, state updates and WebView rendering.
 
-- `scripts/gen_fixture.py` generates deterministic synthetic log fixtures for tests and benchmarks.
+Checks:
 
-  ```bash
-  python3 scripts/gen_fixture.py --rows 1000 --seed 42 --out fixtures/basic.csv
-  ```
-
-  It accepts `--rows N --seed N --out PATH --variant {ascii,utf16,wide,long}`. A fixed seed reproduces the same bytes; `utf16` writes a BOM-prefixed UTF-16LE file, `wide` adds twelve extra columns, and `long` adds many columns with long cells for the T27 benchmark.
-
-- `scripts/check_rust_size.sh` enforces the 500-line limit on Rust source files under `src-tauri/src` and `crates/engine/src`. It exits non-zero when a file exceeds the limit and runs as a quality gate in CI.
-
-  ```bash
-  bash scripts/check_rust_size.sh
-  ```
-
-Quality gates used locally and in CI:
-
-```bash
-cargo test -p trivium-engine
-cargo clippy -p trivium-engine --lib -- -D warnings
+```sh
+cargo test --locked -p trivium-engine
+cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
 bash scripts/check_rust_size.sh
 npm run lint
 npm run lint:test
 npm run test:ui
+npm run contracts:check
 npm run build
 ```
 
-Benchmark results are recorded in [docs/performance.md](docs/performance.md).
-See [the architecture](docs/architecture.md) for read paths and work ownership,
-and [automation](docs/automation.md) for the standalone JSONL CLI and Python example.
+Native GUI checks use the actual embedded application and isolated case profiles; their setup is in [Native smoke](.github/workflows/native-smoke.yml). On Linux, with GTK / WebKitGTK, Xvfb, `libxtst6`, `tauri-driver` and `WebKitWebDriver` installed:
 
-## Windows System Requirement: WebView2
+```sh
+cargo build --locked -p trivium-desktop --features custom-protocol
+xvfb-run -a python3 tests/native/row_navigation.py --binary target/debug/trivium-desktop --rows 5199 2000000
+xvfb-run -a python3 tests/native/workspace_ui.py --binary target/debug/trivium-desktop
+```
 
-On Windows, Trivium uses the Microsoft Edge WebView2 runtime to display the user interface.
-If you are using the **portable executable** (`.exe`), you may need to install the WebView2 Runtime manually. You can download it from the [official Microsoft website](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+For rendering and IPC measurements with synthetic small, tall and wide datasets:
 
-## Technology Stack
+```sh
+xvfb-run -a python3 tests/native/render_benchmark.py --binary target/release/trivium-desktop --out target/render-performance
+```
 
-- **Backend**: Rust with the Tauri framework
-- **Data Processing**: Polars for high-performance DataFrame operations (CSV/Parquet)
-- **Frontend**: Svelte with TypeScript
-- **UI**: Tailwind CSS
+`scripts/gen_fixture.py` generates deterministic CSV test data. Engine benchmarks live in `crates/engine/src/bin/`; generated datasets and measurements belong outside the source tree or under ignored `target/` paths. Update Rust wire DTOs with `npm run contracts:generate`.
 
-## Data Storage
-
-Projects are stored in the standard application data directory for your operating system.
-
-- `trivium/projects/<uuid>/data.parquet` — imported evidence, including exact original records.
-- `trivium/projects/<uuid>/project.sqlite` — case metadata, annotations, settings and durable bulk undo.
-- Older `projects.json`, `flags.db`, and JSON settings are migrated automatically and retained as backups. SQLite becomes authoritative after migration. An active legacy writer or damaged case produces an explicit error; see [storage and migration](docs/storage.md).
-
-The native UI opens cached metadata without decoding evidence rows. Table pages read only the required Parquet row groups. Polars remains the query and analysis engine; projected streaming operations and bounded external sorting keep exports from collecting a whole output frame.
-
-Rust-to-TypeScript wire types are generated in `src/lib/generated/engine.ts`. Run `npm run contracts:generate` after changing public DTOs, and `npm run contracts:check` before committing. Source integers and nanosecond timestamps remain strings on the wire.
-
----
-
-*Trivium is provided under the MIT License. See [LICENSE](LICENSE) for details.*
+[MIT License](LICENSE)
