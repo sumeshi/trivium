@@ -6,6 +6,7 @@ click on Insert UTC. Flags, memos and existing colour rules are preserved.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 import uuid
@@ -84,7 +85,8 @@ def _header_and_search(web, data, evidence, report) -> None:
     export = web.script("const e=document.querySelector('[aria-label=\"Export rows\"]');return e&&{text:e.textContent.trim(),title:e.title};")
     assert export and export["text"] == "" and export["title"], export
     web.named("Workspace options")
-    assert "0.2.0" in web.script("return document.querySelector('[aria-label=\"Application version\"]').textContent;")
+    version = json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text(encoding="utf-8"))["version"]
+    assert version in web.script("return document.querySelector('[aria-label=\"Application version\"]').textContent;")
     web.named("Workspace options")
     web.named("Open project menu")
     recent = web.script("return [...document.querySelectorAll('.project-card')].find(e=>e.querySelector('.project-name')?.textContent.trim()===arguments[0])?.querySelector('.project-hash')?.title;", data["name"])
