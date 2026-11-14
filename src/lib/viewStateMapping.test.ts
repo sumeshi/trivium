@@ -53,6 +53,18 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   assert.deepEqual(restored, saved());
 });
 
+test('display order and ISO settings survive save/restore without changing query scope', () => {
+  const view = saved({ columnOrder: ['c000003', 'c000001', 'c000002'], columnFormats: { c000002: 'iso' } });
+  const state = savedViewToViewState(view);
+  assert.deepEqual(viewStateToSavedView(state, columns), view);
+  assert.deepEqual(state.searchColumns, ['c000002']);
+  assert.equal(state.sortKey, 'c000001');
+  const stale = { ...state, columnOrder: ['gone', 'c000002', 'c000002'], columnFormats: { gone: 'iso', c000001: 'future', c000002: 'iso' } };
+  assert.deepEqual(viewStateToSavedView(stale, columns)?.columnOrder, ['c000002']);
+  assert.deepEqual(viewStateToSavedView(stale, columns)?.columnFormats, { c000002: 'iso' });
+  assert.deepEqual(viewStateWarnings(stale, columns), ['column order', 'column formats']);
+});
+
 test("unknown saved fields are reported instead of silently reset", () => {
   const state = savedViewToViewState(
     saved({

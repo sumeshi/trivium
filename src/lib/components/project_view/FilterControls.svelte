@@ -4,6 +4,7 @@
   import { get } from 'svelte/store';
   import { appendEmptyColumnRule } from '../../appliedFilterSummary';
   import { MAX_GROUP_LEVELS } from '../../grouping';
+  import type { GroupGranularity } from '../../grouping';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
@@ -51,6 +52,7 @@
   let searchControls: SearchControls | undefined;
   let groupingPanel: GroupingPanel | undefined;
   let groupColumns: string[] = [];
+  let groupGranularities: Record<string, GroupGranularity> = {};
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
   $: categoryLabel = groups.find((group) => group.id === activeGroup)?.label ?? 'Tools';
@@ -203,6 +205,22 @@
 
 <section class="filters">
   <div class="filter-row">
+    <div class="filter-primary">
+      <slot name="history" />
+    <button
+      type="button"
+      class="tool-button bookmark-toggle"
+      class:active={$bookmarkedOnly}
+      aria-pressed={$bookmarkedOnly}
+      aria-label="Show bookmarked rows only"
+      title="Show bookmarked rows only"
+      on:click={() => bookmarkedOnly.update((value) => !value)}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
+      </svg>
+    </button>
+
     <div class="flag-picker" bind:this={flagPickerEl}>
       <button
         type="button"
@@ -238,20 +256,6 @@
     </div>
 
     <SearchControls bind:this={searchControls} on:open={() => { flagMenuOpen = columnsOpen = false; }} />
-
-    <button
-      type="button"
-      class="tool-button bookmark-toggle"
-      class:active={$bookmarkedOnly}
-      aria-pressed={$bookmarkedOnly}
-      aria-label="Show bookmarked rows only"
-      title="Show bookmarked rows only"
-      on:click={() => bookmarkedOnly.update((value) => !value)}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
-      </svg>
-    </button>
 
     <div class="column-picker" bind:this={columnPickerEl}>
       <button
@@ -307,16 +311,8 @@
       {/if}
     </div>
 
-    <button type="button" class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}
-      aria-label={$isExporting ? 'Exporting rows' : 'Export rows'} title={$isExporting ? 'Exporting rows…' : 'Export rows to CSV'} aria-busy={$isExporting}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 4v11m0 0 4-4m-4 4-4-4M4 20h16" />
-      </svg>
-
-    </button>
-  </div>
-
-  <div class="advanced-row">
+    </div>
+    <div class="filter-secondary">
     <slot name="navigation" />
     <div class="tool-groups" role="group" aria-label="Investigation tools">
       {#each groups as group}
@@ -325,6 +321,14 @@
           aria-controls="analysis-drawer" aria-expanded={activeGroup === group.id}
           on:click={(event) => openGroup(group, event)}>{group.label}</button>
       {/each}
+    </div>
+    <button type="button" class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}
+      aria-label={$isExporting ? 'Exporting rows' : 'Export rows'} title={$isExporting ? 'Exporting rows…' : 'Export rows to CSV'} aria-busy={$isExporting}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4v11m0 0 4-4m-4 4-4-4M4 20h16" />
+      </svg>
+
+    </button>
     </div>
   </div>
 
@@ -353,7 +357,7 @@
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} />
         {:else if activeTool === 'groups'}
-          <GroupingPanel bind:this={groupingPanel} bind:groupColumns />
+          <GroupingPanel bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities} />
         {:else if activeTool === 'time'}
           <TimePanel open={true} />
         {:else if activeTool === 'timeline'}

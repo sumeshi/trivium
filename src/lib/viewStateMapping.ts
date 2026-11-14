@@ -2,6 +2,7 @@ import type { FlagFilterValue, ViewState } from "./types";
 import type { EditorGroup } from "./stores/condition";
 import type { SavedView } from "./viewState";
 import { isFlagFilterValue } from "./flagFilters.ts";
+import type { ColumnDisplayFormat } from "./dateDisplay";
 
 const COMPARE_OPS = new Set([
   "eq",
@@ -100,6 +101,11 @@ function columnWidths(
   return widths;
 }
 
+function columnFormats(value: unknown, known: Set<string>): Record<string, ColumnDisplayFormat> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([id, format]) => known.has(id) && format === 'iso')) as Record<string, ColumnDisplayFormat>;
+}
+
 /**
  * Validates a legacy localStorage save or any parsed JSON into the current
  * SavedView shape. Returns null when the condition tree cannot be restored.
@@ -137,6 +143,8 @@ export function savedViewFromUnknown(
         : null,
     sortDirection: sortDirection(value.sortDirection),
     columnWidths: columnWidths(value.columnWidths, known),
+    ...(Array.isArray(value.columnOrder) ? { columnOrder: [...new Set(stringArray(value.columnOrder, known))] } : {}),
+    ...(isRecord(value.columnFormats) ? { columnFormats: columnFormats(value.columnFormats, known) } : {}),
     // `offset` is the legacy name for the result-relative row; the engine
     // keeps only `logicalRow`, so the two always agree after a round trip.
     offset: logicalRow,
@@ -183,6 +191,8 @@ export function viewStateWarnings(
   if (unknownHidden.length > 0) {
     warnings.push(`hidden columns ${unknownHidden.join(", ")}`);
   }
+  if (state.columnOrder?.some((id) => !known.has(id))) warnings.push('column order');
+  if (Object.entries(state.columnFormats ?? {}).some(([id, format]) => !known.has(id) || format !== 'iso')) warnings.push('column formats');
   return warnings;
 }
 
@@ -200,6 +210,8 @@ export function savedViewToViewState(view: SavedView): ViewState {
     hiddenColumns: [...view.hiddenColumns],
     ...(view.frozenThrough !== undefined ? { frozenThrough: view.frozenThrough } : {}),
     columnWidths: { ...view.columnWidths },
+    ...(view.columnOrder ? { columnOrder: [...view.columnOrder] } : {}),
+    ...(view.columnFormats ? { columnFormats: { ...view.columnFormats } } : {}),
     logicalRow: view.logicalRow ?? view.offset ?? 0,
   };
 }

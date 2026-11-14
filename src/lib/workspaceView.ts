@@ -58,6 +58,8 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     hiddenColumns: Array.from(get(workspace.hiddenColumns)),
     ...(get(workspace.frozenThrough) !== undefined ? { frozenThrough: get(workspace.frozenThrough) } : {}),
     columnWidths: Object.fromEntries(options.columnWidths()),
+    columnOrder: [...get(workspace.columnOrder)],
+    columnFormats: { ...get(workspace.columnFormats) },
     logicalRow: viewportSnapshot().logicalRow,
   });
   const snapshotSession = (): WorkspaceSession | null => {
@@ -94,7 +96,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     for (const store of [workspace.search, workspace.searchColumns, workspace.flagFilter,
       workspace.bookmarkedOnly, workspace.sortKey, workspace.sortDirection,
       workspace.hiddenColumns, workspace.frozenThrough, workspace.conditionTree,
-      workspace.scrollTop, workspace.scrollLeft]) {
+      workspace.scrollTop, workspace.scrollLeft, workspace.columnOrder, workspace.columnFormats]) {
       let initial = true;
       subscriptions.push(store.subscribe(() => {
         if (initial) { initial = false; return; }

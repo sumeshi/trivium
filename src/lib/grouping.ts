@@ -1,8 +1,14 @@
 import type { GroupTreeNode } from "./types";
 import type { EditorCondition, EditorGroup } from "./stores/condition";
+import type * as Wire from "./generated/engine";
 
 export const MAX_GROUP_LEVELS = 8;
 export const GROUP_PAGE_SIZE = 100;
+export type GroupGranularity = Wire.GroupGranularity;
+export const GROUP_GRANULARITIES = [
+  ["exact", "Exact"], ["year", "Year (UTC)"], ["month", "Month (UTC)"],
+  ["day", "Day (UTC)"], ["hour", "Hour (UTC)"], ["minute", "Minute (UTC)"],
+] as const satisfies readonly (readonly [GroupGranularity, string])[];
 
 export type GroupRow = {
   node: GroupTreeNode;
@@ -70,7 +76,11 @@ export function appendGroupPath(
     const condition = (op: EditorCondition["op"], value: string): EditorCondition => ({
       type: "condition", id: createId(), column, op, value, exact: true, negated: false,
     });
-    if (isMissingGroup(node)) {
+    if (node.range) {
+      // Existing ordered comparisons reject blank source strings. Short-circuit
+      // them before the exact nanosecond comparisons; null also stays excluded.
+      children.push(condition("regex", "\\S"), condition("ge", node.range.start), condition("lt", node.range.end));
+    } else if (isMissingGroup(node)) {
       // Regex sees null as empty, whereas exact equality distinguishes them.
       children.push(condition("ne", ""), condition("regex", "\\A\\z"));
     } else {

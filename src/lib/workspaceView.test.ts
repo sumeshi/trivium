@@ -46,6 +46,8 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   workspace.filterByValue("c1", "filter");
   workspace.recordAppliedCondition(4, get(workspace.conditionTree), 2999);
   workspace.selectedRowIds.set(new Set([2, 4567]));
+  workspace.columnOrder.set(['c1']);
+  workspace.columnFormats.set({ c1: 'iso' });
   workspace.registerLoadedPage(0, 0, [normalizeRow({ row_index: 2,
     cells: { c1: { kind: "string", text: "never retain this row" } }, flag: "", memo: "", tags: [], bookmarked: false })]);
   const snapshot = view.snapshotSession()!;
@@ -55,6 +57,8 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   assert.equal(snapshot.view.search, "query");
   assert.equal(snapshot.view.logicalRow, 2999);
   assert.equal(snapshot.view.sortDirection, "desc");
+  assert.deepEqual(snapshot.view.columnOrder, ['c1']);
+  assert.deepEqual(snapshot.view.columnFormats, { c1: 'iso' });
   assert.deepEqual(snapshot.selectedRowIds, [2, 4567]);
   assert.equal(snapshot.history.index, 1);
   assert.equal(snapshot.scrollLeft, 200);

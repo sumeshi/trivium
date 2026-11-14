@@ -14,7 +14,7 @@
   $: selectedNames = $searchColumns.map((column) => $columnLabels.get(column) ?? column);
   $: scopeLabel = selectedNames.length === 0 ? 'All columns' : selectedNames.length === 1
     ? selectedNames[0] : `${selectedNames.length} columns`;
-  $: scopeTitle = `Search columns: ${selectedNames.length ? selectedNames.join(', ') : 'all data columns'}. Explicit column:value targets its named column.`;
+  $: scopeTitle = `Search columns: ${selectedNames.length ? selectedNames.join(', ') : 'all data columns'}.`;
   export function close(): void { scopeOpen = helpOpen = false; }
   const toggleSearchColumn = (column: string) => {
     searchColumns.update((current) => current.includes(column)
@@ -58,8 +58,7 @@
   {#if scopeOpen}
     <div class="search-popover scope-panel" id="search-column-menu" role="group" aria-label="Search columns">
       <div class="search-popover-head"><strong>Search columns</strong><button type="button" on:click={() => (scopeOpen = false)}>Done</button></div>
-      <p>Choose which columns plain search text checks. A row matches when the search expression is satisfied.</p>
-      <p>Visible columns are separate. An explicit <code>column:value</code> searches that column.</p>
+      <p>Search selected columns. <code>column:value</code> targets a named column.</p>
       <button type="button" class="all-search-columns" class:active={$searchColumns.length === 0}
         on:click={() => searchColumns.set([])}>All data columns</button>
       <input type="search" class="column-search" aria-label="Find a search column" placeholder="Find column" bind:value={scopeSearch} />
@@ -77,7 +76,7 @@
   {:else if helpOpen}
     <div class="search-popover search-help" id="search-syntax-help" role="note" aria-label="Search syntax">
       <div class="search-popover-head"><strong>Search syntax</strong><button type="button" on:click={() => (helpOpen = false)}>Done</button></div>
-      <p>Case-insensitive text matching across the selected search columns.</p>
+      <p>Case-insensitive text search.</p>
       <dl>
         <dt><code>error timeout</code></dt><dd>Both terms (AND)</dd>
         <dt><code>error | warning</code></dt><dd>Either term (OR)</dd>
@@ -86,14 +85,14 @@
         <dt><code>column:value</code></dt><dd>Search one named column</dd>
         <dt><code>column:"failed login"</code></dt><dd>A phrase in one column</dd>
       </dl>
-      <p>Quote text containing a colon, such as <code>"https://example.test"</code>. AND, OR and NOT are ordinary words; use spaces, <code>|</code> and <code>-</code>.</p>
+      <p>Quote literal colons: <code>"https://example.test"</code>.</p>
       <p>For grouped AND/OR, comparisons, dates or regular expressions, use <strong>Filters → Rules</strong>.</p>
     </div>
   {/if}
 </div>
 
 <style>
-  .search-controls { position: relative; flex: 1 1 360px; min-width: 220px; }
+  .search-controls { position: relative; flex: 1 1 240px; min-width: 240px; }
   .search-field { width: 100%; }
   .scope-trigger { display: inline-flex; align-items: center; gap: 5px; border: 0; cursor: pointer; color: var(--muted); white-space: nowrap; }
   .scope-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

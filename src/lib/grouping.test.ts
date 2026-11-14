@@ -57,3 +57,27 @@ test("empty group paths leave existing conditions untouched", () => {
   assert.equal(special.children.length, 1);
   assert.equal(special.children[0].type === "condition" && special.children[0].value, "NaN");
 });
+
+test("calendar drilldown adds an exact half-open range after excluding blank timestamps", () => {
+  const root: EditorGroup = { type: "group", id: "root", kind: "and", collapsed: false, children: [] };
+  const day = { ...node("2026-11-14"), range: { start: "2026-11-14T00:00:00Z", end: "2026-11-15T00:00:00Z" } };
+  const next = appendGroupPath(root, ["host", "timestamp"], [node("host-a"), day]);
+  assert.deepEqual(next.children.map((row) => row.type === "condition" ? [row.column, row.op, row.value] : []), [
+    ["host", "eq", "host-a"], ["timestamp", "regex", "\\S"],
+    ["timestamp", "ge", day.range.start], ["timestamp", "lt", day.range.end],
+  ]);
+  assert.equal(root.children.length, 0);
+  assert.deepEqual(day.range, { start: "2026-11-14T00:00:00Z", end: "2026-11-15T00:00:00Z" });
+});
+
+test("time ranges narrow an existing OR group without replacing its filters", () => {
+  const root: EditorGroup = { type: "group", id: "root", kind: "or", collapsed: false,
+    children: [{ type: "condition", id: "keep", column: "message", op: "contains", value: "logon", negated: false }] };
+  const hour = { ...node("2026-11-14T23:00Z"), range: { start: "2026-11-14T23:00:00Z", end: "2026-11-15T00:00:00Z" } };
+  let id = 0;
+  const next = appendGroupPath(root, ["timestamp"], [hour], () => `time-${++id}`);
+  assert.equal(next.kind, "and");
+  assert.equal(next.children[0].type === "group" && next.children[0].kind, "or");
+  assert.deepEqual(next.children.slice(1).map((row) => row.type === "condition" ? row.op : "group"), ["regex", "ge", "lt"]);
+  assert.equal(root.children.length, 1);
+});

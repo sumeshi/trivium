@@ -6,6 +6,9 @@
   export let x: number;
   export let y: number;
   export let frozenThrough: string | undefined = undefined;
+  export let displayFormat: 'original' | 'iso' = 'original';
+  export let canMoveLeft = false;
+  export let canMoveRight = false;
 
   const dispatch = createEventDispatcher<{
     close: { restoreFocus: boolean };
@@ -15,6 +18,9 @@
     hide: { columnId: string };
     freeze: { columnId: string };
     unfreeze: void;
+    move: { columnId: string; direction: -1 | 1 };
+    resize: { columnId: string };
+    format: { columnId: string; format: 'original' | 'iso' };
   }>();
   let menu: HTMLDivElement;
   let left = x;
@@ -22,6 +28,9 @@
   const close = (restoreFocus = false) => dispatch('close', { restoreFocus });
   const outside = (event: MouseEvent) => {
     if (!menu?.contains(event.target as Node)) close();
+  };
+  const scrolling = (event: Event) => {
+    if (!(event.target instanceof Node) || !menu?.contains(event.target)) close();
   };
   const keydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') { event.preventDefault(); close(true); return; }
@@ -44,7 +53,7 @@
   });
 </script>
 
-<svelte:window on:mousedown={outside} on:scroll|capture={() => close()} on:resize={() => close()} />
+<svelte:window on:mousedown={outside} on:scroll|capture={scrolling} on:resize={() => close()} />
 
 <div class="cell-context-menu column-context-menu" bind:this={menu}
   style={`left: ${left}px; top: ${top}px;`} role="menu" aria-label={`Column actions: ${label}`}
@@ -60,6 +69,17 @@
     Group by this column
   </button>
   <div class="column-menu-separator" role="separator"></div>
+  <button type="button" role="menuitem" disabled={!canMoveLeft}
+    on:click={() => dispatch('move', { columnId, direction: -1 })}>Move left</button>
+  <button type="button" role="menuitem" disabled={!canMoveRight}
+    on:click={() => dispatch('move', { columnId, direction: 1 })}>Move right</button>
+  <button type="button" role="menuitem" on:click={() => dispatch('resize', { columnId })}>Resize column</button>
+  <div class="column-menu-separator" role="separator"></div>
+  <button type="button" role="menuitem" disabled={displayFormat === 'iso'}
+    on:click={() => dispatch('format', { columnId, format: 'iso' })}>Show ISO datetime</button>
+  <button type="button" role="menuitem" disabled={displayFormat === 'original'}
+    on:click={() => dispatch('format', { columnId, format: 'original' })}>Show original values</button>
+  <div class="column-menu-separator" role="separator"></div>
   <button type="button" role="menuitem" on:click={() => dispatch('hide', { columnId })}>
     Hide this column
   </button>
@@ -73,7 +93,7 @@
 </div>
 
 <style>
-  .column-context-menu { min-width: 190px; max-width: min(300px, calc(100vw - 16px)); }
+  .column-context-menu { min-width: 190px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
   .column-menu-separator { border-top: 1px solid var(--border); margin: 3px 0; }
   button:disabled { opacity: .45; cursor: default; }
   .column-menu-label { display: block; padding: 4px 7px 5px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

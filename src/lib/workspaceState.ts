@@ -4,6 +4,8 @@ import type { FlagFilterValue, FlagSymbol, IocEntry, LoadProjectResponse } from 
 import { createWorkspacePages } from "./workspacePages.ts";
 import { emptySelection, selectionAfterScopeChange, setRowsSelected, toggleRowId } from "./selection.ts";
 import type { SelectionScope } from "./selection";
+import { displayColumnOrder } from "./columnLayoutActions.ts";
+import type { ColumnDisplayFormat } from "./dateDisplay";
 import { logicalRowAt } from "./virtualScroll.ts";
 import { PAGE_SIZE, normalizeFlag, applyAnnotationEntry } from "./components/project_view/state.ts";
 import type { AppliedFilters, CachedRow, MemoEditorTarget } from "./components/project_view/state";
@@ -37,6 +39,10 @@ export function createWorkspaceState() {
   const hiddenColumns = writable(new Set<string>());
   /** Missing keeps the first-visible default; empty explicitly unfreezes data. */
   const frozenThrough = writable<string | undefined>(undefined);
+  const columnOrder = writable<string[]>([]);
+  const columnFormats = writable<Record<string, ColumnDisplayFormat>>({});
+  const orderedColumns = derived([projectDetail, columnOrder], ([detail, order]) =>
+    displayColumnOrder(detail?.columns ?? [], order));
 
   const search = writable("");
   const searchColumns = writable<string[]>([]);
@@ -173,10 +179,9 @@ export function createWorkspaceState() {
   const headerScrollEl = writable<HTMLDivElement | null>(null);
 
   const visibleColumns = derived(
-    [projectDetail, hiddenColumns],
-    ([$projectDetail, $hiddenColumns]) => {
-      if (!$projectDetail) return [];
-      return $projectDetail.columns.filter(
+    [orderedColumns, hiddenColumns],
+    ([$orderedColumns, $hiddenColumns]) => {
+      return $orderedColumns.filter(
         (column) => !$hiddenColumns.has(column)
       );
     }
@@ -376,6 +381,9 @@ export function createWorkspaceState() {
     resetPageCache,
     visibleColumns,
     frozenThrough,
+    columnOrder,
+    columnFormats,
+    orderedColumns,
     iocDraft,
     toggleSort,
     setFlag,

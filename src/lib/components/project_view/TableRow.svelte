@@ -7,12 +7,13 @@
   import type { TableColumn } from '../../columnWindow';
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
+  import { formatIsoCell } from '../../dateDisplay';
   import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
   import { useWorkspace } from '../../workspaceContext';
 
   // Functions are stable. This row never subscribes to scroll or page stores.
-  const { setFlag, editMemo, openCell, handleCellKeydown, toggleRowSelection } = useWorkspace();
+  const { setFlag, editMemo, openCell, handleCellKeydown, toggleRowSelection, columnFormats } = useWorkspace();
   export let row: CachedRow | null;
   export let position: number;
   export let projectId: string;
@@ -153,12 +154,14 @@
         row && column.id in row.previewCache
           ? row.previewCache[column.id]
           : ''}
+      {@const formatted = $columnFormats[column.id] === 'iso' && row ? formatIsoCell(row.cells[column.id]) : null}
       <button
         type="button"
         class="cell"
         class:sticky={column.frozen}
         class:stickyData={column.frozen}
         class:lastFrozenData={lastFrozen === column.id}
+        class:datetime-error={Boolean(formatted?.error)}
         data-column-id={column.id}
         data-frozen={column.frozen}
         style={`grid-column: ${column.index + 5};${column.frozen ? ` --sticky-data-left: ${(frozenOffsets.get(column.id) ?? 0) - frozenPan}px;` : ''}`}
@@ -171,7 +174,7 @@
         title={
           !row || cellValue === null
             ? 'Loading…'
-            : cellValue
+            : formatted?.error ? `${cellValue}\n${formatted.error}` : cellValue
         }
         on:click={() => {
           if (!row || !projectId) return;
@@ -198,7 +201,7 @@
           {#if !row || cellValue === null}
             Loading…
           {:else}
-            {cellValue}
+            {formatted?.text ?? cellValue}
           {/if}
         </span>
       </button>

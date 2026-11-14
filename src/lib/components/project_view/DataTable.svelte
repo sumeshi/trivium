@@ -7,7 +7,9 @@
   import type { RenderSlot } from '../../renderSlots';
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
+  import { moveDisplayColumn } from '../../columnLayoutActions';
   import TableRow from './TableRow.svelte';
+  import ColumnResizeHandle from './ColumnResizeHandle.svelte';
   import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from '../../frozenColumns';
   import { errorMessage } from '../../errors';
   import {
@@ -28,6 +30,7 @@
   import { useWorkspace } from "../../workspaceContext";
   const {
     rowsCache, pendingPages, totalRows, totalFilteredRows, filteredFlaggedCount, visibleColumns,
+    orderedColumns, columnOrder, columnFormats,
     sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
     tableWidth, projectDetail, columnLabels, toggleSort,
     positionToRowIndex, largePages, selectedRowIds, selectedCount,
@@ -42,6 +45,8 @@
     notify: { message: string; tone: 'success' | 'error' };
     columnRule: { columnId: string };
     columnGroup: { columnId: string };
+    columnWidth: { columnId: string; width: number };
+    columnFormat: { columnId: string; format: 'original' | 'iso' };
   }>();
 
   type CellMenuState = {
@@ -69,6 +74,8 @@
   let focusedColumnId: string | null = null;
   let scrollFrame: number | null = null;
   let pendingScrollEl: HTMLDivElement | null = null;
+  let draggedColumnId: string | null = null;
+  let dropTarget: { id: string; after: boolean } | null = null;
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -88,12 +95,14 @@
   $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column));
   $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
-  $: frozenLayout = frozenColumnLayout($projectDetail?.columns ?? [], $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
+  $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
+  $: focusedScrollingWidth = focusedColumnId && !frozenLayout.offsets.has(focusedColumnId)
+    ? distributedDataWidths[$visibleColumns.indexOf(focusedColumnId)] : undefined;
   $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, STICKY_COLUMNS_WIDTH,
     $tableWidth, $scrollLeft, focusedScrollingWidth);
   $: columnLayout = tableColumnLayout($visibleColumns, distributedDataWidths, frozenLayout.offsets, STICKY_COLUMNS_WIDTH);
   $: {
-    const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, focusedColumnId);
+    const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, draggedColumnId ?? focusedColumnId);
     if (next !== renderedColumns) renderedColumns = next;
   }
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
@@ -241,6 +250,67 @@
     if (columnId) await focusHeaderColumn(columnId);
   };
 
+  const moveColumn = async (columnId: string, target: string, after = false) => {
+    const order = get(orderedColumns);
+    const next = moveDisplayColumn(order, columnId, target, after);
+    columnMenu = null;
+    if (next === order) return;
+    columnOrder.set([...next]);
+    await tick();
+    await focusHeaderColumn(columnId);
+  };
+  const moveColumnBy = (columnId: string, direction: -1 | 1) => {
+    const visible = get(visibleColumns);
+    const target = visible[visible.indexOf(columnId) + direction];
+    if (target) void moveColumn(columnId, target, direction > 0);
+  };
+  const resizeColumn = async (columnId: string) => {
+    columnMenu = null;
+    await focusHeaderColumn(columnId);
+    [...(get(headerScrollEl)?.querySelectorAll<HTMLElement>('.column-heading') ?? [])]
+      .find((element) => element.dataset.columnId === columnId)
+      ?.querySelector<HTMLElement>('.column-resize-handle')?.focus({ preventScroll: true });
+  };
+  const dragColumn = (event: DragEvent, columnId: string) => {
+    if (!event.dataTransfer || !projectId) return;
+    columnMenu = null;
+    draggedColumnId = columnId;
+    focusedColumnId = columnId;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/x-trivium-column', JSON.stringify({ projectId, columnId }));
+  };
+  const dragOverColumn = (event: DragEvent, columnId: string) => {
+    if (!draggedColumnId || !event.dataTransfer) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    dropTarget = { id: columnId, after: event.clientX >= rect.left + rect.width / 2 };
+  };
+  const scrollDuringDrag = (event: DragEvent) => {
+    const body = get(bodyScrollEl), header = get(headerScrollEl);
+    if (!draggedColumnId || !body || !header) return;
+    const rect = header.getBoundingClientRect();
+    const direction = event.clientX > rect.right - 40 ? 1
+      : event.clientX < rect.left + Math.min(frozenViewport.edge, rect.width - 40) + 20 ? -1 : 0;
+    if (direction) {
+      body.scrollLeft += direction * 60;
+      queueScroll(body);
+    }
+  };
+  const finishDrag = () => { draggedColumnId = null; dropTarget = null; };
+  const dropColumn = (event: DragEvent, target: string) => {
+    if (!draggedColumnId || !event.dataTransfer) return;
+    event.preventDefault();
+    const after = dropTarget?.id === target && dropTarget.after;
+    try {
+      const source = JSON.parse(event.dataTransfer.getData('application/x-trivium-column'));
+      if (source.projectId === projectId && source.columnId === draggedColumnId) {
+        void moveColumn(source.columnId, target, after);
+      }
+    } catch { /* Only columns dragged from this table can change its order. */ }
+    finishDrag();
+  };
+
   const buildVirtualRows = (
     start: number,
     end: number,
@@ -349,7 +419,6 @@
   const focusColumn = (index: number) => {
     if (!$bodyScrollEl) return;
     focusedColumnId = $visibleColumns[index] ?? null;
-    focusedScrollingWidth = frozenLayout.offsets.has($visibleColumns[index]) ? undefined : distributedDataWidths[index];
     $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
       frozenLayout, STICKY_COLUMNS_WIDTH, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
@@ -493,8 +562,10 @@
     <div class="table-scroll">
       <div
         class="table-header-scroll"
+        role="presentation"
         bind:this={$headerScrollEl}
         on:wheel={forwardWheel}
+        on:dragover={scrollDuringDrag}
       >
         <div
           class="data-header"
@@ -520,12 +591,21 @@
           <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Note</div>
           {#each renderedColumns as column (column.id)}
             <div
-              class="header-cell column-heading"
+              class="header-cell column-heading" role="group"
+              aria-label={`Column ${$columnLabels.get(column.id) ?? column.id}`}
               class:sticky={column.frozen}
               class:stickyData={column.frozen}
               class:lastFrozenData={frozenLayout.lastColumn === column.id}
               data-column-id={column.id}
               data-frozen={column.frozen}
+              draggable="true"
+              class:dragging={draggedColumnId === column.id}
+              class:dropBefore={dropTarget?.id === column.id && !dropTarget.after}
+              class:dropAfter={dropTarget?.id === column.id && dropTarget.after}
+              on:dragstart={(event) => dragColumn(event, column.id)}
+              on:dragover={(event) => dragOverColumn(event, column.id)}
+              on:drop={(event) => dropColumn(event, column.id)}
+              on:dragend={finishDrag}
               style={`grid-column: ${column.index + 5};${column.frozen ? ` --sticky-data-left: ${(frozenLayout.offsets.get(column.id) ?? 0) - frozenViewport.pan}px;` : ''}`}
               class:sorted={$sortKey === column.id}
             >
@@ -535,7 +615,7 @@
                 on:contextmenu={(event) => openColumnMenu(event, column.id)}
                 on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnMenuKey(event, column.id); }}
                 aria-pressed={$sortKey === column.id}
-                title={`Sort by ${$columnLabels.get(column.id) ?? column.id}; right-click, Down or Shift+F10 for column actions`}>
+                title={`Sort ${$columnLabels.get(column.id) ?? column.id}; drag to move; right-click for actions`}>
                 <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
                 {#if $sortKey === column.id}
                   <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
@@ -550,6 +630,8 @@
                 on:focus={() => focusColumn(column.index)}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
               </button>
+              <ColumnResizeHandle label={$columnLabels.get(column.id) ?? column.id} width={column.width}
+                on:resize={(event) => dispatch('columnWidth', { columnId: column.id, width: event.detail.width })} />
             </div>
           {/each}
         </div>
@@ -619,11 +701,17 @@
     <ColumnContextMenu columnId={columnMenu.columnId}
       label={$columnLabels.get(columnMenu.columnId) ?? columnMenu.columnId}
       frozenThrough={$frozenThrough}
+      displayFormat={$columnFormats[columnMenu.columnId] ?? 'original'}
+      canMoveLeft={$visibleColumns.indexOf(columnMenu.columnId) > 0}
+      canMoveRight={$visibleColumns.indexOf(columnMenu.columnId) < $visibleColumns.length - 1}
       x={columnMenu.x} y={columnMenu.y}
       on:search={(event) => searchColumn(event.detail.columnId)}
       on:hide={(event) => void hideColumn(event.detail.columnId)}
       on:freeze={(event) => freezeColumn(event.detail.columnId)}
       on:unfreeze={unfreezeColumns}
+      on:move={(event) => moveColumnBy(event.detail.columnId, event.detail.direction)}
+      on:resize={(event) => resizeColumn(event.detail.columnId)}
+      on:format={(event) => { columnMenu = null; dispatch('columnFormat', event.detail); }}
       on:rule={(event) => { columnMenu = null; dispatch('columnRule', event.detail); }}
       on:group={(event) => { columnMenu = null; dispatch('columnGroup', event.detail); }}
       on:close={(event) => {

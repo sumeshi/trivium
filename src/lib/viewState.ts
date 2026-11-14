@@ -1,6 +1,7 @@
 import type { EditorGroup, EditorNode } from "./stores/condition";
 import type { FlagFilterValue } from "./types";
 import { savedViewFromUnknown } from "./viewStateMapping.ts";
+import type { ColumnDisplayFormat } from "./dateDisplay";
 
 export interface HistoryEntry {
   condition: EditorGroup;
@@ -19,12 +20,14 @@ export interface SavedView {
   flagFilter: FlagFilterValue;
   bookmarkedOnly: boolean;
   hiddenColumns: string[];
-  /** Missing: first visible; empty: none; otherwise freeze through this source id. */
+  /** Missing: first visible; empty: none; otherwise freeze through this display id. */
   frozenThrough?: string;
   sortKey: string | null;
   sortDirection: "asc" | "desc";
   /** Persisted widths keyed by data column id. Rebuilt when absent. */
   columnWidths: Record<string, number>;
+  columnOrder?: string[];
+  columnFormats?: Record<string, ColumnDisplayFormat>;
   offset: number;
   /** Result-relative row at the top of the viewport. Preferred over `offset`. */
   logicalRow?: number;

@@ -3,7 +3,8 @@
   import { get } from "svelte/store";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
-  import { appendGroupPath, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS } from "../../grouping";
+  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS } from "../../grouping";
+  import type { GroupGranularity } from "../../grouping";
   import type { Backend } from "../../backend";
   import type { GroupTreeNode, GroupTreeResponse } from "../../types";
   import type { AppliedFilters } from "./state";
@@ -15,6 +16,7 @@
   const requests = createLatestRequest();
   export let open = true;
   export let groupColumns: string[] = [];
+  export let granularities: Record<string, GroupGranularity> = {};
   let pendingColumn = "";
   let tree: GroupTreeResponse | null = null;
   let expanded = new Set<string>();
@@ -35,7 +37,7 @@
     $appliedFilters.search.trim(), $appliedFilters.search.trim() ? $appliedFilters.searchColumns : [],
     $appliedFilters.flag, $appliedFilters.bookmarkedOnly, $appliedFilters.condition,
   ]);
-  $: requestKey = JSON.stringify([projectId, groupColumns, annotationRevision, filterKey, refreshRevision]);
+  $: requestKey = JSON.stringify([projectId, groupColumns, groupColumns.map((name) => granularities[name] ?? "exact"), annotationRevision, filterKey, refreshRevision]);
   $: if (!open || !$backend || !projectId || groupColumns.length === 0) {
     reads.cancelAll();
     requests.invalidate();
@@ -45,7 +47,7 @@
   }
   $: if (open && $backend && projectId && groupColumns.length > 0 && requestKey !== lastKey) {
     lastKey = requestKey;
-    void loadTree($backend, projectId, [...groupColumns], $appliedFilters);
+    void loadTree($backend, projectId, [...groupColumns], groupColumns.map((name) => granularities[name] ?? "exact"), $appliedFilters);
   }
   $: presentation = groupRowsPage(tree?.nodes ?? [], expanded, page);
 
@@ -67,6 +69,11 @@
     groupColumns = copy;
   }
 
+  function changeGranularity(name: string, event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value as GroupGranularity;
+    granularities = { ...granularities, [name]: value };
+  }
+
   function toggle(key: string) {
     const next = new Set(expanded);
     if (next.has(key)) next.delete(key);
@@ -75,7 +82,7 @@
     page = 0;
   }
 
-  async function loadTree(api: Backend, activeProjectId: string, selected: string[], spec: AppliedFilters) {
+  async function loadTree(api: Backend, activeProjectId: string, selected: string[], selectedGranularities: GroupGranularity[], spec: AppliedFilters) {
     reads.cancel("groups");
     const ticket = requests.next();
     tree = null;
@@ -86,6 +93,7 @@
     try {
       const next = await reads.run("groups", api, (requestId) => api.groupTree({
         requestId, projectId: activeProjectId, groupColumns: selected,
+        groupGranularities: selectedGranularities,
         search: spec.search.trim() || undefined,
         searchColumns: [...spec.searchColumns], flagFilter: spec.flag,
         bookmarkedOnly: spec.bookmarkedOnly, condition: spec.condition,
@@ -105,7 +113,6 @@
 </script>
 
 <section class="grouping-panel" aria-label="Nested grouping">
-  <p class="group-help">Nest columns to compare counts. Click a value to narrow the table to its full group path.</p>
   <div class="add-level">
     <select bind:value={pendingColumn} aria-label="Group column" disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS}>
       {#each availableColumns as name}
@@ -124,6 +131,10 @@
       {#each groupColumns as name, index (name)}
         <li data-group-column={name}>
           <span class="level-number">{index + 1}</span><span class="level-name" title={$columnLabels.get(name) ?? name}>{$columnLabels.get(name) ?? name}</span>
+          <select class="group-granularity" aria-label={`Group ${$columnLabels.get(name) ?? name} by`} title="Datetime groups use UTC"
+            value={granularities[name] ?? "exact"} on:change={(event) => changeGranularity(name, event)}>
+            {#each GROUP_GRANULARITIES as [value, label]}<option {value}>{label}</option>{/each}
+          </select>
           <button type="button" class="icon-button" on:click={() => moveColumn(index, -1)} disabled={index === 0}
             aria-label={`Move group ${$columnLabels.get(name) ?? name} up`} title="Move level up">↑</button>
           <button type="button" class="icon-button" on:click={() => moveColumn(index, 1)} disabled={index === groupColumns.length - 1}
@@ -168,13 +179,12 @@
       </nav>
     {/if}
   {:else if !loading && !error}
-    <p class="group-summary">Choose a column above or use “Group by this column” in a table header.</p>
+    <p class="group-summary">Choose a column to group.</p>
   {/if}
 </section>
 
 <style>
   .grouping-panel { display: grid; gap: 9px; min-width: 0; }
-  .group-help { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
   .add-level { display: flex; align-items: center; gap: 5px; }
   .add-level select { flex: 1; min-width: 0; }
   .add-level .ghost { flex: 0 0 auto; font-size: 11px; }
@@ -186,6 +196,7 @@
   .group-levels li { display: flex; align-items: center; gap: 5px; min-width: 0; padding-left: 5px; border-left: 2px solid var(--accent-border); }
   .level-number { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .level-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .group-granularity { flex: 0 0 102px; width: 102px; height: 25px; padding: 0 3px; font-size: 10px; }
   .group-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 10px; color: var(--muted); }
   .text-button { background: transparent; border: 0; padding: 2px 4px; border-radius: 3px; color: var(--muted); font-size: 10px; }
   .panel-error { margin: 0; color: var(--critical); font-size: 11px; }

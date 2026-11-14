@@ -8,7 +8,7 @@ export interface FrozenColumnLayout {
   width: number;
 }
 
-/** Freeze the source-order prefix; hidden columns contribute no physical width. */
+/** Freeze the configured display-order prefix; hidden columns contribute no physical width. */
 export function frozenColumnLayout(
   columns: readonly string[], visible: readonly string[], widths: readonly number[],
   frozenThrough: FrozenThrough, annotationWidth: number,

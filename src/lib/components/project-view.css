@@ -26,44 +26,44 @@
 .filter-row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
-.filter-row > .search-field {
-  flex: 1 1 260px;
-  min-width: 210px;
-}
-
-.advanced-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  padding-top: 0;
+.filter-primary,
+.filter-secondary {
+  display: contents;
 }
 
 .table-navigation {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-}
-
-.table-navigation .history-buttons {
-  padding-right: 10px;
-  border-right: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 
 .row-jump {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 0 2px;
+  gap: 3px;
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+@media (max-width: 1140px) {
+  .filter-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .filter-primary,
+  .filter-secondary { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .filter-secondary .export-button { margin-left: auto; }
+}
+
+@media (max-width: 620px) {
+  .filter-primary,
+  .filter-secondary { flex-wrap: wrap; }
+  .filter-primary .search-controls { flex-basis: 100%; order: 1; }
+  .filter-primary .column-picker { margin-left: auto; }
+  .filter-primary .flag-menu { left: 50%; transform: translateX(-50%); }
 }
 
 .row-jump-field {
@@ -783,7 +783,14 @@ button.primary:disabled {
 .column-heading {
   padding: 0;
   min-width: 0;
+  position: relative;
 }
+
+.column-heading.sticky { position: sticky; }
+.column-heading.dragging { color: var(--accent); }
+.column-heading.dropBefore { box-shadow: inset 2px 0 var(--accent); }
+.column-heading.dropAfter { box-shadow: inset -2px 0 var(--accent); }
+.column-heading .header-label { cursor: grab; }
 
 .column-sort {
   display: inline-flex;
@@ -809,7 +816,7 @@ button.primary:disabled {
   width: 20px;
   height: 24px;
   padding: 0;
-  margin-right: 3px;
+  margin-right: 7px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -1028,6 +1035,11 @@ button.primary:disabled {
 
 .cell:hover {
   background: var(--accent-soft);
+}
+
+.cell.datetime-error .cell-text {
+  text-decoration: underline dotted var(--warning);
+  text-underline-offset: 3px;
 }
 
 .cell:focus-visible {
@@ -1542,17 +1554,6 @@ button.dialog-close:hover:not(:disabled) { background: var(--surface-weak); colo
   cursor: default;
 }
 
-
-@media (max-width: 900px) {
-  .filter-row > .search-field {
-    order: 5;
-    flex-basis: 100%;
-  }
-
-  .export-button {
-    margin-left: 0;
-  }
-}
 
 /* The legacy IOC flag selector reuses `.flag-option`; keep the filter menu
    styling explicit so the later dialog rules cannot change its density. */

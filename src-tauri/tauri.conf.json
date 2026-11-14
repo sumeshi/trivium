@@ -17,6 +17,7 @@
         "width": 1400,
         "height": 900,
         "resizable": true,
+        "dragDropEnabled": false,
         "fullscreen": false
       }
     ]

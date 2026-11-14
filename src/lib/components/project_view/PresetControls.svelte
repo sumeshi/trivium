@@ -4,6 +4,7 @@
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { onDestroy } from 'svelte';
   import { applyPresetView } from '../../presetView';
+  import { presetFileName } from '../../presetFileName';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
@@ -29,16 +30,15 @@
     }
     const service = $backend, projectId = $projectDetail.project.meta.id;
     clearMessages();
+    busy = true;
     try {
-      const stem = $projectDetail.project.meta.name.replace(/\.[^.]+$/, '') || 'trivium';
       const destination = await save({
         filters: [{ name: 'Trivium preset', extensions: ['json'] }],
-        defaultPath: `${stem}-preset.json`,
+        defaultPath: presetFileName($projectDetail.project.meta.source_file_name ?? $projectDetail.project.meta.name),
       });
       if (!destination || destroyed) {
         return;
       }
-      busy = true;
       const fileName = destination.split(/[\\/]/).pop() ?? '';
       await service.savePreset({
         projectId,
@@ -65,6 +65,7 @@
     const service = $backend, projectId = $projectDetail.project.meta.id;
     const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
+    busy = true;
     try {
       const selected = await open({
         multiple: false,
@@ -74,20 +75,19 @@
         return;
       }
       const source = Array.isArray(selected) ? selected[0] : selected;
-      busy = true;
       const preset = await service.loadPreset({
         projectId,
         source,
       });
       if (!isCurrent()) return;
-      applyPresetView(workspace, preset);
-      await service.setHiddenColumns({ projectId, hiddenColumns: preset.hiddenColumns });
-      if (!isCurrent()) return;
       if (preset.unknown_columns.length > 0) {
         warning = `Unknown columns: ${preset.unknown_columns.join(', ')}`;
-      } else {
-        notice = 'Preset applied.';
+        return;
       }
+      await service.setHiddenColumns({ projectId, hiddenColumns: preset.hiddenColumns });
+      if (!isCurrent()) return;
+      applyPresetView(workspace, preset);
+      notice = 'Preset applied.';
     } catch (err) {
       console.error(err);
       error = errorMessage(err, 'Failed to apply preset.');
@@ -98,8 +98,7 @@
 </script>
 
 <div class="stats-panel">
-  <p class="condition-count preset-description">Save structured rules, visible columns and sort order as a reusable preset file.</p>
-  <p class="condition-count preset-description">Search text and flag/bookmark filters keep their current settings when you load a preset.</p>
+  <p class="condition-count preset-description">Rules / hidden columns / sort</p>
   <div class="condition-toolbar">
     <span class="filter-label">Preset</span>
     <button type="button" class="ghost" on:click={savePreset} disabled={busy}>

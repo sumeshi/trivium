@@ -38,6 +38,7 @@
   import { createWorkspaceNavigation } from "../workspaceNavigation";
   import { createWorkspaceView } from "../workspaceView";
   import { createWorkspaceAnnotationObserver } from "../workspaceAnnotations";
+  import { formatIsoCell } from "../dateDisplay";
 
   export let projectDetail: LoadProjectResponse;
   export let backend: Backend;
@@ -49,7 +50,7 @@
   const {
     goBack, goForward, historyRestore, recordAppliedCondition, rememberOffset, resetHistory,
     restoreHistory, setHistoryProject, projectDetail: projectDetailStore, backend: backendStore,
-    visibleColumns, hiddenColumns, frozenThrough, columnLabels, search, searchColumns, flagFilter,
+    visibleColumns, hiddenColumns, frozenThrough, columnOrder, columnFormats, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
     totalRows, totalFilteredRows, appliedResultLoading, flaggedCount,
     expandedCell, memoEditor, iocManagerOpen, scrollLeft,
@@ -166,6 +167,33 @@
     columnWidths = next;
   };
 
+  const changeColumnWidth = (event: CustomEvent<{ columnId: string; width: number }>) => {
+    const { columnId, width } = event.detail;
+    if (!projectDetail.columns.includes(columnId) || !Number.isFinite(width)) return;
+    const bounded = Math.min(MAX_DATA_WIDTH, Math.max(MIN_DATA_WIDTH, Math.round(width)));
+    if (columnWidths.get(columnId) === bounded) return;
+    columnWidths = new Map(columnWidths).set(columnId, bounded);
+    schedulePersist();
+  };
+
+  const changeColumnFormat = (event: CustomEvent<{ columnId: string; format: 'original' | 'iso' }>) => {
+    const { columnId, format } = event.detail;
+    if (!projectDetail.columns.includes(columnId)) return;
+    if (format === 'iso') {
+      for (const row of get(workspace.rowsCache).values()) {
+        const result = formatIsoCell(row.cells[columnId]);
+        if (result.error) {
+          dispatch('notify', { message: `${$columnLabels.get(columnId) ?? columnId}: ${result.error}`, tone: 'error' });
+          return;
+        }
+      }
+    }
+    const next = { ...get(columnFormats) };
+    if (format === 'iso') next[columnId] = 'iso';
+    else delete next[columnId];
+    columnFormats.set(next);
+  };
+
   const view = createWorkspaceView(workspace, {
     backend,
     isReady: () => initialized && !destroyed,
@@ -265,6 +293,8 @@
     conditionTree.set(emptyTree);
     hiddenColumns.set(new Set(detail.hidden_columns ?? []));
     frozenThrough.set(undefined);
+    columnOrder.set([]);
+    columnFormats.set({});
     initializeColumnWidths();
 
     const saved = await view.loadSavedView(detail, tabSession, () =>
@@ -283,6 +313,8 @@
     bookmarkedOnly.set(saved?.bookmarkedOnly ?? false);
     hiddenColumns.set(new Set(saved ? saved.hiddenColumns : (detail.hidden_columns ?? [])));
     frozenThrough.set(saved?.frozenThrough);
+    columnOrder.set(saved?.columnOrder ?? []);
+    columnFormats.set(saved?.columnFormats ?? {});
     sortKey.set(saved?.sortKey ?? null);
     sortDirection.set(saved?.sortDirection ?? 'asc');
     iocDraft.set(detail.iocs.map((entry) => ({
@@ -687,8 +719,8 @@
 <section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
   <FilterControls bind:this={filterControls} on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 
+  <HistoryButtons slot="history" />
   <div slot="navigation" class="table-navigation">
-    <HistoryButtons />
     <div class="row-jump" role="group" aria-label="Original row navigation">
     <div class="row-jump-field">
       <input
@@ -698,7 +730,8 @@
         step="1"
         placeholder={`1–${$totalRows}`}
         aria-label="Original row number"
-        title="Original row number shown in the # column"
+        title="Original row number (#); press Enter to jump"
+        aria-busy={$locatingRow}
         bind:value={gotoRowInput}
         disabled={!initialized || $totalRows === 0}
         on:keydown={(event) => {
@@ -709,17 +742,6 @@
         }}
       />
     </div>
-    <button
-      type="button"
-      class="ghost"
-      on:click={jumpToEnteredRow}
-      aria-label="Go"
-      aria-busy={$locatingRow}
-      title="Find this original row within the current filtered and sorted result"
-      disabled={!initialized || $totalRows === 0 || $appliedResultLoading || filterTimeout !== null || $locatingRow}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
-    </button>
     <button
       type="button"
       class="ghost"
@@ -748,7 +770,8 @@
 
   <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
-  <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')} />
+  <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')}
+    on:annotationsChanged={queueAnnotationRefresh} />
 
   {#if exportSnapshot}
     <ExportDialog
@@ -759,6 +782,7 @@
   {/if}
 
   <DataTable {columnWidths} {ensureRangeLoaded} on:notify={(e) => dispatch('notify', e.detail)}
+    on:columnWidth={changeColumnWidth} on:columnFormat={changeColumnFormat}
     on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)}
     on:columnGroup={(event) => void filterControls?.openGroupingForColumn(event.detail.columnId)} />
   <FilterStatus bind:height={filterStatusHeight} on:clear={clearAllFilters} />
