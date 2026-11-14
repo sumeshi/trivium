@@ -65,7 +65,6 @@
   let selectAllEl: HTMLInputElement | null = null;
   let focusedScrollingWidth: number | undefined;
   let renderedColumns: readonly TableColumn[] = [];
-  let columnSlots: readonly RenderSlot<TableColumn>[] = [];
   let rowSlots: readonly RenderSlot<VirtualRow>[] = [];
   let focusedColumnId: string | null = null;
   let scrollFrame: number | null = null;
@@ -96,10 +95,6 @@
   $: {
     const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, focusedColumnId);
     if (next !== renderedColumns) renderedColumns = next;
-  }
-  $: {
-    const next = recycleSlots(renderedColumns, (column) => column.id, columnSlots);
-    if (next !== columnSlots) columnSlots = next;
   }
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
@@ -523,8 +518,7 @@
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Note</div>
-          {#each columnSlots as entry (entry.slot)}
-            {@const column = entry.value}
+          {#each renderedColumns as column (column.id)}
             <div
               class="header-cell column-heading"
               class:sticky={column.frozen}
@@ -578,7 +572,7 @@
                 row={item.row} position={item.position} {projectId}
                 selected={item.row ? $selectedRowIds.has(item.row.row_index) : false}
                 {largePage} showLargeNotice={item.position === startIndex}
-                {columnSlots} columnCount={$visibleColumns.length} {gridTemplate}
+                columns={renderedColumns} columnCount={$visibleColumns.length} {gridTemplate}
                 frozenOffsets={frozenLayout.offsets} frozenPan={frozenViewport.pan} lastFrozen={frozenLayout.lastColumn}
                 {focusColumn} {openCellMenu} {columnTab}
               />

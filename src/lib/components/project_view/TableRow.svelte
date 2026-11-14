@@ -5,7 +5,6 @@
   import type { CachedRow } from './state';
   import { ROW_HEIGHT, PAGE_SIZE, FLAG_OPTIONS, normalizeFlag } from './state';
   import type { TableColumn } from '../../columnWindow';
-  import type { RenderSlot } from '../../renderSlots';
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { theme } from '../../theme';
@@ -20,7 +19,7 @@
   export let selected = false;
   export let largePage = false;
   export let showLargeNotice = false;
-  export let columnSlots: readonly RenderSlot<TableColumn>[];
+  export let columns: readonly TableColumn[];
   export let columnCount: number;
   export let gridTemplate: string;
   export let frozenOffsets: ReadonlyMap<string, number>;
@@ -145,8 +144,7 @@
         <span class="memo-placeholder">Loading…</span>
       {/if}
     </button>
-    {#each columnSlots as entry (entry.slot)}
-      {@const column = entry.value}
+    {#each columns as column (column.id)}
       {@const cellValue =
         row && column.id in row.displayCache
           ? row.displayCache[column.id]
