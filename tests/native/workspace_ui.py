@@ -12,10 +12,13 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import time
+import traceback
 from typing import Any
 from urllib.error import URLError
 import uuid
@@ -34,6 +37,25 @@ from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, na
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
 TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
 HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree"}
+
+
+def emit_workspace_failure(stage: str, error: Exception) -> None:
+    """Publish only fixed stages and code locations, never assertion values."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    kind = type(error).__name__
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", kind):
+        kind = "Exception"
+    native = Path(__file__).resolve().parent
+    location = ""
+    for frame, line in traceback.walk_tb(error.__traceback__):
+        path = Path(frame.f_code.co_filename).resolve()
+        if path.parent == native and re.fullmatch(r"[a-z_][a-z0-9_]{0,63}\.py", path.name):
+            location = f" at {path.name}:{line}"
+    # The caller selects stage only from its fixed checkpoint labels below.
+    message = f"Native workspace failed: {stage} ({kind}{location})"
+    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=Native workspace::{message}", flush=True)
 
 
 class WorkspaceView(WebView):
@@ -793,15 +815,17 @@ def main() -> None:
                               "unverified": ["Native GTK export destination picker", "Native OS import picker (only its selected-path response is substituted)"], "stages": []}
     with tempfile.TemporaryDirectory(prefix="trivium-native-workspace-") as temporary:
         root = Path(temporary)
-        app = NativeApp(args, root, evidence)
+        app = None
+        stage = "startup"
         try:
+            app = NativeApp(args, root, evidence)
             web = app.start()
             data = fixture(web, root)
             open_project(web, data["name"])
             web.results(data["total"])
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
-            for name, run in [
+            for stage, run in [
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
                 ("stable stripes while scrolling", lambda: verify_scroll_rendering(web, data, evidence, report)),
@@ -817,10 +841,11 @@ def main() -> None:
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
-                print(f"CHECK: {name}", flush=True)
+                print(f"CHECK: {stage}", flush=True)
                 run()
-                report["stages"].append(name)
-                print(f"PASS: {name}", flush=True)
+                report["stages"].append(stage)
+                print(f"PASS: {stage}", flush=True)
+            stage = "final validation"
             assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
             errors = [entry for session in app.sessions + [app.web.diagnostics()] for entry in session["ipc"] if "error" in entry]
             cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows", "load_project", "locate_project_row", "get_cell", "surrounding_rows", "group_tree", "bulk_preview"}]
@@ -836,8 +861,9 @@ def main() -> None:
             report["cancelled_superseded_queries"] = len(cancelled)
             report["passed"] = True
         except Exception as error:
+            emit_workspace_failure(stage, error)
             report["error"] = str(error)
-            if app.web.session:
+            if app is not None and app.web.session:
                 try:
                     report["last_view"] = app.web.state()
                     app.web.screenshot(evidence / "failure.png")
@@ -846,10 +872,11 @@ def main() -> None:
             raise
         finally:
             try:
-                app.close()
+                if app is not None:
+                    app.close()
             finally:
-                report["sessions"] = app.sessions
-                report["transport_retries"] = app.web.transport_retries
+                report["sessions"] = app.sessions if app is not None else []
+                report["transport_retries"] = app.web.transport_retries if app is not None else []
                 (evidence / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Evidence: {evidence / 'report.json'}", flush=True)
 
