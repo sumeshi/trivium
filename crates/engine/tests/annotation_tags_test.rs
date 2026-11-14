@@ -193,7 +193,11 @@ fn bulk_selection_updates_the_same_ids_across_pages() {
             ..AnnotationPatch::default()
         },
     );
-    assert_eq!(removed, 3);
+    assert_eq!(
+        removed,
+        2,
+        "row 2 did not have the tag being removed"
+    );
 
     assert_eq!(
         stored(&store, id, 0).expect("row 0").tags,

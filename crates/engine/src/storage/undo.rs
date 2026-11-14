@@ -67,8 +67,7 @@ pub(super) fn apply_bulk_patch_with_limit(
     if revision(&tx)? != expected_revision {
         bail!("Annotations changed; preview again.");
     }
-    tx.execute("DELETE FROM bulk_undo", [])?;
-    tx.execute("DELETE FROM bulk_undo_state", [])?;
+    let mut changed = 0usize;
     let mut undo_bytes = 0usize;
     let mut delta = 0i64;
     for (position, index) in rows.iter().enumerate() {
@@ -82,6 +81,15 @@ pub(super) fn apply_bulk_patch_with_limit(
         checkpoint(job, position)?;
         let previous = read_entry(&tx, *index)?;
         let next = apply_annotation_patch(previous.as_ref(), patch);
+        if previous == next {
+            continue;
+        }
+        // Keep the previous operation until a real change replaces it.
+        // Budget/cancellation failures still roll this transaction back.
+        if changed == 0 {
+            tx.execute("DELETE FROM bulk_undo", [])?;
+            tx.execute("DELETE FROM bulk_undo_state", [])?;
+        }
         delta += i64::from(next.as_ref().is_some_and(super::is_recognized_flag))
             - i64::from(previous.as_ref().is_some_and(super::is_recognized_flag));
         let previous_json = previous.as_ref().map(serde_json::to_string).transpose()?;
@@ -97,15 +105,18 @@ pub(super) fn apply_bulk_patch_with_limit(
             params![i64::try_from(*index)?, previous_json, applied_json],
         )?;
         write_entry(&tx, *index, next.as_ref())?;
+        changed += 1;
     }
-    let (revision, _) = advance_revision(&tx, delta)?;
-    tx.execute(
-        "INSERT INTO bulk_undo_state(singleton,revision) VALUES(1,?1)",
-        [i64::try_from(revision)?],
-    )?;
+    if changed > 0 {
+        let (revision, _) = advance_revision(&tx, delta)?;
+        tx.execute(
+            "INSERT INTO bulk_undo_state(singleton,revision) VALUES(1,?1)",
+            [i64::try_from(revision)?],
+        )?;
+    }
     job.check_cancelled().map_err(anyhow::Error::new)?;
     tx.commit()?;
-    Ok(rows.len())
+    Ok(changed)
 }
 
 pub fn undo_bulk_patch(path: &Path, job: &JobContext) -> Result<usize> {

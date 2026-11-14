@@ -272,7 +272,11 @@ fn bulk_flag_clear_keeps_tags_bookmarks_and_memos() {
         None,
     );
 
-    assert_eq!(bulk(&store, id, Some(""), None, None, None), 3);
+    assert_eq!(
+        bulk(&store, id, Some(""), None, None, None),
+        1,
+        "only row 0 had a flag to clear"
+    );
 
     let row0 = stored(&store, id, 0).expect("row 0 entry must remain");
     assert_eq!(row0.flag, "");
@@ -285,7 +289,11 @@ fn bulk_flag_clear_keeps_tags_bookmarks_and_memos() {
     assert_eq!(row1.tags, vec!["tag-only".to_string()]);
 
     // Clearing the memo is separate from clearing tags and bookmarks.
-    assert_eq!(bulk(&store, id, None, Some(None), None, None), 3);
+    assert_eq!(
+        bulk(&store, id, None, Some(None), None, None),
+        1,
+        "only row 0 had a note to clear"
+    );
     let row0 = stored(&store, id, 0).expect("row 0 entry must remain");
     assert_eq!(row0.memo, None);
     assert_eq!(row0.tags, vec!["pc".to_string(), "triage".to_string()]);

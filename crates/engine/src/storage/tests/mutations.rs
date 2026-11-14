@@ -287,3 +287,158 @@ fn unknown_flags_are_unflagged_without_losing_raw_annotations() {
     assert_eq!(annotation.flag, "unrecognized legacy label");
     assert_eq!(annotation.memo.as_deref(), Some("keep note"));
 }
+
+#[test]
+fn unchanged_bulk_patches_keep_the_previous_undo_and_revision_without_writes() {
+    let fixture = Fixture::new();
+    let version = load_flag_snapshot(&fixture.flags()).unwrap().1;
+    let applied = AnnotationPatch {
+        flag: Some("critical".into()),
+        memo: Some(Some("reviewed".into())),
+        add_tags: vec!["case".into()],
+        ..Default::default()
+    };
+    assert_eq!(
+        apply_bulk_patch(
+            &fixture.flags(),
+            &[1, 2],
+            &applied,
+            version,
+            &JobContext::none()
+        )
+        .unwrap(),
+        2
+    );
+    let before = load_flag_snapshot(&fixture.flags()).unwrap();
+    let db = sqlite::connect(fixture.path()).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_noop_insert BEFORE INSERT ON annotations BEGIN SELECT RAISE(ABORT, 'unexpected annotation write'); END;
+        CREATE TRIGGER reject_noop_delete BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT, 'unexpected annotation delete'); END;
+        CREATE TRIGGER reject_noop_undo BEFORE DELETE ON bulk_undo BEGIN SELECT RAISE(ABORT, 'unexpected undo replacement'); END;
+        CREATE TRIGGER reject_noop_revision BEFORE UPDATE ON project_state BEGIN SELECT RAISE(ABORT, 'unexpected revision write'); END;").unwrap();
+    for (rows, unchanged) in [
+        (vec![1, 2], applied),
+        (vec![1, 2], AnnotationPatch::default()),
+        (
+            vec![3, 4],
+            AnnotationPatch {
+                flag: Some(String::new()),
+                memo: Some(None),
+                remove_tags: vec!["missing".into()],
+                ..Default::default()
+            },
+        ),
+    ] {
+        assert_eq!(
+            undo::apply_bulk_patch_with_limit(
+                &fixture.flags(),
+                &rows,
+                &unchanged,
+                before.1,
+                &JobContext::none(),
+                1
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(load_flag_snapshot(&fixture.flags()).unwrap(), before);
+    }
+    db.execute_batch("DROP TRIGGER reject_noop_insert; DROP TRIGGER reject_noop_delete; DROP TRIGGER reject_noop_undo; DROP TRIGGER reject_noop_revision;").unwrap();
+    assert_eq!(
+        undo_bulk_patch(&fixture.flags(), &JobContext::none()).unwrap(),
+        2
+    );
+    assert!(load_flags(&fixture.flags()).unwrap().is_empty());
+    assert_eq!(count_flagged(&fixture.flags()).unwrap(), 0);
+}
+
+#[test]
+fn mixed_bulk_only_counts_and_retains_changed_rows_in_its_undo_budget() {
+    let fixture = Fixture::new();
+    let mut unchanged = entry("safe");
+    unchanged.memo = Some("large unchanged note".repeat(200));
+    upsert_flag(&fixture.flags(), 1, &unchanged).unwrap();
+    let version = project_revision(fixture.path()).unwrap();
+    assert_eq!(
+        undo::apply_bulk_patch_with_limit(
+            &fixture.flags(),
+            &[1, 2],
+            &patch("safe"),
+            version,
+            &JobContext::none(),
+            100
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(project_revision(fixture.path()).unwrap(), version + 1);
+    assert_eq!(load_flag(&fixture.flags(), 1).unwrap().unwrap(), unchanged);
+    let db = sqlite::connect(fixture.path()).unwrap();
+    assert_eq!(
+        db.query_row("SELECT row_id FROM bulk_undo", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    // An unchanged target was not part of the operation. Its later edit must
+    // neither prevent undo nor be overwritten by the old snapshot.
+    patch_flag_atomic(
+        &fixture.flags(),
+        1,
+        &AnnotationPatch {
+            memo: Some(Some("later edit".into())),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        undo_bulk_patch(&fixture.flags(), &JobContext::none()).unwrap(),
+        1
+    );
+    assert!(load_flag(&fixture.flags(), 2).unwrap().is_none());
+    assert_eq!(
+        load_flag(&fixture.flags(), 1)
+            .unwrap()
+            .unwrap()
+            .memo
+            .as_deref(),
+        Some("later edit")
+    );
+    assert_eq!(count_flagged(&fixture.flags()).unwrap(), 1);
+}
+
+#[test]
+fn cancelling_an_unchanged_bulk_scan_preserves_the_old_undo() {
+    let fixture = Fixture::new();
+    let rows = (0..800).collect::<Vec<_>>();
+    let version = load_flag_snapshot(&fixture.flags()).unwrap().1;
+    apply_bulk_patch(
+        &fixture.flags(),
+        &rows,
+        &patch("critical"),
+        version,
+        &JobContext::none(),
+    )
+    .unwrap();
+    let before = load_flag_snapshot(&fixture.flags()).unwrap();
+    let guard = jobs::try_begin_job(JobKind::Mutation, None).unwrap();
+    let context = JobContext::with_job(
+        guard,
+        Some(Arc::new(|progress| {
+            jobs::request_cancel(progress.id);
+        })),
+    );
+    assert!(apply_bulk_patch(
+        &fixture.flags(),
+        &rows,
+        &patch("critical"),
+        before.1,
+        &context
+    )
+    .is_err());
+    assert_eq!(load_flag_snapshot(&fixture.flags()).unwrap(), before);
+    assert_eq!(
+        undo_bulk_patch(&fixture.flags(), &JobContext::none()).unwrap(),
+        rows.len()
+    );
+    assert!(load_flags(&fixture.flags()).unwrap().is_empty());
+}

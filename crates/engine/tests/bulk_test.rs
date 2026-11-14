@@ -535,7 +535,11 @@ fn bulk_clear_undo_restores_memo_tags_and_bookmark() {
     assert_eq!(flagged(&store, id), 0);
     assert_eq!(flagged_from_db(&store, id), 0);
 
-    assert_eq!(undo(&store, id), 12);
+    assert_eq!(
+        undo(&store, id),
+        2,
+        "only the two previously flagged rows changed"
+    );
 
     let restored = annotations(&store, id);
     assert_eq!(restored[0].0, "suspicious");
@@ -674,14 +678,14 @@ fn bulk_and_undo_update_flagged_counts_by_difference() {
         ),
     )
     .expect("bulk update failed");
-    assert_eq!(applied.updated, 6);
+    assert_eq!(applied.updated, 5, "row 0 was already Safe");
 
     // Rows 0-5 are now flagged; the bookmark-only row 1 gained a flag, and
     // rows 6-11 were outside the target.
     assert_eq!(flagged(&store, id), 6);
     assert_eq!(flagged(&store, id), flagged_from_db(&store, id));
 
-    assert_eq!(undo(&store, id), 6);
+    assert_eq!(undo(&store, id), 5);
     assert_eq!(flagged(&store, id), 2);
     assert_eq!(flagged(&store, id), flagged_from_db(&store, id));
 
