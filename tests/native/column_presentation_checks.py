@@ -45,7 +45,7 @@ def _unchanged(web, query: dict) -> None:
 
 
 def _native_drag(web, start: dict, end: dict) -> None:
-    # WebKitWebDriver does not reliably begin HTML5 dragging. As with the
+    # WebKitWebDriver does not reliably complete HTML5 dragging. As with the
     # native context-click check, XTest delivers actual OS button input.
     from ctypes import CDLL, c_char_p, c_int, c_ulong, c_void_p
     x11, xtest = CDLL("libX11.so.6"), CDLL("libXtst.so.6")
