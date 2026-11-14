@@ -153,14 +153,14 @@ def run_case(web, case, total, columns, evidence, repeats, steps, report):
              const sample=()=>{const h=e.querySelector('.virtual-inner'),first=Number(h?.firstElementChild?.querySelector('.cell.index')?.textContent),last=Number(h?.lastElementChild?.querySelector('.cell.index')?.textContent);
               range.physical_max=Math.max(range.physical_max,e.scrollTop);range.horizontal_max=Math.max(range.horizontal_max,e.scrollLeft);if(Number.isFinite(first))range.minimum_original=Math.min(range.minimum_original,first);if(Number.isFinite(last))range.maximum_original=Math.max(range.maximum_original,last);};
              const run=()=>{check();if(axis==='vertical')e.scrollTop+=(index<steps/2?1:-1)*32;
-              else e.scrollLeft=maximum*(index<steps/2?(index+1)/(steps/2):Math.max(0,(steps-index-1)/(steps/2)));
+              else {const goal=maximum*(index<steps/2?(index+1)/(steps/2):Math.max(0,(steps-index-1)/(steps/2)));e.dispatchEvent(new WheelEvent('wheel',{deltaX:goal-e.scrollLeft,deltaY:0,deltaMode:0,bubbles:true,cancelable:true}));}
               expected=axis==='vertical'?e.scrollTop:e.scrollLeft;sample();if(++index<steps)requestAnimationFrame(run);else requestAnimationFrame(()=>requestAnimationFrame(()=>{check();sample();done(range);}));};
              requestAnimationFrame(run);
             """, axis, steps)
             settle(web)
             result = web.script(END)
             result.update(axis=axis, repeat=repeat, wall_seconds=time.monotonic() - started, observed_range=observed_range,
-                input="rAF-driven native scroll offsets; not trusted-wheel input", steps=steps)
+                input=("rAF-driven scrollTop offsets" if axis == "vertical" else "rAF-driven synthetic WheelEvent through the app's horizontal handler") + "; not trusted input", steps=steps)
             scenario["measurements"].append(result)
             assert not result["queries"], "A cache-warm sweep unexpectedly requested native pages"
             assert not observed_range["input_overrides"], f"The app overwrote the requested {axis} trajectory: {observed_range['input_overrides']}"
@@ -208,7 +208,7 @@ def main():
     evidence.mkdir(parents=True)
     report = {"started_utc": datetime.now(timezone.utc).isoformat(), "binary": str(args.binary.resolve()),
         "binary_sha256": digest(args.binary), "build": args.profile,
-        "method": "Isolated embedded native app, same synthetic fixtures per comparison. In-place fetch/JSON observation never clones or parses a response twice. rAF-driven native scroll offsets measure frame cadence, not trusted-wheel latency. Two-rAF completion is a presentation proxy, not a GPU fence. The 8Mpx spacer cap maps a32px physical step to about8 logical rows at2M rows; compare identical input within each fixture, not between row counts.",
+        "method": "Isolated embedded native app, same synthetic fixtures per comparison. In-place fetch/JSON observation never clones or parses a response twice. Vertical rAF-driven scrollTop offsets and horizontal synthetic WheelEvent through the app handler measure frame cadence, not trusted-wheel latency. Both input trajectories and zero native page requests are checked. Two-rAF completion is a presentation proxy, not a GPU fence. The 8Mpx spacer cap maps a32px physical step to about8 logical rows at2M rows; compare identical input within each fixture, not between row counts.",
         "cases": [], "passed": False}
     with tempfile.TemporaryDirectory(prefix="trivium-render-benchmark-") as tmp:
         root = Path(tmp)
