@@ -45,7 +45,12 @@ fn copy_directory(source: &Path, target: &Path) -> Result<()> {
                 permissions.set_mode(permissions.mode() | 0o200);
             }
             #[cfg(not(unix))]
-            permissions.set_readonly(false);
+            {
+                // Windows clears a file attribute without widening its ACL;
+                // Unix uses only the owner's write bit above.
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+            }
             fs::set_permissions(copy, permissions)?;
         }
     }
