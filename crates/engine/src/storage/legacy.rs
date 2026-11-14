@@ -20,7 +20,7 @@ impl Drop for Snapshot {
     }
 }
 
-fn copy_directory(source: &Path, target: &Path) -> Result<()> {
+fn copy_directory(source: &Path, target: &Path, locked_db: (&Path, &File)) -> Result<()> {
     fs::create_dir_all(target)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -32,10 +32,19 @@ fn copy_directory(source: &Path, target: &Path) -> Result<()> {
             );
         }
         if kind.is_dir() {
-            copy_directory(&entry.path(), &target.join(entry.file_name()))?;
+            copy_directory(&entry.path(), &target.join(entry.file_name()), locked_db)?;
         } else if kind.is_file() {
             let copy = target.join(entry.file_name());
-            fs::copy(entry.path(), &copy)?;
+            if entry.path() == locked_db.0 {
+                // Windows enforces byte-range locks even against another
+                // handle in this process. Read through the handle we locked.
+                let mut reader = locked_db.1;
+                let mut writer = File::create(&copy)?;
+                writer.set_permissions(reader.metadata()?.permissions())?;
+                std::io::copy(&mut reader, &mut writer)?;
+            } else {
+                fs::copy(entry.path(), &copy)?;
+            }
             // Recovery may write only to the private snapshot, even when the
             // source backup is read-only.
             let mut permissions = fs::metadata(&copy)?.permissions();
@@ -67,7 +76,7 @@ fn visit_sled(path: &Path, mut visit: impl FnMut(usize, FlagEntry) -> Result<()>
         format!("Legacy annotation database is in use; close the previous application before migration: {path:?}"))?;
     let snapshot =
         Snapshot(std::env::temp_dir().join(format!("trivium-sled-migration-{}", Uuid::new_v4())));
-    copy_directory(path, &snapshot.0)?;
+    copy_directory(path, &snapshot.0, (&lock_path, &lock))?;
     let db = sled::Config::new()
         .path(&snapshot.0)
         .cache_capacity(2 * 1024 * 1024)
