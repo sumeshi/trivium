@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
     tags: ['v*']
   workflow_dispatch:
 
@@ -15,6 +15,9 @@ jobs:
             platform: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
 
     steps:
       - name: Checkout
@@ -46,6 +49,11 @@ jobs:
           toolchain: ${{ steps.rust.outputs.version }}
           components: clippy,rustfmt
 
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Quality gates
         shell: bash
         run: |
@@ -59,7 +67,12 @@ jobs:
           npm run lint:test
           npm run test:ui
 
-      - name: Build application
+      - name: Build portable development application
+        if: github.ref == 'refs/heads/develop'
+        run: npm run tauri build -- --no-bundle
+
+      - name: Build application and installer
+        if: github.ref != 'refs/heads/develop'
         run: npm run tauri build -- --bundles nsis
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -96,16 +109,16 @@ jobs:
       - name: Upload desktop application
         uses: actions/upload-artifact@v5
         with:
-          name: trivium-${{ matrix.platform }}
+          name: trivium-windows-exe
           path: target/artifacts/trivium-windows/
-          retention-days: 30
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 3 || 30 }}
 
       - name: Upload optional Windows automation CLI
         uses: actions/upload-artifact@v5
         with:
           name: trivium-cli-${{ matrix.platform }}
           path: target/artifacts/trivium-cli-windows/
-          retention-days: 30
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 3 || 30 }}
 
   release:
     needs: build
