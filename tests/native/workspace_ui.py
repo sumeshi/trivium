@@ -628,6 +628,10 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     web.results(expected)
     web.named("Choose visible columns")
     web.click(web.element(f'#column-{data["columns"]["col_27"]}'))
+    configured_columns_js = "return [...document.querySelectorAll('#visible-column-menu input[type=checkbox]:checked')].map(e=>e.id.slice('column-'.length));"
+    configured_before = web.script(configured_columns_js)
+    expected_columns = [column for label, column in data["columns"].items() if label != "col_27"]
+    assert configured_before == expected_columns, configured_before
     web.named("Done", "#visible-column-menu")
     web.write('.row-jump input[type="number"]', "242")
     web.button("Go")
@@ -635,7 +639,11 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     for row in [242, 243]:
         web.click(web.element(f'input[aria-label="Select row {row}"]'))
     web.horizontal(200)
-    before = web.state()
+    # Physical scrolling is immediate; the mounted column window follows the
+    # next frame. Snapshot the settled viewport, not an old DOM window.
+    web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
+    before = web.results(expected)
+    before_query = web.query()
     assert before["selectionTotal"] == 2 and sorted(before["selectedIds"]) == [242, 243], before
     source = root / f"secondary-{uuid.uuid4().hex[:8]}.json"
     source.write_text(json.dumps([{"source_id": f"r-{i:07d}", "other": "secondary marker"} for i in range(1, 257)]), encoding="utf-8")
@@ -652,11 +660,20 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     web.results(expected)
     after = wait_for(web.state, lambda state: abs(state["scrollTop"] - before["scrollTop"]) <= 1 and abs(state["scrollLeft"] - before["scrollLeft"]) <= 1,
                      "tab restores actual vertical and horizontal DOM scroll positions")
-    assert after["search"] == before["search"] and after["headers"] == before["headers"] and after["selected"] == before["selected"], (before, after)
+    web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
+    after = web.results(expected)
+    assert after["search"] == before["search"], (before, after)
+    assert web.query() == before_query, (before_query, web.query())
     assert after["selectionTotal"] == 2 and sorted(after["selectedIds"]) == [242, 243], after
     assert abs(after["scrollTop"] - before["scrollTop"]) <= 1, (before, after)
     assert abs(after["scrollLeft"] - before["scrollLeft"]) <= 1 and before["scrollLeft"] == 200, (before, after)
     web.screenshot(evidence / "tabs-restored-table.png")
+    # A virtualized header contains only nearby columns and may retain one
+    # focused source column. The Columns menu exposes the saved logical set.
+    web.named("Choose visible columns")
+    configured_after = web.script(configured_columns_js)
+    assert configured_after == configured_before, (configured_before, configured_after)
+    web.named("Done", "#visible-column-menu")
     web.drawer("Conditions")
     restored = web.script("return {kinds:[...document.querySelectorAll('select[aria-label=\"Combine conditions\"]')].map(e=>e.value),values:[...document.querySelectorAll('input[aria-label=\"Value\"]')].map(e=>e.value)};")
     assert restored == conditions, restored
@@ -712,6 +729,9 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
     assert web.results(0)["views"] == 1
     assert len(web.command("list_projects")) == 2
     report["tabs"] = {"csv_and_json": True, "restored_search_condition_sort_columns_scroll_selection": True,
+                      "restored_visible_column_source_ids": configured_after,
+                      "restored_scroll": {"before": {axis: before[axis] for axis in ["scrollTop", "scrollLeft"]},
+                                          "after": {axis: after[axis] for axis in ["scrollTop", "scrollLeft"]}},
                       "restored_selected_original_ids": [242, 243], "late_native_response_ignored": True,
                       "closing_keeps_projects_and_annotations": True, "mounted_project_views": 1,
                       "last_row_actual_flag_change_restore": True, "last_row_add_memo": True, "narrow_keyboard_tab_reveal": narrow,
