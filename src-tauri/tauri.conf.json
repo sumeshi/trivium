@@ -23,7 +23,7 @@
     ]
   },
   "bundle": {
-    "targets": ["deb"],
+    "targets": ["deb", "appimage"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "windows": {
       "webviewInstallMode": {
