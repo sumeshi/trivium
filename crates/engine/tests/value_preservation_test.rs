@@ -170,7 +170,8 @@ fn json_scalars_keep_exact_text_and_null_stays_null() {
     assert_eq!(cell(&response, 2, u), json!("true"));
     assert_eq!(cell(&response, 1, small), serde_json::Value::Null);
     assert_eq!(cell(&response, 2, small), json!("[1,2]"));
-    // An empty object still counts as one record but adds no columns.
+    // A nested empty object remains a present value, distinct from missing.
+    assert_eq!(cell(&response, 2, &ids["/only_later"]), json!("{}"));
     assert_eq!(response.total_rows, 3);
 
     let originals = read_original_records(&store.project_dir(&id)).expect("originals");

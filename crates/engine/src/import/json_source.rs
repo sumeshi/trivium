@@ -5,7 +5,7 @@
 
 use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 use serde::de::{Deserializer as _, SeqAccess, Visitor};
@@ -28,13 +28,14 @@ fn escape_pointer_token(token: &str) -> String {
 }
 
 /// Visits every leaf of an object tree with its absolute JSON Pointer path.
-/// Arrays and scalars are leaves; nested objects are not.
+/// Arrays, scalars, and nested empty objects are leaves. An empty root object
+/// is still a record, but contributes no data columns.
 pub(crate) fn visit_leaves<'a, F>(value: &'a Value, prefix: &str, visit: &mut F)
 where
     F: FnMut(String, &'a Value),
 {
     match value {
-        Value::Object(map) => {
+        Value::Object(map) if !map.is_empty() || prefix.is_empty() => {
             for (key, child) in map {
                 let path = format!("{}/{}", prefix, escape_pointer_token(key));
                 visit_leaves(child, &path, visit);
@@ -148,15 +149,7 @@ where
                     .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?,
             );
             strip_utf8_bom(&mut reader)?;
-            let is_array = {
-                let buffer = reader
-                    .fill_buf()
-                    .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
-                matches!(
-                    buffer.iter().find(|byte| !byte.is_ascii_whitespace()),
-                    Some(&b'[')
-                )
-            };
+            let is_array = starts_with_array(&mut reader)?;
 
             if is_array {
                 let mut error = None;
@@ -188,6 +181,26 @@ where
             }
         }
     }
+}
+
+/// Looks past arbitrarily long leading whitespace without retaining it.
+/// Rewind before parsing so syntax errors keep their original line/column.
+fn starts_with_array(reader: &mut BufReader<File>) -> Result<bool, AppError> {
+    let read_error = |error| AppError::Message(format!("Failed to read file: {}", error));
+    let start = reader.stream_position().map_err(read_error)?;
+    let is_array = loop {
+        let buffer = reader.fill_buf().map_err(read_error)?;
+        if let Some(byte) = buffer.iter().find(|byte| !byte.is_ascii_whitespace()) {
+            break *byte == b'[';
+        }
+        let consumed = buffer.len();
+        if consumed == 0 {
+            break false;
+        }
+        reader.consume(consumed);
+    };
+    reader.seek(SeekFrom::Start(start)).map_err(read_error)?;
+    Ok(is_array)
 }
 
 /// Drops a leading UTF-8 BOM from a JSON document. JSONL does not use this.
