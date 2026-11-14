@@ -49,6 +49,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
         '<CommandLine>whoami & "hostname"</CommandLine>',
         '<img src=x onerror="window.__memoUnsafe=true"><script>window.__memoUnsafe=true</script>',
         '  first line\n\tsecond line, "quoted"\n \t',
+        ' \t\n ',
     ]
     try:
         open_project(web, case["meta"]["name"])
@@ -59,8 +60,9 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
             web.named("Save", ".memo-dialog")
             _saved(web)
             assert _stored(web, owner)["memo"] == note
-            displayed = web.script("const e=document.querySelector('.data-row[data-row-index=\"0\"] .memo-button');return {text:e.querySelector('.memo-text')?.textContent,title:e.title,unsafe:!!window.__memoUnsafe,markup:e.querySelectorAll('img,script').length};")
-            assert displayed == {"text": note, "title": note, "unsafe": False, "markup": 0}, displayed
+            displayed = web.script("const e=document.querySelector('.data-row[data-row-index=\"0\"] .memo-button');return {text:e.querySelector('.memo-text')?.textContent,title:e.title,hasMemo:e.classList.contains('has-memo'),label:e.getAttribute('aria-label'),unsafe:!!window.__memoUnsafe,markup:e.querySelectorAll('img,script').length};")
+            assert displayed == {"text": note, "title": note, "hasMemo": True,
+                "label": f"Edit note for row 1: {note}", "unsafe": False, "markup": 0}, displayed
             _editor(web)
             assert web.script("return document.querySelector('.memo-dialog textarea').value;") == note
             web.named("Save", ".memo-dialog")

@@ -151,15 +151,15 @@
     <button
       class="memo-button"
       bind:this={memoButton}
-      class:has-memo={Boolean(row?.memo?.trim())}
-      aria-label={row?.memo?.trim() ? `Edit note for row ${row.row_index + 1}: ${row.memo}` : row ? `Add note for row ${row.row_index + 1}` : 'Loading note'}
+      class:has-memo={Boolean(row?.memo.length)}
+      aria-label={row?.memo.length ? `Edit note for row ${row.row_index + 1}: ${row.memo}` : row ? `Add note for row ${row.row_index + 1}` : 'Loading note'}
       on:click={() =>
         row &&
         projectId &&
         editMemo(row, projectId)}
       title={
         row
-          ? row.memo && row.memo.trim().length
+          ? row.memo.length > 0
             ? row.memo
             : 'Add note'
           : 'Loading…'
@@ -169,7 +169,7 @@
         if (isTabKey(event) && !event.shiftKey && !row?.tags.length) columnTab(event, -1, position);
       }}
     >
-      {#if row && row.memo && row.memo.trim().length}
+      {#if row && row.memo.length > 0}
         <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
         <span class="memo-text">{row.memo}</span>
       {:else if row}
