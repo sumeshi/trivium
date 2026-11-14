@@ -42,17 +42,6 @@ impl PreparedQuery {
         let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
         let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
         let tokens = search_raw.map(tokenize_search_query).unwrap_or_default();
-        let has_unscoped_terms = tokens.iter().any(|token| match token {
-            SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
-                col.as_deref().is_none_or(str::is_empty) && !text.is_empty()
-            }
-            _ => false,
-        });
-        let search_columns = if has_unscoped_terms {
-            resolve_columns(column_names, requested_scope.unwrap_or(column_names))?
-        } else {
-            Vec::new()
-        };
         let reads_tags = tokens.iter().any(|token| match token {
             SearchToken::Term {
                 col: Some(column), ..
@@ -97,8 +86,10 @@ impl PreparedQuery {
         Ok(Self {
             node,
             required_columns,
-            join_columns: if has_unscoped_terms {
-                search_columns
+            // An unscoped predicate may come from either the search bar or a
+            // condition tree (including one converted from search syntax).
+            join_columns: if needs_joined_text {
+                resolve_columns(column_names, requested_scope.unwrap_or(column_names))?
             } else {
                 Vec::new()
             },

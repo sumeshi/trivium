@@ -149,26 +149,19 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
     }
 
     // `com:WS01|WS02` carries the column across OR (and across a following NOT).
+    // Only the next operand can inherit it; an explicit scope consumes it too.
     let mut adjusted: Vec<SearchToken> = Vec::with_capacity(tokens.len());
     let mut last_operand_col: Option<String> = None;
     let mut carry_col_for_next: Option<String> = None;
     for tok in tokens.into_iter() {
         match tok {
             SearchToken::Term { col, text } => {
-                let new_col = if col.is_none() {
-                    carry_col_for_next.take().or(col)
-                } else {
-                    col
-                };
+                let new_col = col.or(carry_col_for_next.take());
                 last_operand_col = new_col.clone();
                 adjusted.push(SearchToken::Term { col: new_col, text });
             }
             SearchToken::QuotedTerm { col, text } => {
-                let new_col = if col.is_none() {
-                    carry_col_for_next.take().or(col)
-                } else {
-                    col
-                };
+                let new_col = col.or(carry_col_for_next.take());
                 last_operand_col = new_col.clone();
                 adjusted.push(SearchToken::QuotedTerm { col: new_col, text });
             }
