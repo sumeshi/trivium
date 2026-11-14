@@ -1,20 +1,24 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { get } from 'svelte/store';
+  import { tableColumnLayout, visibleTableColumns } from '../../columnWindow';
+  import type { TableColumn } from '../../columnWindow';
+  import { recycleSlots } from '../../renderSlots';
+  import type { RenderSlot } from '../../renderSlots';
+  import { isTabKey } from '../../keyboard';
+  import { protectRecycledActivation } from '../../recycledActivation';
+  import TableRow from './TableRow.svelte';
   import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from '../../frozenColumns';
   import { errorMessage } from '../../errors';
   import {
     ROW_HEIGHT, PAGE_SIZE, SELECT_COL_WIDTH, INDEX_COL_WIDTH, FLAG_COL_WIDTH, MEMO_COL_WIDTH,
-    STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, CHAR_PIXEL, COLUMN_PADDING, BUFFER,
-    FLAG_OPTIONS, normalizeFlag,
+    STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, BUFFER,
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
   import type { CellKind } from '../../types';
   import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
   import ColumnContextMenu from './ColumnContextMenu.svelte';
-  import { theme } from '../../theme';
-  import { displayRowColor } from '../../skin';
 
   import {
     logicalRowAt,
@@ -25,19 +29,15 @@
   const {
     rowsCache, pendingPages, totalRows, totalFilteredRows, filteredFlaggedCount, visibleColumns,
     sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
-    tableWidth, projectDetail, columnLabels, toggleSort, setFlag, editMemo, openCell,
-    handleCellKeydown, positionToRowIndex, largePages, selectedRowIds, selectedCount,
-    selectVisibleRows, toggleRowSelection, rememberOffset, searchColumns, hiddenColumns, frozenThrough, backend,
+    tableWidth, projectDetail, columnLabels, toggleSort,
+    positionToRowIndex, largePages, selectedRowIds, selectedCount,
+    selectVisibleRows, rememberOffset, searchColumns, hiddenColumns, frozenThrough, backend,
   } = useWorkspace();
 
   const _toggleSort = toggleSort;
-  const _setFlag = setFlag;
-  const _editMemo = editMemo;
-  const _openCell = openCell;
-  const _handleCellKeydown = handleCellKeydown;
-  const _normalizeFlag = normalizeFlag;
 
   export let columnWidths: Map<string, number> = new Map();
+  export let ensureRangeLoaded: (start: number, end: number) => void = () => {};
   const dispatch = createEventDispatcher<{
     notify: { message: string; tone: 'success' | 'error' };
     columnRule: { columnId: string };
@@ -64,6 +64,12 @@
   let horizontalScrollEl: HTMLDivElement | null = null;
   let selectAllEl: HTMLInputElement | null = null;
   let focusedScrollingWidth: number | undefined;
+  let renderedColumns: readonly TableColumn[] = [];
+  let columnSlots: readonly RenderSlot<TableColumn>[] = [];
+  let rowSlots: readonly RenderSlot<VirtualRow>[] = [];
+  let focusedColumnId: string | null = null;
+  let scrollFrame: number | null = null;
+  let pendingScrollEl: HTMLDivElement | null = null;
 
   const resolveColumnWidth = (column: string) => {
     const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
@@ -86,6 +92,15 @@
   $: frozenLayout = frozenColumnLayout($projectDetail?.columns ?? [], $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
   $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, STICKY_COLUMNS_WIDTH,
     $tableWidth, $scrollLeft, focusedScrollingWidth);
+  $: columnLayout = tableColumnLayout($visibleColumns, distributedDataWidths, frozenLayout.offsets, STICKY_COLUMNS_WIDTH);
+  $: {
+    const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, focusedColumnId);
+    if (next !== renderedColumns) renderedColumns = next;
+  }
+  $: {
+    const next = recycleSlots(renderedColumns, (column) => column.id, columnSlots);
+    if (next !== columnSlots) columnSlots = next;
+  }
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
@@ -121,6 +136,12 @@
   $: endIndex = windowGeometry.end;
   $: offsetY = windowGeometry.innerTop;
   $: totalHeight = windowGeometry.height;
+  $: ensureRangeLoaded(startIndex, endIndex);
+  $: if (!pendingScrollEl && $bodyScrollEl
+    && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop
+    && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
+    $bodyScrollEl.scrollTop = $scrollTop;
+  }
   // A filter can shrink the result set while the viewport is near the old end.
   // Pull both the store and the scroll element back inside the new physical
   // range so the space below the last row is not left as a blank spacer. Wait
@@ -136,8 +157,11 @@
       }
     }
   }
-  $: loadedRowCount = $rowsCache.size;
   $: projectId = $projectDetail?.project.meta.id ?? '';
+  const headerActivationIdentity = (target: EventTarget | null) => ({
+    projectId, rowIndex: null,
+    columnId: target instanceof Element ? target.closest<HTMLElement>('[data-column-id]')?.dataset.columnId ?? null : null,
+  });
   $: if (cellMenu && cellMenu.projectId !== projectId) {
     cellMenu = null;
   }
@@ -145,6 +169,7 @@
   const openCellMenu = (event: MouseEvent, row: CachedRow, column: string) => {
     event.preventDefault();
     if (!projectId) return;
+    focusedColumnId = column;
     columnMenu = null;
     cellMenu = {
       projectId,
@@ -162,6 +187,7 @@
   const openColumnMenu = (event: MouseEvent | KeyboardEvent, columnId: string) => {
     event.preventDefault();
     event.stopPropagation();
+    focusedColumnId = columnId;
     const trigger = event.currentTarget as HTMLElement;
     const rect = trigger.getBoundingClientRect();
     cellMenu = null;
@@ -197,26 +223,24 @@
     if (get(projectDetail)?.project.meta.id === detail.project.meta.id) {
       const remaining = get(visibleColumns);
       const next = remaining[Math.min(previousIndex, remaining.length - 1)];
-      const heading = next ? [...document.querySelectorAll<HTMLElement>('.column-heading')]
-        .find((element) => element.dataset.columnId === next)?.querySelector<HTMLButtonElement>('.column-sort') : null;
-      (heading ?? document.querySelector<HTMLButtonElement>('[aria-label="Choose visible columns"]'))?.focus();
+      if (next) await focusHeaderColumn(next);
+      else document.querySelector<HTMLButtonElement>('[aria-label="Choose visible columns"]')?.focus();
     }
     try { await pending; }
     catch (error) { dispatch('notify', { message: errorMessage(error, 'Failed to save visible columns.'), tone: 'error' }); }
   };
   const freezeColumn = async (columnId: string) => {
     if (!$projectDetail?.columns.includes(columnId)) return;
-    const trigger = columnMenu?.trigger;
     frozenThrough.set(columnId);
     columnMenu = null;
     await tick();
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    await focusHeaderColumn(columnId);
   };
   const unfreezeColumns = async () => {
-    const trigger = columnMenu?.trigger;
+    const columnId = columnMenu?.columnId;
     frozenThrough.set(''); columnMenu = null;
     await tick();
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    if (columnId) await focusHeaderColumn(columnId);
   };
 
   const buildVirtualRows = (
@@ -249,6 +273,10 @@
   };
 
   $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex, $pendingPages);
+  $: {
+    const next = recycleSlots(virtualRows, (row) => row.position, rowSlots);
+    if (next !== rowSlots) rowSlots = next;
+  }
   // The header checkbox covers only rows that are rendered right now. Selecting
   // the whole result set is the bulk panel's "Current results" scope instead.
   $: visibleRowIds = virtualRows
@@ -264,31 +292,44 @@
     selectVisibleRows(visibleRowIds, headerState !== 'all');
   };
 
-  const handleScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLDivElement;
-    if (!target.isConnected) return;
-    scrollTop.set(target.scrollTop);
-    rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
+  const mirrorHorizontal = (left: number) => {
+    if ($headerScrollEl && $headerScrollEl.scrollLeft !== left) $headerScrollEl.scrollLeft = left;
+    if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== left) horizontalScrollEl.scrollLeft = left;
+  };
+
+  const syncHeader = (left: number) => {
+    mirrorHorizontal(left);
+    if ($scrollLeft !== left) scrollLeft.set(left);
+  };
+
+  const flushScroll = () => {
+    scrollFrame = null;
+    const target = pendingScrollEl;
+    pendingScrollEl = null;
+    if (!target?.isConnected) return;
+    const top = target.scrollTop;
+    if ($scrollTop !== top) scrollTop.set(top);
+    rememberOffset(logicalRowAt(top, $totalFilteredRows, $viewportHeight));
     syncHeader(target.scrollLeft);
   };
 
-  // The body owns horizontal position. Feeding delayed header scroll events
-  // back into it can undo a newer wheel gesture or a tab's restored position.
-  const syncHeader = (left: number) => {
-    scrollLeft.set(left);
-    if ($headerScrollEl && $headerScrollEl.scrollLeft !== left) {
-      $headerScrollEl.scrollLeft = left;
-    }
-    if (horizontalScrollEl && horizontalScrollEl.scrollLeft !== left) {
-      horizontalScrollEl.scrollLeft = left;
-    }
+  const queueScroll = (target: HTMLDivElement) => {
+    if (!target.isConnected) return;
+    rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
+    mirrorHorizontal(target.scrollLeft);
+    pendingScrollEl = target;
+    if (scrollFrame === null) scrollFrame = requestAnimationFrame(flushScroll);
   };
 
+  const handleScroll = (event: Event) => queueScroll(event.currentTarget as HTMLDivElement);
+
+  // The body owns horizontal position. A delayed header event must never feed
+  // an older offset back into it; only the body and external scrollbar publish.
   const handleHorizontalScroll = (event: Event) => {
     const target = event.currentTarget as HTMLDivElement;
     if (!$bodyScrollEl || !target.isConnected) return;
     $bodyScrollEl.scrollLeft = target.scrollLeft;
-    syncHeader($bodyScrollEl.scrollLeft);
+    queueScroll($bodyScrollEl);
   };
 
   const handleHorizontalKey = (event: KeyboardEvent) => {
@@ -307,10 +348,60 @@
 
   const focusColumn = (index: number) => {
     if (!$bodyScrollEl) return;
+    focusedColumnId = $visibleColumns[index] ?? null;
     focusedScrollingWidth = frozenLayout.offsets.has($visibleColumns[index]) ? undefined : distributedDataWidths[index];
     $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
       frozenLayout, STICKY_COLUMNS_WIDTH, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
+  };
+
+  const trackFocus = (event: FocusEvent) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const cell = target.closest<HTMLElement>('[data-column-id]');
+    if (cell && ($headerScrollEl?.contains(cell) || $bodyScrollEl?.contains(cell))) {
+      focusedColumnId = cell.dataset.columnId ?? null;
+    } else if (!cellMenu && !columnMenu && !target.closest('.cell-dialog')) {
+      focusedColumnId = null;
+    }
+  };
+
+  const focusHeaderColumn = async (column: string) => {
+    const index = get(visibleColumns).indexOf(column);
+    if (index < 0) return;
+    focusColumn(index);
+    await tick();
+    [...($headerScrollEl?.querySelectorAll<HTMLElement>('.column-heading') ?? [])]
+      .find((element) => element.dataset.columnId === column)
+      ?.querySelector<HTMLButtonElement>('.column-sort')?.focus({ preventScroll: true });
+  };
+
+  const columnTab = (event: KeyboardEvent, index: number, position?: number) => {
+    if (!isTabKey(event) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const next = index + (event.shiftKey ? -1 : 1);
+    if (next < 0 || next >= $visibleColumns.length) return;
+    event.preventDefault();
+    const column = $visibleColumns[next];
+    let destination = position !== undefined && position < startIndex ? undefined : position;
+    if (event.shiftKey && index === $visibleColumns.length && position !== undefined) {
+      // Native Tab skips unloaded/oversized rows, whose data controls cannot
+      // receive focus. Keep that behavior when their columns are virtualized.
+      destination = undefined;
+      for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
+        if (virtualRows[index].position <= position && virtualRows[index].row) {
+          destination = virtualRows[index].position;
+          break;
+        }
+      }
+    }
+    focusColumn(next);
+    void tick().then(() => {
+      const root = destination === undefined ? $headerScrollEl : $bodyScrollEl;
+      const selector = destination === undefined ? '.column-heading' : `.data-row[data-position="${destination}"] > [data-column-id]`;
+      const target = [...(root?.querySelectorAll<HTMLElement>(selector) ?? [])]
+        .find((element) => element.dataset.columnId === column);
+      (destination === undefined ? target?.querySelector<HTMLButtonElement>('.column-sort') : target)?.focus({ preventScroll: true });
+    });
   };
 
   const forwardWheel = (event: WheelEvent) => {
@@ -328,7 +419,7 @@
       const previousLeft = $bodyScrollEl.scrollLeft;
       $bodyScrollEl.scrollLeft += deltaX;
       handled = handled || $bodyScrollEl.scrollLeft !== previousLeft;
-      syncHeader($bodyScrollEl.scrollLeft);
+      queueScroll($bodyScrollEl);
     }
     if (handled) {
       event.preventDefault();
@@ -336,6 +427,16 @@
   };
 
   onMount(() => {
+    const unsubscribeScroll = scrollTop.subscribe((top) => {
+      const target = $bodyScrollEl;
+      if (!target?.isConnected || top > maxScrollTop($totalFilteredRows, $viewportHeight)
+        || Math.abs(target.scrollTop - top) <= 1) return;
+      // An explicit Go/history/restore supersedes a queued native scroll.
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+      pendingScrollEl = null;
+      target.scrollTop = top;
+    });
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         tableWidth.set(entry.contentRect.width);
@@ -348,6 +449,10 @@
     }
 
     return () => {
+      unsubscribeScroll();
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+      pendingScrollEl = null;
       if (resizeObserver && observedScrollEl) {
         resizeObserver.unobserve(observedScrollEl);
       }
@@ -356,6 +461,8 @@
   });
 
 </script>
+
+<svelte:window on:focusin={trackFocus} />
 
 <section class="table-wrapper" data-frozen-pan={frozenViewport.pan}
   data-frozen-max-pan={frozenViewport.maxPan} data-frozen-reserve={frozenViewport.reserve}>
@@ -392,6 +499,7 @@
       >
         <div
           class="data-header"
+          use:protectRecycledActivation={headerActivationIdentity}
           style={`grid-template-columns: ${gridTemplate}; width: ${effectiveTableWidth}px;`}
         >
           <div class="header-cell sticky sticky-select">
@@ -403,41 +511,45 @@
               on:change={toggleVisibleRows}
               aria-label="Select visible rows"
               title="Select or clear the rows currently on screen"
+              on:keydown={(event) => {
+                if (isTabKey(event) && !event.shiftKey) columnTab(event, -1);
+              }}
             />
           </div>
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Note</div>
-          {#each $visibleColumns as column, columnIndex}
+          {#each columnSlots as entry (entry.slot)}
+            {@const column = entry.value}
             <div
               class="header-cell column-heading"
-              class:sticky={frozenLayout.offsets.has(column)}
-              class:stickyData={frozenLayout.offsets.has(column)}
-              class:lastFrozenData={frozenLayout.lastColumn === column}
-              data-column-id={column}
-              data-frozen={frozenLayout.offsets.has(column)}
-              style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${(frozenLayout.offsets.get(column) ?? 0) - frozenViewport.pan}px;` : undefined}
-              class:sorted={$sortKey === column}
+              class:sticky={column.frozen}
+              class:stickyData={column.frozen}
+              class:lastFrozenData={frozenLayout.lastColumn === column.id}
+              data-column-id={column.id}
+              data-frozen={column.frozen}
+              style={`grid-column: ${column.index + 5};${column.frozen ? ` --sticky-data-left: ${(frozenLayout.offsets.get(column.id) ?? 0) - frozenViewport.pan}px;` : ''}`}
+              class:sorted={$sortKey === column.id}
             >
               <button type="button" class="column-sort"
-                on:click={() => _toggleSort(column)}
-                on:focus={() => focusColumn(columnIndex)}
-                on:contextmenu={(event) => openColumnMenu(event, column)}
-                on:keydown={(event) => columnMenuKey(event, column)}
-                aria-pressed={$sortKey === column}
-                title={`Sort by ${$columnLabels.get(column) ?? column}; right-click, Down or Shift+F10 for column actions`}>
-                <span class="header-label">{$columnLabels.get(column) ?? column}</span>
-                {#if $sortKey === column}
+                on:click={() => _toggleSort(column.id)}
+                on:focus={() => focusColumn(column.index)}
+                on:contextmenu={(event) => openColumnMenu(event, column.id)}
+                on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnMenuKey(event, column.id); }}
+                aria-pressed={$sortKey === column.id}
+                title={`Sort by ${$columnLabels.get(column.id) ?? column.id}; right-click, Down or Shift+F10 for column actions`}>
+                <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
+                {#if $sortKey === column.id}
                   <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
                 {/if}
               </button>
               <button type="button" class="column-actions-trigger"
                 tabindex="-1"
-                aria-label={`Actions for column ${$columnLabels.get(column) ?? column}`}
-                title={`Search or filter ${$columnLabels.get(column) ?? column}`}
-                aria-haspopup="menu" aria-expanded={columnMenu?.columnId === column}
-                on:click={(event) => openColumnMenu(event, column)}
-                on:focus={() => focusColumn(columnIndex)}>
+                aria-label={`Actions for column ${$columnLabels.get(column.id) ?? column.id}`}
+                title={`Search or filter ${$columnLabels.get(column.id) ?? column.id}`}
+                aria-haspopup="menu" aria-expanded={columnMenu?.columnId === column.id}
+                on:click={(event) => openColumnMenu(event, column.id)}
+                on:focus={() => focusColumn(column.index)}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
               </button>
             </div>
@@ -455,154 +567,17 @@
       >
         <div class="virtual-spacer" style={`height: ${totalHeight}px; width: ${effectiveTableWidth}px;`}>
           <div class="virtual-inner" style={`top: ${offsetY}px;`}>
-            {#each virtualRows as item (item.position)}
+            {#each rowSlots as entry (entry.slot)}
+              {@const item = entry.value}
               {@const largePage = !item.row && $largePages.has(Math.floor(item.position / PAGE_SIZE))}
-              <div
-                class="data-row"
-                class:alt-row={item.position % 2 === 1}
-                class:loading={!item.row && !largePage}
-                class:bookmarked={item.row?.bookmarked === true}
-                style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
-                  item.row?.color
-                    ? ` --row-color: ${displayRowColor(item.row.color, $theme)};`
-                    : ''
-                }`}
-              >
-                {#if largePage}
-                  <div class="cell select-cell sticky sticky-select" aria-hidden="true"></div>
-                  <div class="cell index sticky sticky-index" aria-label="Original row not loaded">…</div>
-                  {#if item.position % PAGE_SIZE === 0 || item.position === startIndex}
-                    <div
-                      class="cell large-page-notice"
-                      title="This page exceeds the page-cache byte limit and is not retained in memory."
-                    >
-                      Page too large to cache. Scroll to another page or narrow the results.
-                    </div>
-                  {:else}
-                    <div class="large-page-blank" aria-hidden="true"></div>
-                  {/if}
-                {:else}
-                  <div class="cell select-cell sticky sticky-select">
-                    {#if item.row}
-                      <input
-                        type="checkbox"
-                        checked={$selectedRowIds.has(item.row.row_index)}
-                        on:change={() => item.row && toggleRowSelection(item.row.row_index)}
-                        aria-label={`Select row ${item.row.row_index + 1}`}
-                      />
-                    {/if}
-                  </div>
-                  <div class="cell index sticky sticky-index" title={item.row?.bookmarked ? 'Bookmarked row' : undefined}>{item.row ? item.row.row_index + 1 : '…'}</div>
-                  <div class="cell flag sticky sticky-flag">
-                    {#if item.row}
-                      <div class="flag-buttons">
-                        {#each FLAG_OPTIONS as option}
-                          <button
-                            type="button"
-                            class:selected={item.row ? _normalizeFlag(item.row.flag) === option.value : false}
-                            class:flag-safe={option.value === 'safe'}
-                            class:flag-suspicious={option.value === 'suspicious'}
-                            class:flag-critical={option.value === 'critical'}
-                            title={option.label}
-                            aria-label={option.label}
-                            on:click={() => item.row && _setFlag(item.row, option.value)}
-                          >
-                            {option.hint}
-                          </button>
-                        {/each}
-                      </div>
-                    {:else}
-                      <div class="flag-buttons loading-placeholder">…</div>
-                    {/if}
-                  </div>
-                  <button
-                    class="cell memo-button sticky sticky-memo"
-                    class:frozenDataEdge={frozenLayout.offsets.size === 0}
-                    class:has-memo={Boolean(item.row?.memo?.trim())}
-                    aria-label={item.row?.memo?.trim() ? `Edit note for row ${item.row.row_index + 1}: ${item.row.memo}` : item.row ? `Add note for row ${item.row.row_index + 1}` : 'Loading note'}
-                    on:click={() =>
-                      item.row &&
-                      $projectDetail &&
-                      _editMemo(item.row, $projectDetail.project.meta.id)}
-                    title={
-                      item.row
-                        ? item.row.memo && item.row.memo.trim().length
-                          ? item.row.memo
-                          : 'Add note'
-                        : 'Loading…'
-                    }
-                    disabled={!item.row}
-                  >
-                    {#if item.row && item.row.memo && item.row.memo.trim().length}
-                      <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
-                      <span class="memo-text">{item.row.memo}</span>
-                    {:else if item.row}
-                      <svg class="memo-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
-                      <span class="memo-placeholder">Add note</span>
-                    {:else}
-                      <span class="memo-placeholder">Loading…</span>
-                    {/if}
-                  </button>
-                  {#each $visibleColumns as column, columnIndex}
-                    {@const cellValue =
-                      item.row && column in item.row.displayCache
-                        ? item.row.displayCache[column]
-                        : null}
-                    {@const previewValue =
-                      item.row && column in item.row.previewCache
-                        ? item.row.previewCache[column]
-                        : ''}
-                    <button
-                      type="button"
-                      class="cell"
-                      class:sticky={frozenLayout.offsets.has(column)}
-                      class:stickyData={frozenLayout.offsets.has(column)}
-                      class:lastFrozenData={frozenLayout.lastColumn === column}
-                      data-column-id={column}
-                      data-frozen={frozenLayout.offsets.has(column)}
-                      style={frozenLayout.offsets.has(column) ? `--sticky-data-left: ${(frozenLayout.offsets.get(column) ?? 0) - frozenViewport.pan}px;` : undefined}
-                      on:focus={() => focusColumn(columnIndex)}
-                      on:mousedown={(event) => {
-                        // A right-click must not pan a partly visible column;
-                        // its queued scroll event would dismiss the new menu.
-                        if (event.button === 2) event.preventDefault();
-                      }}
-                      title={
-                        !item.row || cellValue === null
-                          ? 'Loading…'
-                          : cellValue
-                      }
-                      on:click={() => {
-                        if (!item.row || !projectId) return;
-                        _openCell(projectId, column, previewValue, item.row);
-                      }}
-                      on:contextmenu={(event) => {
-                        if (!item.row) return;
-                        openCellMenu(event, item.row, column);
-                      }}
-                      on:keydown={(event) => {
-                        if (!item.row || !projectId) return;
-                        _handleCellKeydown(
-                          event,
-                          projectId,
-                          column,
-                          previewValue,
-                          item.row
-                        );
-                      }}
-                      disabled={!item.row}
-                    >
-                      <span class="cell-text">
-                        {#if !item.row || cellValue === null}
-                          Loading…
-                        {:else}
-                          {cellValue}
-                        {/if}
-                      </span>
-                    </button>
-                  {/each}
-                {/if}
-              </div>
+              <TableRow
+                row={item.row} position={item.position} {projectId}
+                selected={item.row ? $selectedRowIds.has(item.row.row_index) : false}
+                {largePage} showLargeNotice={item.position === startIndex}
+                {columnSlots} columnCount={$visibleColumns.length} {gridTemplate}
+                frozenOffsets={frozenLayout.offsets} frozenPan={frozenViewport.pan} lastFrozen={frozenLayout.lastColumn}
+                {focusColumn} {openCellMenu} {columnTab}
+              />
             {/each}
           </div>
         </div>

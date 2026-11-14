@@ -30,6 +30,12 @@ export function createViewHistory() {
   );
   let nonce = 0;
   let historyProjectId: string | null = null;
+  let pendingOffset: number | null = null;
+  const flushOffset = () => {
+    if (pendingOffset === null) return;
+    history = withOffset(history, pendingOffset);
+    pendingOffset = null;
+  };
 
   /**
    * Bind the history to a project. A queued restore for the previous project is
@@ -46,15 +52,18 @@ export function createViewHistory() {
   }
 
   function resetHistory(tree: EditorGroup, offset: number): void {
+    pendingOffset = null;
     history = emptyHistory(tree, offset);
     publish();
   }
 
   function snapshotHistory(): History {
+    flushOffset();
     return structuredClone(history);
   }
 
   function restoreHistory(snapshot: History): void {
+    pendingOffset = null;
     history = structuredClone(snapshot);
     historyRestore.set(null);
     publish();
@@ -65,15 +74,17 @@ export function createViewHistory() {
     tree: EditorGroup,
     nextOffset: number
   ): void {
+    flushOffset();
     history = pushApplied(history, tree, previousOffset, nextOffset);
     publish();
   }
 
   function rememberOffset(offset: number): void {
-    history = withOffset(history, offset);
+    pendingOffset = offset;
   }
 
   function goBack(): void {
+    flushOffset();
     const next = stepBack(history);
     if (!next) {
       return;
@@ -90,6 +101,7 @@ export function createViewHistory() {
   }
 
   function goForward(): void {
+    flushOffset();
     const next = stepForward(history);
     if (!next) {
       return;
@@ -127,17 +139,5 @@ export function loadProjectView(projectId: string, columns: readonly string[]): 
     return parseSavedView(text, columns);
   } catch {
     return null;
-  }
-}
-
-/**
- * @deprecated Use `Backend.saveViewState`; this is only for the migration path
- * when a legacy save must be mirrored.
- */
-export function saveProjectView(projectId: string, view: SavedView): void {
-  try {
-    localStorage.setItem(STORAGE_PREFIX + projectId, JSON.stringify(view));
-  } catch {
-    // Ignore a full or blocked store. This state is not saved on the server.
   }
 }

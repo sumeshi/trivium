@@ -111,3 +111,27 @@ test("a late view restore cannot revive a disposed case or publish warnings into
   assert.equal(b.view.snapshotSession()?.view.search, "");
   b.workspace.dispose();
 });
+
+test("scroll and control changes save one latest view after idle and unsubscribe on disposal", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { workspace, view, writes } = setup();
+  view.watch();
+  view.watch();
+  workspace.scrollTop.set(32);
+  workspace.search.set("first");
+  t.mock.timers.tick(200);
+  assert.equal(writes.length, 0);
+  workspace.scrollTop.set(160);
+  workspace.search.set("latest");
+  t.mock.timers.tick(249);
+  assert.equal(writes.length, 0);
+  t.mock.timers.tick(1);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].search, "latest");
+  workspace.scrollLeft.set(400);
+  workspace.dispose();
+  t.mock.timers.tick(1000);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(writes.length, 1);
+});

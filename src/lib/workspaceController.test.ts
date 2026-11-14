@@ -242,6 +242,29 @@ test("First/Last cancel their replaced Go request without cancelling independent
   }
 });
 
+test("tab snapshots use native viewport offsets before a queued render frame publishes its stores", () => {
+  const { workspace, queries, backend } = setup();
+  workspace.totalFilteredRows.set(5199);
+  const viewport = { scrollTop: 3207, scrollLeft: 700 } as HTMLDivElement;
+  workspace.bodyScrollEl.set(viewport);
+  assert.equal(get(workspace.scrollTop), 0);
+  const navigation = createWorkspaceNavigation(workspace, queries, {
+    backend, isReady: () => true, isFilterPending: () => false, beforeScroll: () => {}, notify: () => {},
+  });
+  const view = createWorkspaceView(workspace, {
+    backend, isReady: () => true, columnWidths: () => new Map(), logicalRow: navigation.rowOffset,
+    scrollLeft: () => get(workspace.bodyScrollEl)?.scrollLeft ?? get(workspace.scrollLeft),
+    signature: () => queries.signature, notify: () => {},
+  });
+  const snapshot = view.snapshotSession()!;
+  assert.equal(snapshot.view.logicalRow, 100);
+  assert.equal(snapshot.history.entries.at(-1)?.offset, 100);
+  assert.equal(snapshot.scrollLeft, 700);
+  navigation.jumpToFirstRow();
+  assert.equal(viewport.scrollTop, 0);
+  workspace.dispose();
+});
+
 test("restored annotation baselines cannot supersede a slow first query and discard its saved position", async () => {
   const projectId = "slow-restored-query";
   markBulkAnnotationsChanged(projectId);

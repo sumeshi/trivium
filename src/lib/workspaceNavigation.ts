@@ -26,7 +26,8 @@ export function createWorkspaceNavigation(
   let disposed = false;
 
   const rowOffset = () => clampRow(logicalRowAt(
-    get(workspace.scrollTop), get(workspace.totalFilteredRows), get(workspace.viewportHeight),
+    get(workspace.bodyScrollEl)?.scrollTop ?? get(workspace.scrollTop),
+    get(workspace.totalFilteredRows), get(workspace.viewportHeight),
   ), get(workspace.totalFilteredRows));
 
   const applyScrollOffset = (offset: number, totalOverride?: number) => {

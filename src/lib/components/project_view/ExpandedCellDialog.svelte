@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { errorMessage } from '../../errors';
+  import { isTabKey } from '../../keyboard';
   import { displayText } from '../../ipcValues';
   import { createRowDetails, detailCopyValue, detailFilterValue } from '../../rowDetails';
   import type { DetailField } from '../../rowDetails';
@@ -21,6 +22,8 @@
   let scrollEl: HTMLDivElement | null = null;
   let previousFocus: HTMLElement | null = null;
   let focusProject = '';
+  let focusRow: string | undefined;
+  let focusColumn: string | undefined;
 
   const details = createRowDetails({
     read: (target, columnId) => {
@@ -37,11 +40,15 @@
   onDestroy(() => { details.dispose(); reads.dispose(); });
 
   const restoreFocus = () => {
-    if (previousFocus?.isConnected && focusProject === $projectDetail?.project.meta.id) {
+    if (previousFocus?.isConnected && focusProject === $projectDetail?.project.meta.id
+      && previousFocus.closest<HTMLElement>('.data-row')?.dataset.rowIndex === focusRow
+      && previousFocus.closest<HTMLElement>('[data-column-id]')?.dataset.columnId === focusColumn) {
       previousFocus.focus({ preventScroll: true });
     }
     previousFocus = null;
     focusProject = '';
+    focusRow = undefined;
+    focusColumn = undefined;
   };
   const closeCell = () => { expandedCell.set(null); restoreFocus(); };
   const handleBackdropClick = (event: MouseEvent) => {
@@ -59,7 +66,7 @@
       scrollEl.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? scrollEl.scrollHeight
         : scrollEl.scrollTop + (event.key === 'PageDown' ? page : -page);
       scrollEl.focus({ preventScroll: true });
-    } else if (event.key === 'Tab' && dialogEl) {
+    } else if (isTabKey(event) && dialogEl) {
       const items = [...dialogEl.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')];
       const first = items[0], last = items.at(-1);
       if (event.shiftKey && document.activeElement === first && last) {
@@ -86,6 +93,8 @@
     if (!loadedKey && typeof document !== 'undefined') {
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       focusProject = $expandedCell.projectId;
+      focusRow = previousFocus?.closest<HTMLElement>('.data-row')?.dataset.rowIndex;
+      focusColumn = previousFocus?.closest<HTMLElement>('[data-column-id]')?.dataset.columnId;
     }
     loadedKey = sourceKey;
     copyStatus = '';

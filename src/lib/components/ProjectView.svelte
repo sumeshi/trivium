@@ -22,8 +22,8 @@
   import { cloneTree } from '../viewState';
   import type { WorkspaceSession } from '../workspaceSession';
   import {
-    normalizeIocFlag, BUFFER, MIN_DATA_WIDTH,
-    WIDTH_LIMIT_CHARS, CHAR_PIXEL, COLUMN_PADDING, MAX_DATA_WIDTH, PAGE_SIZE,
+    normalizeIocFlag, MIN_DATA_WIDTH,
+    WIDTH_LIMIT_CHARS, CHAR_PIXEL, COLUMN_PADDING, MAX_DATA_WIDTH,
   } from './project_view/state';
   import type {
     FlagFilterValue,
@@ -31,11 +31,7 @@
     ExportOptions,
     ExportSnapshot
   } from './project_view/state';
-  import {
-    clampRow,
-    maxScrollTop,
-    virtualWindow
-  } from '../virtualScroll';
+  import { clampRow } from '../virtualScroll';
   import { createWorkspaceController } from "../workspaceController";
   import { provideWorkspace } from "../workspaceContext";
   import { createWorkspaceQuery } from "../workspaceQuery";
@@ -56,7 +52,7 @@
     visibleColumns, hiddenColumns, frozenThrough, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
     totalRows, totalFilteredRows, appliedResultLoading, flaggedCount,
-    expandedCell, memoEditor, iocManagerOpen, viewportHeight, scrollTop, scrollLeft,
+    expandedCell, memoEditor, iocManagerOpen, scrollLeft,
     bodyScrollEl, headerScrollEl, iocDraft, currentProjectId, lastHiddenColumnsRef,
     viewGeneration, invalidateViewRequests, selectedRowIds, appliedFilters, sortRevision,
     conditionPayload, conditionTree,
@@ -175,11 +171,12 @@
     isReady: () => initialized && !destroyed,
     columnWidths: () => columnWidths,
     logicalRow: () => pendingScrollRow ?? rowOffset(),
-    scrollLeft: () => pendingScrollLeft ?? get(scrollLeft),
+    scrollLeft: () => pendingScrollLeft ?? get(bodyScrollEl)?.scrollLeft ?? get(scrollLeft),
     signature: () => queries.signature,
     notify: (message) => dispatch('notify', { message, tone: 'error' }),
   });
   const { flushPersist, schedulePersist } = view;
+  view.watch();
 
   export function snapshotSession(): WorkspaceSession | null {
     return view.snapshotSession();
@@ -342,6 +339,7 @@
     }
     annotationObserver.initialize();
     initialized = true;
+    schedulePersist();
     applyingProjectId = null;
     // Always request first page to ensure flags and memos are reflected after project reload
     // Wait for the first page to load before marking as ready to render
@@ -413,45 +411,6 @@
       lastSearchColumnsSignature = signature;
       lastConditionJson = conditionJson;
     }
-  }
-
-  // `$scrollTop` is a dependency so scrolling alone schedules the debounced
-  // view-state save; `rowOffset()` reads the store via `get()` and would
-  // otherwise stay invisible to the reactive dependency graph.
-  $: persistedView = initialized && projectDetail && $scrollTop >= 0
-    ? {
-        search: $search,
-        searchColumns: [...$searchColumns],
-        flagFilter: $flagFilter,
-        bookmarkedOnly: $bookmarkedOnly,
-        hidden: Array.from($hiddenColumns),
-        frozenThrough: $frozenThrough,
-        sortKey: $sortKey,
-        sortDirection: $sortDirection,
-        columnWidths,
-        offset: rowOffset(),
-        logicalRow: rowOffset(),
-        tree: $conditionTree,
-      }
-    : null;
-  $: if (persistedView) {
-    schedulePersist();
-  }
-
-  // Keep in sync with DataTable: the applied QuerySpec result is the only
-  // source for the active row count, including bookmark-only filtering.
-  $: effectiveTotalRows = $totalFilteredRows;
-  $: windowGeometry = virtualWindow(
-    $scrollTop,
-    effectiveTotalRows,
-    $viewportHeight,
-    BUFFER
-  );
-  $: startIndex = windowGeometry.start;
-  $: endIndex = windowGeometry.end;
-  $: ensureRangeLoaded(startIndex, endIndex);
-  $: if ($bodyScrollEl && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
-    $bodyScrollEl.scrollTop = $scrollTop;
   }
 
   const closeCell = () => {
@@ -795,7 +754,7 @@
     />
   {/if}
 
-  <DataTable {columnWidths} on:notify={(e) => dispatch('notify', e.detail)}
+  <DataTable {columnWidths} {ensureRangeLoaded} on:notify={(e) => dispatch('notify', e.detail)}
     on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)}
     on:columnGroup={(event) => void filterControls?.openGroupingForColumn(event.detail.columnId)} />
   <FilterStatus bind:height={filterStatusHeight} on:clear={clearAllFilters} />

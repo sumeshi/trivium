@@ -22,8 +22,6 @@ export const FLAG_OPTIONS = [
 
 export type { FlagFilterValue } from "../../types";
 
-export const PRIORITY_FLAGS: FlagSymbol[] = ["suspicious", "critical"];
-
 export const FLAG_FILTER_OPTIONS: Array<{
   value: FlagFilterSelection;
   label: string;

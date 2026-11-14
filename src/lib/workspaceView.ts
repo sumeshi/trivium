@@ -23,6 +23,8 @@ interface ViewOptions {
 export function createWorkspaceView(workspace: WorkspaceController, options: ViewOptions) {
   let writable = true;
   let disposed = false;
+  let watching = false;
+  const subscriptions: Array<() => void> = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   const notify = (message: string) => { if (!disposed) options.notify(message); };
   const cancelScheduled = () => { if (timer) clearTimeout(timer); timer = null; };
@@ -43,6 +45,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
   const snapshotSession = (): WorkspaceSession | null => {
     const projectId = get(workspace.currentProjectId);
     if (disposed || !options.isReady() || !projectId) return null;
+    workspace.rememberOffset(options.logicalRow());
     return {
       projectId, view: buildViewState(), selectedRowIds: [...get(workspace.selectedRowIds)],
       selectionSignature: options.signature(), history: workspace.snapshotHistory(),
@@ -59,8 +62,26 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     }
   };
   const schedulePersist = () => {
+    if (disposed || !writable || !options.isReady()) return;
     cancelScheduled();
     timer = setTimeout(() => { timer = null; void flushPersist(get(workspace.currentProjectId)); }, 250);
+  };
+
+  // Subscribe here so viewport updates do not invalidate the parent component
+  // or rebuild a saved-view object on every scroll. Snapshot only after idle.
+  const watch = () => {
+    if (watching || disposed) return;
+    watching = true;
+    for (const store of [workspace.search, workspace.searchColumns, workspace.flagFilter,
+      workspace.bookmarkedOnly, workspace.sortKey, workspace.sortDirection,
+      workspace.hiddenColumns, workspace.frozenThrough, workspace.conditionTree,
+      workspace.scrollTop, workspace.scrollLeft]) {
+      let initial = true;
+      subscriptions.push(store.subscribe(() => {
+        if (initial) { initial = false; return; }
+        schedulePersist();
+      }));
+    }
   };
 
   const loadSavedView = async (
@@ -116,6 +137,10 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     }
     return null;
   };
-  workspace.onDispose(() => { disposed = true; cancelScheduled(); });
-  return { buildViewState, snapshotSession, flushPersist, schedulePersist, cancelScheduled, loadSavedView };
+  workspace.onDispose(() => {
+    disposed = true;
+    cancelScheduled();
+    for (const unsubscribe of subscriptions) unsubscribe();
+  });
+  return { buildViewState, snapshotSession, flushPersist, schedulePersist, watch, cancelScheduled, loadSavedView };
 }
