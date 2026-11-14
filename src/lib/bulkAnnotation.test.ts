@@ -11,7 +11,7 @@ const filters = {
 const blank = { flag: "keep" as const, memo: "", clearMemo: false, tag: "", tagOperation: "add" as const };
 const args = (): BulkAnnotateArgs => buildBulkAnnotateArgs({
   projectId: "p1", target: "filtered", selectedRowIds: [], filters,
-  sortKey: "c000001", sortDirection: "desc", previewToken: null,
+  sortKey: "c000001", sortDirection: "desc",
   patch: buildBulkPatch({ ...blank, tag: "review" }),
 });
 const deferred = <T>() => {
@@ -20,7 +20,7 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-test("Keep and blank fields do not change any annotation", () => {
+test("unselected flags and blank fields do not change any annotation", () => {
   assert.deepEqual(buildBulkPatch(blank), {});
   assert.deepEqual(buildBulkPatch({ ...blank, memo: "  ", tag: "  " }), {});
 });
@@ -45,7 +45,7 @@ test("clearing a flag or note is explicit and can be combined with tag removal",
 test("the bulk payload shares the applied query and freezes selected row IDs", () => {
   const selected = [4, 2];
   const input = { projectId: "p1", target: "selection" as const, selectedRowIds: selected, filters,
-    sortKey: null, sortDirection: "asc" as const, previewToken: null, patch: { add_tags: ["tag"] } };
+    sortKey: null, sortDirection: "asc" as const, patch: { add_tags: ["tag"] } };
   const result = buildBulkAnnotateArgs(input);
   selected.push(99);
   assert.deepEqual(result.rowIndices, [4, 2]);
@@ -63,16 +63,6 @@ test("direct Apply internally previews and commits exactly once with its token",
     bulkUpdate: async payload => { calls.push("apply"); assert.equal(payload.previewToken, "checked"); assert.deepEqual(payload.add_tags, ["review"]); return { updated: 3 }; },
   }, args(), { isCurrent: () => true });
   assert.deepEqual(calls, ["preview", "apply"]);
-  assert.deepEqual(result, { updated: 3 });
-});
-
-test("an explicit current preview is optional and can be reused without a second preview", async () => {
-  let previewCalls = 0;
-  const result = await applyBulkAnnotation({
-    bulkPreview: async () => { previewCalls += 1; return { count: 3, previewToken: "unexpected" }; },
-    bulkUpdate: async payload => { assert.equal(payload.previewToken, "visible-preview"); return { updated: 3 }; },
-  }, args(), { preview: { count: 3, previewToken: "visible-preview" }, isCurrent: () => true });
-  assert.equal(previewCalls, 0);
   assert.deepEqual(result, { updated: 3 });
 });
 
@@ -146,4 +136,18 @@ test("an expired operation does not start either preview or apply", async () => 
     bulkUpdate: async () => { calls += 1; return { updated: 1 }; },
   }, args(), { isCurrent: () => false });
   assert.equal(result, null); assert.equal(calls, 0);
+});
+
+test("a race during Apply asks the user to apply again, with no visible preview step", async () => {
+  for (const rejection of ["Target changed; preview again.", new Error("Annotations changed; preview again.")]) {
+    await assert.rejects(() => applyBulkAnnotation({
+      bulkPreview: async () => ({ count: 1, previewToken: "checked" }),
+      bulkUpdate: async () => { throw rejection; },
+    }, args(), { isCurrent: () => true }), { message: "Target changed. Apply again." });
+  }
+  const failure = new Error("Could not save annotations.");
+  await assert.rejects(() => applyBulkAnnotation({
+    bulkPreview: async () => ({ count: 1, previewToken: "checked" }),
+    bulkUpdate: async () => { throw failure; },
+  }, args(), { isCurrent: () => true }), error => error === failure);
 });

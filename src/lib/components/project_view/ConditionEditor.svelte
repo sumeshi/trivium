@@ -12,7 +12,7 @@
     <span class="filter-label">Rules</span>
     <span class="condition-count">{$totalFilteredRows.toLocaleString()} rows</span>
   </div>
-  <p class="rules-help">AND matches every child; OR matches any child. Changes apply automatically; value checks are advisory. Empty text rules start applying when you enter a value.</p>
+  <p class="rules-help" title="AND requires every condition; OR accepts any condition. Value checks suggest recognized formats. Blank text conditions wait until a value is entered.">Changes apply automatically. Blank text conditions wait for a value.</p>
   <ConditionBranch node={$conditionTree} {columns} isRoot />
 </div>
 

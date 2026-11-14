@@ -5,14 +5,16 @@
   import { errorMessage } from '../../errors';
   import { createLatestRequest } from '../../latestRequest';
   import { isTabKey } from '../../keyboard';
-  import { iocBulkArgs, iocRuleKey } from '../../iocRules';
+  import { applyBulkAnnotation } from '../../bulkAnnotation';
+  import { iocBulkArgs } from '../../iocRules';
+  import { SEARCH_SYNTAX_HELP } from '../../searchHelp';
   import { normalizeIocFlag } from './state';
   import type { IocEntry } from '../../types';
   import { useWorkspace } from '../../workspaceContext';
   import FlagSelect from './FlagSelect.svelte';
 
-  const { iocManagerOpen, iocDraft, backend, projectDetail, currentProjectId, createReadScope } = useWorkspace();
-  const reads = createReadScope();
+  const workspace = useWorkspace();
+  const { iocManagerOpen, iocDraft, backend, projectDetail, currentProjectId } = workspace;
   const requests = createLatestRequest();
   const dispatch = createEventDispatcher<{ notify: { message: string; tone: 'success' | 'error' }; refresh: void; annotationsChanged: void }>();
   let error = '';
@@ -21,29 +23,25 @@
   let alive = true;
   let dialogEl: HTMLDivElement | null = null;
   let previousFocus: HTMLElement | null = null;
-  let preview: { key: string; token: string; count: number } | null = null;
-
-  const invalidatePreview = () => { preview = null; reads.cancelAll(); };
   const focusDialog = async () => {
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    error = ''; notice = ''; busy = false; invalidatePreview(); requests.invalidate();
+    error = ''; notice = ''; busy = false; requests.invalidate();
     await tick();
     dialogEl?.querySelector<HTMLButtonElement>('[aria-label="Close IOC rules"]')?.focus();
   };
   $: if ($iocManagerOpen) void focusDialog();
-  $: if (!$iocManagerOpen) { reads.cancelAll(); requests.invalidate(); }
+  $: if (!$iocManagerOpen) requests.invalidate();
   $: projectId = $projectDetail?.project.meta.id ?? '';
-  $: if (preview && !$iocDraft.some(entry => iocRuleKey(projectId, entry) === preview?.key)) preview = null;
 
   const close = async () => {
     if (busy) return;
     const owner = projectId;
-    requests.invalidate(); invalidatePreview();
+    requests.invalidate();
     iocManagerOpen.set(false);
     await tick();
     if (!alive || get(currentProjectId) !== owner) return;
     if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
-    else document.querySelector<HTMLButtonElement>('[aria-label="Open Annotations"]')?.focus();
+    else document.querySelector<HTMLButtonElement>('[aria-label="Open Annotate"]')?.focus();
   };
   const keydown = (event: KeyboardEvent) => {
     if (!$iocManagerOpen || !dialogEl?.contains(event.target as Node)) return;
@@ -55,7 +53,14 @@
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   };
-  onDestroy(() => { alive = false; requests.dispose(); reads.dispose(); });
+  const cleanup = () => {
+    if (!alive) return;
+    alive = false; requests.dispose();
+  };
+  // A captured Apply belongs to its old case even if workspace teardown
+  // clears the stores before this dialog unmounts.
+  const unregister = workspace.onDispose(cleanup);
+  onDestroy(() => { unregister(); cleanup(); });
 
   const begin = () => {
     const api = get(backend), owner = get(currentProjectId);
@@ -66,19 +71,16 @@
   };
   const add = async () => {
     if (busy) return;
-    invalidatePreview();
     iocDraft.update(entries => [...entries, { id: crypto.randomUUID(), flag: 'critical', tag: '', query: '' }]);
     await tick();
     const inputs = dialogEl?.querySelectorAll<HTMLInputElement>('.ioc-row input[aria-label^="Rule query"]');
     inputs?.[inputs.length - 1]?.focus();
   };
   const update = (index: number, field: keyof IocEntry, value: string) => {
-    invalidatePreview();
     iocDraft.update(entries => entries.map((entry, at) => at !== index ? entry
       : { ...entry, [field]: field === 'flag' ? normalizeIocFlag(value) : value }));
   };
   const remove = (index: number) => {
-    invalidatePreview();
     iocDraft.update(entries => entries.filter((_, at) => at !== index));
   };
   const entriesToSave = (): IocEntry[] => $iocDraft.map((entry, index) => {
@@ -126,24 +128,18 @@
     } catch (err) { if (active.isCurrent()) error = errorMessage(err, 'Could not export rules.'); }
     finally { if (active.isCurrent()) busy = false; }
   };
-  const runRule = async (entry: IocEntry, apply: boolean) => {
+  const runRule = async (entry: IocEntry) => {
     const active = begin(); if (!active) return;
-    const key = iocRuleKey(active.owner, entry);
     try {
-      if (apply) {
-        if (!preview || preview.key !== key) throw new Error('Preview this rule first.');
-        const result = await active.api.bulkUpdate(iocBulkArgs(active.owner, entry, preview.token));
-        if (!active.isCurrent()) return;
-        notice = `${result.updated.toLocaleString()} rows annotated.`;
-        invalidatePreview(); dispatch('annotationsChanged');
-      } else {
-        invalidatePreview();
-        const args = iocBulkArgs(active.owner, entry);
-        const result = await reads.run('preview', active.api, requestId => active.api.bulkPreview({ ...args, requestId }));
-        if (active.isCurrent()) preview = { key, token: result.previewToken, count: result.count };
-      }
+      const args = iocBulkArgs(active.owner, structuredClone(entry));
+      const result = await applyBulkAnnotation(active.api, args, {
+        isCurrent: () => !alive || active.isCurrent(),
+      });
+      if (!result || !active.isCurrent()) return;
+      notice = `${result.updated.toLocaleString()} rows annotated.`;
+      dispatch('annotationsChanged');
     } catch (err) {
-      if (active.isCurrent()) { invalidatePreview(); error = errorMessage(err, 'Could not apply rule.'); }
+      if (active.isCurrent()) error = errorMessage(err, 'Could not apply rule.');
     } finally { if (active.isCurrent()) busy = false; }
   };
   const undo = async () => {
@@ -151,7 +147,7 @@
     try {
       const result = await active.api.bulkUndo({ projectId: active.owner });
       if (!active.isCurrent()) return;
-      invalidatePreview(); notice = `${result.updated.toLocaleString()} rows restored.`; dispatch('annotationsChanged');
+      notice = `${result.updated.toLocaleString()} rows restored.`; dispatch('annotationsChanged');
     } catch (err) { if (active.isCurrent()) error = errorMessage(err, 'Could not undo.'); }
     finally { if (active.isCurrent()) busy = false; }
   };
@@ -185,15 +181,12 @@
           <p class="ioc-empty">No rules</p>
         {:else}
           {#each $iocDraft as entry, index (entry.id || `entry-${index}`)}
-            {@const matchingPreview = preview?.key === iocRuleKey(projectId, entry) ? preview : null}
             <div class="ioc-row">
               <FlagSelect value={entry.flag} disabled={busy} on:change={event => update(index, 'flag', event.detail)} />
               <input value={entry.tag} placeholder="Tag" aria-label={`Rule tag ${index + 1}`} on:input={event => update(index, 'tag', event.currentTarget.value)} disabled={busy} />
-              <input value={entry.query} placeholder="Search query" aria-label={`Rule query ${index + 1}`} title="Same syntax as search: terms, |, -, column:value" on:input={event => update(index, 'query', event.currentTarget.value)} disabled={busy} />
+              <input value={entry.query} placeholder="Search query" aria-label={`Rule query ${index + 1}`} title={SEARCH_SYNTAX_HELP} on:input={event => update(index, 'query', event.currentTarget.value)} disabled={busy} />
               <div class="ioc-rule-actions">
-                {#if matchingPreview}<span class="condition-count" role="status">{matchingPreview.count.toLocaleString()} rows</span>{/if}
-                <button type="button" class="ghost" title="Count matching rows without changing annotations" on:click={() => void runRule(entry, false)} disabled={busy || !entry.query.trim()}>Preview</button>
-                <button type="button" class="ghost" title="Set this flag and add this tag to the previewed rows" on:click={() => void runRule(entry, true)} disabled={busy || !matchingPreview?.count}>Apply</button>
+                <button type="button" class="ghost" title="Set this flag and add this tag to matching rows" on:click={() => void runRule(entry)} disabled={busy || !entry.query.trim()}>Apply</button>
                 <button type="button" class="ghost danger ioc-icon" aria-label={`Delete rule ${index + 1}`} title="Delete rule" on:click={() => remove(index)} disabled={busy}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
                 </button>

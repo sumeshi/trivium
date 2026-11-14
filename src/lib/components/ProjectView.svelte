@@ -87,6 +87,7 @@
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
+  let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
   let exportSnapshot: ExportSnapshot | null = null;
 
   let destroyed = false;
@@ -146,25 +147,31 @@
   const initializeColumnWidths = (savedWidths?: Record<string, number>) => {
     if (!projectDetail) {
       columnWidths = new Map();
+      defaultColumnWidths = new Map();
       return;
     }
+    const defaults = new Map<string, number>();
     const next = new Map<string, number>();
     for (const column of projectDetail.columns) {
       // Widths use the display label, while the column key stays the internal id.
-      const saved = savedWidths?.[column];
-      if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) {
-        next.set(column, Math.min(Math.max(saved, MIN_DATA_WIDTH), MAX_DATA_WIDTH));
-        continue;
-      }
       const label = $columnLabels.get(column) ?? column;
       const headerChars = Math.min(label.length, WIDTH_LIMIT_CHARS);
       const dataChars = Math.min(projectDetail.column_max_chars[column] ?? headerChars, WIDTH_LIMIT_CHARS);
       const maxChars = Math.max(headerChars, dataChars);
       const estimated = Math.round(maxChars * CHAR_PIXEL + COLUMN_PADDING);
       const width = Math.min(Math.max(estimated, MIN_DATA_WIDTH), MAX_DATA_WIDTH);
-      next.set(column, width);
+      defaults.set(column, width);
+      const saved = savedWidths?.[column];
+      next.set(column, typeof saved === 'number' && Number.isFinite(saved) && saved > 0
+        ? Math.min(Math.max(saved, MIN_DATA_WIDTH), MAX_DATA_WIDTH) : width);
     }
+    defaultColumnWidths = defaults;
     columnWidths = next;
+  };
+
+  const applyPresetColumnWidths = (widths: Record<string, number>) => {
+    initializeColumnWidths({ ...Object.fromEntries(defaultColumnWidths), ...widths });
+    schedulePersist();
   };
 
   const changeColumnWidth = (event: CustomEvent<{ columnId: string; width: number }>) => {
@@ -718,7 +725,9 @@
 </script>
 
 <section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
-  <FilterControls bind:this={filterControls} on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
+  <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
+    on:columnWidths={event => applyPresetColumnWidths(event.detail)}
+    on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 
   <HistoryButtons slot="history" />
   <div slot="navigation" class="table-navigation">

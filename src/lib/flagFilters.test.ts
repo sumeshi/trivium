@@ -45,7 +45,7 @@ test("export and bulk keep the same composite flag query unchanged", () => {
   const filters = { search: "needle", searchColumns: ["hidden"], flag,
     bookmarkedOnly: true, condition: null };
   const bulk = buildBulkAnnotateArgs({ projectId: "project", target: "filtered", selectedRowIds: [],
-    filters, sortKey: "rank", sortDirection: "desc", previewToken: null, patch: { memo: "checked" } });
+    filters, sortKey: "rank", sortDirection: "desc", patch: { memo: "checked" } });
   const exported = buildExportArgs("project", { search: filters.search,
     searchColumns: filters.searchColumns, flagFilter: flag, bookmarkedOnly: true, condition: null,
     sortKey: "rank", sortDirection: "desc", rowIndices: [], totalRows: 40, totalFilteredRows: 8,

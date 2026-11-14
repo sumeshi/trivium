@@ -15,13 +15,15 @@ The application's **Workspace options** menu shows its version and source commit
 ## Investigate
 
 1. Open **Projects**, choose a data file, and open it. CSV delimiter options apply only to CSV; the first record supplies column names. The source stays read-only.
-2. Search or use **Filters** to narrow the result. Click a row value for its full record; right-click cells and column headings for contextual actions.
+2. Search or use **Filter** to narrow the result. Click a row value for its full record; right-click cells and column headings for contextual actions.
 3. Record flags, notes, tags and bookmarks. These annotations are independent; unflagged rows are not Safe.
 4. Export all rows, the current result, or selected rows to CSV. Optional `trivium-*` columns include annotations.
 
 Open projects use tabs. Closing a tab preserves its saved case and annotations; reopen it from Projects. The `#` column and row-jump input refer to original, one-based row numbers even after filtering or sorting. First / Last move within the current result.
 
-Move or resize column headings; right-click for freezing and UTC ISO date display. These settings affect presentation, not search scope or source values. **Search in** chooses text-search columns. **Analysis** contains statistics, nested grouping (including UTC date/hour groups) and the timeline. **Annotations** contains bulk operations and IOC rules with Preview / Apply / Undo. Themes are available in Workspace options.
+Move or resize column headings; right-click for freezing and UTC ISO date display. These settings affect presentation, not search scope or source values. **Search in** chooses text-search columns. **Analyze** opens the timeline, time analysis, column statistics and nested grouping. **Annotate** applies flags, notes and tags to multiple rows, with Undo; IOC rules use the same operations. Themes are available in Workspace options.
+
+Presets save rules, hidden columns, sort and any changed column order or widths. Blank annotation fields and unselected flags leave existing values unchanged.
 
 ### Search
 
@@ -37,7 +39,7 @@ Text search is case-insensitive. Combine terms with spaces for AND, `|` for OR, 
 | `@tag:review` | Rows labelled with the annotation tag `review` |
 | `@tag:*` | Rows with any annotation tag |
 
-Use Filters for nested AND/OR groups, numeric or datetime comparisons, and regular expressions. Text search and structured conditions combine with AND. Text search itself does not interpret regex or parentheses.
+Use Filter for nested AND/OR groups, numeric or datetime comparisons, and regular expressions. Text search and structured conditions combine with AND. Text search itself does not interpret regex or parentheses.
 
 Tags label related findings. Click a row's tag count to search a label, then analyze or export the current result.
 

@@ -1,6 +1,7 @@
 import type { AnnotationPatch, Backend, BulkAnnotateArgs } from "./backend";
-import type { BulkApplied, BulkCount } from "./types";
+import type { BulkApplied } from "./types";
 import type { AppliedFilters } from "./components/project_view/state";
+import { errorMessage } from "./errors.ts";
 
 export type BulkTarget = "selection" | "filtered" | "all";
 export type BulkFlag = "keep" | NonNullable<AnnotationPatch["flag"]>;
@@ -31,7 +32,6 @@ export function buildBulkAnnotateArgs(input: {
   filters: AppliedFilters;
   sortKey: string | null;
   sortDirection: "asc" | "desc";
-  previewToken: string | null;
   patch: AnnotationPatch;
 }): BulkAnnotateArgs {
   return {
@@ -47,25 +47,30 @@ export function buildBulkAnnotateArgs(input: {
     sortKey: input.sortKey,
     sortDirection: input.sortDirection,
     condition: input.filters.condition,
-    ...(input.previewToken ? { previewToken: input.previewToken } : {}),
     ...input.patch,
   };
 }
 
-/** Direct Apply and optional Preview share one frozen, token-checked operation. */
+/** One Apply freezes its arguments, checks the target and commits with its token. */
 export async function applyBulkAnnotation(
   api: Pick<Backend, "bulkPreview" | "bulkUpdate">,
   args: BulkAnnotateArgs,
   options: {
-    preview?: BulkCount | null;
     isCurrent: () => boolean;
   },
 ): Promise<BulkApplied | null> {
   if (!options.isCurrent()) return null;
   const snapshot = structuredClone(args);
-  const preview = options.preview ?? await api.bulkPreview(snapshot);
-  if (!options.isCurrent()) return null;
-  // An empty operation must not replace the last useful undo record.
-  if (preview.count === 0) return { updated: 0 };
-  return api.bulkUpdate({ ...snapshot, previewToken: preview.previewToken });
+  try {
+    const preview = await api.bulkPreview(snapshot);
+    if (!options.isCurrent()) return null;
+    // An empty operation must not replace the last useful undo record.
+    if (preview.count === 0) return { updated: 0 };
+    return await api.bulkUpdate({ ...snapshot, previewToken: preview.previewToken });
+  } catch (error) {
+    if (["Target changed; preview again.", "Annotations changed; preview again."].includes(errorMessage(error))) {
+      throw new Error("Target changed. Apply again.");
+    }
+    throw error;
+  }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { useWorkspace } from '../../workspaceContext';
+  import { SEARCH_EXAMPLES, SEARCH_SYNTAX_HELP } from '../../searchHelp';
   const { search, searchColumns, projectDetail, columnLabels } = useWorkspace();
   const dispatch = createEventDispatcher<{ open: void }>();
   let searchToolsEl: HTMLDivElement | null = null;
@@ -43,7 +44,7 @@
       <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
     </svg>
     <input placeholder='Search: error timeout · error | warning · -noise' aria-label="Search rows"
-      title='Case-insensitive text search. Spaces mean AND, | means OR, - excludes; use column:value to target a column.'
+      title={SEARCH_SYNTAX_HELP}
       bind:value={$search} type="search" />
     <button type="button" class="scope-chip scope-trigger" bind:this={scopeTrigger} aria-label="Choose search columns"
       aria-controls="search-column-menu" aria-expanded={scopeOpen} class:active={scopeOpen}
@@ -78,17 +79,12 @@
       <div class="search-popover-head"><strong>Search syntax</strong><button type="button" on:click={() => (helpOpen = false)}>Done</button></div>
       <p>Case-insensitive text search.</p>
       <dl>
-        <dt><code>error timeout</code></dt><dd>Both terms (AND)</dd>
-        <dt><code>error | warning</code></dt><dd>Either term (OR)</dd>
-        <dt><code>-noise</code></dt><dd>Exclude rows containing noise</dd>
-        <dt><code>"failed login"</code></dt><dd>Keep the phrase together</dd>
-        <dt><code>column:value</code></dt><dd>Search one named column</dd>
-        <dt><code>column:"failed login"</code></dt><dd>A phrase in one column</dd>
-        <dt><code>@tag:review</code></dt><dd>Rows with the tag review</dd>
-        <dt><code>@tag:*</code></dt><dd>Rows with any tag</dd>
+        {#each SEARCH_EXAMPLES as [query, meaning]}
+          <dt><code>{query}</code></dt><dd>{meaning}</dd>
+        {/each}
       </dl>
       <p>Quote literal colons: <code>"https://example.test"</code>.</p>
-      <p>For grouped AND/OR, comparisons, dates or regular expressions, use <strong>Filters → Rules</strong>.</p>
+      <p>For grouped AND/OR, comparisons, dates or regular expressions, use <strong>Filter → Rules</strong>.</p>
     </div>
   {/if}
 </div>

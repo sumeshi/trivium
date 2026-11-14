@@ -2,14 +2,18 @@
   import { errorMessage } from "../../errors";
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
-  import { onDestroy } from 'svelte';
-  import { applyPresetView } from '../../presetView';
+  import { createEventDispatcher, onDestroy } from 'svelte';
+  import { applyPresetView, changedPresetLayout } from '../../presetView';
   import { presetFileName } from '../../presetFileName';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
-    conditionPayload, backend, hiddenColumns, projectDetail, sortDirection, sortKey,
+    conditionPayload, backend, hiddenColumns, projectDetail, sortDirection, sortKey, columnOrder,
   } = workspace;
+
+  export let columnWidths: ReadonlyMap<string, number> = new Map();
+  export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
+  const dispatch = createEventDispatcher<{ columnWidths: Record<string, number> }>();
 
   let error = '';
   let notice = '';
@@ -29,30 +33,36 @@
       return;
     }
     const service = $backend, projectId = $projectDetail.project.meta.id;
+    const sourceName = $projectDetail.project.meta.source_file_name ?? $projectDetail.project.meta.name;
+    const snapshot = structuredClone({
+      condition: $conditionPayload,
+      hiddenColumns: Array.from(get(hiddenColumns)),
+      sortKey: get(sortKey),
+      sortDirection: get(sortDirection),
+      ...changedPresetLayout($projectDetail.columns, get(columnOrder), columnWidths, defaultColumnWidths),
+    });
+    const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
     busy = true;
     try {
       const destination = await save({
         filters: [{ name: 'Trivium preset', extensions: ['json'] }],
-        defaultPath: presetFileName($projectDetail.project.meta.source_file_name ?? $projectDetail.project.meta.name),
+        defaultPath: presetFileName(sourceName),
       });
-      if (!destination || destroyed) {
+      if (!destination || !isCurrent()) {
         return;
       }
       const fileName = destination.split(/[\\/]/).pop() ?? '';
       await service.savePreset({
         projectId,
         name: fileName.replace(/\.json$/i, '') || null,
-        condition: $conditionPayload,
-        hiddenColumns: Array.from(get(hiddenColumns)),
-        sortKey: get(sortKey),
-        sortDirection: get(sortDirection),
+        ...snapshot,
         destination,
       });
-      notice = 'Preset saved.';
+      if (isCurrent()) notice = 'Preset saved.';
     } catch (err) {
       console.error(err);
-      error = errorMessage(err, 'Failed to save preset.');
+      if (isCurrent()) error = errorMessage(err, 'Failed to save preset.');
     } finally {
       busy = false;
     }
@@ -87,10 +97,11 @@
       await service.setHiddenColumns({ projectId, hiddenColumns: preset.hiddenColumns });
       if (!isCurrent()) return;
       applyPresetView(workspace, preset);
+      if (preset.columnWidths !== undefined) dispatch('columnWidths', preset.columnWidths);
       notice = 'Preset applied.';
     } catch (err) {
       console.error(err);
-      error = errorMessage(err, 'Failed to apply preset.');
+      if (isCurrent()) error = errorMessage(err, 'Failed to apply preset.');
     } finally {
       busy = false;
     }
@@ -98,7 +109,7 @@
 </script>
 
 <div class="stats-panel">
-  <p class="condition-count preset-description">Rules / hidden columns / sort</p>
+  <p class="condition-count preset-description">Saves rules, hidden columns, sort and changed column order / widths.</p>
   <div class="condition-toolbar">
     <span class="filter-label">Preset</span>
     <button type="button" class="ghost" on:click={savePreset} disabled={busy}>

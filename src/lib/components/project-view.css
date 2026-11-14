@@ -61,8 +61,7 @@
 @media (max-width: 620px) {
   .filter-primary,
   .filter-secondary { flex-wrap: wrap; }
-  .filter-primary .search-controls { flex-basis: 100%; order: 1; }
-  .filter-primary .column-picker { margin-left: auto; }
+  .filter-secondary .search-controls { flex-basis: 100%; }
   .filter-primary .flag-menu { left: 50%; transform: translateX(-50%); }
 }
 

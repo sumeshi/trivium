@@ -24,22 +24,26 @@
     isExporting, projectDetail, backend, columnLabels, conditionTree,
   } = workspace;
 
+  export let columnWidths: ReadonlyMap<string, number> = new Map();
+  export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
+
+  let toolbarHeight = 0;
   let columnsOpen = false;
   let columnPickerEl: HTMLDivElement | null = null;
   let columnSearch = '';
 
   const groups = [
-    { id: 'filters', label: 'Filters', first: 'conditions' },
-    { id: 'analysis', label: 'Analysis', first: 'stats' },
-    { id: 'annotations', label: 'Annotations', first: 'bulk' },
+    { id: 'filters', label: 'Filter', first: 'conditions' },
+    { id: 'analysis', label: 'Analyze', first: 'timeline' },
+    { id: 'annotations', label: 'Annotate', first: 'bulk' },
   ] as const;
   const tools = [
     { id: 'conditions', label: 'Rules', group: 'filters' },
     { id: 'presets', label: 'Presets', group: 'filters' },
+    { id: 'timeline', label: 'Timeline', group: 'analysis' },
+    { id: 'time', label: 'Time analysis', group: 'analysis' },
     { id: 'stats', label: 'Column stats', group: 'analysis' },
     { id: 'groups', label: 'Groups', group: 'analysis' },
-    { id: 'time', label: 'Time analysis', group: 'analysis' },
-    { id: 'timeline', label: 'Timeline', group: 'analysis' },
     { id: 'bulk', label: 'Bulk annotate', group: 'annotations' },
     { id: 'iocs', label: 'IOC rules', group: 'annotations' },
   ] as const;
@@ -57,9 +61,9 @@
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
   $: categoryLabel = groups.find((group) => group.id === activeGroup)?.label ?? 'Tools';
 
-  const closeTool = () => {
+  const closeTool = (restoreFocus = true) => {
     activeTool = null;
-    if (drawerTrigger?.isConnected) drawerTrigger.focus();
+    if (restoreFocus && drawerTrigger?.isConnected) drawerTrigger.focus({ preventScroll: true });
   };
   const selectTool = async (tool: Tool, focusPanel = false) => {
     activeTool = tool;
@@ -178,8 +182,20 @@
     if (activeTool) closeTool();
   };
 
+  let pointerStart: { x: number; y: number } | null = null;
+  const handlePointerDown = (event: PointerEvent) => {
+    pointerStart = event.isPrimary && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+  };
+  const interactiveTargets = [
+    'button,a[href],input,select,textarea,label,summary,[contenteditable]:not([contenteditable="false"]),[draggable="true"]',
+    '[role="button"],[role="tab"],[role="menuitem"],[role="checkbox"],[role="switch"],[role="slider"],[role="separator"],[role="scrollbar"]',
+    '[role="dialog"],[role="menu"],[role="listbox"],.cell-dialog-backdrop,.drawer-backdrop,.workspace-options,.search-controls,.column-panel,.flag-menu',
+  ].join(',');
   const handleClickOutside = (event: MouseEvent) => {
-    const target = event.target as HTMLElement;
+    const start = pointerStart;
+    pointerStart = null;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
     
     // Outside click for flag picker
     if (flagMenuOpen && flagPickerEl && !flagPickerEl.contains(target)) {
@@ -190,20 +206,32 @@
     if (columnsOpen && columnPickerEl && !columnPickerEl.contains(target)) {
       columnsOpen = false;
     }
+
+    if (!activeTool || event.button !== 0 || event.defaultPrevented || event.detail === 0 || drawerEl?.contains(target)) return;
+    // Blank clicks dismiss the tool; controls, selection and drag gestures
+    // retain their own actions and focus.
+    if (target.closest(interactiveTargets)) return;
+    if ((start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) || window.getSelection()?.isCollapsed === false) return;
+    const viewport = target.closest<HTMLElement>('.virtual-viewport');
+    if (viewport && viewport.scrollHeight > viewport.clientHeight
+      && event.clientX >= viewport.getBoundingClientRect().right - Math.max(16, viewport.offsetWidth - viewport.clientWidth)) return;
+    closeTool(false);
   };
 
   onMount(() => {
     document.addEventListener('click', handleClickOutside);
+    document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleEscape);
   });
 
   onDestroy(() => {
     document.removeEventListener('click', handleClickOutside);
+    document.removeEventListener('pointerdown', handlePointerDown, true);
     document.removeEventListener('keydown', handleEscape);
   });
 </script>
 
-<section class="filters">
+<section class="filters" bind:offsetHeight={toolbarHeight}>
   <div class="filter-row">
     <div class="filter-primary">
       <slot name="history" />
@@ -255,6 +283,18 @@
       {/if}
     </div>
 
+    <slot name="navigation" />
+    <div class="tool-groups" role="group" aria-label="Investigation tools">
+      {#each groups as group}
+        <button type="button" class="aux-trigger" class:active={activeGroup === group.id}
+          id={`tool-group-${group.id}`} aria-label={`Open ${group.label}`} title={`Open ${group.label}`}
+          aria-controls="analysis-drawer" aria-expanded={activeGroup === group.id}
+          on:click={(event) => openGroup(group, event)}>{group.label}</button>
+      {/each}
+    </div>
+
+    </div>
+    <div class="filter-secondary">
     <SearchControls bind:this={searchControls} on:open={() => { flagMenuOpen = columnsOpen = false; }} />
 
     <div class="column-picker" bind:this={columnPickerEl}>
@@ -311,17 +351,6 @@
       {/if}
     </div>
 
-    </div>
-    <div class="filter-secondary">
-    <slot name="navigation" />
-    <div class="tool-groups" role="group" aria-label="Investigation tools">
-      {#each groups as group}
-        <button type="button" class="aux-trigger" class:active={activeGroup === group.id}
-          id={`tool-group-${group.id}`} aria-label={`Open ${group.label}`} title={`Open ${group.label}`}
-          aria-controls="analysis-drawer" aria-expanded={activeGroup === group.id}
-          on:click={(event) => openGroup(group, event)}>{group.label}</button>
-      {/each}
-    </div>
     <button type="button" class="tool-button export-button" on:click={() => dispatch('export')} disabled={$isExporting}
       aria-label={$isExporting ? 'Exporting rows' : 'Export rows'} title={$isExporting ? 'Exporting rows…' : 'Export rows to CSV'} aria-busy={$isExporting}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -334,11 +363,11 @@
 
   {#if activeTool}
     <div class="analysis-drawer" id="analysis-drawer" role="dialog" aria-labelledby="analysis-tool-label"
-      bind:this={drawerEl} tabindex="-1">
+      bind:this={drawerEl} tabindex="-1" style={`top: ${toolbarHeight + 4}px;`}>
       <div class="analysis-head">
         <h3 id="analysis-tool-label">{categoryLabel}</h3>
         <button type="button" class="analysis-close" aria-label="Close analysis panel"
-          title="Close panel" on:click={closeTool}>
+          title="Close panel" on:click={() => closeTool()}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
             <path d="m6 6 12 12M6 18 18 6" />
           </svg>
@@ -363,7 +392,7 @@
         {:else if activeTool === 'timeline'}
           <TimelinePanel open={true} />
         {:else if activeTool === 'presets'}
-          <PresetControls />
+          <PresetControls {columnWidths} {defaultColumnWidths} on:columnWidths={(event) => dispatch('columnWidths', event.detail)} />
         {:else if activeTool === 'bulk'}
           <BulkControls on:refresh />
         {:else}
@@ -428,7 +457,7 @@
   .analysis-tabs button { border: 1px solid transparent; border-radius: 4px; padding: 4px 7px; background: transparent; color: var(--muted); font-size: 11px; }
   .analysis-tabs button[aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--fg); }
   .analysis-tabs button:hover { color: var(--fg); background: var(--surface-weak); }
-  .tool-groups { display: flex; align-items: center; gap: 3px; margin-left: 4px; padding-left: 9px; border-left: 1px solid var(--border); }
+  .tool-groups { display: flex; align-items: center; flex: 0 0 auto; gap: 3px; margin-left: 3px; padding-left: 8px; border-left: 1px solid var(--border); }
   .export-button { width: 33px; min-width: 33px; padding: 0; justify-content: center; }
   button:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 
