@@ -77,8 +77,8 @@
   let draggedColumnId: string | null = null;
   let dropTarget: { id: string; after: boolean } | null = null;
 
-  const resolveColumnWidth = (column: string) => {
-    const width = columnWidths.get(column) ?? MIN_DATA_WIDTH;
+  const resolveColumnWidth = (column: string, widths: ReadonlyMap<string, number>) => {
+    const width = widths.get(column) ?? MIN_DATA_WIDTH;
     if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
     if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
     return width;
@@ -92,7 +92,7 @@
     });
   };
 
-  $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column));
+  $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column, columnWidths));
   $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
   $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
