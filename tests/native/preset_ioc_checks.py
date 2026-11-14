@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 import uuid
 
 from column_pin_checks import _key
@@ -36,6 +37,56 @@ def _load_preset(web, source: Path) -> None:
     wait_for(lambda: web.script("return document.querySelector('#analysis-drawer').textContent;"),
              lambda text: "Preset applied." in text, "preset application completes")
     _settle(web)
+
+
+def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original: list[dict]) -> dict:
+    project_id = case["meta"]["id"]
+    saved = web.command("load_project", {"projectId": project_id}, request=True)["iocs"]
+    invalid = root / "invalid-ioc.csv"
+    invalid.write_text("flag,tag,query\nsafe,valid,message:clear\ncritcal,bad,message:beacon\n", encoding="utf-8")
+    _picker(web, invalid)
+    web.named("Import IOC rules", ".ioc-dialog")
+    wait_for(lambda: web.script("return document.querySelector('.ioc-dialog [role=alert]')?.textContent??'';"),
+             lambda text: "line 3" in text and "critcal" in text, "invalid IOC import reports the CSV line and original flag")
+    assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == saved
+    assert web.script("return document.querySelectorAll('.ioc-row').length;") == 1
+    assert _rows(web, project_id) == original
+    web.named("Close IOC rules", ".ioc-dialog")
+
+    # Seed an older malformed saved definition in this test's isolated case.
+    # Reopening must preserve it for correction rather than choosing Safe.
+    web.tab(data["id"])
+    web.named(f"Close {source.name}")
+    databases = list(root.glob(f"**/projects/{project_id}/project.sqlite"))
+    assert len(databases) == 1, databases
+    legacy = [*saved, {"flag": "critcal", "tag": "invalid", "query": "message:clear"}]
+    with sqlite3.connect(databases[0]) as database:
+        database.execute("UPDATE settings SET value=? WHERE key='iocs'", (json.dumps(legacy).encode(),))
+    open_project(web, case["meta"]["name"])
+    web.results(1)  # The previously saved text search remains active.
+    _open_iocs(web)
+    flags = web.script("return [...document.querySelectorAll('.ioc-row .flag-select')].map(e=>({flag:e.dataset.flag,label:e.textContent.trim(),title:e.querySelector('button').title}));")
+    assert flags[0]["flag"] == "critical" and "Critical" in flags[0]["label"], flags
+    assert flags[1]["flag"] == "critcal" and "Invalid" in flags[1]["label"] and "critcal" in flags[1]["title"], flags
+    assert web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].filter(e=>e.textContent.trim()==='Apply').map(e=>e.disabled);") == [False, True]
+    web.named("Save rules", ".ioc-dialog")
+    wait_for(lambda: web.script("return document.querySelector('.ioc-dialog [role=alert]')?.textContent??'';"),
+             lambda text: "rule 2" in text and "critcal" in text, "legacy invalid flags require an explicit correction before saving")
+    assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == legacy
+    assert _rows(web, project_id) == original
+
+    # Correcting the invalid definition keeps the valid definition intact.
+    web.click(web.node(".ioc-row .flag-select-trigger", 1))
+    web.click(web.node(".flag-select-menu .flag-option.flag-suspicious"))
+    web.named("Save rules", ".ioc-dialog")
+    wait_for(lambda: web.script("return !document.querySelector('.ioc-dialog');"), bool, "corrected IOC rules save")
+    corrected = web.command("load_project", {"projectId": project_id}, request=True)["iocs"]
+    assert sorted(rule["flag"] for rule in corrected) == ["critical", "suspicious"], corrected
+    assert _rows(web, project_id) == original
+    return {"project_id": project_id, "csv_path": str(invalid),
+            "csv_error_line": 3, "rejected_import_preserves_rules": True,
+            "legacy_invalid_visible": True, "invalid_apply_disabled": True,
+            "explicit_correction_preserves_valid_rules": True, "annotations_unchanged": True}
 
 
 def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, root: Path) -> dict:
@@ -199,13 +250,14 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         assert "critical,IOC,message:beacon" in export_path.read_text(encoding="utf-8")
         assert source.read_bytes() == original_source
         web.screenshot(evidence / "ioc-direct-apply-undo.png")
-        web.named("Close IOC rules", ".ioc-dialog")
+        invalid_flags = _invalid_ioc_flags(web, data, case, source, root, original)
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
             "layout": layout,
             "unknown_reference_leaves_view_unchanged": True, "preset_rules_columns_sort_applied": True,
             "ioc_saved_without_annotations": True, "direct_apply_matches_all_rows": 2, "no_visible_preview": True,
             "query_help": help_text,
-            "apply_preserves_other_fields": True, "undo_restores_complete_annotations": True, "native_csv_export": True}
+            "apply_preserves_other_fields": True, "undo_restores_complete_annotations": True, "native_csv_export": True,
+            "invalid_flags": invalid_flags}
     finally:
         web.script("window.__presetIocPicker?.restore();delete window.__presetIocPicker;")
         if web.script("return !!document.querySelector('.ioc-dialog');"):

@@ -28,7 +28,8 @@ export type ConditionNode = Wire.Node;
 export type QuerySpec = { [K in keyof Required<Wire.QuerySpec>]:
   K extends "condition" | "sortKey" ? Wire.QuerySpec[K] : NonNullable<Wire.QuerySpec[K]>
 } & { flagFilter: FlagFilterValue; sortDirection: "asc" | "desc" };
-export type IocEntry = Omit<Wire.IocEntry, "flag"> & { id?: string; flag: FlagSymbol };
+/** Unknown stored IOC flags stay visible until the user corrects them. */
+export type IocEntry = Wire.IocEntry & { id?: string };
 export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
 export type ColorRule = Wire.ColorRule;
 export interface PresetData {

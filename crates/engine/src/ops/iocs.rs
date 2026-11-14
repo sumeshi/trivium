@@ -53,8 +53,7 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
-    let entries = prepare_ioc_entries(payload.entries);
-    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    save_ioc_entries(&project_dir, &payload.entries).map_err(AppError::from)?;
 
     Ok(())
 }
@@ -75,7 +74,7 @@ pub fn import_iocs(
     if !source.exists() {
         return Err(AppError::Message("Selected file does not exist.".into()));
     }
-    let entries = prepare_ioc_entries(read_ioc_csv(&source).map_err(AppError::from)?);
+    let entries = read_ioc_csv(&source).map_err(AppError::from)?;
     save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -92,9 +91,10 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
     };
     let project_dir = store.project_dir(&meta.id);
     let entries = match payload.entries {
-        Some(entries) => prepare_ioc_entries(entries),
+        Some(entries) => entries,
         None => load_ioc_entries(&project_dir).map_err(AppError::from)?,
     };
+    let entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
     let destination = PathBuf::from(payload.destination);
     write_atomically(
         &destination,

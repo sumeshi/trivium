@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use csv::{ReaderBuilder, WriterBuilder};
 
 use crate::flags::{normalize_flag_value, severity_rank};
@@ -37,12 +37,7 @@ pub fn apply_ioc_outcomes_to_rows(rows: &mut [ProjectRow], outcomes: &[IocRowOut
                 memo.push_str(tag);
             }
         }
-        let trimmed = memo.trim().to_string();
-        row.memo = if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        };
+        row.memo = if memo.is_empty() { None } else { Some(memo) };
     }
 }
 
@@ -53,7 +48,14 @@ pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
     let mut entries: Vec<IocEntry> =
         serde_json::from_slice(&data).context("failed to parse saved IOC definitions")?;
     for entry in &mut entries {
-        entry.flag = normalize_flag_value(&entry.flag);
+        // Keep invalid legacy values visible for correction. Losing the value
+        // here used to let the editor silently turn an unknown flag into Safe.
+        let normalized = normalize_flag_value(&entry.flag);
+        entry.flag = if normalized.is_empty() {
+            entry.flag.trim().to_string()
+        } else {
+            normalized
+        };
         entry.tag = entry.tag.trim().to_string();
         entry.query = entry.query.trim().to_string();
     }
@@ -61,7 +63,9 @@ pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
 }
 
 pub fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> {
-    let data = serde_json::to_vec(entries).context("failed to serialize ioc entries")?;
+    // Validate the entire replacement before writing any project setting.
+    let entries = prepare_ioc_entries(entries.to_vec())?;
+    let data = serde_json::to_vec(&entries).context("failed to serialize ioc entries")?;
     crate::storage::save_setting_bytes(project_dir, "iocs", &data)
 }
 
@@ -71,19 +75,20 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
         .from_path(path)
         .with_context(|| format!("failed to open IOC CSV {:?}", path))?;
     let mut entries = Vec::new();
-    for record in reader.records() {
+    for (index, record) in reader.records().enumerate() {
         let record = record.with_context(|| "failed to read IOC CSV record")?;
-        let flag_value = record.get(0).unwrap_or("").trim().to_string();
+        let flag_value = record.get(0).unwrap_or("");
+        let line = record
+            .position()
+            .map(|position| position.line())
+            .unwrap_or(index as u64 + 2);
+        let flag = validate_ioc_flag(flag_value, &format!("IOC CSV line {line}"))?;
         let tag = record.get(1).unwrap_or("").trim().to_string();
         let query = record.get(2).unwrap_or("").trim().to_string();
         if query.is_empty() {
             continue;
         }
-        entries.push(IocEntry {
-            flag: normalize_flag_value(&flag_value),
-            tag,
-            query,
-        });
+        entries.push(IocEntry { flag, tag, query });
     }
     Ok(entries)
 }
@@ -141,16 +146,27 @@ pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
     Ok(count)
 }
 
-pub fn prepare_ioc_entries(entries: Vec<IocEntry>) -> Vec<IocEntry> {
-    let mut prepared: Vec<IocEntry> = entries
-        .into_iter()
-        .map(|entry| IocEntry {
-            flag: normalize_flag_value(&entry.flag),
-            tag: entry.tag.trim().to_string(),
-            query: entry.query.trim().to_string(),
-        })
-        .filter(|entry| !entry.query.is_empty())
-        .collect();
+fn validate_ioc_flag(value: &str, location: &str) -> Result<String> {
+    let flag = normalize_flag_value(value);
+    if flag.is_empty() {
+        bail!("{location}: invalid IOC flag {value:?}. Expected Safe, Suspicious, or Critical.");
+    }
+    Ok(flag)
+}
+
+pub fn prepare_ioc_entries(entries: Vec<IocEntry>) -> Result<Vec<IocEntry>> {
+    let mut prepared = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.into_iter().enumerate() {
+        let flag = validate_ioc_flag(&entry.flag, &format!("IOC rule {}", index + 1))?;
+        let query = entry.query.trim().to_string();
+        if !query.is_empty() {
+            prepared.push(IocEntry {
+                flag,
+                tag: entry.tag.trim().to_string(),
+                query,
+            });
+        }
+    }
     prepared.sort_by(|a, b| a.tag.cmp(&b.tag));
-    prepared
+    Ok(prepared)
 }

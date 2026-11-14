@@ -108,17 +108,7 @@ export type MemoEditorTarget = {
   row: CachedRow;
 };
 
-export function normalizeIocFlag(value: string): FlagSymbol {
-  const lowered = value.trim().toLowerCase();
-  if (
-    lowered === "critical" ||
-    lowered === "suspicious" ||
-    lowered === "safe"
-  ) {
-    return lowered as FlagSymbol;
-  }
-  return "safe";
-}
+export { normalizeIocFlag } from "../../iocRules.ts";
 
 export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
   if (!f) return "";

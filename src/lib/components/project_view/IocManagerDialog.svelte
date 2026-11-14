@@ -6,7 +6,7 @@
   import { createLatestRequest } from '../../latestRequest';
   import { isTabKey } from '../../keyboard';
   import { applyBulkAnnotation } from '../../bulkAnnotation';
-  import { iocBulkArgs } from '../../iocRules';
+  import { iocBulkArgs, isIocFlag, requireIocFlag } from '../../iocRules';
   import { SEARCH_SYNTAX_HELP } from '../../searchHelp';
   import { normalizeIocFlag } from './state';
   import type { IocEntry } from '../../types';
@@ -86,7 +86,7 @@
   const entriesToSave = (): IocEntry[] => $iocDraft.map((entry, index) => {
     const tag = entry.tag.trim(), query = entry.query.trim();
     if (tag && !query) throw new Error(`Enter a query for rule ${index + 1}.`);
-    return { flag: normalizeIocFlag(entry.flag), tag, query };
+    return { flag: requireIocFlag(entry.flag, `IOC rule ${index + 1}`), tag, query };
   }).filter(entry => entry.query.length > 0);
 
   const saveRules = async () => {
@@ -186,7 +186,7 @@
               <input value={entry.tag} placeholder="Tag" aria-label={`Rule tag ${index + 1}`} on:input={event => update(index, 'tag', event.currentTarget.value)} disabled={busy} />
               <input value={entry.query} placeholder="Search query" aria-label={`Rule query ${index + 1}`} title={SEARCH_SYNTAX_HELP} on:input={event => update(index, 'query', event.currentTarget.value)} disabled={busy} />
               <div class="ioc-rule-actions">
-                <button type="button" class="ghost" title="Set this flag and add this tag to matching rows" on:click={() => void runRule(entry)} disabled={busy || !entry.query.trim()}>Apply</button>
+                <button type="button" class="ghost" title="Set this flag and add this tag to matching rows" on:click={() => void runRule(entry)} disabled={busy || !entry.query.trim() || !isIocFlag(entry.flag)}>Apply</button>
                 <button type="button" class="ghost danger ioc-icon" aria-label={`Delete rule ${index + 1}`} title="Delete rule" on:click={() => remove(index)} disabled={busy}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
                 </button>

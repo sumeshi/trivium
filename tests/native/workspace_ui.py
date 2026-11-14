@@ -918,8 +918,15 @@ def main() -> None:
                 and entry["request"].get("condition") == {"column": data["columns"]["timestamp"],
                     "op": "ge", "values": ["not-a-timestamp"], "negated": False}
                 and entry["error"] == "Datetime comparison requires a recognized datetime: not-a-timestamp"]
-            assert all(entry in cancelled or entry in expected_invalid for entry in errors), errors
+            rejected_ioc = report.get("presets_iocs", {}).get("invalid_flags", {})
+            expected_invalid_ioc = [entry for entry in errors if entry["name"] == "import_iocs"
+                and entry["request"].get("projectId") == rejected_ioc.get("project_id")
+                and entry["request"].get("path") == rejected_ioc.get("csv_path")
+                and entry["error"] == 'IOC CSV line 3: invalid IOC flag "critcal". Expected Safe, Suspicious, or Critical.']
+            assert len(expected_invalid_ioc) == (1 if rejected_ioc else 0), expected_invalid_ioc
+            assert all(entry in cancelled or entry in expected_invalid or entry in expected_invalid_ioc for entry in errors), errors
             report["expected_invalid_timestamp_queries"] = len(expected_invalid)
+            report["expected_invalid_ioc_imports"] = len(expected_invalid_ioc)
             report["cancelled_superseded_queries"] = len(cancelled)
             report["passed"] = True
         except Exception as error:

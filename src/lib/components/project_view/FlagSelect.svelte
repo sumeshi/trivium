@@ -3,7 +3,7 @@
   import { FLAG_OPTIONS } from './state';
   import type { FlagSymbol } from '../../types';
 
-  export let value: FlagSymbol = 'safe';
+  export let value: string = 'safe';
   export let disabled = false;
 
   const dispatch = createEventDispatcher<{ change: FlagSymbol }>();
@@ -115,8 +115,7 @@
     detachGlobalPositionListeners();
   });
 
-  $: activeOption =
-    FLAG_OPTIONS.find((option) => option.value === value) ?? FLAG_OPTIONS[0];
+  $: activeOption = FLAG_OPTIONS.find((option) => option.value === value);
 </script>
 
 <div
@@ -129,15 +128,16 @@
     class={`flag-select-trigger flag-${value}`}
     aria-haspopup="listbox"
     aria-expanded={expanded}
-    aria-label="Select flag severity"
+    aria-label={activeOption ? 'Select flag severity' : `Invalid flag: ${value || '(empty)'}. Choose a severity.`}
+    title={activeOption ? undefined : `Invalid flag: ${value || '(empty)'}. Choose a severity.`}
     on:click|stopPropagation={toggleExpanded}
     on:keydown={handleKeydown}
     disabled={disabled}
     bind:this={triggerEl}
   >
     <span class="flag-select-label">
-      <span class="flag-icon">{activeOption.hint}</span>
-      <span class="flag-label">{activeOption.label}</span>
+      <span class="flag-icon">{activeOption?.hint ?? '!'}</span>
+      <span class="flag-label">{activeOption?.label ?? 'Invalid'}</span>
     </span>
     <span class="flag-caret" aria-hidden="true">▾</span>
   </button>
