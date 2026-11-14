@@ -271,7 +271,8 @@ pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
     match series.get(row_idx).ok()? {
         AnyValue::Null => None,
         other => {
-            anyvalue_to_search_string(&other).and_then(|text| serde_json::from_str(&text).ok())
+            anyvalue_to_search_string(&other)
+                .and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok())
         }
     }
 }

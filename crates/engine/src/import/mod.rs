@@ -2,7 +2,10 @@ pub mod csv;
 pub mod json;
 pub mod jsonl;
 mod json_source;
+mod strict_json;
 mod utf16;
+
+pub(crate) use strict_json::from_reader as parse_json_value;
 
 use polars::prelude::{DataFrame, NamedFrom, Series};
 

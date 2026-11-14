@@ -12,6 +12,7 @@ use serde::de::{Deserializer as _, SeqAccess, Visitor};
 use serde_json::{Deserializer, Value};
 
 use crate::error::AppError;
+use crate::import::strict_json::{self, ValueSeed};
 
 /// Record layout of a JSON source. `Json` accepts a single object or one
 /// object per array element; `JsonLines` accepts one object per physical line.
@@ -74,8 +75,18 @@ where
     where
         A: SeqAccess<'de>,
     {
-        while let Some(value) = seq.next_element::<Value>()? {
+        loop {
             let record_no = self.element + 1;
+            let value = seq
+                .next_element_seed(ValueSeed::new(format!("/{}", self.element)))
+                .map_err(|err| {
+                    *self.error = Some(AppError::Message(format!(
+                        "Failed to parse JSON: record {} in the JSON array: {}",
+                        record_no, err
+                    )));
+                    err
+                })?;
+            let Some(value) = value else { break };
             self.element = record_no;
             if !value.is_object() {
                 *self.error = Some(AppError::Message(format!(
@@ -118,12 +129,8 @@ where
                 if trimmed.is_empty() {
                     continue;
                 }
-                let value: Value = serde_json::from_str(trimmed).map_err(|e| {
-                    AppError::Message(format!(
-                        "Failed to parse JSONL line {}: {}",
-                        line_no + 1,
-                        e
-                    ))
+                let value = strict_json::from_reader(trimmed.as_bytes()).map_err(|e| {
+                    AppError::Message(format!("Failed to parse JSONL line {}: {}", line_no + 1, e))
                 })?;
                 if !value.is_object() {
                     return Err(AppError::Message(format!(
@@ -164,14 +171,13 @@ where
                 if let Some(error) = error {
                     return Err(error);
                 }
-                result
-                    .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
+                result.map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
                 deserializer
                     .end()
                     .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
                 Ok(())
             } else {
-                let value: Value = serde_json::from_reader(reader)
+                let value = strict_json::from_reader(reader)
                     .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
                 if !value.is_object() {
                     return Err(AppError::Message(

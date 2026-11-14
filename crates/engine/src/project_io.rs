@@ -364,7 +364,7 @@ pub fn read_original_records(project_dir: &Path) -> Result<Vec<Value>> {
             AnyValue::Null => Value::Null,
             other => {
                 let text = anyvalue_to_search_string(&other).unwrap_or_default();
-                serde_json::from_str(&text)
+                crate::import::parse_json_value(text.as_bytes())
                     .with_context(|| format!("failed to parse original record at row {}", index))?
             }
         };
