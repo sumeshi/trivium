@@ -19,10 +19,12 @@ from http.client import RemoteDisconnected
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import tempfile
 import time
+import traceback
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -33,6 +35,39 @@ from runtime import ApplicationSession, IPC_COMMAND_JS, emit_failure_annotation,
 
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
+
+
+def emit_navigation_failure(progress: dict[str, Any], error: Exception) -> None:
+    """Publish fixed checkpoints and code locations, never assertion payloads."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    label = progress.get("stage", "startup")
+    stages = {"startup", "generate fixture", "native import", "open project", "First / Last unfiltered",
+              "search keep", "numeric score sort ascending", "numeric score sort descending",
+              "rejected jumps preserve query and viewport", "annotation / selected export compatibility",
+              "stale real lookup response", "complete"}
+    stage = "unknown checkpoint"
+    if isinstance(label, str):
+        if label in stages:
+            stage = label
+        elif re.fullmatch(r"Go original #[0-9,]{1,9}", label):
+            stage = "Go original row"
+        elif re.fullmatch(r"filtered descending Go original #[0-9,]{1,9}", label):
+            stage = "filtered descending Go original row"
+    kind = type(error).__name__
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", kind):
+        kind = "Exception"
+    native = Path(__file__).resolve().parent
+    location = ""
+    for frame, line in traceback.walk_tb(error.__traceback__):
+        path = Path(frame.f_code.co_filename).resolve()
+        if path.parent == native and re.fullmatch(r"[a-z_][a-z0-9_]{0,63}\.py", path.name):
+            location = f" at {path.name}:{line}"
+    rows = progress.get("rows")
+    count = f"; rows={rows}" if type(rows) is int and 100 <= rows <= 2_000_000 else ""
+    message = f"Native navigation failed: {stage}{count} ({kind}{location})"
+    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=Native navigation::{message}", flush=True)
 
 
 def free_port() -> int:
@@ -456,6 +491,7 @@ def main() -> None:
                     print(f"PASS: real native Tauri {rows:,} rows; source-number Go, First/Last, filtered descending scope and geometry", flush=True)
                 report["passed"] = True
             except Exception as error:
+                emit_navigation_failure(report["results"][-1] if report["results"] else {}, error)
                 emit_failure_annotation(error)
                 report["passed"] = False
                 report["error"] = str(error)

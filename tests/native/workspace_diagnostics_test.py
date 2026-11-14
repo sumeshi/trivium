@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from row_navigation import wait_for
+from row_navigation import emit_navigation_failure, wait_for
 from workspace_ui import emit_workspace_failure, main
 
 
@@ -30,6 +30,33 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
         self.assertRegex(annotation, r"^::error title=Native workspace::Native workspace failed: virtualized wide table and unchanged rows \(AssertionError at row_navigation\.py:[0-9]+\)\n$")
         self.assertNotIn("private", annotation)
         self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
+
+    def test_navigation_annotation_uses_fixed_stages_and_omits_private_payloads(self):
+        try:
+            wait_for(lambda: "private-source-value", lambda value: False, "private-query%\r\nsecret", timeout=0)
+        except AssertionError as error:
+            for label, expected in [("native import", "native import"),
+                                    ("Go original #2,000,000", "Go original row"),
+                                    ("filtered descending Go original #3,898", "filtered descending Go original row"),
+                                    ("private-stage%\r\nsecret", "unknown checkpoint"),
+                                    ({"private": "secret"}, "unknown checkpoint")]:
+                for rows in [100, 5199, 2_000_000, 99, 2_000_001, True, "private-rows"]:
+                    with self.subTest(label=label, rows=rows):
+                        output = io.StringIO()
+                        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), redirect_stdout(output):
+                            emit_navigation_failure({"stage": label, "rows": rows}, error)
+                        annotation = output.getvalue()
+                        count = f"; rows={rows}" if type(rows) is int and 100 <= rows <= 2_000_000 else ""
+                        prefix = f"::error title=Native navigation::Native navigation failed: {expected}{count} (AssertionError at row_navigation.py:"
+                        self.assertTrue(annotation.startswith(prefix), annotation)
+                        self.assertRegex(annotation[len(prefix):], r"^[0-9]+\)\n$")
+                        self.assertNotIn("private", annotation)
+                        self.assertNotIn("secret", annotation)
+                        self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
+            output = io.StringIO()
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), redirect_stdout(output):
+                emit_navigation_failure({}, error)
+            self.assertEqual(output.getvalue(), "")
 
     def test_startup_constructor_failure_is_annotated_and_keeps_its_private_report(self):
         with tempfile.TemporaryDirectory() as directory:

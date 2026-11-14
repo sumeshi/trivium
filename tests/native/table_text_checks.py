@@ -37,12 +37,31 @@ def _size(web, action: str | None, expected: int) -> None:
     _settle(web)
     if action:
         web.tap(web.node(f'[aria-label="{action} table text size"]'))
-    controls = web.script("""
-      const g=document.querySelector('[aria-label="Table text size"]');
-      return {text:g.querySelector('[aria-label="Reset table text size"]').textContent.trim(),
-        disabled:[...g.querySelectorAll('button')].map(e=>e.disabled)};
-    """)
-    assert controls == {"text": f"{expected}%", "disabled": [expected == 85, expected == 100, expected == 145]}, controls
+    last_controls = None
+
+    def read_controls():
+        nonlocal last_controls
+        last_controls = web.script("""
+          const g=document.querySelector('[aria-label="Table text size"]');
+          return {text:g.querySelector('[aria-label="Reset table text size"]').textContent.trim(),
+            disabled:[...g.querySelectorAll('button')].map(e=>e.disabled)};
+        """)
+        return last_controls
+
+    desired = {"text": f"{expected}%", "disabled": [expected == 85, expected == 100, expected == 145]}
+    try:
+        wait_for(read_controls, lambda controls: controls == desired, "table text controls update", timeout=8)
+    except AssertionError as error:
+        if os.environ.get("GITHUB_ACTIONS") == "true" and str(error).startswith("Timed out: table text controls update;"):
+            sizes = {85, 100, 115, 130, 145}
+            observed = next((size for size in sizes if (last_controls or {}).get("text") == f"{size}%"), None)
+            safe = {"action": action if action in {"Decrease", "Increase", "Reset"} else "read",
+                    "expected": expected if expected in sizes else None, "observed": observed}
+            disabled = (last_controls or {}).get("disabled")
+            if isinstance(disabled, list) and len(disabled) == 3 and all(type(value) is bool for value in disabled):
+                safe["disabled"] = disabled
+            print(f"::error title=Native table text state::{json.dumps(safe, separators=(',', ':'))}", flush=True)
+        raise
     web.named("Workspace options")
     _settle(web)
     if action:
