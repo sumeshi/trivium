@@ -36,12 +36,13 @@ global.fetch=async()=>{
 new Function(input.source)();
 const call=(name,payload={projectId:'p1'})=>fetch(`ipc://localhost/${name}`,{body:JSON.stringify({payload})});
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-(async()=>{__BODY__})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{__BODY__})().then(()=>console.log('OBSERVATION_COMPLETE'),error=>{console.error(error);process.exitCode=1;});
 """.replace("__BODY__", body)
         completed = subprocess.run([shutil.which("node"), "-e", driver],
                                    input=json.dumps({"source": source}), text=True,
                                    capture_output=True, timeout=15)
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "OBSERVATION_COMPLETE", "Every asynchronous assertion must finish")
 
     def test_both_observers_forward_before_the_only_decode_and_keep_error_stages(self):
         for owner, trace in [(WebView, '__navigationIpc'), (WorkspaceView, '__workspaceIpc')]:

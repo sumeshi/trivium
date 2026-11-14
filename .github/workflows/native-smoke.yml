@@ -57,7 +57,7 @@ jobs:
         run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Linux native navigation smoke
         if: runner.os == 'Linux'
-        run: xvfb-run -a python tests/native/row_navigation.py --binary target/debug/trivium-desktop --rows 5199
+        run: xvfb-run -a python tests/native/row_navigation.py --binary target/debug/trivium-desktop --rows 5199 2000000
       - name: Linux native investigation and wide-table checks
         if: runner.os == 'Linux'
         run: xvfb-run -a python tests/native/workspace_ui.py --binary target/debug/trivium-desktop
