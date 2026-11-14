@@ -10,7 +10,7 @@ import { createWorkspaceQuery } from "./workspaceQuery.ts";
 import { createWorkspaceNavigation } from "./workspaceNavigation.ts";
 import { createOwnedRequests } from "./workspaceRequests.ts";
 import { createWorkspaceAnnotationObserver } from "./workspaceAnnotations.ts";
-import { markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
+import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { virtualWindow } from "./virtualScroll.ts";
 import { createWorkspaceView } from "./workspaceView.ts";
 import { effectiveSearchScopeKey } from "./searchScope.ts";
@@ -37,7 +37,8 @@ function response(offset = 0, rows = [row(offset)], total = 5199): QueryProjectR
   return { offset, rows, total_rows: total, total_filtered_rows: total, annotated_total: 0, annotated_filtered: 0 };
 }
 async function settle() { for (let step = 0; step < 8; step += 1) await Promise.resolve(); }
-function setup(api: Partial<Backend> = {}, id = "a", total = 5199) {
+function setup(api: Partial<Backend> = {}, id = "a", total = 5199,
+  options: Partial<Parameters<typeof createWorkspaceQuery>[1]> = {}) {
   const cancelled: string[] = [];
   const backend = {
     queryProjectRows: async (args: QueryProjectRowsArgs) => response(args.offset ?? 0, [row(args.offset ?? 0)], total),
@@ -53,7 +54,7 @@ function setup(api: Partial<Backend> = {}, id = "a", total = 5199) {
   const errors: string[] = [];
   const queries = createWorkspaceQuery(workspace, {
     backend, isReady: () => true, restoreViewport: async () => {}, scopeChanged: () => {}, summary: () => {},
-    notify: (message) => errors.push(message),
+    notify: (message) => errors.push(message), ...options,
   });
   queries.initialize(filters());
   return { workspace, queries, backend, cancelled, errors };
@@ -373,4 +374,146 @@ test("an unused search-column change cannot supersede an in-flight original-row 
   assert.equal(get(navigation.locatingRow), false); assert.deepEqual(errors, []);
   assert.equal(queryCalls, 1, "the target's already cached page stays available");
   workspace.dispose();
+});
+
+test("history restores logical rows against the arriving result count, including compressed ranges", async () => {
+  for (const total of [5199, 2_000_000]) {
+    let nextTotal = total, pendingRow: number | null = null;
+    let restore: (row: number, total: number) => void = () => {};
+    const { workspace, queries, backend } = setup({ queryProjectRows: async (args) => ({
+      ...response(args.offset ?? 0, [], nextTotal), total_rows: total,
+    }) }, `history-${total}`, total, {
+      scopeChanged: (row) => { pendingRow = row; },
+      restoreViewport: async (result, isCurrent) => {
+        await Promise.resolve();
+        if (isCurrent() && pendingRow !== null) { restore(pendingRow, result.total_filtered_rows); pendingRow = null; }
+      },
+    });
+    const navigation = createWorkspaceNavigation(workspace, queries, {
+      backend, isReady: () => true, isFilterPending: () => false, beforeScroll: () => {}, notify: () => {},
+    });
+    restore = navigation.applyScrollOffset;
+    const deepRow = total === 5199 ? 4000 : 1_000_000;
+    workspace.resetHistory(get(workspace.conditionTree), deepRow);
+    workspace.filterByValue("c1", "keep");
+    workspace.recordAppliedCondition(deepRow, get(workspace.conditionTree), 40);
+    workspace.totalFilteredRows.set(100);
+    navigation.applyScrollOffset(40);
+
+    workspace.goBack();
+    let entry = get(workspace.historyRestore)!;
+    workspace.conditionTree.set(entry.tree);
+    await queries.applyFilters({ ...filters(), condition: get(workspace.conditionPayload) }, false, true, entry.offset);
+    assert.ok(Math.abs(navigation.rowOffset() - deepRow) <= 1);
+    assert.equal(pendingRow, null);
+
+    workspace.rememberOffset(deepRow);
+    workspace.goForward();
+    entry = get(workspace.historyRestore)!;
+    workspace.conditionTree.set(entry.tree);
+    nextTotal = 100;
+    await queries.applyFilters({ ...filters(), condition: get(workspace.conditionPayload) }, false, true, entry.offset);
+    assert.equal(navigation.rowOffset(), 40);
+    workspace.dispose();
+  }
+});
+
+test("a late page cannot erase a successful annotation after its old cache page was evicted", async () => {
+  const projectId = "annotation-page-race";
+  const mutation = deferred<UpdateFlagResult>();
+  const pages: Array<ReturnType<typeof deferred<QueryProjectRowsResponse>>> = [];
+  const { workspace, queries } = setup({
+    updateFlag: async () => {
+      const result = await mutation.promise;
+      markAnnotationsChanged(projectId);
+      return result;
+    },
+    queryProjectRows: () => { const gate = deferred<QueryProjectRowsResponse>(); pages.push(gate); return gate.promise; },
+  }, projectId);
+  workspace.totalFilteredRows.set(5199);
+  workspace.registerLoadedPage(0, 0, [normalizeRow(row(2))]);
+  workspace.toggleRowSelection(2);
+  const revision = queries.revision;
+  const saving = workspace.setFlag(get(workspace.rowsCache).get(2)!, "critical");
+  for (let page = 1; page <= 6; page += 1) {
+    workspace.scrollTop.set(page * PAGE_SIZE * 32);
+    workspace.registerLoadedPage(page, page * PAGE_SIZE, [normalizeRow(row(page * PAGE_SIZE))]);
+  }
+  assert.equal(get(workspace.loadedPages).has(0), false);
+  workspace.scrollTop.set(0);
+  const loading = queries.requestPage(0);
+  await settle();
+  mutation.resolve({ entry: { flag: "critical", memo: null, tags: [], bookmarked: false }, revision: 1, flaggedRecords: 1 });
+  await saving;
+  pages[0].resolve(response(0, [row(2)]));
+  await settle();
+  assert.equal(pages.length, 2);
+  assert.equal(get(workspace.rowsCache).has(2), false);
+  assert.equal(get(workspace.flaggedCount), 1, "a discarded page cannot publish its stale counts");
+  pages[1].resolve({ ...response(0, [{ ...row(2), flag: "critical" }]), annotated_total: 1, annotated_filtered: 1 });
+  await loading;
+  assert.equal(get(workspace.rowsCache).get(2)?.flag, "critical");
+  assert.equal(get(workspace.filteredFlaggedCount), 1);
+  assert.equal(queries.revision, revision);
+  assert.deepEqual([...get(workspace.selectedRowIds)], [2]);
+  workspace.dispose();
+  forgetAnnotationVersion(projectId);
+});
+
+test("annotation changes during viewport restoration retry before row and flag publication", async () => {
+  const projectId = "annotation-restore-race", restoring = deferred<void>();
+  let calls = 0, restores = 0;
+  const { workspace, queries } = setup({ queryProjectRows: async () => {
+    calls += 1;
+    return { ...response(0, [{ ...row(2), flag: calls === 1 ? "" : "critical" }]), annotated_total: calls - 1 };
+  } }, projectId, 5199, { restoreViewport: async () => { if (++restores === 1) await restoring.promise; } });
+  const loading = queries.requestPage(0);
+  await settle();
+  markAnnotationsChanged(projectId);
+  restoring.resolve();
+  await loading;
+  assert.equal(calls, 2);
+  assert.equal(get(workspace.rowsCache).get(2)?.flag, "critical");
+  assert.equal(get(workspace.flaggedCount), 1);
+  workspace.dispose(); forgetAnnotationVersion(projectId);
+});
+
+test("annotation retries are bounded and unrelated projects do not invalidate a page", async () => {
+  for (const sameProject of [false, true]) {
+    const projectId = `annotation-retry-${sameProject}`;
+    let calls = 0;
+    const { workspace, queries, errors } = setup({ queryProjectRows: async () => {
+      calls += 1;
+      markAnnotationsChanged(sameProject ? projectId : "unrelated-annotations");
+      return response();
+    } }, projectId);
+    await queries.requestPage(0);
+    assert.equal(calls, sameProject ? 3 : 1);
+    assert.equal(errors.length, sameProject ? 1 : 0);
+    assert.equal(get(workspace.loadedPages).has(0), !sameProject);
+    workspace.dispose(); forgetAnnotationVersion(projectId);
+  }
+  forgetAnnotationVersion("unrelated-annotations");
+});
+
+test("superseded and disposed queries never retry a late annotation-invalidated response", async () => {
+  for (const dispose of [false, true]) {
+    const projectId = `annotation-superseded-${dispose}`;
+    const old = deferred<QueryProjectRowsResponse>();
+    let calls = 0;
+    const { workspace, queries } = setup({ queryProjectRows: async () => {
+      calls += 1; return calls === 1 ? old.promise : response(0, [row(77, "new query")]);
+    } }, projectId);
+    const loading = queries.requestPage(0);
+    await settle();
+    markAnnotationsChanged(projectId);
+    if (dispose) workspace.dispose();
+    else await queries.applyFilters(filters("new"), true, true);
+    old.resolve(response(0, [row(2, "old query")]));
+    await loading;
+    assert.equal(calls, dispose ? 1 : 2);
+    assert.equal(get(workspace.rowsCache).has(2), false);
+    assert.equal(get(workspace.rowsCache).has(77), !dispose);
+    workspace.dispose(); forgetAnnotationVersion(projectId);
+  }
 });

@@ -69,14 +69,14 @@
   let initialized = false;
   let filterStatusHeight = 26;
   let filterTimeout: ReturnType<typeof setTimeout> | null = null;
-  let pendingFilters: (AppliedFilters & { resetScroll: boolean }) | null = null;
+  let pendingFilters: (AppliedFilters & { resetScroll: boolean; restoredRow?: number }) | null = null;
   let lastSortRevision = 0;
   let lastSearchValue: string | null = null;
   let lastFlagFilter: FlagFilterValue | null = null;
   let lastBookmarkedOnly: boolean | null = null;
   let lastSearchColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
-  let applyingHistory = false;
+  let applyingHistory: number | null = null;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
   let pendingScrollLeft: number | null = null;
@@ -116,8 +116,8 @@
       if (pendingScrollRow === savedRow) pendingScrollRow = null;
       if (pendingScrollLeft === savedLeft) pendingScrollLeft = null;
     },
-    scopeChanged: () => {
-      pendingScrollRow = null;
+    scopeChanged: (logicalRow) => {
+      pendingScrollRow = logicalRow;
       lastSummaryFlagged = -1;
       lastSummaryHiddenKey = '';
     },
@@ -419,9 +419,18 @@
     appliedRestoreNonce = $historyRestore.nonce;
     // A restore recorded for another project must not rewrite this project's view.
     if ($historyRestore.projectId === $currentProjectId) {
-      applyingHistory = true;
+      const previous = JSON.stringify(get(conditionPayload));
       conditionTree.set(cloneTree($historyRestore.tree));
-      applyScrollOffset($historyRestore.offset);
+      if (previous === JSON.stringify(get(conditionPayload))) {
+        applyingHistory = null;
+        pendingScrollRow = null;
+        applyScrollOffset($historyRestore.offset);
+      } else {
+        // Keep the original logical row until the restored query supplies its
+        // own total. Clamping against the outgoing result loses deep offsets.
+        applyingHistory = $historyRestore.offset;
+        pendingScrollRow = applyingHistory;
+      }
     }
   }
 
@@ -440,15 +449,16 @@
       lastSearchColumnsSignature === null || signature !== lastSearchColumnsSignature;
     const conditionChanged = conditionJson !== lastConditionJson;
     let resetScroll = flagChanged || bookmarkedChanged || conditionChanged;
-    if (conditionChanged && applyingHistory) {
+    const restoredRow = conditionChanged ? applyingHistory ?? undefined : undefined;
+    if (conditionChanged && applyingHistory !== null) {
       resetScroll = false;
-      applyingHistory = false;
+      applyingHistory = null;
     } else if (conditionChanged) {
       recordAppliedCondition(rowOffset(), get(conditionTree), 0);
     }
 
     if (searchChanged || flagChanged || bookmarkedChanged || searchColumnsChanged || conditionChanged) {
-      scheduleFilterRefresh(searchValue, flagValue, scopedColumns, resetScroll);
+      scheduleFilterRefresh(searchValue, flagValue, scopedColumns, resetScroll, restoredRow);
       lastSearchValue = searchValue;
       lastFlagFilter = flagValue;
       lastBookmarkedOnly = bookmarkedValue;
@@ -465,7 +475,8 @@
     searchValue: string,
     flagValue: FlagFilterValue,
     scopedColumns: string[],
-    resetScroll: boolean
+    resetScroll: boolean,
+    restoredRow?: number
   ) => {
     navigation.cancelLookup();
     pendingFilters = {
@@ -475,6 +486,7 @@
       searchColumns: [...scopedColumns],
       condition: get(conditionPayload),
       resetScroll,
+      restoredRow,
     };
     if (filterTimeout) {
       clearTimeout(filterTimeout);
@@ -495,13 +507,15 @@
           condition: scheduled.condition,
         },
         scheduled.resetScroll,
-        false
+        false,
+        scheduled.restoredRow
       );
     }, 160);
   };
 
   const forceRefreshFilteredRows = (resetScroll: boolean) => {
     if (!projectDetail) return Promise.resolve();
+    const restoredRow = pendingFilters?.restoredRow;
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
@@ -516,7 +530,8 @@
         condition: get(conditionPayload),
       },
       resetScroll,
-      true
+      true,
+      restoredRow
     );
   };
 
@@ -536,7 +551,7 @@
     lastBookmarkedOnly = false;
     lastSearchColumnsSignature = '[]';
     lastConditionJson = nextCondition;
-    applyingHistory = false;
+    applyingHistory = null;
     navigation.cancelLookup();
     void forceRefreshFilteredRows(true);
   };
@@ -601,6 +616,10 @@
     if (!snapshot || !projectDetail) {
       return;
     }
+    const projectId = projectDetail.project.meta.id;
+    const generation = get(viewGeneration);
+    const isCurrent = () => !destroyed && generation === get(viewGeneration)
+      && projectId === get(currentProjectId);
     isExporting.set(true);
     try {
       const suggested = exportFileName(projectDetail.project.meta.name);
@@ -608,18 +627,20 @@
         filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
         defaultPath: suggested
       });
-      if (!selected) {
+      if (!selected || !isCurrent()) {
         return;
       }
-      const result = await backend.exportProject(
-        buildExportArgs(projectDetail.project.meta.id, snapshot, options, selected)
-      );
+      const args = buildExportArgs(projectId, snapshot, options, selected);
+      // The native Save dialog confirms replacement before returning a path.
+      const result = await backend.exportProject({ ...args, allowOverwrite: true });
+      if (!isCurrent()) return;
       const warnings = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
       dispatch('notify', {
         message: `Exported ${result.rows} rows to CSV.${warnings}`,
         tone: 'success'
       });
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       // Tauri returns the engine error as a plain string; keep the actionable
       // message (for example, choosing another destination).

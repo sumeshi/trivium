@@ -7,13 +7,14 @@ import { isJobLimitError } from "./jobTracking.ts";
 import { logicalRowAt } from "./virtualScroll.ts";
 import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
 import { beginPageTiming } from "./renderPerformance.ts";
+import { annotationVersions } from "./annotationVersions.ts";
 import type { WorkspaceController } from "./workspaceController";
 
 interface QueryOptions {
   backend: Backend;
   isReady: () => boolean;
   restoreViewport: (result: QueryProjectRowsResponse, isCurrent: () => boolean) => Promise<void>;
-  scopeChanged: () => void;
+  scopeChanged: (logicalRow: number) => void;
   summary: () => void;
   notify: (message: string) => void;
 }
@@ -143,20 +144,24 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     };
     request.promise = (async () => {
       try {
-        await withSlot(() => isCurrent() && !request.cancelled &&
-          (request.explicit || wantedPages.has(page)), async () => {
-          request.running = true;
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            const published = await withSlot(() => isCurrent() && !request.cancelled &&
+              (request.explicit || wantedPages.has(page)), async () => {
+              request.running = true;
+              const annotationVersion = get(annotationVersions)[projectId] ?? 0;
+              const isFresh = () => isCurrent() && annotationVersion === (get(annotationVersions)[projectId] ?? 0);
               timing?.mark("dispatched");
               const response = await reads.run(key, options.backend, (requestId) =>
                 options.backend.queryProjectRows({ ...payload, ...{ requestId } }));
               timing?.mark("responded");
-              if (!isCurrent()) return;
+              if (!isCurrent()) return true;
+              if (!isFresh()) return false;
               workspace.totalRows.set(response.total_rows);
               workspace.totalFilteredRows.set(response.total_filtered_rows);
-              await options.restoreViewport(response, isCurrent);
-              if (!isCurrent()) return;
+              await options.restoreViewport(response, isFresh);
+              if (!isCurrent()) return true;
+              if (!isFresh()) return false;
               workspace.flaggedCount.set(response.annotated_total);
               workspace.filteredFlaggedCount.set(response.annotated_filtered);
               workspace.appliedResultLoading.set(false);
@@ -168,16 +173,18 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
               timing?.mark("published");
               options.summary();
               timing?.present(isCurrent);
-              return;
-            } catch (error) {
-              if (attempt < 2 && isJobLimitError(error) && isCurrent()) {
-                if (!request.explicit && !wantedPages.has(page)) return;
-                await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-                if (!isCurrent()) return;
-              } else throw error;
-            }
+              return true;
+            }, () => request.priority);
+            if (published !== false) return;
+            if (attempt === 2) throw new Error("Annotations keep changing while rows load. Refresh the project to retry.");
+          } catch (error) {
+            if (attempt < 2 && isJobLimitError(error) && isCurrent()) {
+              await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+            } else throw error;
+          } finally {
+            request.running = false;
           }
-        }, () => request.priority);
+        }
       } catch (error) {
         if (isCurrent()) {
           if (get(workspace.appliedResultLoading)) workspace.totalFilteredRows.set(0);
@@ -234,13 +241,17 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     for (const page of visible) workspace.touchPage(page);
   };
 
-  const applyFilters = (filters: AppliedFilters, resetScroll: boolean, force: boolean): Promise<void> => {
+  const applyFilters = (filters: AppliedFilters, resetScroll: boolean, force: boolean, restoredRow?: number): Promise<void> => {
     if (disposed || !get(workspace.projectDetail)) return Promise.resolve();
     const normalized = normalize(filters);
     if (!force && signatureFor(normalized) === signature) return Promise.resolve();
+    const body = get(workspace.bodyScrollEl);
+    const row = resetScroll ? 0 : restoredRow ?? logicalRowAt(
+      body?.isConnected ? body.scrollTop : get(workspace.scrollTop),
+      get(workspace.totalFilteredRows), get(workspace.viewportHeight));
     initialize(normalized);
     workspace.appliedResultLoading.set(true);
-    options.scopeChanged();
+    options.scopeChanged(row);
     if (resetScroll) {
       workspace.scrollTop.set(0);
       workspace.scrollLeft.set(0);
@@ -248,7 +259,6 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       if (body) { body.scrollTop = 0; body.scrollLeft = 0; }
       if (header) header.scrollLeft = 0;
     }
-    const row = resetScroll ? 0 : logicalRowAt(get(workspace.scrollTop), get(workspace.totalFilteredRows), get(workspace.viewportHeight));
     return requestPage(Math.floor(row / PAGE_SIZE), true);
   };
 

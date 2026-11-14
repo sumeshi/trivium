@@ -6,6 +6,7 @@ import type { LoadProjectResponse } from "./types.ts";
 import { PAGE_SIZE } from "./components/project_view/state.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 import { createWorkspaceQuery } from "./workspaceQuery.ts";
+import { markAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 
 const TOTAL = PAGE_SIZE * 100;
 async function settle() { for (let step = 0; step < 16; step += 1) await Promise.resolve(); }
@@ -165,4 +166,19 @@ test("returning immediately to a dropped page cannot let its old completion clea
   assert.deepEqual(pages(), [0, 1, 5]);
   assert.ok(get(workspace.pendingPages).has(key), "The replacement request stays pending until its own response");
   await finish();
+});
+
+test("a stale annotation prefetch yields its slot to the current visible page instead of retrying offscreen", async () => {
+  const { show, calls, pages, finish } = setup();
+  show(5);
+  await settle();
+  assert.deepEqual(pages(), [5, 6]);
+  show(20);
+  markAnnotationsChanged("queue-test");
+  calls[1].resolve();
+  await settle();
+  assert.deepEqual(pages(), [5, 6, 20]);
+  assert.equal(pages().filter((page) => page === 6).length, 1);
+  await finish();
+  forgetAnnotationVersion("queue-test");
 });
