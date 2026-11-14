@@ -64,6 +64,9 @@ jobs:
       - name: Windows native navigation smoke
         if: runner.os == 'Windows'
         run: python tests/native/row_navigation.py --binary target/debug/trivium-desktop.exe --rows 5199
+      - name: Windows column presentation smoke
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --column-presentation-only
       - name: Retain native logs and screenshots
         if: always()
         uses: actions/upload-artifact@v5

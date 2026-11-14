@@ -105,6 +105,11 @@ class WebView:
                      {"text": text + ("\ue007" if enter else "")})
 
     def button(self, text: str, container: str = ".row-jump") -> None:
+        if text == "Go" and container == ".row-jump":
+            # Row navigation is submitted with Enter; there is no Go button.
+            element = self.element('.row-jump input[type="number"]')
+            self.request("POST", self.route(f"element/{element[ELEMENT]}/value"), {"text": "\ue007"})
+            return
         element = wait_for(
             lambda: self.script(
                 "return [...document.querySelectorAll(arguments[0]+' button')]"

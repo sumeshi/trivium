@@ -30,6 +30,10 @@ from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
 from scroll_render_checks import verify_scroll_rendering
+from toolbar_checks import verify_toolbar
+from datetime_group_checks import verify_datetime_groups
+from preset_ioc_checks import verify_presets_iocs
+from column_presentation_checks import verify_column_presentation
 from wide_table_checks import verify_wide_table
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
@@ -827,6 +831,7 @@ def main() -> None:
     parser.add_argument("--driver", default=shutil.which("tauri-driver") or "/workspace/.trivium-tools/bin/tauri-driver")
     parser.add_argument("--native-driver", default=native_driver_default())
     parser.add_argument("--output", type=Path, default=Path("target/native-workspace-ui"))
+    parser.add_argument("--column-presentation-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -846,21 +851,27 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
                 ("feedback usability and sticky cells", lambda: verify_feedback(web, data, root, evidence, report)),
                 ("refined imports, scope, grouping and styling", lambda: verify_refinements(web, data, root, evidence, report)),
                 ("stable stripes while scrolling", lambda: verify_scroll_rendering(web, data, evidence, report)),
                 ("virtualized wide table and unchanged rows", lambda: verify_wide_table(web, data, root, evidence, report)),
                 ("saved arbitrary column pinning", lambda: verify_column_pinning(web, data, root, evidence, report)),
+                ("column ordering, widths and ISO display", lambda: verify_column_presentation(web, data, root, evidence, report)),
                 ("compact scrollable row detail", lambda: verify_compact_detail(web, data, root, evidence, report)),
                 ("full row detail and sparse flagged timeline", lambda: verify_detail_timeline(web, data, root, evidence, report)),
                 ("flag filters and bulk/export", lambda: flag_filters(web, data, root, report)),
                 ("columns and header", lambda: columns_and_header(web, data, root, report)),
                 ("analysis drawers and timeline", lambda: analysis(web, data, evidence, report)),
+                ("UTC datetime grouping", lambda: verify_datetime_groups(web, data, root, evidence, report)),
+                ("portable presets and explicit IOC application", lambda: verify_presets_iocs(web, data, root, evidence, report)),
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
+                if args.column_presentation_only and stage != "column ordering, widths and ISO display":
+                    continue
                 print(f"CHECK: {stage}", flush=True)
                 run()
                 report["stages"].append(stage)
