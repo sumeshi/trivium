@@ -65,6 +65,9 @@ def _details(web, project_id: str, columns: dict[str, str], message: str, total:
     assert not web.script("return !!document.querySelector('.row-detail-dialog');")
     _clear(web, total)
     _open_detail(web)
+    wait_for(lambda: web.script("return document.querySelector(arguments[0])?.querySelector('.row-field-value')?.textContent;", f'.row-detail-field[data-column-id="{columns["message"]}"]'),
+        lambda value: value == message, "visible long field finishes laying out before clicking another field")
+    _settle(web)
     web.named("Filter in empty", ".row-detail-dialog")
     web.applied(projectId=project_id, condition={"column": columns["empty"], "op": "eq", "values": [""], "negated": False})
     web.results(1)

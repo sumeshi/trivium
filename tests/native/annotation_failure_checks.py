@@ -21,9 +21,16 @@ def verify_annotation_failures(web, data, root: Path, report: dict) -> None:
             owner = case["meta"]["id"]
             open_project(web, case["meta"]["name"])
             web.results(1)
+            wait_for(lambda: web.script("return !document.querySelector('.toast.error');"), bool, "previous error notification clears")
             web.script("""
               window.__flagFailureFetch=window.fetch;
-              window.__flagFailure={results:arguments[0],calls:0,done:0,release:null};
+              window.__flagFailure={results:arguments[0],calls:0,done:0,release:null,errorVisible:false};
+              const observed=window.__flagFailure;
+              observed.observer=new MutationObserver(()=>{
+                if([...document.querySelectorAll('.toast.error')].some(e=>/flag|annotation/i.test(e.textContent)))
+                  observed.errorVisible=true;
+              });
+              observed.observer.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true});
               window.fetch=(input,options,...rest)=>{
             """ + IPC_COMMAND_JS + """
                 if(name!=='update_flag')return window.__flagFailureFetch(input,options,...rest);
@@ -58,11 +65,11 @@ def verify_annotation_failures(web, data, root: Path, report: dict) -> None:
                 assert (persisted["rows"][0]["flag"] or "") == expected, persisted
                 assert persisted["annotated_total"] == persisted["annotated_filtered"] == expected_count, persisted
                 if not (first and second):
-                    assert web.script("return [...document.querySelectorAll('.toast.error')].some(e=>/flag|annotation/i.test(e.textContent));"), "Write failure must be visible"
+                    wait_for(lambda: web.script("return window.__flagFailure.errorVisible;"), bool, "write failure is shown to the user")
                 outcomes.append({"first_success": first, "second_success": second,
                                  "persisted_flag": expected, "flagged": expected_count})
             finally:
-                web.script("window.fetch=window.__flagFailureFetch;delete window.__flagFailureFetch;delete window.__flagFailure;")
+                web.script("window.__flagFailure.observer.disconnect();window.fetch=window.__flagFailureFetch;delete window.__flagFailureFetch;delete window.__flagFailure;")
                 open_project(web, data["name"])
                 web.results(outer_total)
                 web.named(f"Close {source.name}")
