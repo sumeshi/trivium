@@ -50,6 +50,7 @@ from annotation_restore_checks import verify_annotation_restore
 from storage_responsiveness_checks import verify_storage_responsiveness
 from graceful_close_checks import verify_graceful_close
 from review_fixes_checks import verify_review_fixes
+from file_drop_checks import verify_file_drop
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -878,6 +879,7 @@ def main() -> None:
     parser.add_argument("--boundary-only", action="store_true")
     parser.add_argument("--close-only", action="store_true")
     parser.add_argument("--review-fixes-only", action="store_true")
+    parser.add_argument("--file-drop-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -897,6 +899,7 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("native external file drop and manual import", lambda: verify_file_drop(web, data, root, evidence, report)),
                 ("review query feedback, note width and row navigation", lambda: verify_review_fixes(web, data, root, evidence, report)),
                 ("normal close drains saves before exit", lambda: verify_graceful_close(app, data, root, evidence, report)),
                 ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
@@ -933,6 +936,8 @@ def main() -> None:
                 ("note text and composition confirmation", lambda: verify_memo_ime(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
+                if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:
+                    continue
                 if stage == "multiple-file import options and failure isolation" and not args.review_fixes_only:
                     continue  # Covered by the full refinement checks below.
                 if args.review_fixes_only and stage not in {"review query feedback, note width and row navigation", "compact scrollable row detail", "multiple-file import options and failure isolation"}:
