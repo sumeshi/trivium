@@ -34,6 +34,8 @@ Choose from a variety of color themes to suit your preferences.
 
 View CSV, JSON, JSONL, and NDJSON logs in a table, including nested JSON records. Click a cell to inspect the full record without having to scroll across all its columns.
 
+JSON imports support up to 4,096 flattened columns; files exceeding this limit are rejected.
+
 You can open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
 ### Search & Filter

@@ -9,16 +9,20 @@ use crate::import::json_source::{for_each_record, value_to_cell, visit_leaves};
 use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
-use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
 use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 pub use crate::import::json_source::RecordFormat;
+mod batch;
+use batch::{Batch, Record};
 
 /// Maximum number of records in one import batch.
 pub const DEFAULT_BATCH_ROWS: usize = 50_000;
-/// Approximate payload bytes (cell text plus the `__original` JSON) in one
-/// batch. A single record larger than the limit still forms a batch of its own.
+/// Retained batch buffer budget, including missing-cell slots, vector capacity
+/// and string capacity. Parsing, schema and the emitted Polars frame use extra
+/// memory. A single oversized record still forms a batch of its own.
 pub const DEFAULT_BATCH_BYTES: usize = 8 * 1024 * 1024;
+/// Bound dense schema overhead before any row-by-column buffers are allocated.
+pub const MAX_JSON_COLUMNS: usize = 4_096;
 /// How many scanned records pass between progress reports during pass 1.
 const PROGRESS_RECORD_INTERVAL: usize = 1_024;
 
@@ -95,15 +99,24 @@ impl JsonImporter {
         let mut seen: HashMap<String, usize> = HashMap::new();
         let mut rows = 0usize;
 
-        for_each_record(path, format, |_record_no, value| {
+        for_each_record(path, format, |record_no, value| {
             rows += 1;
-            let mut paths = Vec::new();
-            visit_leaves(&value, "", &mut |pointer, _| paths.push(pointer));
-            for pointer in paths {
-                if !seen.contains_key(&pointer) {
+            let mut too_wide = false;
+            visit_leaves(&value, "", &mut |pointer, _| {
+                if !too_wide && !seen.contains_key(&pointer) {
+                    if order.len() == MAX_JSON_COLUMNS {
+                        too_wide = true;
+                        return;
+                    }
                     seen.insert(pointer.clone(), order.len());
                     order.push(pointer);
                 }
+            });
+            if too_wide {
+                return Err(AppError::Message(format!(
+                    "JSON record {} exceeds the limit of {} flattened columns. No columns were discarded.",
+                    record_no, MAX_JSON_COLUMNS
+                )));
             }
             if rows.is_multiple_of(PROGRESS_RECORD_INTERVAL) {
                 job.report_progress(rows as u64, None, Some("Scanning JSON".into()));
@@ -187,82 +200,57 @@ impl JsonImporter {
             ));
         }
 
-        let mut cells: Vec<Vec<Option<String>>> = vec![Vec::new(); columns.len()];
-        let mut originals: Vec<String> = Vec::new();
-        let mut row_ids: Vec<i64> = Vec::new();
-        let mut source_records: Vec<i64> = Vec::new();
+        let mut batch = Batch::new(columns.len());
         let mut rows_read = 0usize;
-        let mut batch_rows = 0usize;
-        let mut estimated_bytes = 0usize;
 
         for_each_record(&path, format, |record_no, value| {
             job.check_cancelled()?;
-            let row_position = row_ids.len();
-            for values in &mut cells {
-                values.push(None);
-            }
+            let mut cells = Vec::new();
             visit_leaves(&value, "", &mut |pointer, leaf| {
                 if let Some(index) = column_index.get(pointer.as_str()) {
-                    cells[*index][row_position] = value_to_cell(leaf);
+                    cells.push((*index, value_to_cell(leaf)));
                 }
             });
-
-            let original = value.to_string();
-            estimated_bytes += original.len() + 8;
-            for values in &cells {
-                if let Some(Some(text)) = values.last() {
-                    estimated_bytes += text.len() + 1;
-                }
-            }
+            let record = Record {
+                cells,
+                original: value.to_string(),
+                row_id: rows_read as i64,
+                // Physical JSONL line or 1-based JSON array element.
+                source_record: record_no as i64,
+            };
 
             // The initial table layout only needs a leading sample, matching
             // the CSV importer.
             if rows_read < sample_rows {
-                for (position, values) in cells.iter().enumerate() {
-                    let length = values
-                        .last()
-                        .and_then(|value| value.as_ref())
-                        .map(|text| text.chars().count())
-                        .unwrap_or(0);
-                    if let Some(current) = column_max_chars.get_mut(&columns[position].id) {
-                        if length > *current {
-                            *current = length;
-                        }
+                for (position, text) in &record.cells {
+                    if let (Some(current), Some(text)) = (
+                        column_max_chars.get_mut(&columns[*position].id),
+                        text.as_ref(),
+                    ) {
+                        *current = (*current).max(text.chars().count());
                     }
                 }
             }
 
-            originals.push(original);
-            row_ids.push(rows_read as i64);
-            // Physical JSONL line or 1-based JSON array element.
-            source_records.push(record_no as i64);
-            rows_read += 1;
-            batch_rows += 1;
-
-            if batch_rows >= limits.max_rows || estimated_bytes >= limits.max_bytes {
-                let frame = build_batch(
-                    &columns,
-                    &mut cells,
-                    &mut originals,
-                    &mut row_ids,
-                    &mut source_records,
-                )?;
+            if batch.len() > 0 && batch.would_exceed(&record, limits.max_bytes) {
+                let frame = batch.take_frame(&columns)?;
                 write(&frame)?;
                 job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
-                batch_rows = 0;
-                estimated_bytes = 0;
+                job.check_cancelled()?;
+            }
+            batch.push(record)?;
+            rows_read += 1;
+            if batch.len() >= limits.max_rows || batch.allocated_bytes() >= limits.max_bytes {
+                let frame = batch.take_frame(&columns)?;
+                write(&frame)?;
+                job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
+                job.check_cancelled()?;
             }
             Ok(())
         })?;
 
-        if batch_rows > 0 {
-            let frame = build_batch(
-                &columns,
-                &mut cells,
-                &mut originals,
-                &mut row_ids,
-                &mut source_records,
-            )?;
+        if batch.len() > 0 {
+            let frame = batch.take_frame(&columns)?;
             write(&frame)?;
             job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
         }
@@ -280,32 +268,6 @@ impl JsonImporter {
             column_max_chars,
         })
     }
-}
-
-/// Builds one frame from the accumulated column values. The vectors are taken,
-/// leaving them empty for the next batch.
-fn build_batch(
-    columns: &[ColumnMeta],
-    cells: &mut [Vec<Option<String>>],
-    originals: &mut Vec<String>,
-    row_ids: &mut Vec<i64>,
-    source_records: &mut Vec<i64>,
-) -> Result<DataFrame, AppError> {
-    let mut series: Vec<Series> = Vec::with_capacity(columns.len() + 3);
-    for (column, values) in columns.iter().zip(cells.iter_mut()) {
-        series.push(Series::new(column.id.as_str(), std::mem::take(values)));
-    }
-    series.push(Series::new(
-        INTERNAL_ORIGINAL,
-        std::mem::take(originals),
-    ));
-    series.push(Series::new(INTERNAL_ROW_ID, std::mem::take(row_ids)));
-    series.push(Series::new(
-        INTERNAL_SOURCE_RECORD,
-        std::mem::take(source_records),
-    ));
-    DataFrame::new(series)
-        .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
 }
 
 /// Reads a whole JSONL file into one frame.
