@@ -2,11 +2,53 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sqlite3
 import time
 import uuid
 
 from row_navigation import open_project, wait_for
+
+
+def _windows_local_app_data() -> Path:
+    """Match Tauri's Known Folder lookup, which ignores LOCALAPPDATA overrides."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Guid(ctypes.Structure):
+        _fields_ = [("data1", wintypes.DWORD), ("data2", wintypes.WORD),
+                    ("data3", wintypes.WORD), ("data4", ctypes.c_ubyte * 8)]
+
+    folder = Guid.from_buffer_copy(uuid.UUID("f1b32785-6fba-4fcf-9d55-7b8e7f157091").bytes_le)
+    path = ctypes.c_wchar_p()
+    shell = ctypes.WinDLL("shell32")
+    shell.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(Guid), wintypes.DWORD,
+                                         wintypes.HANDLE, ctypes.POINTER(ctypes.c_wchar_p)]
+    shell.SHGetKnownFolderPath.restype = ctypes.c_long
+    result = shell.SHGetKnownFolderPath(ctypes.byref(folder), 0, None, ctypes.byref(path))
+    if result != 0:
+        raise OSError(f"LocalAppData Known Folder lookup failed (HRESULT 0x{result & 0xffffffff:08x})")
+    try:
+        return Path(path.value)
+    finally:
+        ole = ctypes.WinDLL("ole32")
+        ole.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+        ole.CoTaskMemFree.restype = None
+        ole.CoTaskMemFree(ctypes.cast(path, ctypes.c_void_p))
+
+
+def _case_database(root: Path, owner: str, *, platform: str | None = None) -> Path:
+    owner = str(uuid.UUID(owner))
+    if (platform or os.name) == "nt":
+        # The owned debug binary rejects automation in any other namespace.
+        # Never search production cases or infer this from overridden app env.
+        path = (_windows_local_app_data() / "com.trivium.native-tests" / "trivium"
+                / "projects" / owner / "project.sqlite")
+        assert path.is_file(), "The owned Windows automation case database was not found"
+        return path
+    paths = list(root.glob(f"**/projects/{owner}/project.sqlite"))
+    assert len(paths) == 1, paths
+    return paths[0]
 
 
 def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, report: dict) -> None:
@@ -22,9 +64,7 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
         web.results(1)
         # Allow the newly mounted view's initial debounced save to settle.
         web.async_script("const done=arguments[arguments.length-1];setTimeout(()=>done(true),350);")
-        paths = list(root.glob(f"**/projects/{owner}/project.sqlite"))
-        assert len(paths) == 1, paths
-        database = sqlite3.connect(paths[0], timeout=.1, isolation_level=None)
+        database = sqlite3.connect(_case_database(root, owner), timeout=.1, isolation_level=None)
         database.execute("BEGIN IMMEDIATE")
         started = time.monotonic()
         web.script("""
