@@ -15,7 +15,7 @@
   const {
     backend, columnLabels, expandedCell, hiddenColumns, projectDetail,
     addFilterCondition, createReadScope, appliedFilters, sortKey, sortDirection,
-    viewGeneration, totalFilteredRows, rowsCache, positionToRowIndex,
+    viewGeneration, totalFilteredRows,
   } = useWorkspace();
   const reads = createReadScope();
   const navigationReads = createReadScope();
@@ -42,14 +42,6 @@
     current: () => $expandedCell && navigationScope ? {
       scope: resultScopeKey($expandedCell.projectId), projectId: $expandedCell.projectId, rowIndex: $expandedCell.rowIndex,
     } : null,
-    position: (rowIndex) => {
-      for (const [position, id] of $positionToRowIndex) if (id === rowIndex) return position;
-      return null;
-    },
-    row: (position) => {
-      const id = $positionToRowIndex.get(position);
-      return id === undefined ? undefined : $rowsCache.get(id);
-    },
     locate: (scope, rowIndex) => {
       const api = $backend;
       if (!api) return Promise.reject(new Error('Row is unavailable.'));

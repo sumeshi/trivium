@@ -20,7 +20,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-test('previous and next follow filtered descending result positions, reuse cache, and stop at boundaries', async () => {
+test('previous and next follow fresh filtered descending result positions and stop at boundaries', async () => {
   const order = [98, 41, 6];
   let current = { scope: scope.key, projectId: scope.projectId, rowIndex: 41 };
   let state: DetailNavigationState | undefined;
@@ -29,9 +29,10 @@ test('previous and next follow filtered descending result positions, reuse cache
   let locates = 0;
   const navigation = createRowDetailsNavigation({
     current: () => current,
-    position: (id) => order.indexOf(id),
-    row: (position) => position === 0 ? row(98) : undefined,
-    async locate() { locates += 1; throw new Error('Cached positions need no locate.'); },
+    async locate(_request, id) {
+      locates += 1;
+      return { position: order.indexOf(id), total_rows: 100, total_filtered_rows: order.length };
+    },
     async read(request, position) {
       assert.deepEqual(request.query, scope.query);
       reads.push(position); return result(position, order[position]);
@@ -43,24 +44,24 @@ test('previous and next follow filtered descending result positions, reuse cache
   await navigation.move(-1);
   await navigation.move(-1);
   assert.deepEqual(opened, [98]);
-  assert.deepEqual(reads, []);
+  assert.deepEqual(reads, [0]);
   assert.equal(state?.position, 0);
   await navigation.move(1);
   await navigation.move(1);
   await navigation.move(1);
   assert.deepEqual(opened, [98, 41, 6]);
-  assert.deepEqual(reads, [1, 2]);
+  assert.deepEqual(reads, [0, 1, 2]);
   assert.equal(state?.position, 2);
-  assert.equal(locates, 0);
+  assert.equal(locates, 1);
   navigation.dispose();
 });
 
-test('a row outside the page cache locates once by original id and reads only the adjacent position', async () => {
+test('opening a row locates once by original id and reads only the adjacent position', async () => {
   let current = { scope: scope.key, projectId: scope.projectId, rowIndex: 41 };
   let state: DetailNavigationState | undefined;
   let locates = 0;
   const navigation = createRowDetailsNavigation({
-    current: () => current, position: () => null, row: () => undefined,
+    current: () => current,
     async locate(request, id) {
       assert.equal(id, 41); assert.equal(request.query.sortDirection, 'desc'); locates += 1;
       return { position: 1, total_rows: 100, total_filtered_rows: 3 };
@@ -88,7 +89,7 @@ test('late locate and page responses cannot change a closed dialog, new tab or n
   let cancelled = 0;
   const opened: number[] = [];
   const navigation = createRowDetailsNavigation({
-    current: () => current, position: () => null, row: () => undefined,
+    current: () => current,
     locate: () => located.promise, read: () => page.promise,
     cancel() { cancelled += 1; }, changed(next) { state = next; },
     open(next) { opened.push(next.row_index); },
@@ -117,7 +118,7 @@ test('missing rows and failed adjacent reads keep the original row and filters',
   let state: DetailNavigationState | undefined;
   let matching = false;
   const navigation = createRowDetailsNavigation({
-    current: () => current, position: () => null, row: () => undefined,
+    current: () => current,
     async locate() { return { position: matching ? 1 : null, total_rows: 100, total_filtered_rows: 3 }; },
     async read() { throw new Error('read failed'); },
     cancel() {}, changed(next) { state = next; },
@@ -136,7 +137,7 @@ test('missing rows and failed adjacent reads keep the original row and filters',
   navigation.dispose();
 });
 
-test('changed flag filters and annotation versions ignore the old table position and row caches', async () => {
+test('changed flag filters and annotation versions use fresh positions and row counts', async () => {
   let current = { scope: scope.key, projectId: scope.projectId, rowIndex: 41 };
   let state: DetailNavigationState | undefined;
   let locates = 0;
@@ -144,11 +145,11 @@ test('changed flag filters and annotation versions ignore the old table position
   const opened: number[] = [];
   const navigation = createRowDetailsNavigation({
     current: () => current,
-    // Old table cache says row 41 is second, followed by row 6.
-    position: () => 1, row: () => row(6),
     async locate(request, id) {
-      assert.equal(request.query.flagFilter, 'critical'); assert.equal(id, 41); locates += 1;
-      return { position: 0, total_rows: 100, total_filtered_rows: 2 };
+      assert.equal(id, 41); locates += 1;
+      return request.query.flagFilter === 'critical'
+        ? { position: 0, total_rows: 100, total_filtered_rows: 2 }
+        : { position: 1, total_rows: 100, total_filtered_rows: 3 };
     },
     async read(_request, position) { assert.equal(position, 1); reads += 1; return result(1, 87, 2); },
     cancel() {}, changed(next) { state = next; },
@@ -156,13 +157,51 @@ test('changed flag filters and annotation versions ignore the old table position
   });
   await navigation.load({ projectId: 'case-a', rowIndex: 41, columnId: 'message' }, scope);
   const changed: DetailResultScope = { ...scope, key: 'critical:new-annotation-version',
-    query: { ...scope.query, flagFilter: 'critical' }, total: 2 };
+    query: { ...scope.query, flagFilter: 'critical' }, total: 3 };
   current = { ...current, scope: changed.key };
   await navigation.load({ projectId: 'case-a', rowIndex: 41, columnId: 'message' }, changed);
   assert.equal(state?.position, 0);
+  assert.equal(state?.total, 2, 'the old table total does not override the located result count');
   await navigation.move(1);
   assert.deepEqual(opened, [87]);
-  assert.equal(locates, 1);
+  assert.equal(locates, 2);
   assert.equal(reads, 1);
+  navigation.dispose();
+});
+
+test('first open after an annotation change ignores stale table positions and later metadata updates', async () => {
+  // The table still shows Critical [0,1,2] while its refresh is debounced.
+  // Row 0 was just changed to Safe, so the current result is already [1,2].
+  const staleScope: DetailResultScope = { ...scope, key: 'critical:after-save', total: 3,
+    query: { ...scope.query, flagFilter: 'critical' } };
+  let current = { scope: staleScope.key, projectId: scope.projectId, rowIndex: 1 };
+  let state: DetailNavigationState | undefined;
+  let locates = 0;
+  const reads: number[] = [];
+  const opened: number[] = [];
+  const navigation = createRowDetailsNavigation({
+    current: () => current,
+    async locate(_request, id) {
+      assert.equal(id, 1); locates += 1;
+      return { position: 0, total_rows: 3, total_filtered_rows: 2 };
+    },
+    async read(_request, position) { reads.push(position); return result(position, 2, 2); },
+    cancel() {}, changed(next) { state = next; },
+    open(next) { opened.push(next.row_index); current = { ...current, rowIndex: next.row_index }; },
+  });
+  await navigation.load({ projectId: 'case-a', rowIndex: 1, columnId: 'message' }, staleScope);
+  assert.equal(state?.position, 0);
+  assert.equal(state?.total, 2);
+  // A refreshed table count has the same semantic key and must not disturb the
+  // already fresh location or fetch it again.
+  await navigation.load({ projectId: 'case-a', rowIndex: 1, columnId: 'message' }, { ...staleScope, total: 2 });
+  await navigation.move(-1);
+  assert.deepEqual(opened, [], 'Previous is a boundary, rather than reopening original row 1');
+  assert.deepEqual(reads, []);
+  await navigation.move(1);
+  await navigation.load({ projectId: 'case-a', rowIndex: 2, columnId: 'message' }, { ...staleScope, total: 2 });
+  assert.deepEqual(opened, [2]);
+  assert.deepEqual(reads, [1]);
+  assert.equal(locates, 1, 'own Next response and table count updates do not relaunch locate');
   navigation.dispose();
 });
