@@ -23,14 +23,14 @@ fn key() -> QueryCacheKey {
     key
 }
 
-fn wait_for_waiter(key: &QueryCacheKey) {
+fn wait_for_waiters(key: &QueryCacheKey, waiters: usize) {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        // Map + owner + waiter. Inspect without cloning the Arc ourselves.
+        // Map + owner + enrolled waiters. Inspect without cloning the Arc ourselves.
         if flights()
             .lock()
             .get(key)
-            .is_some_and(|flight| Arc::strong_count(flight) >= 3)
+            .is_some_and(|flight| Arc::strong_count(flight) >= 2 + waiters)
         {
             return;
         }
@@ -91,7 +91,7 @@ fn concurrent_cold_queries_share_work_and_cancelled_or_panicking_owners_do_not_p
                 Ok(CachedResult::new(vec![2, 5, 8], 0, 0, 0))
             })
         });
-        wait_for_waiter(&key);
+        wait_for_waiters(&key, 1);
         if let Some(id) = owner_id {
             assert!(jobs::request_cancel(id));
         }
@@ -144,7 +144,13 @@ fn cancelling_a_waiter_leaves_the_owner_and_other_cache_users_alive() {
             panic!("cancelled waiter evaluated")
         })
     });
-    wait_for_waiter(&key);
+    let healthy_key = key.clone();
+    let healthy = thread::spawn(move || {
+        resolve_once(Some(healthy_key), &JobContext::none(), || {
+            panic!("independent waiter evaluated instead of sharing its owner")
+        })
+    });
+    wait_for_waiters(&key, 2);
     assert!(jobs::request_cancel(id));
     assert_eq!(
         waiter.join().unwrap().unwrap_err().to_string(),
@@ -152,9 +158,9 @@ fn cancelling_a_waiter_leaves_the_owner_and_other_cache_users_alive() {
     );
     release_tx.send(()).unwrap();
     let first = owner.join().unwrap().unwrap();
-    let cached = resolve_once(Some(key), &JobContext::none(), || {
-        panic!("successful owner was not cached")
-    })
-    .unwrap();
-    assert!(Arc::ptr_eq(&first.ids, &cached.ids));
+    let shared = healthy.join().unwrap().unwrap();
+    // Compare enrolled users of this flight. The process-wide two-entry LRU
+    // may legitimately be cleared or evicted by other parallel tests.
+    assert!(Arc::ptr_eq(&first.ids, &shared.ids));
+    assert!(!flights().lock().contains_key(&key));
 }
