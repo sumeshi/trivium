@@ -42,6 +42,11 @@ def _query_failure(web, project_id: str, report: dict) -> None:
     assert "Result unavailable" in first["meta"] and "8 source rows" in first["meta"], first
     assert not first["empty"] and first["cells"] == 0 and first["query"] == "|", first
     assert "Flagged —" in first["flagged"], first
+    web.drawer("Conditions")
+    web.tap(web.node('.analysis-drawer [aria-label="Add condition"]'))
+    wait_for(lambda: web.script("return document.querySelectorAll('.condition-row').length;"),
+        lambda count: count == 1, "Rules remain clickable above the query-error layer")
+    web.close_drawer()
     before_retry = len(web.trace())
     web.named("Retry", '.table-query-state[role="alert"]')
     wait_for(lambda: [entry for entry in web.trace()[before_retry:] if entry["name"] == "query_project_rows"

@@ -538,6 +538,8 @@ button.primary:disabled {
 }
 
 .table-scroll {
+  /* Keep table loading/error layers below the adjacent investigation drawer. */
+  isolation: isolate;
   width: 100%;
   flex: 1;
   min-height: 0;
