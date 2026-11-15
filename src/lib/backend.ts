@@ -5,6 +5,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites.ts";
 import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
+import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 import type {
   CellKind,
   ColorRule,
@@ -355,20 +356,22 @@ class NativeBackend implements Backend {
     if (!args.path) {
       return Promise.reject(new Error("Path is required to create a project."));
     }
-    return invokeOwned("create_project", {
+    return acceptSave(() => invokeOwned<ProjectSummary>("create_project", {
       payload: {
         path: args.path,
         description: args.description ?? null,
         delimiter: args.delimiter ?? null,
         restore_annotations: args.restoreAnnotations === true,
       },
-    }, args);
+    }, args));
   }
 
-  async deleteProject(projectId: string): Promise<void> {
-    await invoke("delete_project", { request: { projectId: projectId } });
-    forgetAnnotationWrites(projectId);
-    forgetAnnotationVersion(projectId);
+  deleteProject(projectId: string): Promise<void> {
+    return acceptSave(async () => {
+      await invoke("delete_project", { request: { projectId: projectId } });
+      forgetAnnotationWrites(projectId);
+      forgetAnnotationVersion(projectId);
+    });
   }
 
   async loadProject(projectId: string, requestId?: string): Promise<LoadProjectResponse> {
@@ -557,36 +560,36 @@ class NativeBackend implements Backend {
   }
 
   saveIocs(args: SaveIocsArgs): Promise<void> {
-    return invoke("save_iocs", {
+    return acceptSave(() => invoke<void>("save_iocs", {
       payload: {
         projectId: args.projectId,
         entries: args.entries,
       },
-    });
+    }));
   }
 
   importIocs(args: ImportIocsArgs): Promise<IocEntry[]> {
-    return invoke("import_iocs", {
+    return acceptSave(() => invoke<IocEntry[]>("import_iocs", {
       payload: {
         projectId: args.projectId,
         path: args.path,
       },
-    });
+    }));
   }
 
   exportIocs(args: ExportIocsArgs): Promise<void> {
-    return invoke("export_iocs", {
+    return acceptSave(() => invoke<void>("export_iocs", {
       payload: {
         projectId: args.projectId,
         destination: args.destination,
         allowOverwrite: args.allowOverwrite ?? false,
         entries: args.entries ?? null,
       },
-    });
+    }));
   }
 
   savePreset(args: SavePresetArgs): Promise<void> {
-    return invoke("save_preset", {
+    return acceptSave(() => invoke<void>("save_preset", {
       payload: {
         projectId: args.projectId,
         name: args.name ?? null,
@@ -599,7 +602,7 @@ class NativeBackend implements Backend {
         destination: args.destination,
         allowOverwrite: args.allowOverwrite ?? false,
       },
-    });
+    }));
   }
 
   loadPreset(args: LoadPresetArgs): Promise<PresetData> {
@@ -620,12 +623,12 @@ class NativeBackend implements Backend {
   }
 
   saveColorRules(args: SaveColorRulesArgs): Promise<ColorRulesResponse> {
-    return invoke("save_color_rules", {
+    return acceptSave(() => invoke<ColorRulesResponse>("save_color_rules", {
       payload: {
         projectId: args.projectId,
         rules: args.rules,
       },
-    });
+    }));
   }
 
   async updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
@@ -658,12 +661,13 @@ class NativeBackend implements Backend {
   }
 
   saveViewState(args: SaveViewStateArgs): Promise<void> {
-    return invoke("save_view_state", {
+    // View callbacks may already be accepted by saveWorkspaceView's queue.
+    return trackAcceptedSave(invoke<void>("save_view_state", {
       payload: {
         projectId: args.projectId,
         state: args.state,
       },
-    });
+    }));
   }
 
   exportProject(args: ExportProjectArgs): Promise<ExportResult> {

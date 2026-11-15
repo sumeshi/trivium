@@ -1,3 +1,5 @@
+import { acceptSave } from "./saveDrain.ts";
+
 interface AnnotationQueue {
   tail: Promise<unknown>;
   failures: number;
@@ -29,29 +31,33 @@ function enqueue<T>(projectId: string, queue: AnnotationQueue, operation: () => 
 
 /** Preserve mutation order within a case without blocking another case. */
 export function queueAnnotationWrite<T>(projectId: string, write: () => Promise<T>): Promise<T> {
-  const queue = queueFor(projectId);
-  return enqueue(projectId, queue, async () => {
-    try {
-      return await write();
-    } catch (error) {
-      queue.failures += 1;
-      throw error;
-    }
+  return acceptSave(() => {
+    const queue = queueFor(projectId);
+    return enqueue(projectId, queue, async () => {
+      try {
+        return await write();
+      } catch (error) {
+        queue.failures += 1;
+        throw error;
+      }
+    });
   });
 }
 
 /** A strict snapshot runs after earlier saves and before later ones. */
 export function queueAfterAnnotationWrites<T>(projectId: string, read: () => Promise<T>): Promise<T> {
-  const queue = queueFor(projectId);
-  const acknowledgedAtRequest = queue.acknowledgedFailures;
-  return enqueue(projectId, queue, async () => {
-    if (queue.failures > acknowledgedAtRequest) {
-      // Every export requested before this warning must stop. A fresh explicit
-      // retry may export the confirmed state after the user has checked it.
-      queue.acknowledgedFailures = queue.failures;
-      throw new Error("Export stopped because an annotation could not be saved. Check the annotations before retrying the export.");
-    }
-    return read();
+  return acceptSave(() => {
+    const queue = queueFor(projectId);
+    const acknowledgedAtRequest = queue.acknowledgedFailures;
+    return enqueue(projectId, queue, async () => {
+      if (queue.failures > acknowledgedAtRequest) {
+        // Every export requested before this warning must stop. A fresh explicit
+        // retry may export the confirmed state after the user has checked it.
+        queue.acknowledgedFailures = queue.failures;
+        throw new Error("Export stopped because an annotation could not be saved. Check the annotations before retrying the export.");
+      }
+      return read();
+    });
   });
 }
 

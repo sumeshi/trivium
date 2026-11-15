@@ -1,6 +1,7 @@
 import { get, writable } from "svelte/store";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 
 export const TABLE_TEXT_SIZES = [85, 100, 115, 130, 145] as const;
 export type TableTextSize = (typeof TABLE_TEXT_SIZES)[number];
@@ -48,20 +49,21 @@ export async function initTableTextSize(): Promise<void> {
 export function setTableTextSize(value: unknown): Promise<void> {
   const next = parseTableTextSize(value);
   if (next === null) return pendingWrite;
-  revision += 1;
-  current.set(next);
-  cache(next);
-  // Serialize native writes so a slower old choice cannot replace the latest.
-  pendingWrite = pendingWrite.then(async () => {
-    try {
+  return acceptSave(() => {
+    revision += 1;
+    current.set(next);
+    cache(next);
+    // Serialize native writes so a slower old choice cannot replace the latest.
+    const write = pendingWrite.then(async () => {
       const base = await appLocalDataDir();
       await mkdir(base, { recursive: true });
       await writeTextFile(await join(base, STORAGE_FILE), JSON.stringify(next));
-    } catch {
-      // Native storage is optional; browser and live settings still work.
-    }
+    });
+    trackAcceptedSave(write);
+    // Native storage is optional for the live UI; close still checks failure.
+    pendingWrite = write.catch(() => {});
+    return pendingWrite;
   });
-  return pendingWrite;
 }
 
 export function adjustTableTextSize(direction: -1 | 1): Promise<void> {

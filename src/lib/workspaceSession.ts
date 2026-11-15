@@ -1,6 +1,7 @@
 import type { Backend } from "./backend";
 import type { ViewState } from "./types";
 import type { History } from "./viewState";
+import { acceptSave } from "./saveDrain.ts";
 
 /** Inactive tabs retain controls and row IDs, never row data or page caches. */
 export interface WorkspaceSession {
@@ -34,17 +35,25 @@ export function saveWorkspaceView(
   projectId: string,
   state: ViewState
 ): Promise<void> {
-  const snapshot = structuredClone(state);
-  const previous = pendingSaves.get(projectId) ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(() => backend.saveViewState({ projectId, state: snapshot }));
-  pendingSaves.set(projectId, next);
-  void next.finally(() => {
-    if (pendingSaves.get(projectId) === next) pendingSaves.delete(projectId);
-  }).catch(() => {});
-  return next;
+  return acceptSave(() => {
+    const snapshot = structuredClone(state);
+    const previous = pendingSaves.get(projectId) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(() => backend.saveViewState({ projectId, state: snapshot }));
+    pendingSaves.set(projectId, next);
+    void next.finally(() => {
+      if (pendingSaves.get(projectId) === next) pendingSaves.delete(projectId);
+    }).catch(() => {});
+    return next;
+  });
 }
 
 /** A just-closed tab must not reload a file before its last save completes. */
 export async function waitForWorkspaceSave(projectId: string): Promise<void> {
-  await pendingSaves.get(projectId)?.catch(() => {});
+  let pending = pendingSaves.get(projectId);
+  while (pending) {
+    await pending.catch(() => {});
+    const latest = pendingSaves.get(projectId);
+    if (latest === pending) return;
+    pending = latest;
+  }
 }

@@ -3,8 +3,9 @@ import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
 import { createThemePreference, DEFAULT_THEME, parseSavedTheme, parseTheme } from "./themeModel.ts";
 import type { Theme } from "./themeModel";
+import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 
-export { THEME_OPTIONS } from "./themeModel";
+export { THEME_OPTIONS } from "./themeModel.ts";
 export type { Theme } from "./themeModel";
 
 const THEME_KEY = "trivium:theme";
@@ -53,24 +54,26 @@ function persistTheme(next: Theme): Promise<void> {
     // ignore
   }
   // Serialize writes so rapid changes cannot leave an older choice on disk.
-  pendingWrite = pendingWrite.then(async () => {
-    try {
-      const base = await appLocalDataDir();
-      await mkdir(base, { recursive: true });
-      const path = await join(base, THEME_FILE);
-      await writeTextFile(path, JSON.stringify(createThemePreference(next), null, 2));
-    } catch (_err) {
-      // localStorage remains available when filesystem access is unavailable.
-    }
+  const write = pendingWrite.then(async () => {
+    const base = await appLocalDataDir();
+    await mkdir(base, { recursive: true });
+    const path = await join(base, THEME_FILE);
+    await writeTextFile(path, JSON.stringify(createThemePreference(next), null, 2));
   });
+  // Keep browser fallback behavior, but a normal close must notice a failed
+  // native save rather than mistaking the swallowed error for durable success.
+  trackAcceptedSave(write);
+  pendingWrite = write.catch(() => {});
   return pendingWrite;
 }
 
-export async function setTheme(next: Theme) {
+export function setTheme(next: Theme): Promise<void> {
   const selected = parseTheme(next);
-  if (!selected) return;
-  themeRevision += 1;
-  applyThemeAttr(selected);
-  theme.set(selected);
-  await persistTheme(selected);
+  if (!selected) return Promise.resolve();
+  return acceptSave(() => {
+    themeRevision += 1;
+    applyThemeAttr(selected);
+    theme.set(selected);
+    return persistTheme(selected);
+  });
 }
