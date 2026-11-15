@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
+import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -64,4 +64,65 @@ test("a failed edit remains rejected to its caller and cannot block the next edi
   await Promise.all([rejected, next, reopened]);
   assert.equal(saved, true);
   await waitForAnnotationWrites("annotation-failure");
+});
+
+test("an export snapshot follows earlier writes and prevents later writes from overtaking it", async () => {
+  const writeHeld = deferred(), exportHeld = deferred();
+  const order: string[] = [];
+  const write = queueAnnotationWrite("annotation-export-order", async () => {
+    await writeHeld.promise; order.push("saved");
+  });
+  const snapshot = queueAfterAnnotationWrites("annotation-export-order", async () => {
+    order.push("export started"); await exportHeld.promise; order.push("export finished");
+  });
+  const later = queueAnnotationWrite("annotation-export-order", async () => { order.push("later saved"); });
+  await turn();
+  assert.deepEqual(order, []);
+  writeHeld.resolve(); await write; await turn();
+  assert.deepEqual(order, ["saved", "export started"]);
+  exportHeld.resolve();
+  await Promise.all([snapshot, later]);
+  assert.deepEqual(order, ["saved", "export started", "export finished", "later saved"]);
+});
+
+test("all exports requested before a save failure is acknowledged stop; a fresh retry uses confirmed state", async () => {
+  const held = deferred();
+  const write = queueAnnotationWrite("annotation-export-failure", () => held.promise);
+  const writeRejected = assert.rejects(write, /storage failed/);
+  let exports = 0;
+  const exportSnapshot = () => queueAfterAnnotationWrites("annotation-export-failure", async () => ++exports);
+  const first = assert.rejects(exportSnapshot(), /annotation could not be saved/);
+  const second = assert.rejects(exportSnapshot(), /annotation could not be saved/);
+  held.reject(new Error("storage failed"));
+  await Promise.all([writeRejected, first, second]);
+  assert.equal(exports, 0);
+  assert.equal(await exportSnapshot(), 1);
+});
+
+test("a settled failed save survives lenient reopen waiting and an intervening successful write", async () => {
+  const projectId = "annotation-export-settled-failure";
+  await assert.rejects(queueAnnotationWrite(projectId, async () => { throw new Error("failed"); }));
+  await waitForAnnotationWrites(projectId);
+  await queueAnnotationWrite(projectId, async () => "saved");
+  await assert.rejects(queueAfterAnnotationWrites(projectId, async () => assert.fail("must not export")),
+    /Check the annotations before retrying the export/);
+  assert.equal(await queueAfterAnnotationWrites(projectId, async () => "confirmed"), "confirmed");
+});
+
+test("failed exports do not count as annotation failures or block another case", async () => {
+  await assert.rejects(queueAfterAnnotationWrites("annotation-export-bad-path", async () => {
+    throw new Error("destination exists");
+  }), /destination exists/);
+  assert.equal(await queueAfterAnnotationWrites("annotation-export-bad-path", async () => "retried"), "retried");
+  const held = deferred();
+  const write = queueAnnotationWrite("annotation-export-other-pending", () => held.promise);
+  assert.equal(await queueAfterAnnotationWrites("annotation-export-independent", async () => "independent"), "independent");
+  held.resolve(); await write;
+});
+
+test("successful case deletion releases remembered failures", async () => {
+  const projectId = "annotation-export-deleted";
+  await assert.rejects(queueAnnotationWrite(projectId, async () => { throw new Error("failed"); }));
+  forgetAnnotationWrites(projectId);
+  assert.equal(await queueAfterAnnotationWrites(projectId, async () => "new snapshot"), "new snapshot");
 });

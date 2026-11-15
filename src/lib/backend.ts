@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites.ts";
-import { queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
+import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import type {
   CellKind,
@@ -364,6 +364,7 @@ class NativeBackend implements Backend {
 
   async deleteProject(projectId: string): Promise<void> {
     await invoke("delete_project", { request: { projectId: projectId } });
+    forgetAnnotationWrites(projectId);
     forgetAnnotationVersion(projectId);
   }
 
@@ -668,24 +669,26 @@ class NativeBackend implements Backend {
         new Error("Destination path is required to export a project.")
       );
     }
-    return invokeOwned("export_project", {
+    // Waiting must not change the selected destination or investigation scope.
+    const snapshot = structuredClone(args);
+    return queueAfterAnnotationWrites(snapshot.projectId, () => invokeOwned("export_project", {
       payload: {
-        projectId: args.projectId,
-        destination: args.destination,
-        allowOverwrite: args.allowOverwrite ?? false,
-        scope: args.scope ?? "filtered",
-        search: args.search ?? null,
-        searchColumns: args.searchColumns ?? null,
-        condition: args.condition ?? null,
-        flagFilter: args.flagFilter ?? null,
-        bookmarkedOnly: args.bookmarkedOnly ?? null,
-        sortKey: args.sortKey ?? null,
-        sortDirection: args.sortDirection ?? null,
-        columns: args.columns ?? null,
-        rowIndices: args.rowIndices ?? null,
-        includeAnnotations: args.includeAnnotations ?? true,
+        projectId: snapshot.projectId,
+        destination: snapshot.destination,
+        allowOverwrite: snapshot.allowOverwrite ?? false,
+        scope: snapshot.scope ?? "filtered",
+        search: snapshot.search ?? null,
+        searchColumns: snapshot.searchColumns ?? null,
+        condition: snapshot.condition ?? null,
+        flagFilter: snapshot.flagFilter ?? null,
+        bookmarkedOnly: snapshot.bookmarkedOnly ?? null,
+        sortKey: snapshot.sortKey ?? null,
+        sortDirection: snapshot.sortDirection ?? null,
+        columns: snapshot.columns ?? null,
+        rowIndices: snapshot.rowIndices ?? null,
+        includeAnnotations: snapshot.includeAnnotations ?? true,
       },
-    }, args);
+    }, snapshot));
   }
 
   cancelJob(jobId: number): Promise<boolean> {
