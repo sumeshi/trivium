@@ -21,8 +21,16 @@ use uuid::Uuid;
 
 #[path = "architecture_bench/instrumentation.rs"]
 mod instrumentation;
+#[path = "architecture_bench/scenarios.rs"]
+mod scenarios;
 
-const TRIALS: usize = 3;
+fn trials() -> usize {
+    std::env::var("TRIVIUM_BENCH_TRIALS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|runs| *runs > 0)
+        .unwrap_or(3)
+}
 const PAGE: usize = 250;
 
 fn status_kib(name: &str) -> Option<u64> {
@@ -82,11 +90,11 @@ fn run_fixture(fixture: &str) -> Result<()> {
         "{}",
         json!({"build_label":std::env::var("TRIVIUM_BENCH_LABEL").unwrap_or_else(|_| "current".into()),
         "fixture":fixture,"input_bytes":fs::metadata(fixture)?.len(),
-        "os_cache":"not dropped; generated/warm", "trials":TRIALS,
+        "os_cache":"not dropped; generated/warm", "trials":trials(),
         "rss":"cumulative process VmHWM per fixture, engine only", "io_kind":instrumentation::kind()})
     );
     let mut imported_ids = Vec::new();
-    let meta = measure("import", TRIALS, || {
+    let meta = measure("import", trials(), || {
         let summary = create_project(
             &store,
             CreateProjectPayload {
@@ -115,6 +123,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         json!({"rows":meta.total_records,"columns":meta.columns.len(),
         "parquet_bytes":fs::metadata(&path)?.len()})
     );
+    scenarios::isolated_searches(&root, id)?;
     let column = |source: &str| -> String {
         meta.columns
             .iter()
@@ -123,13 +132,13 @@ fn run_fixture(fixture: &str) -> Result<()> {
             .id
             .clone()
     };
-    measure("reopen_compat_250", TRIALS, || {
+    measure("reopen_compat_250", trials(), || {
         let fresh = ProjectsStore::new(root.clone())?;
         let response = load_project(&fresh, ProjectRequest { project_id: id })?;
         assert_eq!(response.initial_rows.len(), PAGE.min(meta.total_records));
         Ok(())
     })?;
-    measure("reopen_metadata", TRIALS, || {
+    measure("reopen_metadata", trials(), || {
         let fresh = ProjectsStore::new(root.clone())?;
         instrumentation::metadata_open(&fresh, id)
     })?;
@@ -138,19 +147,20 @@ fn run_fixture(fixture: &str) -> Result<()> {
         ("page_middle", meta.total_records / 2),
         ("page_last", meta.total_records.saturating_sub(PAGE)),
     ] {
-        measure(name, TRIALS, || {
+        measure(name, trials(), || {
             let frame = read_page_dataframe(&path, &schema, offset, PAGE)?;
             assert_eq!(frame.height(), PAGE.min(meta.total_records));
             Ok(())
         })?;
     }
+    anyhow::ensure!(meta.total_records > 0, "fixture must contain rows");
     let sparse = [
         meta.total_records - 1,
         0,
         meta.total_records / 2,
         meta.total_records - 1,
     ];
-    measure("page_sparse", TRIALS, || {
+    measure("page_sparse", trials(), || {
         let frame = read_page_rows_dataframe(&path, &schema, &sparse)?;
         assert_eq!(frame.height(), sparse.len());
         Ok(())
@@ -159,14 +169,14 @@ fn run_fixture(fixture: &str) -> Result<()> {
         search: Some(format!("{}:alice", column("user"))),
         ..QuerySpec::default()
     };
-    measure("query_scoped_cold", TRIALS, || {
+    measure("query_scoped_cold", trials(), || {
         clear_result_cache();
         query(&store, id, spec.clone(), 0)
     })?;
-    measure("query_scoped_cached", TRIALS, || {
+    measure("query_scoped_cached", trials(), || {
         query(&store, id, spec.clone(), 0)
     })?;
-    measure("stats_filtered", TRIALS, || {
+    measure("stats_filtered", trials(), || {
         let result = column_stats(
             &store,
             ColumnStatsPayload {
@@ -204,7 +214,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
             sort_direction: Some("desc".into()),
             ..QuerySpec::default()
         };
-        measure(label, TRIALS, || {
+        measure(label, trials(), || {
             clear_result_cache();
             let matched = query(&store, id, sparse_spec.clone(), 0)?;
             anyhow::ensure!(matched == sparse_count, "unexpected sparse target size");
@@ -216,7 +226,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         sort_direction: Some("desc".into()),
         ..QuerySpec::default()
     };
-    measure("query_all_integer_sorted_cold", TRIALS, || {
+    measure("query_all_integer_sorted_cold", trials(), || {
         clear_result_cache();
         let matched = query(
             &store,
@@ -234,7 +244,9 @@ fn run_fixture(fixture: &str) -> Result<()> {
         );
         Ok(())
     })?;
-    measure("export_sorted_all", TRIALS, || {
+    scenarios::sorted_pages(&store, id, &meta)?;
+    scenarios::annotated_project(&store, id, &meta, &root)?;
+    measure("export_sorted_all", trials(), || {
         clear_result_cache();
         let result = export_project(
             &store,
@@ -262,6 +274,13 @@ fn run_fixture(fixture: &str) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--search") {
+        return scenarios::search_child(
+            Path::new(args.get(1).context("missing project root")?),
+            args.get(2).context("missing project id")?.parse()?,
+            args.get(3).context("missing search scenario")?,
+        );
+    }
     if args.first().map(String::as_str) == Some("--single") {
         return run_fixture(args.get(1).context("missing fixture")?);
     }

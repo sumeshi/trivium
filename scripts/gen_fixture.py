@@ -11,11 +11,16 @@ Variants:
     long    120 columns, about 1 KiB of text cells per record (3 long
             ~160-character cells plus 110 short extras). Intended for the
             T27 "many columns, long cells" measurement.
+
+Use --format jsonl for the same long records as JSON Lines. --shuffle-sort adds
+a unique sort_key unrelated to source order, to exercise scattered sorted pages.
 """
 
 import argparse
 import csv
 import io
+import json
+import math
 import os
 import random
 from datetime import datetime, timedelta
@@ -60,7 +65,7 @@ def format_ts(moment, index):
     return f"{base}.{moment.microsecond * 1000:09d}"
 
 
-def iter_rows(rows, seed, variant):
+def iter_rows(rows, seed, variant, shuffle_sort=False):
     """Yield rows one at a time so large fixtures never sit in memory."""
     rng = random.Random(seed)
     current = datetime(2024, 1, 1, 0, 0, 0)
@@ -68,6 +73,9 @@ def iter_rows(rows, seed, variant):
     wide = variant == "wide"
     long = variant == "long"
     previous = None
+    stride = 104729 + 2 * seed
+    while math.gcd(stride, rows) != 1:
+        stride += 2
 
     for index in range(rows):
         if index in gap_positions:
@@ -108,24 +116,32 @@ def iter_rows(rows, seed, variant):
                 row[column] = long_cell(index, slot)
             for column in LONG_EXTRA_COLUMNS:
                 row[column] = rng.choice(LONG_SHORT_VALUES)
+        if shuffle_sort:
+            row["sort_key"] = str((index * stride + seed) % rows)
         previous = row
         yield row
 
 
-def header_for(variant):
+def header_for(variant, shuffle_sort=False):
     header = list(BASE_COLUMNS)
     if variant == "wide":
         header.extend(f"extra{n:02d}" for n in range(1, 13))
     if variant == "long":
         header.extend(LONG_DETAIL_COLUMNS)
         header.extend(LONG_EXTRA_COLUMNS)
+    if shuffle_sort:
+        header.append("sort_key")
     return header
 
 
-def write_output(path, rows, variant):
-    header = header_for(variant)
+def write_output(path, rows, variant, output_format="csv", shuffle_sort=False):
+    header = header_for(variant, shuffle_sort)
 
     def write(text):
+        if output_format == "jsonl":
+            for row in rows:
+                text.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+            return
         writer = csv.writer(text)
         writer.writerow(header)
         for row in rows:
@@ -154,12 +170,21 @@ def parse_args():
         choices=["ascii", "utf16", "wide", "long"],
         default="ascii",
     )
-    return parser.parse_args()
+    parser.add_argument("--format", choices=["csv", "jsonl"], default="csv")
+    parser.add_argument("--shuffle-sort", action="store_true",
+                        help="Add a unique permuted sort_key for scattered-page measurements.")
+    args = parser.parse_args()
+    if args.rows < 1:
+        parser.error("--rows must be positive")
+    if args.variant == "utf16" and args.format != "csv":
+        parser.error("utf16 is a CSV variant")
+    return args
 
 
 def main():
     args = parse_args()
-    write_output(args.out, iter_rows(args.rows, args.seed, args.variant), args.variant)
+    write_output(args.out, iter_rows(args.rows, args.seed, args.variant, args.shuffle_sort),
+                 args.variant, args.format, args.shuffle_sort)
 
 
 if __name__ == "__main__":
