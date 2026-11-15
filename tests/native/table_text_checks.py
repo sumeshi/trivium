@@ -26,7 +26,7 @@ def _fit_failure(percent: int, index: int, control: dict) -> None:
     safe = {"control": "tag" if control["tag"] else "flag", "index": index}
     if percent in SIZES:
         safe["percent"] = percent
-    for key in ("width", "height", "contentWidth", "contentHeight", "advanceWidth", "inkWidth", "inkHeight", "fontSize"):
+    for key in ("width", "height", "contentWidth", "contentHeight", "advanceWidth", "inkWidth", "inkHeight", "fontSize", "leftClearance", "rightClearance"):
         value = control.get(key)
         if isinstance(value, (int, float)) and math.isfinite(value) and abs(value) <= 10_000:
             safe[key] = round(value, 3)
@@ -89,13 +89,21 @@ def _sample(web, percent: int) -> dict:
         outside:[...document.querySelectorAll('.brand-name,.filter-row,.filter-row input,.aux-trigger,.table-meta')].map(e=>({font:font(e),box:box(e)})),
         controls:[...row.querySelectorAll('.flag-buttons button,.row-tags-button')].map(e=>{
           const r=e.getBoundingClientRect(),tag=e.classList.contains('row-tags-button'),label=tag?e.querySelector('span'):e,
-            style=getComputedStyle(label),content=contentBox(e),labelWidth=contentBox(label).width;
+            style=getComputedStyle(label),controlStyle=getComputedStyle(e),content=contentBox(e),labelWidth=contentBox(label).width;
           // clientWidth rounds fractional glyph widths; compare the same float CSS-pixel units.
           context.font=canvasFont(style);const m=context.measureText(label.textContent.trim()),
             inkWidth=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,inkHeight=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
-          return {height:r.height,width:r.width,tag,fontSize:parseFloat(style.fontSize),contentWidth:labelWidth,
+          // A count may overhang its advance box into the button's padding.
+          // Check its painted bounds, including clearance from the tag icon.
+          const pen=tag?label.getBoundingClientRect().left+(labelWidth-m.width)/2:
+            r.left+parseFloat(controlStyle.borderLeftWidth)+parseFloat(controlStyle.paddingLeft)+(content.width-m.width)/2,
+            left=tag?e.querySelector('svg').getBoundingClientRect().right:r.left+parseFloat(controlStyle.borderLeftWidth),
+            right=r.right-parseFloat(controlStyle.borderRightWidth),
+            leftClearance=pen-m.actualBoundingBoxLeft-left,rightClearance=right-pen-m.actualBoundingBoxRight;
+          return {height:r.height,width:r.width,tag,fontSize:parseFloat(style.fontSize),contentWidth:content.width,
             contentHeight:content.height,advanceWidth:m.width,inkWidth,inkHeight,
-            fits:Math.max(m.width,inkWidth)<=labelWidth+.1&&inkHeight<=content.height};}),
+            leftClearance,rightClearance,
+            fits:m.width<=content.width+.1&&leftClearance>=-.1&&rightClearance>=-.1&&inkHeight<=content.height};}),
         sevenDigitWidth,
         indexContentWidth:contentBox(index).width};
     """)
