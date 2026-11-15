@@ -251,10 +251,10 @@ fn numeric_compare_keeps_integer_and_decimal_precision() {
     )
     .unwrap());
 
-    // Unsupported values remain errors, rather than lexical/float fallbacks.
-    for invalid in ["", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
+    // Unsupported source values do not match; malformed user bounds are errors.
+    for invalid in ["", " ", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
         let invalid_cell = row(&[("n", invalid)]);
-        assert!(eval(&condition("n", Op::Gt, &["0"], false), &invalid_cell).is_err());
+        assert!(!eval(&condition("n", Op::Gt, &["0"], false), &invalid_cell).unwrap());
         assert!(eval(&condition("n", Op::Lt, &[invalid], false), &fraction).is_err());
     }
 }

@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 /// Exact finite base-ten key. Keeping significant digits and their decimal
 /// position avoids f64 rounding and never allocates zeroes for an exponent.
+#[derive(Debug)]
 pub(crate) struct ExactNumber {
     negative: bool,
     digits: String,

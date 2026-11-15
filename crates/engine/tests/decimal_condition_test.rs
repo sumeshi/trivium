@@ -27,25 +27,26 @@ fn predicate(column: &str, op: Op, value: &str) -> Node {
 }
 
 #[test]
-fn invalid_numeric_sources_and_bounds_remain_errors() {
-    for invalid in ["", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
+fn unparseable_numeric_sources_do_not_match_but_invalid_bounds_remain_errors() {
+    for invalid in ["", " ", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
         for (source, value) in [(invalid, "0"), ("1.5", invalid)] {
             let frame = DataFrame::new(vec![Series::new("n", [source])]).unwrap();
             let spec = QuerySpec {
                 condition: Some(predicate("n", Op::Ge, value)),
                 ..Default::default()
             };
-            assert!(
-                resolve_target(
-                    &frame,
-                    &spec,
-                    &["n".into()],
-                    &HashMap::new(),
-                    &JobContext::none()
-                )
-                .is_err(),
-                "source={source:?} value={value:?}"
+            let result = resolve_target(
+                &frame,
+                &spec,
+                &["n".into()],
+                &HashMap::new(),
+                &JobContext::none(),
             );
+            if value == invalid {
+                assert!(result.is_err(), "source={source:?} value={value:?}");
+            } else {
+                assert!(result.unwrap().filtered.is_empty(), "source={source:?}");
+            }
         }
     }
 }

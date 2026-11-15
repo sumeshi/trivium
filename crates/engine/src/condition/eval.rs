@@ -7,15 +7,15 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use regex::Regex;
 use serde_json::Value;
 
-use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
-use crate::number::ExactNumber;
 use crate::search::{TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
 
 use super::model::{GroupKind, Node, Op};
 
 mod bound;
+mod ordered;
 pub use bound::BoundNode;
+use ordered::{ordered_matches, OrderedBound};
 
 /// Test instrumentation: regex compilations in this process.
 ///
@@ -74,6 +74,7 @@ pub struct PreparedCondition {
     values: Vec<String>,
     lower_values: Vec<String>,
     regexes: Vec<Regex>,
+    ordered_values: Vec<OrderedBound>,
     negated: bool,
 }
 
@@ -128,6 +129,15 @@ impl PreparedNode {
                 }))
             }
             Node::Condition(condition) => {
+                let ordered_values = if matches!(condition.op, Op::Gt | Op::Ge | Op::Lt | Op::Le) {
+                    condition
+                        .values
+                        .iter()
+                        .map(|value| OrderedBound::parse(value))
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    Vec::new()
+                };
                 let regexes = if condition.op == Op::Regex {
                     condition
                         .values
@@ -147,6 +157,7 @@ impl PreparedNode {
                         .map(|value| value.to_lowercase())
                         .collect(),
                     regexes,
+                    ordered_values,
                     negated: condition.negated,
                 }))
             }
@@ -216,19 +227,10 @@ pub struct EvalError {
 }
 
 impl EvalError {
-    fn numeric(value: &str) -> Self {
+    fn ordered(value: &str) -> Self {
         Self {
             message: format!(
-                "Numeric comparison requires an exact finite number: {}",
-                value
-            ),
-        }
-    }
-
-    fn datetime(value: &str) -> Self {
-        Self {
-            message: format!(
-                "Datetime comparison requires a recognized datetime: {}",
+                "Ordered comparison requires an exact finite number or a recognized datetime: {}",
                 value
             ),
         }
@@ -262,8 +264,10 @@ impl From<EvalError> for AppError {
 /// case-insensitively. An empty column reads the `""` entry, which callers set
 /// to the joined searchable text when they want an unscoped term. Equality and
 /// text operators use the original cell string. Ordered comparisons use exact
-/// base-ten numbers or parsed datetimes, and return an error instead of falling
-/// back to f64. Invalid regex patterns are reported as errors.
+/// base-ten numbers or parsed datetimes according to each bound. Empty/null,
+/// missing and unparseable source values do not match an ordered predicate;
+/// NOT inverts that result as for any other predicate. Source text is unchanged.
+/// Invalid bounds and regex patterns are rejected during preparation.
 pub fn eval(node: &Node, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
     PreparedNode::prepare(node)?.eval(row)
 }
@@ -286,10 +290,10 @@ impl PreparedCondition {
             match self.op {
                 Op::Eq | Op::In => self.values.iter().any(|value| cell == Some(value.as_str())),
                 Op::Ne => !self.values.iter().any(|value| cell == Some(value.as_str())),
-                Op::Gt => numeric_any(cell, &self.values, Ordering::Greater, false)?,
-                Op::Lt => numeric_any(cell, &self.values, Ordering::Less, false)?,
-                Op::Ge => numeric_any(cell, &self.values, Ordering::Greater, true)?,
-                Op::Le => numeric_any(cell, &self.values, Ordering::Less, true)?,
+                Op::Gt => ordered_matches(cell, &self.ordered_values, Ordering::Greater, false),
+                Op::Lt => ordered_matches(cell, &self.ordered_values, Ordering::Less, false),
+                Op::Ge => ordered_matches(cell, &self.ordered_values, Ordering::Greater, true),
+                Op::Le => ordered_matches(cell, &self.ordered_values, Ordering::Less, true),
                 Op::Contains | Op::StartsWith | Op::EndsWith => {
                     text_any(cell, &self.lower_values, self.op)
                 }
@@ -347,55 +351,6 @@ fn lookup<'a>(row: &'a HashMap<String, Value>, column: &str) -> Option<&'a Value
     row.iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(column))
         .map(|(_, value)| value)
-}
-
-fn numeric_any(
-    cell: Option<&str>,
-    values: &[String],
-    want: Ordering,
-    or_equal: bool,
-) -> Result<bool, EvalError> {
-    let Some(cell) = cell else {
-        return Ok(false);
-    };
-    let mut matched = false;
-    for raw in values {
-        if let Some(ordering) = numeric_cmp(cell, raw)? {
-            if ordering == want || (or_equal && ordering == Ordering::Equal) {
-                matched = true;
-            }
-        }
-    }
-    Ok(matched)
-}
-
-/// Compares numeric source text or a datetime without a float round trip.
-fn numeric_cmp(cell: &str, raw: &str) -> Result<Option<Ordering>, EvalError> {
-    let left = cell.trim();
-    let right = raw.trim();
-
-    if let Ok(left) = left.parse::<i128>() {
-        // Keep the common integer path inline and allocation-free.
-        return match right.parse::<i128>() {
-            Ok(right) => Ok(Some(left.cmp(&right))),
-            Err(_) => ExactNumber::parse(right)
-                .map(|right| Some(right.cmp_integer(left).reverse()))
-                .ok_or_else(|| EvalError::numeric(right)),
-        };
-    }
-    if let Some(left) = ExactNumber::parse(left) {
-        return match right.parse::<i128>() {
-            Ok(right) => Ok(Some(left.cmp_integer(right))),
-            Err(_) => ExactNumber::parse(right)
-                .map(|right| Some(left.cmp(&right)))
-                .ok_or_else(|| EvalError::numeric(right)),
-        };
-    }
-    if let Some(left) = parse_datetime_nanos(left) {
-        let right = parse_datetime_nanos(right).ok_or_else(|| EvalError::datetime(right))?;
-        return Ok(Some(left.cmp(&right)));
-    }
-    Err(EvalError::numeric(left))
 }
 
 fn compile_regex(pattern: &str) -> Result<Regex, EvalError> {
