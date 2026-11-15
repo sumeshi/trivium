@@ -374,3 +374,86 @@ fn cancellation_after_decoding_never_publishes_a_partial_streamed_result() {
         "cancelled result entered the cache"
     );
 }
+
+#[test]
+fn page_responses_report_the_annotation_snapshot_revision_on_all_query_paths() {
+    let _serial = SERIAL.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new("csv", "id,message\nr0,keep\nr1,drop\nr2,keep\n");
+    let query = |spec: QuerySpec| {
+        query_project_rows(
+            &fixture.store,
+            QueryRowsPayload {
+                project_id: fixture.id,
+                spec,
+                offset: Some(0),
+                limit: Some(20),
+            },
+        )
+        .unwrap()
+    };
+    let update = |row_index: usize, flag: &str, memo: &str| {
+        ops::flags::update_flag(
+            &fixture.store,
+            UpdateFlagPayload {
+                project_id: fixture.id,
+                row_index,
+                flag: Some(flag.into()),
+                memo: Some(Some(memo.into())),
+                tags: None,
+                bookmarked: None,
+            },
+        )
+        .unwrap()
+    };
+    let initial = query(QuerySpec::default());
+    assert_eq!(
+        initial.annotation_revision,
+        trivium_engine::storage::project_revision(&fixture.store.project_dir(&fixture.id)).unwrap()
+    );
+    let first = update(0, "critical", "first");
+    let unfiltered = query(QuerySpec::default());
+    assert_eq!(unfiltered.annotation_revision, first.revision);
+    assert_eq!(unfiltered.rows[0].flag, "critical");
+    assert_eq!(
+        (unfiltered.annotated_total, unfiltered.annotated_filtered),
+        (1, 1)
+    );
+
+    let spec = QuerySpec {
+        search: Some("keep".into()),
+        ..Default::default()
+    };
+    clear_result_cache();
+    let cold = query(spec.clone());
+    let cached = query(spec.clone());
+    assert_eq!(cold.annotation_revision, first.revision);
+    assert_eq!(cached.annotation_revision, first.revision);
+    assert_eq!(
+        cold.rows
+            .iter()
+            .map(|row| row.row_index)
+            .collect::<Vec<_>>(),
+        vec![0, 2]
+    );
+
+    // A second writer changes the annotation after the data-only IDs cached.
+    // The returned revision must describe the updated rows and their counts.
+    let second = update(0, "safe", "second");
+    for response in [query(spec.clone()), query(spec.clone())] {
+        assert_eq!(response.annotation_revision, second.revision);
+        assert_eq!(response.rows[0].flag, "safe");
+        assert_eq!(response.rows[0].memo.as_deref(), Some("second"));
+        assert_eq!(
+            (response.annotated_total, response.annotated_filtered),
+            (1, 1)
+        );
+    }
+    let third = update(1, "critical", "outside results");
+    for response in [query(spec.clone()), query(spec)] {
+        assert_eq!(response.annotation_revision, third.revision);
+        assert_eq!(
+            (response.annotated_total, response.annotated_filtered),
+            (2, 1)
+        );
+    }
+}

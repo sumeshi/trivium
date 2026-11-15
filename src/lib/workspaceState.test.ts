@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
-import type { Backend, UpdateFlagArgs } from "./backend.ts";
+import type { Backend, UpdateFlagArgs, UpdateFlagResult } from "./backend.ts";
 import type { FlagEntry, LoadProjectResponse, ProjectRow } from "./types.ts";
 import { queueAnnotationWrite } from "./annotationWrites.ts";
 import { normalizeRow } from "./components/project_view/state.ts";
 import { createWorkspaceState } from "./workspaceState.ts";
 
-function deferred() {
-  let resolve!: () => void;
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
@@ -24,7 +24,7 @@ function setup(id: string, entries = new Map([[2, { ...baseline }]])) {
   const detail = { project: { meta: { id } } } as LoadProjectResponse;
   workspace.projectDetail.set(detail);
   workspace.currentProjectId.set(id);
-  const gates: ReturnType<typeof deferred>[] = [];
+  const gates: ReturnType<typeof deferred<void>>[] = [];
   let revision = 0;
   workspace.backend.set({ updateFlag: (args: UpdateFlagArgs) => {
     const gate = deferred();
@@ -261,6 +261,39 @@ for (const externalFlag of ["critical", ""]) {
     assert.equal(cached.bookmarked, false);
     assert.equal(get(state.workspace.flaggedCount), externalFlag ? 1 : 0);
     assert.equal(get(state.workspace.filteredFlaggedCount), externalFlag ? 1 : 0);
+    state.workspace.dispose();
+  });
+}
+
+for (const externalFlag of ["critical", ""]) {
+  test(`a delayed revision-1 save cannot replace a newer revision-2 ${externalFlag || "clear"} page baseline`, async () => {
+    const state = setup(`flag-delayed-revision-${externalFlag || "clear"}`);
+    const oldReply = deferred<UpdateFlagResult>(), noteReply = deferred<UpdateFlagResult>();
+    let calls = 0;
+    state.workspace.backend.set({ ...get(state.workspace.backend)!,
+      updateFlag: () => (++calls === 1 ? oldReply.promise : noteReply.promise) });
+    const clicked = get(state.workspace.rowsCache).get(2)!;
+    const saving = state.workspace.setFlag(clicked, "safe");
+    const note = state.workspace.saveAnnotation(get(state.workspace.currentProjectId)!, clicked, { memo: "draft" })
+      .then(() => true, () => false);
+    // The first save committed Safe at revision 1, but its IPC reply is held.
+    // A separate process then changes the persisted annotation at revision 2.
+    const external = { ...baseline, flag: externalFlag, memo: "external revision 2" };
+    state.entries.set(2, external);
+    state.workspace.registerLoadedPage(0, 0, [normalizeRow(row(2, external))], 2);
+    state.workspace.applyAnnotationCounts(externalFlag ? 1 : 0, externalFlag ? 1 : 0, 2);
+    oldReply.resolve({ entry: { ...baseline, flag: "safe" }, revision: 1, flaggedRecords: 1 });
+    await saving;
+    assert.equal(get(state.workspace.rowsCache).get(2)?.flag, externalFlag);
+    assert.equal(get(state.workspace.rowsCache).get(2)?.memo, "draft");
+    assert.equal(get(state.workspace.flaggedCount), externalFlag ? 1 : 0);
+    assert.equal(get(state.workspace.filteredFlaggedCount), externalFlag ? 1 : 0);
+    noteReply.reject(new Error("disk full")); await note;
+    assert.equal(get(state.workspace.rowsCache).get(2)?.flag, externalFlag);
+    assert.equal(get(state.workspace.rowsCache).get(2)?.memo, external.memo);
+    assert.equal(get(state.workspace.flaggedCount), externalFlag ? 1 : 0);
+    assert.equal(get(state.workspace.filteredFlaggedCount), externalFlag ? 1 : 0);
+    assert.equal(get(state.workspace.annotationRefreshRequested), 1);
     state.workspace.dispose();
   });
 }

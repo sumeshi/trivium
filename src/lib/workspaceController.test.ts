@@ -34,7 +34,7 @@ function row(id: number, text = String(id)): ProjectRow {
   return { row_index: id, cells: { c1: { kind: "string", text } }, flag: "", memo: "", tags: [], bookmarked: false };
 }
 function response(offset = 0, rows = [row(offset)], total = 5199): QueryProjectRowsResponse {
-  return { offset, rows, total_rows: total, total_filtered_rows: total, annotated_total: 0, annotated_filtered: 0 };
+  return { offset, rows, total_rows: total, total_filtered_rows: total, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 };
 }
 async function settle() { for (let step = 0; step < 8; step += 1) await Promise.resolve(); }
 function setup(api: Partial<Backend> = {}, id = "a", total = 5199,
@@ -450,7 +450,7 @@ test("a late page cannot erase a successful annotation after its old cache page 
   assert.equal(pages.length, 2);
   assert.equal(get(workspace.rowsCache).has(2), false);
   assert.equal(get(workspace.flaggedCount), 1, "a discarded page cannot publish its stale counts");
-  pages[1].resolve({ ...response(0, [{ ...row(2), flag: "critical" }]), annotated_total: 1, annotated_filtered: 1 });
+  pages[1].resolve({ ...response(0, [{ ...row(2), flag: "critical" }]), annotated_total: 1, annotated_filtered: 1, annotation_revision: 1 });
   await loading;
   assert.equal(get(workspace.rowsCache).get(2)?.flag, "critical");
   assert.equal(get(workspace.filteredFlaggedCount), 1);
@@ -465,7 +465,7 @@ test("annotation changes during viewport restoration retry before row and flag p
   let calls = 0, restores = 0;
   const { workspace, queries } = setup({ queryProjectRows: async () => {
     calls += 1;
-    return { ...response(0, [{ ...row(2), flag: calls === 1 ? "" : "critical" }]), annotated_total: calls - 1 };
+    return { ...response(0, [{ ...row(2), flag: calls === 1 ? "" : "critical" }]), annotated_total: calls - 1, annotation_revision: calls - 1 };
   } }, projectId, 5199, { restoreViewport: async () => { if (++restores === 1) await restoring.promise; } });
   const loading = queries.requestPage(0);
   await settle();
@@ -533,7 +533,7 @@ for (const included of [true, false]) {
       queryProjectRows: async (args) => {
         requests++;
         return { ...response(args.offset ?? 0, [row(1000)], 1000),
-          annotated_total: saved ? 1 : 0, annotated_filtered: saved && included ? 1 : 0 };
+          annotated_total: saved ? 1 : 0, annotated_filtered: saved && included ? 1 : 0, annotation_revision: saved ? 1 : 0 };
       },
     }, projectId);
     workspace.registerLoadedPage(0, 0, [normalizeRow(row(2))]);
@@ -552,3 +552,27 @@ for (const included of [true, false]) {
     workspace.dispose(); forgetAnnotationVersion(projectId);
   });
 }
+
+test("an older durable annotation page retries even when no frontend annotation event was observed", async () => {
+  const pages: Array<ReturnType<typeof deferred<QueryProjectRowsResponse>>> = [];
+  const { workspace, queries } = setup({
+    updateFlag: async () => ({ entry: { flag: "critical", memo: null, tags: [], bookmarked: false }, revision: 2, flaggedRecords: 1 }),
+    queryProjectRows: () => { const reply = deferred<QueryProjectRowsResponse>(); pages.push(reply); return reply.promise; },
+  }, "annotation-durable-revision");
+  workspace.registerLoadedPage(0, 0, [normalizeRow(row(2))]);
+  const loading = queries.requestPage(0, true);
+  await settle();
+  await workspace.setFlag(get(workspace.rowsCache).get(2)!, "critical");
+  pages[0].resolve({ ...response(0, [{ ...row(2), flag: "safe" }]),
+    annotated_total: 1, annotated_filtered: 1, annotation_revision: 1 });
+  await settle();
+  assert.equal(pages.length, 2);
+  assert.equal(get(workspace.rowsCache).get(2)?.flag, "critical");
+  pages[1].resolve({ ...response(0, [{ ...row(2), flag: "critical" }]),
+    annotated_total: 1, annotated_filtered: 1, annotation_revision: 2 });
+  await loading;
+  assert.equal(get(workspace.rowsCache).get(2)?.flag, "critical");
+  assert.equal(get(workspace.flaggedCount), 1);
+  assert.equal(get(workspace.filteredFlaggedCount), 1);
+  workspace.dispose();
+});

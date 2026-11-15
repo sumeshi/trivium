@@ -150,11 +150,12 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
               (request.explicit || wantedPages.has(page)), async () => {
               request.running = true;
               const annotationVersion = get(annotationVersions)[projectId] ?? 0;
-              const isFresh = () => isCurrent() && annotationVersion === (get(annotationVersions)[projectId] ?? 0);
               timing?.mark("dispatched");
               const response = await reads.run(key, options.backend, (requestId) =>
                 options.backend.queryProjectRows({ ...payload, ...{ requestId } }));
               timing?.mark("responded");
+              const isFresh = () => isCurrent() && annotationVersion === (get(annotationVersions)[projectId] ?? 0)
+                && workspace.isAnnotationRevisionCurrent(response.annotation_revision);
               if (!isCurrent()) return true;
               if (!isFresh()) return false;
               workspace.totalRows.set(response.total_rows);
@@ -167,8 +168,8 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
               timing?.mark("normalizeStarted");
               const rows = response.rows.map(normalizeRow);
               timing?.mark("normalized");
-              workspace.registerLoadedPage(Math.floor(response.offset / PAGE_SIZE), response.offset, rows);
-              workspace.applyAnnotationCounts(response.annotated_total, response.annotated_filtered);
+              workspace.registerLoadedPage(Math.floor(response.offset / PAGE_SIZE), response.offset, rows, response.annotation_revision);
+              workspace.applyAnnotationCounts(response.annotated_total, response.annotated_filtered, response.annotation_revision);
               timing?.mark("published");
               options.summary();
               timing?.present(isCurrent);

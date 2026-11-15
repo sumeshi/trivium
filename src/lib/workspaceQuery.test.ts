@@ -28,7 +28,7 @@ function setup() {
           active -= 1;
           resolve({ offset, rows: [{ row_index: offset, cells: { c1: { kind: "string", text: String(offset) } },
             flag: "", memo: "", tags: [], bookmarked: false }], total_rows: TOTAL,
-            total_filtered_rows: TOTAL, annotated_total: 0, annotated_filtered: 0 });
+            total_filtered_rows: TOTAL, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 });
         } });
       });
     },

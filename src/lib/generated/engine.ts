@@ -156,6 +156,10 @@ export type QuerySpec = { search?: string | null, searchColumns?: Array<string> 
 export type QueryRowsPayload = { projectId: string, offset?: number | null, limit?: number | null, search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
 export type QueryRowsResponse = { rows: Array<ProjectRow>,
 /**
+ * Revision of the annotation snapshot used by these rows and counts.
+ */
+annotation_revision: number,
+/**
  * Annotated rows in the whole project (user flags only).
  */
 annotated_total: number,

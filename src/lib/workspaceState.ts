@@ -102,13 +102,18 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     currentVisiblePage, touchPage, registerLoadedPage: registerPage, resetPageCache,
   } = pages;
 
-  function registerLoadedPage(page: number, offset: number, rows: CachedRow[]): void {
+  function registerLoadedPage(page: number, offset: number, rows: CachedRow[], annotationRevision?: number): void {
+    if (!isAnnotationRevisionCurrent(annotationRevision)) return;
+    if (annotationRevision !== undefined) lastAnnotationRevision = annotationRevision;
     registerPage(page, offset, rows.map((row) => {
       const pending = pendingAnnotations.get(row.row_index);
       if (!pending) return row;
       // The query has already rejected stale annotation versions. This row is a
       // newer committed baseline, including bulk edits made between local saves.
-      pending.confirmed = annotationEntry(row);
+      if (annotationRevision === undefined || annotationRevision >= pending.revision) {
+        pending.confirmed = annotationEntry(row);
+        if (annotationRevision !== undefined) pending.revision = annotationRevision;
+      }
       pending.scopeKey = annotationScopeKey();
       const entry = pendingEntry(pending);
       pending.displayedFlag = normalizeFlag(entry.flag);
@@ -213,8 +218,14 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     return delta;
   }
 
+  function isAnnotationRevisionCurrent(revision?: number): boolean {
+    return revision === undefined || revision >= lastAnnotationRevision;
+  }
+
   /** Backend counts describe committed annotations; add only outstanding changes. */
-  function applyAnnotationCounts(total: number, filtered: number): void {
+  function applyAnnotationCounts(total: number, filtered: number, revision?: number): void {
+    if (!isAnnotationRevisionCurrent(revision)) return;
+    if (revision !== undefined) lastAnnotationRevision = revision;
     flaggedCount.set(Math.max(0, total + pendingFlagDelta()));
     filteredFlaggedCount.set(Math.max(0, filtered + pendingFlagDelta(true)));
   }
@@ -271,7 +282,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
       }
       // A changed result may contain this row outside its loaded pages. Let the
       // existing query path recount it instead of guessing result membership.
-      if (state.scopeKey !== annotationScopeKey()) needsAnnotationRefresh = true;
+      if (state.scopeKey !== annotationScopeKey() || updated.revision < lastAnnotationRevision) needsAnnotationRefresh = true;
       return true;
     } catch (error) {
       if (!isCurrent()) return false;
@@ -428,6 +439,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     iocManagerOpen,
     saveAnnotation,
     applyAnnotationCounts,
+    isAnnotationRevisionCurrent,
     annotationRefreshRequested,
     updateCachedRow,
     viewportHeight,

@@ -66,6 +66,9 @@ pub struct QueryRowsPayload {
 #[derive(Debug, Serialize, ts_rs::TS)]
 pub struct QueryRowsResponse {
     pub rows: Vec<ProjectRow>,
+    /// Revision of the annotation snapshot used by these rows and counts.
+    #[ts(type = "number")]
+    pub annotation_revision: u64,
     /// Annotated rows in the whole project (user flags only).
     pub annotated_total: usize,
     /// Annotated rows inside the current result set.
@@ -177,7 +180,7 @@ pub fn query_project_rows_with_job(
             read_page_dataframe_with_job(&parquet_path, &page_projection, start, limit, job)
                 .map_err(AppError::from)?;
 
-        let (page_flags, annotated_total, _) =
+        let (page_flags, annotated_total, page_revision) =
             load_page_flag_snapshot(&flags_path, &row_ids).map_err(AppError::from)?;
 
         job.check_cancelled()?;
@@ -195,6 +198,7 @@ pub fn query_project_rows_with_job(
         job.report_progress(3, Some(3), Some("Rows ready".into()));
         return Ok(QueryRowsResponse {
             rows,
+            annotation_revision: page_revision,
             annotated_total,
             annotated_filtered: annotated_total,
             total_rows,
@@ -261,6 +265,7 @@ pub fn query_project_rows_with_job(
             job.report_progress(3, Some(3), Some("Rows ready".into()));
             return Ok(QueryRowsResponse {
                 rows,
+                annotation_revision: page_revision,
                 annotated_total,
                 annotated_filtered,
                 total_rows,
@@ -299,6 +304,7 @@ pub fn query_project_rows_with_job(
 
     Ok(QueryRowsResponse {
         rows,
+        annotation_revision: target.annotation_revision,
         annotated_total,
         annotated_filtered,
         total_rows,
