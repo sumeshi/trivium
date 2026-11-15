@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 use trivium_engine::annotation::AnnotationPatch;
+use trivium_engine::jobs::JobContext;
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{
     bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
@@ -17,7 +18,7 @@ use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::{
     clear_result_cache, query_project_rows, reset_resolve_count, resolve_count,
-    result_cache_stats, QueryRowsPayload, QueryRowsResponse, QuerySpec,
+    resolve_project_target, result_cache_stats, QueryRowsPayload, QueryRowsResponse, QuerySpec,
 };
 use trivium_engine::store::ProjectsStore;
 
@@ -266,17 +267,18 @@ fn cache_keeps_two_results_and_evicts_the_oldest() {
     let _guard = cache_test_guard();
     let (root, store, id) = setup_project();
 
+    let mut allocations = Vec::new();
     for value in ["value00", "value01", "value02"] {
-        query(
-            &store,
-            id,
-            QuerySpec {
-                search: Some(value.to_string()),
-                ..Default::default()
-            },
-            0,
-            PAGE,
-        );
+        let spec = QuerySpec {
+            search: Some(value.to_string()),
+            ..Default::default()
+        };
+        query(&store, id, spec.clone(), 0, PAGE);
+        let target = resolve_project_target(&store, id, &spec, &JobContext::none()).unwrap();
+        assert_eq!(target.ids.len(), 1);
+        // Streaming selection grows a Vec; its reserved capacity is retained
+        // by the cache even when only one source row matched.
+        allocations.push(target.ids.capacity() * std::mem::size_of::<usize>() + 64);
     }
 
     let stats = result_cache_stats();
@@ -284,7 +286,11 @@ fn cache_keeps_two_results_and_evicts_the_oldest() {
     assert_eq!(stats.max_entries, 2);
     assert_eq!(stats.evictions, 1);
     assert_eq!(stats.misses, 3);
-    assert_eq!(stats.total_bytes, 2 * (std::mem::size_of::<usize>() + 64));
+    assert_eq!(
+        stats.total_bytes,
+        allocations.iter().rev().take(2).sum::<usize>()
+    );
+    assert!(stats.total_bytes <= stats.max_bytes);
     assert_eq!(resolve_count(), 3);
 
     let first_again = query(
