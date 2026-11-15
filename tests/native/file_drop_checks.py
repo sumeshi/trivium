@@ -13,6 +13,7 @@ import time
 import uuid
 
 from feedback_checks import _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import wait_for
 from runtime import IPC_COMMAND_JS
 
@@ -255,4 +256,4 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
         for meta in created:
             if web.script("return !!document.querySelector(arguments[0]);", f'#project-tab-{meta["id"]}'):
                 web.named(f'Close {meta["source_file_name"]}')
-            web.command("delete_project", {"projectId": meta["id"]}, request=True)
+            delete_fixture_project(web, meta["id"])

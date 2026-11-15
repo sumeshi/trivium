@@ -10,6 +10,7 @@ import uuid
 
 from column_pin_checks import _prefix
 from feedback_checks import _horizontal_to, _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
@@ -297,4 +298,4 @@ def verify_table_text(app, data, root: Path, evidence: Path, report: dict) -> No
         for path, project in [(source, owner), (other, second["meta"]["id"])]:
             if web.script("return !![...document.querySelectorAll('.tab-close')].find(e=>e.getAttribute('aria-label')===arguments[0]);", f"Close {path.name}"):
                 web.named(f"Close {path.name}")
-            web.command("delete_project", {"projectId": project}, request=True)
+            delete_fixture_project(web, project)

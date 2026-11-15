@@ -179,3 +179,120 @@ test("switching or closing a loading tab cancels only its owned native load", as
   assert.equal(get(controller.state).isLoadingDetail, false);
   assert.deepEqual(get(controller.state).openProjectIds, []);
 });
+
+test("deleting an active case closes its tab and settles teardown before native deletion", async () => {
+  const teardown = deferred<void>();
+  let deleted = false, enteredHook = false;
+  const f = fixture({ deleteProject: async id => {
+    assert.equal(id, "a");
+    assert.equal(enteredHook, true);
+    assert.equal(get(f.controller.state).selectedProjectId, "b");
+    assert.ok(!get(f.controller.state).openProjectIds.includes("a"));
+    deleted = true;
+    f.projects.splice(f.projects.findIndex(project => project.meta.id === id), 1);
+  } });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  await f.controller.selectProject("b");
+  await f.controller.selectProject("a");
+  const deleting = f.controller.deleteProject("a", async () => {
+    enteredHook = true;
+    assert.equal(get(f.controller.state).selectedProjectId, "b");
+    await teardown.promise;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(deleted, false);
+  assert.equal(enteredHook, true);
+  await assert.rejects(f.controller.selectProject("a"), /being deleted/);
+  await assert.rejects(f.controller.deleteProject("a"), /already being deleted/);
+  teardown.resolve(); await deleting;
+  assert.equal(deleted, true);
+  assert.deepEqual(get(f.controller.state).openProjectIds, ["b"]);
+  assert.equal(get(f.controller.state).selectedProjectId, "b");
+  assert.ok(!get(f.controller.state).projects.some(project => project.meta.id === "a"));
+  f.controller.dispose();
+});
+
+test("a failed deletion restores its open tab, view and selection without deleting saved metadata", async () => {
+  const f = fixture({ deleteProject: async () => { throw new Error("could not move saved case"); } });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  await f.controller.selectProject("b");
+  await f.controller.selectProject("a");
+  await assert.rejects(f.controller.deleteProject("a", async () => {
+    assert.deepEqual(get(f.controller.state).openProjectIds, ["b"]);
+  }), /could not move saved case/);
+  assert.deepEqual(get(f.controller.state).openProjectIds, ["a", "b"]);
+  assert.equal(get(f.controller.state).selectedProjectId, "a");
+  assert.equal(get(f.controller.state).projectDetail?.project.meta.id, "a");
+  assert.equal(get(f.controller.state).projects.length, 3);
+  await f.controller.selectProject("a"); // Deletion admission was released after failure.
+  f.controller.dispose();
+});
+
+for (const active of [false, true]) {
+  test(`a failed ${active ? "active" : "inactive"} case deletion does not steal a later tab selection`, async () => {
+    const deletion = deferred<void>();
+    const f = fixture({ deleteProject: () => deletion.promise });
+    await f.controller.loadProjects();
+    await f.controller.selectProject("a");
+    await f.controller.selectProject("b");
+    if (active) await f.controller.selectProject("a");
+    const deleting = f.controller.deleteProject("a");
+    const checked = assert.rejects(deleting, /delete failed/);
+    await new Promise(resolve => setImmediate(resolve));
+    await f.controller.selectProject("c");
+    deletion.reject(new Error("delete failed")); await checked;
+    assert.deepEqual(get(f.controller.state).openProjectIds, ["a", "b", "c"]);
+    assert.equal(get(f.controller.state).selectedProjectId, "c");
+    assert.equal(get(f.controller.state).projectDetail?.project.meta.id, "c");
+    f.controller.dispose();
+  });
+}
+
+test("failed teardown aborts deletion and restores the saved case's tab", async () => {
+  const f = fixture();
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  await assert.rejects(f.controller.deleteProject("a", async () => { throw new Error("teardown failed"); }), /teardown failed/);
+  assert.equal(f.deleted(), 0);
+  assert.deepEqual(get(f.controller.state).openProjectIds, ["a"]);
+  assert.equal(get(f.controller.state).selectedProjectId, "a");
+  assert.equal(get(f.controller.state).projectDetail?.project.meta.id, "a");
+  f.controller.dispose();
+});
+
+test("an unreadable adjacent case does not prevent deleting the closed target and returns a warning", async () => {
+  let failAdjacent = false, nativeDeletes = 0, teardownSettled = false;
+  const f = fixture({
+    loadProject: async id => {
+      if (id === "b" && failAdjacent) throw new Error("adjacent project unreadable");
+      return detail(id);
+    },
+    deleteProject: async id => {
+      assert.equal(id, "a");
+      assert.equal(teardownSettled, true);
+      nativeDeletes += 1;
+      f.projects.splice(f.projects.findIndex(project => project.meta.id === id), 1);
+    },
+  });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  await f.controller.selectProject("b");
+  await f.controller.selectProject("a");
+  failAdjacent = true;
+  const result = await f.controller.deleteProject("a", async () => {
+    assert.deepEqual(get(f.controller.state).openProjectIds, ["b"]);
+    teardownSettled = true;
+  });
+  assert.deepEqual(result, { adjacentLoadFailed: true });
+  assert.equal(nativeDeletes, 1);
+  assert.ok(!get(f.controller.state).projects.some(project => project.meta.id === "a"));
+  assert.equal(get(f.controller.state).selectedProjectId, "b");
+  assert.equal(get(f.controller.state).projectDetail, null);
+  assert.equal(get(f.controller.state).isLoadingDetail, false);
+  failAdjacent = false;
+  await f.controller.selectProject("b");
+  assert.equal(get(f.controller.state).projectDetail?.project.meta.id, "b", "the adjacent saved case remains reopenable");
+  f.controller.dispose();
+});

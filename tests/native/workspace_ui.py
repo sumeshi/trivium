@@ -57,6 +57,57 @@ from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, na
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
 TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
 HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree"}
+IPC_COMMANDS = frozenset({
+    "list_projects", "create_project", "delete_project", "load_project", "query_project_rows",
+    "locate_project_row", "get_cell", "cancel_job", "cancel_request_jobs", "active_jobs",
+    "save_iocs", "import_iocs", "export_iocs", "update_flag", "set_hidden_columns", "export_project",
+    "column_stats", "duplicate_rows", "search_projects", "diff_projects", "histogram", "group_tree",
+    "time_analysis", "surrounding_rows", "build_report", "bulk_preview", "bulk_update", "bulk_undo",
+    "save_color_rules", "color_rules", "save_preset", "load_preset", "validate_condition_values",
+    "load_view_state", "save_view_state", "finish_app_close", "cancel_app_close", "app_close_requested",
+})
+
+
+def _ipc_error_category(error: Any) -> str:
+    if not isinstance(error, str):
+        return "unknown"
+    if error == "Cancelled.":
+        return "cancelled"
+    if error == "Project not found.":
+        return "project_missing"
+    if error in {"Project data file missing.", "Project directory missing"} or any(part in error for part in (
+            "No such file or directory", "The system cannot find the file specified", "(os error 2)", "(os error 3)")):
+        return "io_missing"
+    if any(part in error for part in ("database is locked", "database table is locked", "Legacy annotation database is in use;")):
+        return "locked"
+    if error in {
+        "Too many long-running operations. Wait for one to finish.",
+        "The operation queue is full. Wait for an operation to finish.",
+        "The storage queue is full. Wait for a save to finish.",
+    }:
+        return "capacity"
+    return "unknown"
+
+
+def emit_unexpected_ipc_errors(entries: list[dict[str, Any]]) -> None:
+    """Publish only allowlisted commands, fixed categories, counts and booleans."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    counts: dict[tuple, int] = {}
+    for entry in entries:
+        name = entry.get("name")
+        command = name if isinstance(name, str) and name in IPC_COMMANDS else "unknown"
+        request = entry.get("request")
+        request = request if isinstance(request, dict) else {}
+        key = (command, _ipc_error_category(entry.get("error")), bool(request.get("projectId")),
+               bool(entry.get("requestId")), bool(request.get("search") or request.get("condition")
+               or request.get("flagFilter") not in (None, "", "all") or request.get("bookmarkedOnly")),
+               bool(request.get("sortKey")))
+        counts[key] = counts.get(key, 0) + 1
+    for (command, category, project, owned, filtered, sorted_), count in sorted(counts.items()):
+        safe = {"command": command, "category": category, "count": count, "project": project,
+                "owned": owned, "filtered": filtered, "sorted": sorted_}
+        print("::error title=Unexpected native IPC::" + json.dumps(safe, sort_keys=True, separators=(",", ":")), flush=True)
 
 
 def emit_workspace_failure(stage: str, error: Exception) -> None:
@@ -979,6 +1030,8 @@ def main() -> None:
                 all(entry.get(key) == expected[key] for key in ("name", "request", "error"))
                 for expected in boundary_expected)]
             assert len(expected_boundary) == len(boundary_expected), expected_boundary
+            emit_unexpected_ipc_errors([entry for entry in errors if entry not in cancelled
+                and entry not in expected_invalid and entry not in expected_invalid_ioc and entry not in expected_boundary])
             assert all(entry in cancelled or entry in expected_invalid or entry in expected_invalid_ioc or entry in expected_boundary for entry in errors), errors
             report["expected_invalid_timestamp_queries"] = len(expected_invalid)
             report["expected_invalid_ioc_imports"] = len(expected_invalid_ioc)

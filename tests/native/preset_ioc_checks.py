@@ -9,6 +9,7 @@ import uuid
 from column_pin_checks import _key
 from column_presentation_checks import _focus_resize, _order, _reorder, _width
 from feedback_checks import _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 from preset_state_checks import verify_preset_state
@@ -269,4 +270,4 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.tab(data["id"])
         web.results(data["total"])
         web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": project_id}, request=True)
+        delete_fixture_project(web, project_id)

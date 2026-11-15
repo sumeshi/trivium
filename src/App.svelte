@@ -83,16 +83,17 @@
   const fileDropState = fileDrop.state;
   $: if (closing) fileDrop.clear();
   const sessions = new Map<string, WorkspaceSession>();
+  const pendingDeletions = new Set<string>();
   $: openProjects = $projectState.openProjectIds.flatMap((id) => {
     const project = $projectState.projects.find((item) => item.meta.id === id);
     return project ? [project] : [];
   });
   $: for (const id of sessions.keys()) {
-    if (!$projectState.openProjectIds.includes(id)) sessions.delete(id);
+    if (!$projectState.openProjectIds.includes(id) && !pendingDeletions.has(id)) sessions.delete(id);
   }
 
   const retainSession = (session: WorkspaceSession) => {
-    if ($projectState.openProjectIds.includes(session.projectId)) {
+    if ($projectState.openProjectIds.includes(session.projectId) || pendingDeletions.has(session.projectId)) {
       sessions.set(session.projectId, copyWorkspaceSession(session));
     }
   };
@@ -165,10 +166,16 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        await projectController.deleteProject(projectId);
-        sessions.delete(projectId);
-        showToast('Project deleted.');
-        await tick();
+        pendingDeletions.add(projectId);
+        try {
+          const result = await projectController.deleteProject(projectId, tick);
+          sessions.delete(projectId);
+          showToast(result?.adjacentLoadFailed ? 'Project deleted. Could not open the next tab.' : 'Project deleted.',
+            result?.adjacentLoadFailed ? 'error' : 'success');
+          await tick();
+        } finally {
+          pendingDeletions.delete(projectId);
+        }
       });
     } catch (error) {
       console.error(error);

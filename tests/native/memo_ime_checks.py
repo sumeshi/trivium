@@ -15,6 +15,7 @@ import uuid
 
 from column_pin_checks import _key
 from feedback_checks import _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import native_driver_default
 
@@ -168,7 +169,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
         web.results(outer_total)
         if web.script("return !!document.querySelector(arguments[0]);", f'#project-tab-{owner}'):
             web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": owner}, request=True)
+        delete_fixture_project(web, owner)
 
 
 def main() -> None:

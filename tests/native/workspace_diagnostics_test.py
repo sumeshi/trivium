@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from row_navigation import emit_navigation_failure, wait_for
-from workspace_ui import emit_workspace_failure, main
+from workspace_ui import emit_unexpected_ipc_errors, emit_workspace_failure, main
 
 
 class WorkspaceDiagnosticsTests(unittest.TestCase):
@@ -21,6 +21,64 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
 
     def test_annotation_is_disabled_outside_github_actions(self):
         self.assertEqual(self.capture("startup", AssertionError("private"), "false"), "")
+
+    def ipc_annotations(self, entries, enabled="true"):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": enabled}), redirect_stdout(output):
+            emit_unexpected_ipc_errors(entries)
+        return output.getvalue()
+
+    def test_unexpected_ipc_annotations_are_disabled_outside_ci_and_when_empty(self):
+        entry = {"name": "query_project_rows", "error": "private error", "request": {"path": "private/path"}}
+        self.assertEqual(self.ipc_annotations([entry], "false"), "")
+        self.assertEqual(self.ipc_annotations([]), "")
+
+    def test_unexpected_ipc_annotations_classify_fixed_errors_without_payloads(self):
+        cases = [
+            ("Project not found.", "project_missing"),
+            ("Project data file missing.", "io_missing"),
+            ("Project directory missing", "io_missing"),
+            ("private/path: No such file or directory (os error 2)", "io_missing"),
+            ("C:\\Users\\private\\case: The system cannot find the file specified. (os error 2)", "io_missing"),
+            ("database is locked: private/path", "locked"),
+            ("database table is locked: private-table", "locked"),
+            ("Legacy annotation database is in use; private/path", "locked"),
+            ("The operation queue is full. Wait for an operation to finish.", "capacity"),
+            ("The storage queue is full. Wait for a save to finish.", "capacity"),
+            ("Too many long-running operations. Wait for one to finish.", "capacity"),
+            ("Cancelled.", "cancelled"),
+            ("private unrecognized source error", "unknown"),
+            ({"private": "error"}, "unknown"),
+        ]
+        for error, category in cases:
+            with self.subTest(category=category, error=error):
+                output = self.ipc_annotations([{"name": "query_project_rows", "error": error,
+                    "requestId": "private-request-id", "request": {"projectId": "private-project-id",
+                    "search": "private-search", "condition": {"column": "private-column"},
+                    "sortKey": "private-sort", "path": "/home/private/case", "memo": "private memo"}}])
+                prefix = "::error title=Unexpected native IPC::"
+                self.assertTrue(output.startswith(prefix))
+                self.assertNotIn("private", output)
+                self.assertEqual(json.loads(output[len(prefix):]), {"command": "query_project_rows",
+                    "category": category, "count": 1, "project": True, "owned": True, "filtered": True, "sorted": True})
+
+    def test_unexpected_ipc_annotations_allowlist_commands_and_group_safe_flags_only(self):
+        secret = "fixture.csv /home/alice/private source, memo, search, token=credential%\r\n::error title=Injected::bad"
+        request = {"projectId": secret, "rowIndex": 123456, "path": secret, "memo": secret,
+                   "search": secret, "sortKey": secret, "tags": [secret], "flagFilter": "all"}
+        known = {"name": "get_cell", "error": secret, "requestId": secret, "request": request}
+        hostile = {"name": secret, "error": secret, "request": request}
+        output = self.ipc_annotations([known, known, hostile, {"name": {"secret": secret}, "error": secret}])
+        self.assertNotIn(secret, output)
+        for fragment in ["fixture.csv", "/home/", "alice", "credential", "123456", "Injected", "private", "token="]:
+            self.assertNotIn(fragment, output)
+        lines = output.splitlines()
+        self.assertEqual(len(lines), 3)
+        records = [json.loads(line.split("::", 2)[2]) for line in lines]
+        self.assertEqual({record["command"] for record in records}, {"get_cell", "unknown"})
+        self.assertEqual(next(record for record in records if record["command"] == "get_cell")["count"], 2)
+        self.assertTrue(all(record["category"] == "unknown" for record in records))
+        self.assertTrue(all(type(record[key]) is bool for record in records for key in ["project", "owned", "filtered", "sorted"]))
 
     def test_timeout_annotation_contains_native_location_without_values_or_paths(self):
         try:

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from workspace_ui import NativeApp
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS, native_driver_default
 
@@ -231,7 +232,7 @@ def main():
                 run_case(web, case, rows, columns, evidence, args.repeats, args.steps, report)
                 web.close_drawer()
                 web.named(f"Close {source.name}")
-                web.command("delete_project", {"projectId": case["meta"]["id"]}, request=True)
+                delete_fixture_project(web, case["meta"]["id"])
             assert not web.diagnostics()["js_errors"], web.diagnostics()["js_errors"]
             report["passed"] = True
         except Exception as error:

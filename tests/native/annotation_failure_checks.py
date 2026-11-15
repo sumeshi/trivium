@@ -6,6 +6,7 @@ the selected failed writes return the native IPC error response shape.
 from pathlib import Path
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 
@@ -73,7 +74,7 @@ def verify_annotation_failures(web, data, root: Path, report: dict) -> None:
                 open_project(web, data["name"])
                 web.results(outer_total)
                 web.named(f"Close {source.name}")
-                web.command("delete_project", {"projectId": owner}, request=True)
+                delete_fixture_project(web, owner)
         report["annotation_failures"] = {"outcomes": outcomes, "failure_mode": "injected IPC error response in real WebView"}
     finally:
         web.close_drawer()

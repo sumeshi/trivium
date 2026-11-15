@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from feedback_checks import _settle
 
@@ -151,6 +152,6 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.tab(data["id"])
         web.results(data["total"])
         web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": project_id}, request=True)
+        delete_fixture_project(web, project_id)
         open_project(web, data["name"])
         web.results(data["total"])

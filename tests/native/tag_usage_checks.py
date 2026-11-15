@@ -10,6 +10,7 @@ from column_pin_checks import _key
 from feedback_checks import _check_sticky, _settle
 from refinement_checks import _scope
 from refinement_grouping import _rows
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
@@ -151,4 +152,4 @@ def verify_tag_usage(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.tab(data["id"])
         web.results(data["total"])
         web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": owner}, request=True)
+        delete_fixture_project(web, owner)

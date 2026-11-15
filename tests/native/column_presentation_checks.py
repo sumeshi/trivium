@@ -9,6 +9,7 @@ import uuid
 
 from column_pin_checks import _key, _menu_items, _prefix, _saved
 from feedback_checks import _horizontal_to, _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
@@ -257,4 +258,4 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         web.results(data["total"])
         if web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{project_id}"):
             web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": project_id}, request=True)
+        delete_fixture_project(web, project_id)

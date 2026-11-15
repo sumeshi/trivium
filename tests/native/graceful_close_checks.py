@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS, NormalWindowClose
 from storage_responsiveness_checks import _case_database
@@ -290,4 +291,4 @@ def verify_graceful_close(app, data: dict, root: Path, evidence: Path, report: d
                 owner = case["meta"]["id"]
                 if web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{owner}"):
                     web.named(f"Close {source.name}")
-                web.command("delete_project", {"projectId": owner}, request=True)
+                delete_fixture_project(web, owner)

@@ -113,3 +113,60 @@ test("sealing save admission leaves lifecycle reads available", async () => {
     await flushAllSaves();
   });
 });
+
+test("native deletion waits for queued teardown views, annotations and hidden columns in that case only", async () => {
+  const viewGates = [deferred(), deferred()], annotationGate = deferred(), hiddenGate = deferred();
+  const projectId = "delete-after-teardown";
+  const order: string[] = [];
+  let exists = true, viewCalls = 0;
+  const state: ViewState = { version: 1, search: "initial", searchColumns: [],
+    hiddenColumns: [], condition: null, flagFilter: "all", bookmarkedOnly: false,
+    sortKey: null, sortDirection: "asc", columnWidths: {}, logicalRow: 0 };
+  await withBackend(async (command, args) => {
+    const wire = args as { payload?: { projectId: string; state?: ViewState }; request?: { projectId: string } };
+    const owner = wire.payload?.projectId ?? wire.request?.projectId;
+    if (command === "delete_project") {
+      if (owner === "unrelated-case") { order.push("other-delete"); return; }
+      assert.equal(owner, projectId);
+      assert.ok(order.includes("view-2-committed") && order.includes("annotation-committed") && order.includes("hidden-committed"), order.join(","));
+      order.push("delete"); exists = false;
+      return;
+    }
+    assert.equal(owner, projectId);
+    assert.ok(exists, "no native write may start after deleting its case");
+    if (command === "save_view_state") {
+      const index = viewCalls++;
+      order.push(`view-${index + 1}-started`);
+      await viewGates[index].promise;
+      assert.ok(exists);
+      order.push(`view-${index + 1}-committed`);
+      return;
+    }
+    if (command === "update_flag") {
+      await annotationGate.promise;
+      assert.ok(exists); order.push("annotation-committed");
+      return { entry: { flag: "safe", memo: "", tags: [], bookmarked: false }, revision: 1, flaggedRecords: 1 };
+    }
+    assert.equal(command, "set_hidden_columns");
+    await hiddenGate.promise;
+    assert.ok(exists); order.push("hidden-committed");
+  }, async backend => {
+    const firstView = saveWorkspaceView(backend, projectId, state);
+    await turn();
+    const teardown = saveWorkspaceView(backend, projectId, { ...state, search: "final teardown" });
+    const annotation = backend.updateFlag({ projectId, rowIndex: 0, flag: "safe" });
+    const hidden = backend.setHiddenColumns({ projectId, hiddenColumns: ["c1"] });
+    const deleting = backend.deleteProject(projectId);
+    await backend.deleteProject("unrelated-case");
+    assert.ok(order.includes("other-delete"), "one case's pending saves must not block another case");
+    assert.ok(!order.includes("delete"));
+    annotationGate.resolve(); hiddenGate.resolve(); viewGates[0].resolve();
+    await Promise.all([firstView, annotation, hidden]); await turn();
+    assert.equal(viewCalls, 2);
+    assert.ok(!order.includes("delete"), "the queued final view, not just the running view, must settle");
+    viewGates[1].resolve();
+    await Promise.all([teardown, deleting]);
+    assert.equal(order.at(-1), "delete");
+    await flushAllSaves();
+  });
+});

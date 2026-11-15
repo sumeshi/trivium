@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 
@@ -101,7 +102,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
             web.tab(data["id"])
             web.results(data["total"])
             web.named(f"Close {source.name}")
-            web.command("delete_project", {"projectId": meta["id"]}, request=True)
+            delete_fixture_project(web, meta["id"])
 
         token = uuid.uuid4().hex[:8]
         batch_csv = root / f"refinement-batch-{token}.csv"
@@ -178,7 +179,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
             if web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{project_id}"):
                 web.named(f"Close {source.name}")
             if any(item["meta"]["id"] == project_id for item in web.command("list_projects")):
-                web.command("delete_project", {"projectId": project_id}, request=True)
+                delete_fixture_project(web, project_id)
         for source in source_paths:
             source.unlink(missing_ok=True)
     report["import_identity"] = {"header_full_source_path": True, "recent_short_hash_without_prefix": label,

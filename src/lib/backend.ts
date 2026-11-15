@@ -6,6 +6,7 @@ import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColum
 import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
+import { waitForWorkspaceSave } from "./workspaceSession.ts";
 import type {
   CellKind,
   ColorRule,
@@ -368,6 +369,10 @@ class NativeBackend implements Backend {
 
   deleteProject(projectId: string): Promise<void> {
     return acceptSave(async () => {
+      // A closed tab can still own accepted writes, including its teardown view.
+      // Delete only after all three project queues have settled.
+      await Promise.all([waitForWorkspaceSave(projectId),
+        waitForAnnotationWrites(projectId), waitForHiddenColumnWrites(projectId)]);
       await invoke("delete_project", { request: { projectId: projectId } });
       forgetAnnotationWrites(projectId);
       forgetAnnotationVersion(projectId);

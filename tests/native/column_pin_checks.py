@@ -6,6 +6,7 @@ import time
 import uuid
 
 from feedback_checks import _horizontal_to, _settle
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
@@ -247,7 +248,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         web.command("save_view_state", {"projectId": data["id"], "state": original})
         if other:
             web.named(f"Close {source.name}")
-            web.command("delete_project", {"projectId": other["meta"]["id"]}, request=True)
+            delete_fixture_project(web, other["meta"]["id"])
         open_project(web, data["name"])
         web.results(data["total"])
         _horizontal_to(web, 0)

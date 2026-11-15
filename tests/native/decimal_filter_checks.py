@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
@@ -51,4 +52,4 @@ def verify_decimal_filters(web, data: dict, root: Path, report: dict) -> None:
         web.results(outer_total)
         if web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{owner}"):
             web.named(f"Close {source.name}")
-        web.command("delete_project", {"projectId": owner}, request=True)
+        delete_fixture_project(web, owner)

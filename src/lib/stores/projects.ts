@@ -42,6 +42,7 @@ export function createProjectController(backend: Backend) {
   const reads = createOwnedRequests();
   let detailGeneration = 0;
   let listGeneration = 0;
+  const deletingProjects = new Set<string>();
   const state = writable<ProjectsState>({
     projects: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
     isLoadingProjects: false, isLoadingDetail: false, creating: false,
@@ -135,6 +136,7 @@ export function createProjectController(backend: Backend) {
   }
 
   async function selectProject(projectId: string) {
+    if (deletingProjects.has(projectId)) throw new Error("This project is being deleted. Wait for it to finish.");
     const current = get(state);
     if (current.selectedProjectId === projectId && (current.projectDetail || current.isLoadingDetail)) return;
     await loadProjectDetail(projectId);
@@ -228,10 +230,46 @@ export function createProjectController(backend: Backend) {
     }
   }
 
-  async function deleteProject(projectId: string) {
-    await backend.deleteProject(projectId);
-    await closeProject(projectId);
+  async function deleteProject(projectId: string, afterClose: () => Promise<void> = async () => {}) {
+    if (disposed) return;
+    if (deletingProjects.has(projectId)) throw new Error("This project is already being deleted.");
+    const before = get(state);
+    const index = before.openProjectIds.indexOf(projectId);
+    const wasSelected = before.selectedProjectId === projectId;
+    deletingProjects.add(projectId);
+    let closedGeneration = detailGeneration;
+    let adjacentLoadFailed = false;
+    try {
+      const closing = closeProject(projectId);
+      closedGeneration = detailGeneration;
+      // closeProject has already removed this tab. A neighbor's failed read
+      // must not prevent deleting the intended case; report it separately.
+      try { await closing; }
+      catch { adjacentLoadFailed = true; }
+      // The app passes tick so the old ProjectView enqueues its final save.
+      await afterClose();
+      await backend.deleteProject(projectId);
+    } catch (error) {
+      if (!disposed && index >= 0) {
+        state.update((value) => {
+          if (value.openProjectIds.includes(projectId)) return value;
+          const openProjectIds = [...value.openProjectIds];
+          openProjectIds.splice(Math.min(index, openProjectIds.length), 0, projectId);
+          return { ...value, openProjectIds };
+        });
+        // A failed delete preserves its saved case. Restore focus only if this
+        // operation still owns navigation; another selected tab stays selected.
+        if (wasSelected && detailGeneration === closedGeneration) {
+          try { await loadProjectDetail(projectId); }
+          catch { /* Keep the original deletion error and the reopenable tab. */ }
+        }
+      }
+      throw error;
+    } finally {
+      deletingProjects.delete(projectId);
+    }
     await loadProjects(true);
+    return { adjacentLoadFailed };
   }
 
   function updateSummary(payload: {

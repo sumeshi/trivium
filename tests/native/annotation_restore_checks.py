@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import uuid
 
+from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 
@@ -117,4 +118,4 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         for project_id, filename in created:
             if web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{project_id}"):
                 web.named(f"Close {filename}")
-            web.command("delete_project", {"projectId": project_id}, request=True)
+            delete_fixture_project(web, project_id)
