@@ -47,6 +47,10 @@ pub struct Histogram {
     pub buckets: Vec<HistogramBucket>,
     #[ts(type = "number")]
     pub missing: u64,
+    /// Present values that could not be parsed under the requested interpretation.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub invalid: u64,
     #[serde(default)]
     #[ts(type = "number")]
     pub outside: u64,
@@ -228,6 +232,7 @@ fn histogram_i128(
         kind: kind.as_str().to_string(),
         buckets,
         missing,
+        invalid: 0,
         outside: 0,
         full_range: None,
         auto_focused: false,
@@ -267,6 +272,7 @@ fn histogram_i128_range(
         kind: kind.as_str().to_string(),
         buckets: buckets_out,
         missing,
+        invalid: 0,
         outside,
         full_range: None,
         auto_focused: false,
@@ -289,6 +295,7 @@ fn histogram_f64(
         kind: ColumnKind::Float.as_str().to_string(),
         buckets: empty_buckets(buckets),
         missing: points.len() as u64,
+        invalid: 0,
         outside: 0,
         full_range: None,
         auto_focused: false,
@@ -361,6 +368,7 @@ fn histogram_f64_range(
         kind: ColumnKind::Float.as_str().to_string(),
         buckets: buckets_out,
         missing,
+        invalid: 0,
         outside,
         full_range: None,
         auto_focused: false,

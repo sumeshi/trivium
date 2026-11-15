@@ -15,6 +15,9 @@ pub struct HistogramPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub column: String,
+    /// Interpret the chosen column as datetime without changing source values.
+    #[serde(default, rename = "asDatetime")]
+    pub as_datetime: bool,
     #[serde(default = "default_buckets")]
     pub buckets: u32,
     #[serde(default)]
@@ -92,6 +95,7 @@ pub fn histogram_with_job(
         range,
         &source.target.flags,
         payload.focus,
+        payload.as_datetime,
         job,
     )
     .map_err(AppError::Message)

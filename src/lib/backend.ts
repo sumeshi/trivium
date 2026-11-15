@@ -164,6 +164,8 @@ export interface ColumnStatsArgs extends QuerySpec, RequestOwned {
 }
 
 export interface HistogramArgs extends RequestOwned {
+  /** Analyze source values as datetime even when the import type is string. */
+  asDatetime?: boolean;
   projectId: string;
   column: string;
   buckets?: number;
@@ -188,6 +190,8 @@ export interface SurroundingRowsArgs extends RequestOwned {
 }
 
 export interface TimeAnalysisArgs extends RequestOwned {
+  /** Analyze source values as datetime even when the import type is string. */
+  asDatetime?: boolean;
   projectId: string;
   column: string;
   gapSeconds?: number;
@@ -396,6 +400,7 @@ class NativeBackend implements Backend {
   histogram(args: HistogramArgs): Promise<Histogram> {
     return invokeOwned("histogram", {
       payload: {
+        asDatetime: args.asDatetime ?? false,
         projectId: args.projectId,
         column: args.column,
         buckets: args.buckets ?? 50,
@@ -414,6 +419,7 @@ class NativeBackend implements Backend {
   timeAnalysis(args: TimeAnalysisArgs): Promise<TimeAnalysis> {
     return invokeOwned("time_analysis", {
       payload: {
+        asDatetime: args.asDatetime ?? false,
         projectId: args.projectId,
         column: args.column,
         gapSeconds: args.gapSeconds ?? 60,

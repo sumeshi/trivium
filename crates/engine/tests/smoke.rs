@@ -723,6 +723,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
     let hist = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: event_id.clone(),
             buckets: 4,
@@ -762,6 +763,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
     let searched_hist = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: event_id.clone(),
             buckets: 4,
@@ -793,6 +795,7 @@ fn histogram_bucket_sum_matches_filtered_rows() {
     assert!(ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: user_id.clone(),
             buckets: 4,
@@ -835,6 +838,7 @@ fn histogram_places_values_in_equal_width_buckets() {
     let ints = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: n_id,
             buckets: 2,
@@ -861,6 +865,7 @@ fn histogram_places_values_in_equal_width_buckets() {
     let floats = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: x_id,
             buckets: 2,
@@ -891,6 +896,7 @@ fn histogram_range_counts_outside_values() {
     let ints = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: event_id.clone(),
             buckets: 2,
@@ -917,6 +923,7 @@ fn histogram_range_counts_outside_values() {
     let times = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_id.clone(),
             buckets: 2,
@@ -952,6 +959,7 @@ fn histogram_range_counts_outside_values() {
     let invalid = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_id.clone(),
             buckets: 2,
@@ -973,6 +981,7 @@ fn histogram_range_counts_outside_values() {
     let reversed = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: event_id.clone(),
             buckets: 2,
@@ -1067,6 +1076,7 @@ fn time_analysis_finds_fixture_gaps() {
     let analysis = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_id,
             gap_seconds: 60,
@@ -1124,6 +1134,7 @@ fn time_analysis_gap_range_matches_bounds() {
     let analysis = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_id.clone(),
             gap_seconds: 30,

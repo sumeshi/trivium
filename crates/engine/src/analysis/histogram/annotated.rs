@@ -28,6 +28,7 @@ pub fn histogram_series_annotated(
         range,
         flags,
         focus,
+        false,
         &crate::jobs::JobContext::none(),
     )
 }
@@ -41,9 +42,14 @@ pub(crate) fn histogram_series_annotated_with_job(
     range: Option<(&str, &str)>,
     flags: &HashMap<usize, FlagEntry>,
     focus: bool,
+    as_datetime: bool,
     job: &crate::jobs::JobContext,
 ) -> Result<Histogram, String> {
-    let kind = series_kind_for_rows_with_job(series, rows, job).map_err(|e| e.to_string())?;
+    let kind = if as_datetime {
+        ColumnKind::Datetime
+    } else {
+        series_kind_for_rows_with_job(series, rows, job).map_err(|e| e.to_string())?
+    };
     if kind == ColumnKind::Datetime {
         return datetime_histogram(
             column,
@@ -140,6 +146,7 @@ fn datetime_histogram(
     let mut sample = Vec::with_capacity(4096.min(rows.len()));
     let mut random = 0x4d595df4d0f33173u64;
     let mut missing = 0;
+    let mut invalid = 0;
     let mut full_min = i128::MAX;
     let mut full_max = i128::MIN;
     for (position, row) in rows.iter().enumerate() {
@@ -147,7 +154,16 @@ fn datetime_histogram(
             job.check_cancelled().map_err(|e| e.to_string())?;
         }
         let Some(value) = datetime_point(series, *row) else {
-            missing += 1;
+            let present = series
+                .get(*row)
+                .ok()
+                .and_then(|value| crate::value_utils::anyvalue_to_search_string(&value))
+                .is_some_and(|text| !text.trim().is_empty());
+            if present {
+                invalid += 1;
+            } else {
+                missing += 1;
+            }
             continue;
         };
         full_min = full_min.min(value);
@@ -220,6 +236,7 @@ fn datetime_histogram(
         kind: "datetime".into(),
         buckets: output,
         missing,
+        invalid,
         outside,
         full_range,
         auto_focused: suggested.is_some(),

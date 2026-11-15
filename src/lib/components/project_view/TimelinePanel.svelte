@@ -12,6 +12,7 @@
   import { requestTimelineHistogram } from "../../timelineRequests";
   import { initialTimelineBucket, timelineAxisTicks, timelineBucketSelection, timelineFlagMarkers } from "../../timelinePresentation";
 
+  import TimeColumnSelect from "./TimeColumnSelect.svelte";
   import { shouldRequestPanel } from "../../panelRequest";
   import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
@@ -199,6 +200,7 @@
         requestId,
         projectId: activeProjectId,
         column: activeColumn,
+        asDatetime: true,
         buckets: BUCKET_COUNT,
         range: activeRange,
         focus,
@@ -250,13 +252,8 @@
     }, 120);
   };
 
-  $: timeColumns = ($projectDetail?.columns ?? []).filter(
-    (name) => $projectDetail?.column_kinds?.[name] === "datetime"
-  );
+  $: timeColumns = $projectDetail?.columns ?? [];
   $: projectId = $projectDetail?.project.meta.id ?? "";
-  $: if (projectId && !timeColumns.includes(column)) {
-    column = timeColumns[0] ?? "";
-  }
   $: filtersKey = `${$appliedFilters.search}::${$appliedFilters.flag}::${$appliedFilters.searchColumns.join("|")}::${$appliedFilters.bookmarkedOnly}::${JSON.stringify($appliedFilters.condition)}`;
   $: resetKey = `${projectId}::${column}::${filtersKey}`;
   $: if (resetKey !== lastResetKey) {
@@ -293,7 +290,7 @@
   $: buckets = histogram?.buckets ?? [];
   $: maxCount = buckets.reduce((max, bucket) => Math.max(max, bucket.count), 0);
   $: bucketTotal = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
-  $: totalRows = bucketTotal + (histogram?.outside ?? 0) + (histogram?.missing ?? 0);
+  $: totalRows = bucketTotal + (histogram?.outside ?? 0) + (histogram?.missing ?? 0) + (histogram?.invalid ?? 0);
   $: currentRange = zoomRange ?? visibleRange(histogram);
   $: fullRange = histogram?.full_range;
   $: fullMin = fullRange ? parseTimelineNanos(fullRange.min) : null;
@@ -323,13 +320,7 @@
 {#if timeColumns.length > 0}
   <div class="stats-panel timeline-panel" aria-busy={loading}>
     <div class="condition-toolbar">
-      <label class="condition-count">Column
-        <select bind:value={column} aria-label="Timeline column">
-          {#each timeColumns as name}
-            <option value={name}>{$columnLabels.get(name) ?? name}</option>
-          {/each}
-        </select>
-      </label>
+      <TimeColumnSelect bind:column label="Timeline column" />
       <button type="button" class="ghost" disabled={!canZoom} on:click={() => zoom(0.8)} title="Zoom in" aria-label="Zoom in">+</button>
       <button type="button" class="ghost" disabled={!canZoom} on:click={() => zoom(1.2)} title="Zoom out" aria-label="Zoom out">−</button>
       <button type="button" class="ghost" disabled={!canPanLeft} on:click={() => pan(-1)} title="Pan left" aria-label="Pan left">←</button>
@@ -344,6 +335,7 @@
           In window {bucketTotal.toLocaleString()} / {totalRows.toLocaleString()}
           · Outside {histogram.outside.toLocaleString()}
           {#if histogram.missing > 0}· Missing {histogram.missing.toLocaleString()}{/if}
+          {#if histogram.invalid > 0}· Unparseable {histogram.invalid.toLocaleString()}{/if}
           {#if histogram.auto_focused}· Focused period{/if}
         </p>
         <div class="timeline-window-range" aria-label="Visible timeline period">
@@ -433,7 +425,8 @@
           </ol>
         </details>
       {:else}
-        <p class="condition-count">{loading ? "Loading timeline…" : "No datetime events."}</p>
+        <p class="condition-count">{loading ? "Loading timeline…" : column ? "No datetime events." : "Choose a column to analyze as datetime."}</p>
+        {#if histogram}<p class="condition-count">Missing {histogram.missing.toLocaleString()} · Unparseable {histogram.invalid.toLocaleString()}</p>{/if}
       {/if}
     {/if}
   </div>

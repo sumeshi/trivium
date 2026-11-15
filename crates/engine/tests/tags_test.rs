@@ -283,6 +283,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
     let histogram = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: event_id,
             buckets: 4,
@@ -305,6 +306,7 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
     let time = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_id,
             gap_seconds: 60,

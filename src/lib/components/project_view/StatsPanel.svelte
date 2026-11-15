@@ -18,6 +18,8 @@
   let column = "";
   let rareMax: number | null = 1;
   let bucketCount: number | null = 50;
+  let histogramMode: "auto" | "datetime" = "auto";
+  let modeColumn = "";
   let stats: ColumnStats | null = null;
   let histogram: Histogram | null = null;
   let error = "";
@@ -39,8 +41,12 @@
   $: projectId = $projectDetail?.project.meta.id ?? "";
   $: annotationRevision = $annotationVersions[projectId] ?? 0;
   $: scope = { projectId, annotationRevision };
-  $: kind = $projectDetail?.column_kinds?.[column] ?? "";
-  $: numeric = kind === "int" || kind === "float" || kind === "datetime";
+  $: kind = stats?.column === column ? stats.kind : $projectDetail?.column_kinds?.[column] ?? "";
+  $: numeric = histogramMode === "datetime" || kind === "int" || kind === "float" || kind === "datetime";
+  $: if (`${projectId}:${column}` !== modeColumn) {
+    modeColumn = `${projectId}:${column}`;
+    histogramMode = "auto";
+  }
   $: if (projectId && !columns.includes(column)) {
     column = columns[0] ?? "";
   }
@@ -101,6 +107,7 @@
     activeScope: { projectId: string; annotationRevision: number },
     activeColumn: string,
     activeBuckets: number | null,
+    activeMode: "auto" | "datetime",
     spec: AppliedFilters
   ) => {
     reads.cancel("histogram");
@@ -119,6 +126,7 @@
         projectId: activeScope.projectId,
         column: activeColumn,
         buckets: activeBuckets ?? 50,
+        asDatetime: activeMode === "datetime",
         search: spec.search.trim() || undefined,
         searchColumns: [...spec.searchColumns],
         flagFilter: spec.flag,
@@ -153,7 +161,7 @@
   // Annotation updates can also publish an equivalent applied QuerySpec.
   // One semantic scope should trigger one aggregation, not both notifications.
   $: statsKey = JSON.stringify([scope, column, rareMax, $appliedFilters]);
-  $: histogramKey = JSON.stringify([scope, column, bucketCount, $appliedFilters]);
+  $: histogramKey = JSON.stringify([scope, column, bucketCount, histogramMode, $appliedFilters]);
   $: if ($backend && shouldRequestPanel({ open, projectId, column }) && statsKey !== lastStatsKey) {
     lastStatsKey = statsKey;
     void loadStats($backend, scope, column, rareMax, $appliedFilters);
@@ -166,6 +174,7 @@
       scope,
       column,
       bucketCount,
+      histogramMode,
       $appliedFilters
     );
   }
@@ -182,6 +191,12 @@
       {/each}
     </select>
   </div>
+  <label class="histogram-mode">Histogram as
+    <select bind:value={histogramMode} aria-label="Histogram interpretation" title="Datetime analyzes original values without changing the column. Unparseable values are counted and skipped.">
+      <option value="auto">Auto</option>
+      <option value="datetime">Datetime</option>
+    </select>
+  </label>
   {#if error}
     <p class="panel-error" role="alert">{error}</p>
   {:else if statsLoading}
@@ -224,9 +239,9 @@
           <line x1="0" y1="105" x2="400" y2="105" />
         </svg>
         <div class="histogram-boundaries"><span title={histogram.buckets[0].start}>{compactTimestamp(histogram.buckets[0].start)}</span><span title={histogram.buckets[histogram.buckets.length - 1].end}>{compactTimestamp(histogram.buckets[histogram.buckets.length - 1].end)}</span></div>
-        <p class="condition-count">{histogramTotal.toLocaleString()} values · Missing {histogram.missing.toLocaleString()}{histogram.outside ? ` · Outside ${histogram.outside.toLocaleString()}` : ""}</p>
+        <p class="condition-count">{histogramTotal.toLocaleString()} values · Missing {histogram.missing.toLocaleString()}{histogram.invalid ? ` · Unparseable ${histogram.invalid.toLocaleString()}` : ""}{histogram.outside ? ` · Outside ${histogram.outside.toLocaleString()}` : ""}</p>
       {:else if histogram}
-        <p class="condition-count">No values in this result.</p>
+        <p class="condition-count">No values in this result. Missing {histogram.missing.toLocaleString()} · Unparseable {histogram.invalid.toLocaleString()}</p>
       {/if}
     </section>
   {/if}
@@ -236,6 +251,8 @@
   .stats-panel { gap: 12px; min-width: 0; }
   .stats-controls { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .stats-controls select { flex: 1; min-width: 0; }
+  .histogram-mode { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+  .histogram-mode select { flex: 1; min-width: 0; }
   .stats-summary { display: flex; gap: 14px; flex-wrap: wrap; margin: 0; color: var(--muted); font-size: 11px; }
   .stats-summary b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
   .stat-section { display: grid; gap: 7px; }

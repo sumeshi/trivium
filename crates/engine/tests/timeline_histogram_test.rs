@@ -315,6 +315,7 @@ fn operation_respects_search_multiselect_and_bookmark_scope_in_one_source_read()
     let result = histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: common::id(&ids, "ts"),
             buckets: 2,

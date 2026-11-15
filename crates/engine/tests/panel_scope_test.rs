@@ -92,6 +92,7 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
     let histogram = ops::histogram::histogram(
         &store,
         HistogramPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_column.clone(),
             buckets: 6,
@@ -115,6 +116,7 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
     let time = ops::time::time_analysis(
         &store,
         TimeAnalysisPayload {
+            as_datetime: false,
             project_id: id,
             column: ts_column,
             gap_seconds: 1,

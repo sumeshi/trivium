@@ -15,6 +15,9 @@ pub struct TimeAnalysisPayload {
     #[serde(rename = "projectId")]
     pub project_id: Uuid,
     pub column: String,
+    /// Interpret the chosen column as datetime without changing source values.
+    #[serde(default, rename = "asDatetime")]
+    pub as_datetime: bool,
     #[serde(default = "default_gap_seconds", rename = "gapSeconds")]
     pub gap_seconds: u64,
     #[serde(default = "default_session_minutes", rename = "sessionMinutes")]
@@ -94,6 +97,7 @@ pub fn time_analysis_with_job(
         payload.session_minutes,
         payload.burst_window_seconds,
         payload.burst_min,
+        payload.as_datetime,
         job,
     )
     .map_err(AppError::Message)

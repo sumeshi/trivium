@@ -5,6 +5,7 @@
   import type { Backend } from "../../backend";
   import type { TimeAnalysis } from "../../types";
   import { shouldRequestPanel } from "../../panelRequest";
+  import TimeColumnSelect from "./TimeColumnSelect.svelte";
   import TimeSpanList from "./TimeSpanList.svelte";
   import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
@@ -33,15 +34,10 @@
     requests.dispose();
   });
 
-  $: timeColumns = ($projectDetail?.columns ?? []).filter(
-    (name) => $projectDetail?.column_kinds?.[name] === "datetime"
-  );
+  $: timeColumns = $projectDetail?.columns ?? [];
   $: projectId = $projectDetail?.project.meta.id ?? "";
   $: annotationRevision = $annotationVersions[projectId] ?? 0;
   $: scope = { projectId, annotationRevision };
-  $: if (projectId && !timeColumns.includes(column)) {
-    column = timeColumns[0] ?? "";
-  }
 
   const ready = (value: number | null) => Number.isSafeInteger(value) && (value ?? 0) >= 0;
 
@@ -70,6 +66,7 @@
         requestId,
         projectId: activeScope.projectId,
         column: activeColumn,
+        asDatetime: true,
         gapSeconds: activeGap ?? 60,
         sessionMinutes: activeSession ?? 30,
         burstWindowSeconds: activeWindow ?? 60,
@@ -120,14 +117,7 @@
 
 <div class="stats-panel time-panel">
   {#if timeColumns.length > 0}
-    <div class="time-column">
-      <label for="time-column">Column</label>
-      <select id="time-column" bind:value={column} aria-label="Time column">
-        {#each timeColumns as name}
-          <option value={name}>{$columnLabels.get(name) ?? name}</option>
-        {/each}
-      </select>
-    </div>
+    <TimeColumnSelect bind:column label="Time column" />
     <div class="time-settings">
       <label class="condition-count">
         Gap seconds
@@ -151,6 +141,7 @@
     {:else if loading}
       <p class="condition-count" role="status">Analyzing time…</p>
     {:else if analysis}
+      <p class="condition-count">Missing {analysis.missing.toLocaleString()} · Unparseable {analysis.invalid.toLocaleString()}</p>
       <p class="time-help">Click an interval to filter. Hover for the original timestamps.</p>
       <details class="time-section" bind:open={gapsOpen}>
         <summary>Gaps <span>{analysis.gaps.length.toLocaleString()}</span></summary>
@@ -164,16 +155,16 @@
         <summary>Bursts <span>{analysis.bursts.length.toLocaleString()}</span></summary>
         {#if burstsOpen}<TimeSpanList column={analysis.column} spans={analysis.bursts} kind="burst" />{/if}
       </details>
+    {:else if !column}
+      <p class="condition-count">Choose a column to analyze as datetime.</p>
     {/if}
   {:else}
-    <p class="condition-count">This project has no datetime columns.</p>
+    <p class="condition-count">This project has no columns.</p>
   {/if}
 </div>
 
 <style>
   .time-panel { gap: 10px; min-width: 0; }
-  .time-column { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
-  .time-column select { flex: 1; min-width: 0; }
   .time-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 10px; }
   .time-settings label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--muted); }
   .time-settings input { width: 100%; min-width: 0; }

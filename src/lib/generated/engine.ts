@@ -186,9 +186,13 @@ export type ColumnStats = { column: string, kind: string, missing: number, uniqu
 export type HistogramBucket = { start: string, end: string, count: number, flags: HistogramFlags, end_inclusive: boolean, };
 export type HistogramFlags = { safe: number, suspicious: number, critical: number, unflagged: number, };
 export type HistogramRangeInfo = { min: string, max: string, };
-export type Histogram = { column: string, kind: string, buckets: Array<HistogramBucket>, missing: number, outside: number, full_range: HistogramRangeInfo | null, auto_focused: boolean, };
+export type Histogram = { column: string, kind: string, buckets: Array<HistogramBucket>, missing: number,
+/**
+ * Present values that could not be parsed under the requested interpretation.
+ */
+invalid: number, outside: number, full_range: HistogramRangeInfo | null, auto_focused: boolean, };
 export type TimeSpan = { start: string, end: string, count: number, };
-export type TimeAnalysis = { column: string, gaps: Array<TimeSpan>, sessions: Array<TimeSpan>, bursts: Array<TimeSpan>, };
+export type TimeAnalysis = { column: string, missing: number, invalid: number, gaps: Array<TimeSpan>, sessions: Array<TimeSpan>, bursts: Array<TimeSpan>, };
 export type GroupGranularity = "exact" | "year" | "month" | "day" | "hour" | "minute";
 export type GroupTimeRange = { start: string, end: string, };
 export type GroupTreeNode = { value: JsonValue, label: string, count: number, children: Array<GroupTreeNode>, range?: GroupTimeRange, };

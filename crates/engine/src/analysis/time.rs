@@ -15,6 +15,10 @@ pub struct TimeSpan {
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct TimeAnalysis {
     pub column: String,
+    #[ts(type = "number")]
+    pub missing: u64,
+    #[ts(type = "number")]
+    pub invalid: u64,
     pub gaps: Vec<TimeSpan>,
     pub sessions: Vec<TimeSpan>,
     pub bursts: Vec<TimeSpan>,
@@ -45,6 +49,7 @@ pub fn analyze_series(
         session_minutes,
         burst_window_seconds,
         burst_min,
+        false,
         &crate::jobs::JobContext::none(),
     )
 }
@@ -58,20 +63,35 @@ pub(crate) fn analyze_series_with_job(
     session_minutes: u64,
     burst_window_seconds: u64,
     burst_min: u64,
+    as_datetime: bool,
     job: &crate::jobs::JobContext,
 ) -> Result<TimeAnalysis, String> {
-    if series_kind_for_rows_with_job(series, row_indices, job).map_err(|e| e.to_string())?
-        != ColumnKind::Datetime
+    if !as_datetime
+        && series_kind_for_rows_with_job(series, row_indices, job).map_err(|e| e.to_string())?
+            != ColumnKind::Datetime
     {
         return Err("Column is not datetime.".into());
     }
     let mut events = Vec::new();
+    let mut missing = 0;
+    let mut invalid = 0;
     for (position, idx) in row_indices.iter().enumerate() {
         if position % 1024 == 0 {
             job.check_cancelled().map_err(|e| e.to_string())?;
         }
         if let Some(event) = event_at(series, *idx) {
             events.push(event);
+        } else {
+            let present = series
+                .get(*idx)
+                .ok()
+                .and_then(|value| crate::value_utils::anyvalue_to_search_string(&value))
+                .is_some_and(|text| !text.trim().is_empty());
+            if present {
+                invalid += 1;
+            } else {
+                missing += 1;
+            }
         }
     }
     events.sort_by(|left, right| {
@@ -82,6 +102,8 @@ pub(crate) fn analyze_series_with_job(
     job.check_cancelled().map_err(|e| e.to_string())?;
     let result = TimeAnalysis {
         column: column.to_string(),
+        missing,
+        invalid,
         gaps: gaps(&events, gap_seconds, job)?,
         sessions: sessions(&events, session_minutes, job)?,
         bursts: bursts(&events, burst_window_seconds, burst_min, job)?,
