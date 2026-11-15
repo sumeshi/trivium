@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem with Trivium.
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include real investigation logs, notes, credentials, or personal file paths.
+        If possible, attach a small synthetic file that reproduces the problem.
+  - type: input
+    id: version
+    attributes:
+      label: Trivium version
+      placeholder: 0.2.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and package
+      placeholder: Windows 11 / portable exe, or Ubuntu 24.04 / AppImage
+    validations:
+      required: true
+  - type: input
+    id: input
+    attributes:
+      label: Input format and size
+      placeholder: CSV / 5,199 rows / 27 columns / 4 MB
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the attached synthetic file.
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

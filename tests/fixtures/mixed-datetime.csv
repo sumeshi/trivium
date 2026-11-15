@@ -1,0 +1,6 @@
+Timestamp,Host,EventID,Event
+2026-11-14T00:00:00.000000001Z,WS01,4624,start
+,WS01,4624,unknown-time
+N/A,WS02,4625,unparseable-time
+2026-11-14T10:00:00.000000002+09:00,WS01,4624,finish
+2026-11-14T01:30:00Z,WS02,4624,other-host

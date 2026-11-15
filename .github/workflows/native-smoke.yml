@@ -72,6 +72,9 @@ jobs:
       - name: Windows memo and composition event checks
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --memo-ime-only
+      - name: Windows investigation integrity checks
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --integrity-only
       - name: Retain native logs and screenshots
         if: always()
         uses: actions/upload-artifact@v5

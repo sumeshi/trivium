@@ -41,6 +41,9 @@ from wide_table_checks import verify_wide_table
 from memo_ime_checks import verify_memo_ime
 from history_scroll_checks import verify_history_scroll
 from decimal_filter_checks import verify_decimal_filters
+from annotation_failure_checks import verify_annotation_failures
+from investigation_filter_checks import verify_investigation_filters
+from csp_checks import verify_content_policy
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -599,8 +602,10 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     wait_for(lambda: web.query().get("condition"), bool, "pointer drag selects a structured time range")
     web.close_drawer()
     web.drawer("Conditions")
-    assert web.script("return document.querySelectorAll('.condition-row').length;") == 2
-    values = web.script("return [...document.querySelectorAll('.condition-row input[aria-label=\"Value\"]')].map(e=>e.value);")
+    clauses = web.script("return [...document.querySelectorAll('.condition-row')].map(e=>({op:e.querySelector('select[aria-label=\"Operator\"]').value,value:e.querySelector('input[aria-label=\"Value\"]').value}));")
+    assert [clause["op"] for clause in clauses] == ["regex", "ge", "le"], clauses
+    assert clauses[0]["value"] == r"\S", clauses
+    values = [clause["value"] for clause in clauses[1:]]
     assert all("." in value and len(value.split(".")[-1].removesuffix("Z")) == 9 for value in values), values
     while True:
         count = web.script("return document.querySelectorAll('.condition-row').length;")
@@ -857,6 +862,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("target/native-workspace-ui"))
     parser.add_argument("--table-presentation-only", action="store_true")
     parser.add_argument("--memo-ime-only", action="store_true")
+    parser.add_argument("--integrity-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -876,6 +882,9 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("native content security policy", lambda: verify_content_policy(web, report)),
+                ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
+                ("analysis preserves investigation rules", lambda: verify_investigation_filters(web, data, root, evidence, report)),
                 ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
                 ("drawer switching and blank-area dismissal", lambda: verify_drawer_interaction(web, data, evidence, report)),
                 ("condition add button affordance", lambda: verify_condition_buttons(web, evidence, report)),
@@ -905,6 +914,8 @@ def main() -> None:
             ]:
                 if args.memo_ime_only and stage != "note text and composition confirmation":
                     continue
+                if args.integrity_only and stage not in {"native content security policy", "failed annotation reconciliation", "analysis preserves investigation rules"}:
+                    continue
                 if args.table_presentation_only and stage not in {"column ordering, widths and ISO display", "table text size without layout changes"}:
                     continue
                 print(f"CHECK: {stage}", flush=True)
@@ -921,7 +932,7 @@ def main() -> None:
                 and entry["request"].get("projectId") == data["id"]
                 and entry["request"].get("condition") == {"column": data["columns"]["timestamp"],
                     "op": "ge", "values": ["not-a-timestamp"], "negated": False}
-                and entry["error"] == "Datetime comparison requires a recognized datetime: not-a-timestamp"]
+                and entry["error"] == "Ordered comparison requires an exact finite number or a recognized datetime: not-a-timestamp"]
             rejected_ioc = report.get("presets_iocs", {}).get("invalid_flags", {})
             expected_invalid_ioc = [entry for entry in errors if entry["name"] == "import_iocs"
                 and entry["request"].get("projectId") == rejected_ioc.get("project_id")
