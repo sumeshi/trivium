@@ -44,6 +44,9 @@ from decimal_filter_checks import verify_decimal_filters
 from annotation_failure_checks import verify_annotation_failures
 from investigation_filter_checks import verify_investigation_filters
 from csp_checks import verify_content_policy
+from boundary_integrity_checks import verify_boundary_integrity
+from annotation_restore_checks import verify_annotation_restore
+from storage_responsiveness_checks import verify_storage_responsiveness
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -862,6 +865,7 @@ def main() -> None:
     parser.add_argument("--table-presentation-only", action="store_true")
     parser.add_argument("--memo-ime-only", action="store_true")
     parser.add_argument("--integrity-only", action="store_true")
+    parser.add_argument("--boundary-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -881,6 +885,9 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
+                ("explicit GUI annotation restore", lambda: verify_annotation_restore(web, data, root, evidence, report)),
+                ("responsive storage writes under SQLite lock", lambda: verify_storage_responsiveness(web, data, root, evidence, report)),
                 ("native content security policy", lambda: verify_content_policy(web, report)),
                 ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
                 ("analysis preserves investigation rules", lambda: verify_investigation_filters(web, data, root, evidence, report)),
@@ -913,6 +920,8 @@ def main() -> None:
             ]:
                 if args.memo_ime_only and stage != "note text and composition confirmation":
                     continue
+                if args.boundary_only and stage not in {"IOC validation and ordered annotation export", "explicit GUI annotation restore", "responsive storage writes under SQLite lock"}:
+                    continue
                 if args.integrity_only and stage not in {"native content security policy", "failed annotation reconciliation", "analysis preserves investigation rules"}:
                     continue
                 if args.table_presentation_only and stage not in {"column ordering, widths and ISO display", "table text size without layout changes"}:
@@ -938,7 +947,12 @@ def main() -> None:
                 and entry["request"].get("path") == rejected_ioc.get("csv_path")
                 and entry["error"] == 'IOC CSV line 3: invalid IOC flag "critcal". Expected Safe, Suspicious, or Critical.']
             assert len(expected_invalid_ioc) == (1 if rejected_ioc else 0), expected_invalid_ioc
-            assert all(entry in cancelled or entry in expected_invalid or entry in expected_invalid_ioc for entry in errors), errors
+            boundary_expected = report.get("boundary_expected_errors", [])
+            expected_boundary = [entry for entry in errors if any(
+                all(entry.get(key) == expected[key] for key in ("name", "request", "error"))
+                for expected in boundary_expected)]
+            assert len(expected_boundary) == len(boundary_expected), expected_boundary
+            assert all(entry in cancelled or entry in expected_invalid or entry in expected_invalid_ioc or entry in expected_boundary for entry in errors), errors
             report["expected_invalid_timestamp_queries"] = len(expected_invalid)
             report["expected_invalid_ioc_imports"] = len(expected_invalid_ioc)
             report["cancelled_superseded_queries"] = len(cancelled)

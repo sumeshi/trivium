@@ -55,6 +55,10 @@ jobs:
         env:
           TAURI_CONFIG: '{"identifier":"com.trivium.native-tests"}'
         run: cargo build --locked -p trivium-desktop --features custom-protocol
+      - name: Check desktop storage workers and startup
+        env:
+          TAURI_CONFIG: '{"identifier":"com.trivium.native-tests"}'
+        run: cargo test --locked -p trivium-desktop --features custom-protocol
       - name: Install native app driver
         run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Linux native navigation smoke
@@ -75,6 +79,9 @@ jobs:
       - name: Windows investigation integrity checks
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --integrity-only
+      - name: Windows annotation transfer and storage checks
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --boundary-only
       - name: Retain native logs and screenshots
         if: always()
         uses: actions/upload-artifact@v5
