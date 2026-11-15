@@ -54,7 +54,7 @@ def _case_database(root: Path, owner: str, *, platform: str | None = None) -> Pa
 def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, report: dict) -> None:
     outer_query, outer_total = web.query(), web.state()["total"]
     source = root / f"storage-lock-{uuid.uuid4().hex[:8]}.csv"
-    source.write_text("source_id,message\nr-0000000,synthetic\n", encoding="utf-8")
+    source.write_text("source_id,message\nr-0000000,synthetic first last\n", encoding="utf-8")
     case = web.command("create_project", {"path": str(source)})
     owner = case["meta"]["id"]
     database = None
@@ -67,19 +67,27 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
         database = sqlite3.connect(_case_database(root, owner), timeout=.1, isolation_level=None)
         database.execute("BEGIN IMMEDIATE")
         started = time.monotonic()
+        checkpoint = web.script("return performance.now();")
+        def writes(name: str, value: str) -> list[dict]:
+            return [entry for entry in web.trace() if entry["name"] == name and entry["started"] >= checkpoint
+                    and entry["request"].get("projectId") == owner
+                    and (entry["request"].get("flag") if name == "update_flag" else entry["request"].get("state", {}).get("search")) == value]
         web.script("""
-          const owner=arguments[0];
-          const state=window.__storageProbe={results:[],frames:0,active:null};
-          const run=(name,payload,label)=>window.__TAURI_INTERNALS__.invoke(name,{payload})
-            .then(value=>state.results.push({label,ok:true,value}),error=>state.results.push({label,ok:false,error:String(error)}));
-          run('update_flag',{projectId:owner,row_index:0,flag:'safe'},'safe');
-          run('save_view_state',{projectId:owner,state:{version:1,search:'first'}},'view-first');
-          run('update_flag',{projectId:owner,row_index:0,flag:'critical'},'critical');
-          run('save_view_state',{projectId:owner,state:{version:1,search:'last'}},'view-last');
+          const state=window.__storageProbe={frames:0,active:null};
           const frame=()=>{state.frames++;if(window.__storageProbe===state)requestAnimationFrame(frame);};
           requestAnimationFrame(frame);
           window.__TAURI_INTERNALS__.invoke('active_jobs').then(()=>state.active=true,error=>state.active=String(error));
-        """, owner)
+        """)
+        # Exercise the actual UI producers and their per-case queues. Raw
+        # concurrent invokes have no defined arrival order at an async handler.
+        web.named("Safe", ".data-row")
+        web.named("Critical", ".data-row")
+        web.write('input[aria-label="Search rows"]', "first")
+        web.applied(projectId=owner, search="first"); web.results(1)
+        wait_for(lambda: writes("save_view_state", "first"), bool,
+                 "the UI's first debounced view save is dispatched while the flag write waits")
+        web.write('input[aria-label="Search rows"]', "last")
+        web.applied(projectId=owner, search="last"); web.results(1)
         # Native pointer input must still reach the window while DB writes wait.
         web.named("Workspace options")
         wait_for(lambda: web.script("return !!document.querySelector('[aria-label=\"Application version\"]');"),
@@ -91,16 +99,22 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
         probe = web.script("return window.__storageProbe;")
         elapsed = time.monotonic() - started
         assert elapsed < 4, f"The window waited for SQLite's five-second busy timeout: {elapsed:.3f}s"
-        assert probe["active"] is True and probe["frames"] > 0 and probe["results"] == [], probe
+        assert probe["active"] is True and probe["frames"] > 0, probe
+        first_flag, first_view = writes("update_flag", "safe"), writes("save_view_state", "first")
+        assert len(first_flag) == len(first_view) == 1
+        assert all("result" not in entry and "error" not in entry for entry in first_flag + first_view)
+        assert not writes("update_flag", "critical") and not writes("save_view_state", "last"), "Later UI saves wait for their producer's earlier operation"
         database.execute("COMMIT")
         database.close()
         database = None
-        results = wait_for(lambda: web.script("return window.__storageProbe.results;"),
-                           lambda rows: len(rows) == 4, "queued writes finish after releasing the SQLite lock")
-        assert sorted(row["label"] for row in results) == ["critical", "safe", "view-first", "view-last"], results
-        assert all(row["ok"] for row in results), results
-        by_label = {row["label"]: row for row in results}
-        assert by_label["safe"]["value"]["revision"] < by_label["critical"]["value"]["revision"], results
+        requests = [("update_flag", "safe"), ("update_flag", "critical"), ("save_view_state", "first"), ("save_view_state", "last")]
+        results = wait_for(lambda: [writes(name, value) for name, value in requests],
+            lambda groups: all(group and "result" in group[-1] for group in groups),
+            "actual UI flag and view queues finish after releasing the SQLite lock")
+        assert all("error" not in entry for group in results for entry in group), results
+        assert results[0][0]["result"]["revision"] < results[1][0]["result"]["revision"], results
+        assert results[1][0]["started"] >= results[0][0]["decode_done"], results
+        assert results[3][0]["started"] >= results[2][0]["decode_done"], results
         stored = web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 1})
         assert stored["rows"][0]["flag"] == "critical", stored
         view = web.command("load_view_state", {"projectId": owner}, request=True)
@@ -109,7 +123,7 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
             "trusted_menu_usable_while_locked": True, "native_main_thread_probe": True,
             "other_project_read_completed": True, "ui_frames_while_locked": probe["frames"],
             "responsive_phase_seconds": elapsed, "same_project_final_flag": "critical", "same_project_final_view": "last",
-            "reply_order": [row["label"] for row in results]}
+            "ui_flag_and_view_producers": True, "later_saves_dispatched_after_earlier_responses": True}
         web.screenshot(evidence / "storage-lock-responsive.png")
     finally:
         if database is not None:

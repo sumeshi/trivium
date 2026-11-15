@@ -147,7 +147,7 @@ class WorkspaceView(WebView):
                 return json(...args).then(value=>{
                   entry.decode_done=performance.now();entry.elapsed_ms=entry.decode_done-entry.started;
                   if(response.headers.get('Tauri-Response')==='ok'){
-                    entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,
+                    entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,revision:value?.revision,
                       rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
                       total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
                   }else entry.error=String(value);
