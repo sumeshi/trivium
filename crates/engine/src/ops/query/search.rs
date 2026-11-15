@@ -13,10 +13,6 @@ use crate::value_utils::{anyvalue_to_search_string, record_stringified_column_co
 /// Fixed evaluation batch. Cancellation is checked at each boundary.
 const EVAL_BATCH_ROWS: usize = 1024;
 
-pub struct SearchState {
-    pub mask: Option<Vec<bool>>,
-}
-
 /// A query prepared once at the start of a search.
 ///
 /// Preparation tokenizes the search string, builds the condition tree, compiles
@@ -32,7 +28,7 @@ pub struct PreparedQuery {
 }
 
 impl PreparedQuery {
-    fn prepare(
+    pub(super) fn prepare(
         column_names: &[String],
         requested_columns: Option<&[String]>,
         search: Option<&str>,
@@ -98,10 +94,23 @@ impl PreparedQuery {
         })
     }
 
-    fn evaluate(
+    /// Required source columns for both projection and evaluation. Unscoped
+    /// conditions use exactly the same joined scope as search-bar terms.
+    pub(super) fn projection(&self) -> Vec<String> {
+        let mut columns = self.required_columns.clone();
+        for column in &self.join_columns {
+            if !columns.contains(column) {
+                columns.push(column.clone());
+            }
+        }
+        columns
+    }
+
+    pub(super) fn evaluate(
         &self,
         df: &DataFrame,
         flags: &HashMap<usize, FlagEntry>,
+        row_offset: usize,
         job: &JobContext,
     ) -> Result<Option<Vec<bool>>, AppError> {
         let Some(node) = &self.node else {
@@ -185,7 +194,7 @@ impl PreparedQuery {
                     }
                     let tags = if self.reads_tags {
                         flags
-                            .get(&row_idx)
+                            .get(&(row_offset + row_idx))
                             .map_or(&[][..], |entry| entry.tags.as_slice())
                     } else {
                         &[]
@@ -249,20 +258,6 @@ fn append_searchable(joined: &mut String, text: &str) {
         // Keep Rust's contextual Unicode lowercase rules (not per-char folding).
         joined.push_str(&text.to_lowercase());
     }
-}
-
-pub fn prepare_search(
-    df: &DataFrame,
-    requested_columns: Option<&[String]>,
-    column_names: &[String],
-    search: Option<&str>,
-    condition: Option<&Node>,
-    flags: &HashMap<usize, FlagEntry>,
-    job: &JobContext,
-) -> Result<SearchState, AppError> {
-    let prepared = PreparedQuery::prepare(column_names, requested_columns, search, condition)?;
-    let mask = prepared.evaluate(df, flags, job)?;
-    Ok(SearchState { mask })
 }
 
 fn resolve_columns(column_names: &[String], requested: &[String]) -> Result<Vec<String>, AppError> {

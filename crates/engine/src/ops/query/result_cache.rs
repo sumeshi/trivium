@@ -34,7 +34,7 @@ impl CachedResult {
         annotated_total: usize,
         annotation_revision: u64,
     ) -> Self {
-        let estimated_bytes = ids.len() * size_of::<usize>() + ENTRY_OVERHEAD_BYTES;
+        let estimated_bytes = ids.capacity() * size_of::<usize>() + ENTRY_OVERHEAD_BYTES;
         Self {
             ids: std::sync::Arc::new(ids),
             annotated_filtered,
@@ -364,7 +364,11 @@ mod tests {
     fn oversized_result_is_not_retained_or_reported_as_hit() {
         let mut cache = ResultCache::new(2, 1024);
         let project = Uuid::new_v4();
-        let large = result(1024); // ~8 KiB, larger than the injected budget.
+        // A selective result may retain much more allocation than its length.
+        let mut ids = Vec::with_capacity(1024);
+        ids.push(0);
+        let large = CachedResult::new(ids, 0, 0, 0);
+        assert_eq!(large.ids.len(), 1);
         assert!(large.estimated_bytes > 1024);
         cache.insert(key(project, "large"), large);
 

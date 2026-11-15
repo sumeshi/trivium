@@ -8,6 +8,7 @@ mod result_cache;
 mod search;
 mod singleflight;
 mod sort;
+mod stream;
 mod target;
 
 use std::collections::HashMap;

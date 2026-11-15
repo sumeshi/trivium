@@ -104,6 +104,11 @@ pub fn project_page_reads() -> u64 {
     PROJECT_PAGE_READS.load(Ordering::Relaxed)
 }
 
+/// Record projected streaming query reads alongside materialized reads.
+pub(crate) fn record_column_read_projection(columns: &[String]) {
+    record_projection(last_column_read_projection_store(), columns);
+}
+
 /// Column projection of the most recent page read. Test-only.
 pub fn last_page_projection() -> Vec<String> {
     last_page_projection_store()

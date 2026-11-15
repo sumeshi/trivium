@@ -5,10 +5,12 @@ use uuid::Uuid;
 
 use super::{
     page::{flag_population, is_unrestricted_flag_filter},
-    page_read::{is_unconditional_page, resolution_projection},
+    page_read::is_unconditional_page,
     result_cache::{self, CachedResult},
+    search::PreparedQuery,
     singleflight,
-    target::{resolve_target, QuerySpec},
+    stream::resolve_source_order,
+    target::{resolve_target_prepared, QuerySpec},
 };
 use crate::{
     error::AppError,
@@ -16,7 +18,7 @@ use crate::{
     models::FlagEntry,
     project_io::{
         is_internal_column_for_version, read_project_columns_with_job, read_project_row_count,
-        read_project_schema_columns, INTERNAL_ROW_ID,
+        read_project_schema_columns, record_column_read_projection, INTERNAL_ROW_ID,
     },
     storage::load_flag_snapshot,
     store::ProjectsStore,
@@ -80,25 +82,53 @@ pub fn resolve_project_target(
     let token = result_cache::spec_depends_on_annotations(&spec).then(|| revision.to_string());
     let key = result_cache::query_cache_key(project_id, &spec, &path, token);
     let result = singleflight::resolve_once(key.clone(), job, || {
-        let projection = resolution_projection(
-            &spec,
+        let prepared = PreparedQuery::prepare(
             &columns,
-            schema.iter().any(|name| name == INTERNAL_ROW_ID),
-        );
+            spec.search_columns.as_deref(),
+            spec.search.as_deref(),
+            spec.condition.as_ref(),
+        )?;
+        let mut projection = prepared.projection();
         job.report_progress(1, Some(3), Some("Evaluating query".into()));
-        let frame = if projection.iter().all(|column| column == INTERNAL_ROW_ID) {
-            // Flags, bookmarks and tag-only expressions are sparse metadata.
-            // A null anchor keeps row count without reading source columns.
-            DataFrame::new(vec![Series::full_null(
-                INTERNAL_ROW_ID,
+        let target = if spec
+            .sort_key
+            .as_deref()
+            .is_none_or(|key| key.trim().is_empty())
+        {
+            record_column_read_projection(&projection);
+            resolve_source_order(
+                &path,
                 total_rows,
-                &DataType::Null,
-            )])
-            .map_err(|error| AppError::from(anyhow::Error::from(error)))?
+                &projection,
+                &spec,
+                &prepared,
+                &flags,
+                job,
+            )?
         } else {
-            read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?
+            // Sorting retains the current materialized path. Only source-order
+            // queries switch to streaming until sorted keys can be bounded too.
+            if let Some(key) = spec.sort_key.as_deref().and_then(|key| {
+                columns
+                    .iter()
+                    .find(|column| column.eq_ignore_ascii_case(key))
+            }) {
+                if !projection.contains(key) {
+                    projection.push(key.clone());
+                }
+            }
+            let frame = if projection.is_empty() {
+                DataFrame::new(vec![Series::full_null(
+                    INTERNAL_ROW_ID,
+                    total_rows,
+                    &DataType::Null,
+                )])
+                .map_err(|error| AppError::from(anyhow::Error::from(error)))?
+            } else {
+                read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?
+            };
+            resolve_target_prepared(&frame, &spec, &flags, &prepared, job)?
         };
-        let target = resolve_target(&frame, &spec, &columns, &flags, job)?;
         job.check_cancelled()?;
         if store
             .try_find(&project_id)

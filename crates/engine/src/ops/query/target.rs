@@ -8,8 +8,8 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 
-use super::page::{flag_population, is_unrestricted_flag_filter, FlagFilterMask};
-use super::search::prepare_search;
+use super::page::{flag_population, FlagFilterMask};
+use super::search::PreparedQuery;
 use super::sort::sort_row_indices;
 
 /// Number of `resolve_target` calls since process start.
@@ -74,9 +74,8 @@ pub struct ResolvedTarget {
 
 /// Resolves a `QuerySpec` to original row ids in display order.
 ///
-/// This is the single implementation used by the page query, export, and bulk
-/// targets. Search is always evaluated on the full frame; callers restrict
-/// their output columns only after this returns.
+/// The in-memory/reference path shares membership evaluation with persisted
+/// batch searches. Output-column restrictions never change the search scope.
 pub fn resolve_target(
     df: &DataFrame,
     spec: &QuerySpec,
@@ -85,53 +84,31 @@ pub fn resolve_target(
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
     spec.validate_filter()?;
-    RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
     // An empty search scope is the same as "every data column".
     let search_columns = spec
         .search_columns
         .as_deref()
         .filter(|requested| !requested.is_empty());
-    let search_state = prepare_search(
-        df,
-        search_columns,
+    let prepared = PreparedQuery::prepare(
         all_columns,
+        search_columns,
         spec.search.as_deref(),
         spec.condition.as_ref(),
-        flags,
-        job,
     )?;
-    let restrict_flags = !is_unrestricted_flag_filter(spec.flag_filter.as_deref());
-    let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref())?;
-    let matches = |index: usize| {
-        if search_state.mask.as_ref().is_some_and(|mask| !mask[index]) {
-            return false;
-        }
-        if restrict_flags || spec.bookmarked_only == Some(true) {
-            let entry = flags.get(&index);
-            if restrict_flags
-                && !flag_filter
-                    .matches_population(entry.map_or(8, |entry| flag_population(&entry.flag)))
-            {
-                return false;
-            }
-            if spec.bookmarked_only == Some(true) && !entry.is_some_and(|entry| entry.bookmarked) {
-                return false;
-            }
-        }
-        true
-    };
-    // Resolve membership before ordering: a selective query must not build
-    // sort keys or an ordering vector for every source row. Source order also
-    // supplies the stable tie order for both ascending and descending sorts.
+    resolve_target_prepared(df, spec, flags, &prepared, job)
+}
+
+pub(super) fn resolve_target_prepared(
+    df: &DataFrame,
+    spec: &QuerySpec,
+    flags: &HashMap<usize, FlagEntry>,
+    prepared: &PreparedQuery,
+    job: &JobContext,
+) -> Result<ResolvedTarget, AppError> {
+    record_resolution();
     let mut filtered = Vec::new();
-    for index in 0..df.height() {
-        if index.is_multiple_of(1024) {
-            job.check_cancelled()?;
-        }
-        if matches(index) {
-            filtered.push(index);
-        }
-    }
+    let annotated_filtered =
+        append_matching_rows(df, 0, spec, prepared, flags, &mut filtered, job)?;
     let filtered = sort_row_indices(
         df,
         filtered,
@@ -143,18 +120,51 @@ pub fn resolve_target(
         .iter()
         .filter(|(index, entry)| **index < df.height() && flag_population(&entry.flag) != 8)
         .count();
-    let annotated_filtered = flags
-        .iter()
-        .filter(|(index, entry)| {
-            **index < df.height() && flag_population(&entry.flag) != 8 && matches(**index)
-        })
-        .count();
 
     Ok(ResolvedTarget {
         filtered,
         annotated_filtered,
         annotated_total,
     })
+}
+
+pub(super) fn record_resolution() {
+    RESOLVE_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Shared membership evaluation for an in-memory frame or one decoded batch.
+/// Annotation IDs always refer to source rows, never positions within a batch.
+pub(super) fn append_matching_rows(
+    frame: &DataFrame,
+    row_offset: usize,
+    spec: &QuerySpec,
+    prepared: &PreparedQuery,
+    flags: &HashMap<usize, FlagEntry>,
+    output: &mut Vec<usize>,
+    job: &JobContext,
+) -> Result<usize, AppError> {
+    let mask = prepared.evaluate(frame, flags, row_offset, job)?;
+    let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref())?;
+    let mut annotated = 0;
+    for index in 0..frame.height() {
+        if index.is_multiple_of(1024) {
+            job.check_cancelled()?;
+        }
+        if mask.as_ref().is_some_and(|mask| !mask[index]) {
+            continue;
+        }
+        let row_id = row_offset + index;
+        let entry = flags.get(&row_id);
+        let population = entry.map_or(8, |entry| flag_population(&entry.flag));
+        if !flag_filter.matches_population(population)
+            || (spec.bookmarked_only == Some(true) && !entry.is_some_and(|entry| entry.bookmarked))
+        {
+            continue;
+        }
+        output.push(row_id);
+        annotated += usize::from(population != 8);
+    }
+    Ok(annotated)
 }
 
 /// Stable JSON for the preview token. Field order is fixed by the struct

@@ -13,8 +13,7 @@ use crate::{
     condition::Node,
     error::AppError,
     models::{ColorRule, ProjectRow},
-    project_io::{is_internal_column, INTERNAL_ROW_ID},
-    search::{is_tag_scope, tokenize_search_query, SearchToken},
+    project_io::is_internal_column,
     storage::load_color_rules,
 };
 
@@ -40,85 +39,6 @@ pub(super) fn is_source_order_unsearched(spec: &QuerySpec) -> bool {
         .map(str::trim)
         .is_none_or(str::is_empty);
     search_empty && spec.condition.is_none() && sort_empty
-}
-
-/// Columns the resolver actually reads: search scope, condition columns, the
-/// sort key, and `__rowid` as a row-count anchor.
-pub(super) fn resolution_projection(
-    spec: &QuerySpec,
-    all_columns: &[String],
-    has_row_id: bool,
-) -> Vec<String> {
-    let mut requested: Vec<String> = Vec::new();
-    if let Some(search) = spec
-        .search
-        .as_deref()
-        .map(str::trim)
-        .filter(|search| !search.is_empty())
-    {
-        let tokens = tokenize_search_query(search);
-        let has_unscoped_term = tokens.iter().any(|token| match token {
-            SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
-                col.as_deref().is_none_or(str::is_empty) && !text.is_empty()
-            }
-            _ => false,
-        });
-        if has_unscoped_term {
-            match spec
-                .search_columns
-                .as_deref()
-                .filter(|requested| !requested.is_empty())
-            {
-                Some(scope) => requested.extend(scope.iter().cloned()),
-                None => requested.extend(all_columns.iter().cloned()),
-            }
-        }
-        for token in &tokens {
-            match token {
-                SearchToken::Term {
-                    col: Some(column), ..
-                }
-                | SearchToken::QuotedTerm {
-                    col: Some(column), ..
-                } if !is_tag_scope(column) => {
-                    requested.push(column.clone());
-                }
-                _ => {}
-            }
-        }
-    }
-    if let Some(condition) = &spec.condition {
-        collect_node_columns(condition, &mut |column| requested.push(column.to_string()));
-    }
-    if let Some(sort_key) = spec
-        .sort_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-    {
-        requested.push(sort_key.to_string());
-    }
-
-    let mut resolved: Vec<String> = Vec::new();
-    for name in requested {
-        if let Some(actual) = all_columns
-            .iter()
-            .find(|known| *known == &name)
-            .or_else(|| {
-                all_columns
-                    .iter()
-                    .find(|known| known.eq_ignore_ascii_case(&name))
-            })
-        {
-            if !resolved.iter().any(|known| known == actual) {
-                resolved.push(actual.clone());
-            }
-        }
-    }
-    if has_row_id && !resolved.iter().any(|column| column == INTERNAL_ROW_ID) {
-        resolved.push(INTERNAL_ROW_ID.to_string());
-    }
-    resolved
 }
 
 pub(super) fn collect_node_columns(node: &Node, visit: &mut impl FnMut(&str)) {
