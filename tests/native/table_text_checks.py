@@ -15,6 +15,8 @@ from row_navigation import open_project, wait_for
 
 BASE = {"body": 10.5, "header": 9.5, "index": 10, "note": 11, "flag": 10, "tag": 10}
 SIZES = {55, 70, 85, 100, 115, 130, 145}
+PAGE_SIZE = 250
+PREFETCH_PAGES = 1
 
 
 def _fit_failure(percent: int, index: int, control: dict) -> None:
@@ -110,11 +112,27 @@ def _sample(web, percent: int) -> dict:
     return sample
 
 
+def _check_density_requests(query: dict, entries: list[dict], rendered_pages: set[int], loaded_pages: set[int], total: int) -> None:
+    # The normal loader also fetches one neighboring page. Historical responses
+    # cannot prove cache membership after annotation refresh or page eviction.
+    maximum = (max(total, 1) - 1) // PAGE_SIZE
+    allowed = set(range(max(0, min(rendered_pages) - PREFETCH_PAGES), min(maximum, max(rendered_pages) + PREFETCH_PAGES) + 1))
+    seen = set(loaded_pages)
+    for entry in entries:
+        assert entry["name"] != "locate_project_row", "Density changes must preserve the source-row anchor without a lookup"
+        if entry["name"] != "query_project_rows":
+            continue
+        request = entry["request"]
+        assert all(request.get(key) == value for key, value in query.items()), entry
+        assert request["offset"] % PAGE_SIZE == 0 and request["limit"] == PAGE_SIZE, entry
+        page = request["offset"] // PAGE_SIZE
+        assert page in allowed, "Density changes may only load rendered pages or their bounded prefetch neighbors"
+        assert page not in seen, "Density changes must not reload a rendered page or request the same page twice"
+        seen.add(page)
+
+
 def _change(web, total: int, action: str, percent: int, baseline: dict) -> dict:
     before, query = web.state(), web.query()
-    cached = {position for entry in web.trace() if entry["name"] == "query_project_rows" and "result" in entry
-              and all(entry["request"].get(key) == value for key, value in query.items())
-              for position in range(entry["request"]["offset"], entry["request"]["offset"] + entry["result"]["rows"])}
     start = web.script("return performance.now();")
     _size(web, action, percent)
     after, sample = web.results(total), _sample(web, percent)
@@ -128,14 +146,8 @@ def _change(web, total: int, action: str, percent: int, baseline: dict) -> dict:
     ids = [row["id"] for row in after["rows"]]
     assert len(ids) == len(set(ids)) and all(right - left == 2 for left, right in zip(ids, ids[1:])), after
     assert all(abs(right["top"] - left["bottom"]) <= 1 for left, right in zip(after["rows"], after["rows"][1:])), after
-    needed = {row["id"] // 2 - 1 for row in after["rows"]} - cached
-    for entry in web.trace():
-        if entry["started"] < start:
-            continue
-        assert entry["name"] != "locate_project_row", "Density changes must preserve the source-row anchor without a lookup"
-        if entry["name"] == "query_project_rows":
-            assert all(entry["request"].get(key) == value for key, value in query.items()), entry
-            assert needed.intersection(range(entry["request"]["offset"], entry["request"]["offset"] + entry["request"]["limit"])), "Only newly exposed, uncached rows may request another page"
+    pages = lambda state: {(row["id"] // 2 - 1) // PAGE_SIZE for row in state["rows"]}
+    _check_density_requests(query, [entry for entry in web.trace() if entry["started"] >= start], pages(after), pages(before), total)
     return {"percent": percent, "row_height": sample["rowHeights"][0], "rendered_rows": len(ids),
             "scroll_top": after["scrollTop"], "scroll_left": after["scrollLeft"], "fonts": sample["fonts"]}
 
