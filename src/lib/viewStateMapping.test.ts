@@ -55,6 +55,17 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   assert.deepEqual(restored, saved());
 });
 
+test('note width survives view round trips separately from source column widths', () => {
+  const view = saved({ noteColumnWidth: 154 });
+  const wire = JSON.parse(JSON.stringify(savedViewToViewState(view)));
+  assert.deepEqual(viewStateToSavedView(wire, columns), view);
+  assert.deepEqual(wire.columnWidths, view.columnWidths);
+  for (const invalid of [null, -10, 0, '154', Infinity]) {
+    assert.equal(savedViewFromUnknown({ ...view, noteColumnWidth: invalid }, columns)?.noteColumnWidth, undefined);
+  }
+  assert.equal(viewStateToSavedView(savedViewToViewState(saved()), columns)?.noteColumnWidth, undefined);
+});
+
 test("preset literal arrays survive engine view JSON and saved-view restoration", () => {
   for (const values of [[], [""], ["alice,bob", " carol ", ""]]) {
     const literal = { column: columns[0], op: "in" as const, values, negated: true };

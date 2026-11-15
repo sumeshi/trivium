@@ -46,6 +46,11 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
   let wantedPages = new Set<number>();
   let previousStart: number | null = null;
   let direction = 1;
+  const failedPages = new Map<number, string>();
+  const publishError = () => {
+    const last = [...failedPages].at(-1);
+    workspace.queryError.set(last ? { page: last[0], message: last[1] } : null);
+  };
 
   const discardStaleWaiters = () => {
     for (let index = waiters.length - 1; index >= 0; index -= 1) {
@@ -90,6 +95,9 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     workspace.loadedPages.set(new Set());
     workspace.resetPageCache();
     workspace.totalRows.set(get(workspace.projectDetail)?.project.meta.total_records ?? 0);
+    workspace.queryCountKnown.set(false);
+    failedPages.clear();
+    publishError();
     workspace.flaggedCount.set(0);
     workspace.filteredFlaggedCount.set(0);
   };
@@ -131,6 +139,10 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       return existing.promise;
     }
     if (!force && get(workspace.loadedPages).has(page)) return;
+    if (!explicit && failedPages.has(page)) return;
+    failedPages.delete(page);
+    publishError();
+    if (!get(workspace.queryCountKnown)) workspace.appliedResultLoading.set(true);
     const request: PageRequest = { key, page, explicit, running: false, cancelled: false,
       priority: explicit ? 0 : 1, promise: Promise.resolve() };
     const timing = beginPageTiming(page * PAGE_SIZE, PAGE_SIZE);
@@ -163,7 +175,10 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
               await options.restoreViewport(response, isFresh);
               if (!isCurrent()) return true;
               if (!isFresh()) return false;
+              workspace.queryCountKnown.set(true);
               workspace.appliedResultLoading.set(false);
+              failedPages.delete(page);
+              publishError();
               timing?.rows(response.rows.length, Object.keys(response.rows[0]?.cells ?? {}).length);
               timing?.mark("normalizeStarted");
               const rows = response.rows.map(normalizeRow);
@@ -186,13 +201,14 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
           }
         }
       } catch (error) {
-        if (isCurrent()) {
-          if (get(workspace.appliedResultLoading)) workspace.totalFilteredRows.set(0);
+        if (isCurrent() && !request.cancelled) {
+          const message = errorMessage(error, "Failed to load rows.");
+          failedPages.set(page, message);
+          publishError();
           workspace.appliedResultLoading.set(false);
-          options.notify(errorMessage(error, "Failed to load rows."));
+          options.notify(message);
         }
       } finally {
-        if (page === 0 && isCurrent() && !request.cancelled) workspace.appliedResultLoading.set(false);
         forgetPageRequest(request);
       }
     })();
@@ -202,7 +218,8 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
   const requestPage = (pageIndex: number, force = false) => loadPage(pageIndex, force);
 
   const ensureRangeLoaded = (start: number, end: number) => {
-    if (disposed || !options.isReady() || end <= start) return;
+    if (disposed || !options.isReady() || end <= start
+      || (!get(workspace.queryCountKnown) && failedPages.size > 0)) return;
     const maximum = Math.floor(Math.max(get(workspace.totalFilteredRows) - 1, 0) / PAGE_SIZE);
     const first = Math.min(maximum, Math.max(0, Math.floor(start / PAGE_SIZE)));
     const last = Math.min(maximum, Math.floor(Math.max(start, end - 1) / PAGE_SIZE));
@@ -232,7 +249,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       const pending = pageRequests.get(key);
       if (pending) {
         if (!pending.explicit) pending.priority = priority;
-      } else if (!get(workspace.largePages).has(page) && !get(workspace.loadedPages).has(page)) {
+      } else if (!failedPages.has(page) && !get(workspace.largePages).has(page) && !get(workspace.loadedPages).has(page)) {
         void loadPage(page, false, false);
         const request = pageRequests.get(key);
         if (request) request.priority = priority;
@@ -274,12 +291,17 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     for (const waiter of waiters.splice(0)) waiter.resolve(false);
     pageRequests.clear();
     wantedPages.clear();
+    failedPages.clear();
   };
   workspace.onDispose(dispose);
   return {
     get revision() { return revision; },
     get signature() { return signature; },
     signatureFor, initialize, resetCache, requestPage, ensureRangeLoaded, applyFilters,
+    retryFailedPage: () => {
+      const error = get(workspace.queryError);
+      return error ? requestPage(error.page, true) : Promise.resolve();
+    },
     cancel: () => reads.cancelAll(),
     cancelLookup: () => { reads.cancel("locate"); discardStaleWaiters(); },
     runLookup: <T>(isCurrent: () => boolean, run: (requestId: string) => Promise<T>) =>

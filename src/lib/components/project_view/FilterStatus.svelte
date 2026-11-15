@@ -2,7 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { describeAppliedFilters } from '../../appliedFilterSummary';
   import { useWorkspace } from '../../workspaceContext';
-  const { appliedFilters, appliedResultLoading, columnLabels, search, searchColumns,
+  const { appliedFilters, appliedResultLoading, queryError, queryCountKnown, columnLabels, search, searchColumns,
     flagFilter, bookmarkedOnly, conditionTree } = useWorkspace();
   const dispatch = createEventDispatcher<{ clear: void }>();
   export let height = 26;
@@ -14,7 +14,7 @@
 
 <footer class="applied-filter-status" bind:offsetHeight={height} class:has-filters={description.active} aria-label="Applied filters">
   <div class="filter-status-line">
-    <span class="filter-status-state">{$appliedResultLoading ? 'Applying…' : description.active ? 'Filtered' : 'All rows'}</span>
+    <span class="filter-status-state">{$appliedResultLoading ? 'Applying…' : $queryError ? ($queryCountKnown ? 'Rows unavailable' : 'Query failed') : description.active ? 'Filtered' : 'All rows'}</span>
     {#if description.active}
       <button type="button" class="filter-summary" title={description.text}
         aria-label="Show applied filter details" aria-expanded={expanded} aria-controls="applied-filter-details"

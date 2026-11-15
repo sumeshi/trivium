@@ -115,6 +115,9 @@ pub struct ViewState {
     pub frozen_through: Option<String>,
     #[serde(default, rename = "columnWidths")]
     pub column_widths: HashMap<String, f64>,
+    #[serde(default, rename = "noteColumnWidth", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note_column_width: Option<f64>,
     #[serde(default, rename = "columnOrder", skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub column_order: Option<Vec<String>>,
@@ -143,6 +146,7 @@ impl Default for ViewState {
             hidden_columns: Vec::new(),
             frozen_through: None,
             column_widths: HashMap::new(),
+            note_column_width: None,
             column_order: None,
             column_formats: None,
             logical_row: 0,

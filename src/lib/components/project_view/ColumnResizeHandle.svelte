@@ -4,11 +4,14 @@
 
   export let label: string;
   export let width: number;
+  export let minWidth = MIN_DATA_WIDTH;
+  export let maxWidth = MAX_DATA_WIDTH;
+  export let tabIndex = -1;
   const dispatch = createEventDispatcher<{ resize: { width: number } }>();
   let start: { x: number; width: number } | null = null;
   let pendingWidth = width;
   let frame: number | null = null;
-  const clamp = (value: number) => Math.min(MAX_DATA_WIDTH, Math.max(MIN_DATA_WIDTH, Math.round(value)));
+  const clamp = (value: number) => Math.min(maxWidth, Math.max(minWidth, Math.round(value)));
   const publish = () => { frame = null; dispatch('resize', { width: clamp(pendingWidth) }); };
   const cleanup = () => {
     window.removeEventListener('mousemove', move);
@@ -59,8 +62,8 @@
     const step = event.shiftKey ? 1 : 10;
     const next = event.key === 'ArrowLeft' ? width - step
       : event.key === 'ArrowRight' ? width + step
-      : event.key === 'Home' ? MIN_DATA_WIDTH
-      : event.key === 'End' ? MAX_DATA_WIDTH : null;
+      : event.key === 'Home' ? minWidth
+      : event.key === 'End' ? maxWidth : null;
     if (next === null) return;
     event.preventDefault();
     event.stopPropagation();
@@ -71,9 +74,9 @@
 
 <div class="column-resize-handle" role="slider"
   aria-orientation="horizontal" aria-label={`Resize column ${label}`}
-  aria-valuemin={MIN_DATA_WIDTH} aria-valuemax={MAX_DATA_WIDTH} aria-valuenow={Math.round(width)}
+  aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={Math.round(width)}
   aria-valuetext={`${Math.round(width)} pixels`}
-  title={`Resize ${label} (drag or arrow keys)`} draggable="false" tabindex="-1"
+  title={`Resize ${label} (drag or arrow keys)`} draggable="false" tabindex={tabIndex}
   on:mousedown={begin} on:keydown={keydown} on:keydown on:click|stopPropagation></div>
 
 <style>

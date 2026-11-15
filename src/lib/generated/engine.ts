@@ -81,7 +81,7 @@ export type ViewState = { version: number, search: string, searchColumns: Array<
  * Missing keeps first-visible-column freezing; empty unfreezes data.
  * A column id freezes the display prefix through that id, excluding hidden widths.
  */
-frozenThrough?: string, columnWidths: { [key in string]?: number }, columnOrder?: Array<string>, columnFormats?: { [key in string]?: string }, logicalRow: number, };
+frozenThrough?: string, columnWidths: { [key in string]?: number }, noteColumnWidth?: number, columnOrder?: Array<string>, columnFormats?: { [key in string]?: string }, logicalRow: number, };
 export type Cell = {
 /**
  * Preview text for list responses; full text from `get_cell`. `None` for

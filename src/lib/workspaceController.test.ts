@@ -57,6 +57,8 @@ function setup(api: Partial<Backend> = {}, id = "a", total = 5199,
     notify: (message) => errors.push(message), ...options,
   });
   queries.initialize(filters());
+  // Most controller scenarios begin with an already available result count.
+  workspace.queryCountKnown.set(true);
   return { workspace, queries, backend, cancelled, errors };
 }
 

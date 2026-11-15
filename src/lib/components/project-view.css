@@ -792,6 +792,7 @@ button.primary:disabled {
 }
 
 .column-heading.sticky { position: sticky; }
+.note-heading { cursor: default; }
 .column-heading.dragging { color: var(--accent); }
 .column-heading.dropBefore { box-shadow: inset 2px 0 var(--accent); }
 .column-heading.dropAfter { box-shadow: inset -2px 0 var(--accent); }

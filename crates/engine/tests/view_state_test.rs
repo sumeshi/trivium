@@ -113,6 +113,7 @@ fn sample_state() -> ViewState {
         sort_direction: "desc".to_string(),
         hidden_columns: vec!["c000004".to_string()],
         column_widths: widths,
+        note_column_width: Some(154.0),
         column_order: Some(vec!["c000002".to_string(), "c000001".to_string(), "c000003".to_string()]),
         column_formats: Some(HashMap::from([("c000003".to_string(), "iso".to_string())])),
         frozen_through: None,

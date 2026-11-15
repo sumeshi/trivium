@@ -13,6 +13,7 @@ interface ViewOptions {
   backend: Backend;
   isReady: () => boolean;
   columnWidths: () => Map<string, number>;
+  noteColumnWidth?: () => number;
   logicalRow: () => number;
   scrollLeft: () => number;
   signature: () => string;
@@ -59,6 +60,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     hiddenColumns: Array.from(get(workspace.hiddenColumns)),
     ...(get(workspace.frozenThrough) !== undefined ? { frozenThrough: get(workspace.frozenThrough) } : {}),
     columnWidths: Object.fromEntries(options.columnWidths()),
+    ...(options.noteColumnWidth ? { noteColumnWidth: options.noteColumnWidth() } : {}),
     columnOrder: [...get(workspace.columnOrder)],
     columnFormats: { ...get(workspace.columnFormats) },
     logicalRow: viewportSnapshot().logicalRow,

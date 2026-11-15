@@ -2,7 +2,7 @@
 
   import ConditionBranch from "./ConditionBranch.svelte";
   import { useWorkspace } from "../../workspaceContext";
-  const { totalFilteredRows, projectDetail, conditionTree } = useWorkspace();
+  const { totalFilteredRows, queryCountKnown, queryError, projectDetail, conditionTree } = useWorkspace();
 
   $: columns = $projectDetail?.columns ?? [];
 </script>
@@ -10,7 +10,7 @@
 <div class="condition-editor">
   <div class="condition-toolbar">
     <span class="filter-label">Rules</span>
-    <span class="condition-count">{$totalFilteredRows.toLocaleString()} rows</span>
+    <span class="condition-count">{$queryCountKnown ? `${$totalFilteredRows.toLocaleString()} rows` : $queryError ? 'Result unavailable' : 'Loading…'}</span>
   </div>
   <p class="rules-help" title="AND requires every condition; OR accepts any condition. Value checks suggest recognized formats. Blank text conditions wait until a value is entered.">Changes apply automatically. Blank text conditions wait for a value.</p>
   <ConditionBranch node={$conditionTree} {columns} isRoot />

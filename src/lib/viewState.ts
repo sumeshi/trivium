@@ -26,6 +26,7 @@ export interface SavedView {
   sortDirection: "asc" | "desc";
   /** Persisted widths keyed by data column id. Rebuilt when absent. */
   columnWidths: Record<string, number>;
+  noteColumnWidth?: number;
   columnOrder?: string[];
   columnFormats?: Record<string, ColumnDisplayFormat>;
   offset: number;

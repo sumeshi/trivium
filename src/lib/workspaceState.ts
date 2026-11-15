@@ -91,6 +91,9 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   const totalFilteredRows = writable(0);
   /** True while the first page of a newly applied result is loading. */
   const appliedResultLoading = writable(false);
+  /** A result count is available only after this query has returned successfully. */
+  const queryCountKnown = writable(false);
+  const queryError = writable<{ message: string; page: number } | null>(null);
   /** Annotated rows in the whole project. */
   const flaggedCount = writable(0);
   /** Annotated rows inside the current result set. */
@@ -427,6 +430,8 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     totalRows,
     totalFilteredRows,
     appliedResultLoading,
+    queryCountKnown,
+    queryError,
     flaggedCount,
     filteredFlaggedCount,
     positionToRowIndex,

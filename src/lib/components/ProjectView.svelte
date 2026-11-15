@@ -22,7 +22,7 @@
   import { cloneTree } from '../viewState';
   import type { WorkspaceSession } from '../workspaceSession';
   import {
-    normalizeIocFlag, MIN_DATA_WIDTH,
+    normalizeIocFlag, MIN_DATA_WIDTH, MEMO_COL_WIDTH, MIN_MEMO_WIDTH, MAX_MEMO_WIDTH,
     WIDTH_LIMIT_CHARS, CHAR_PIXEL, COLUMN_PADDING, MAX_DATA_WIDTH,
   } from './project_view/state';
   import type {
@@ -54,7 +54,7 @@
     restoreHistory, setHistoryProject, projectDetail: projectDetailStore, backend: backendStore,
     visibleColumns, hiddenColumns, frozenThrough, columnOrder, columnFormats, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
-    totalRows, totalFilteredRows, appliedResultLoading, flaggedCount,
+    totalRows, totalFilteredRows, appliedResultLoading, queryCountKnown, flaggedCount,
     expandedCell, memoEditor, iocManagerOpen, scrollLeft,
     bodyScrollEl, headerScrollEl, iocDraft, currentProjectId, lastHiddenColumnsRef,
     viewGeneration, invalidateViewRequests, selectedRowIds, appliedFilters, sortRevision,
@@ -89,6 +89,7 @@
   let lastSummaryHiddenKey = '';
 
   let columnWidths: Map<string, number> = new Map();
+  let noteColumnWidth = MEMO_COL_WIDTH;
   let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
   let exportSnapshot: ExportSnapshot | null = null;
 
@@ -188,6 +189,12 @@
     schedulePersist();
   };
 
+  const changeNoteWidth = (event: CustomEvent<{ width: number }>) => {
+    if (!Number.isFinite(event.detail.width)) return;
+    noteColumnWidth = Math.min(MAX_MEMO_WIDTH, Math.max(MIN_MEMO_WIDTH, Math.round(event.detail.width)));
+    schedulePersist();
+  };
+
   const changeColumnFormat = (event: CustomEvent<{ columnId: string; format: 'original' | 'iso' }>) => {
     const { columnId, format } = event.detail;
     if (!projectDetail.columns.includes(columnId)) return;
@@ -210,6 +217,7 @@
     backend,
     isReady: () => initialized && !destroyed,
     columnWidths: () => columnWidths,
+    noteColumnWidth: () => noteColumnWidth,
     logicalRow: () => pendingScrollRow ?? rowOffset(),
     scrollLeft: () => {
       if (pendingScrollLeft !== null) return pendingScrollLeft;
@@ -386,6 +394,7 @@
       query: entry.query
     })));
     initializeColumnWidths(saved?.columnWidths);
+    noteColumnWidth = Math.min(MAX_MEMO_WIDTH, Math.max(MIN_MEMO_WIDTH, Math.round(saved?.noteColumnWidth ?? MEMO_COL_WIDTH)));
     const filters: AppliedFilters = {
       search: normalizeSearchText($search),
       flag: $flagFilter,
@@ -640,9 +649,9 @@
     // the new result returns. Do not open a dialog whose counts and export
     // target disagree. This covers a scrolled position too, where the first
     // request is not page 0.
-    if ($appliedResultLoading) {
+    if ($appliedResultLoading || !$queryCountKnown) {
       dispatch('notify', {
-        message: 'Wait for the current query to finish before exporting.',
+        message: $appliedResultLoading ? 'Wait for the current query to finish before exporting.' : 'Retry the failed query before exporting.',
         tone: 'error'
       });
       return;
@@ -823,7 +832,7 @@
         title="Original row number (#); press Enter to jump"
         aria-busy={$locatingRow}
         bind:value={gotoRowInput}
-        disabled={!initialized || $totalRows === 0}
+        disabled={!initialized || !$queryCountKnown || $totalRows === 0}
         on:keydown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
@@ -838,7 +847,7 @@
       on:click={jumpToFirstRow}
       aria-label="First"
       title="First row in the current result"
-      disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
+      disabled={!initialized || !$queryCountKnown || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v14m13-14-7 7 7 7" /></svg>
     </button>
@@ -848,7 +857,7 @@
       on:click={jumpToLastRow}
       aria-label="Last"
       title="Last row in the current result"
-      disabled={!initialized || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
+      disabled={!initialized || !$queryCountKnown || $totalFilteredRows === 0 || $appliedResultLoading || filterTimeout !== null}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5v14M6 5l7 7-7 7" /></svg>
     </button>
@@ -871,7 +880,9 @@
     />
   {/if}
 
-  <DataTable {columnWidths} {ensureRangeLoaded} on:notify={(e) => dispatch('notify', e.detail)}
+  <DataTable {columnWidths} {noteColumnWidth} {ensureRangeLoaded} on:notify={(e) => dispatch('notify', e.detail)}
+    on:noteWidth={changeNoteWidth}
+    on:retry={() => void queries.retryFailedPage()}
     on:columnWidth={changeColumnWidth} on:columnFormat={changeColumnFormat}
     on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)}
     on:columnGroup={(event) => void filterControls?.openGroupingForColumn(event.detail.columnId)} />

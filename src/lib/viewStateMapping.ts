@@ -145,6 +145,8 @@ export function savedViewFromUnknown(
         : null,
     sortDirection: sortDirection(value.sortDirection),
     columnWidths: columnWidths(value.columnWidths, known),
+    ...(typeof value.noteColumnWidth === 'number' && Number.isFinite(value.noteColumnWidth) && value.noteColumnWidth > 0
+      ? { noteColumnWidth: value.noteColumnWidth } : {}),
     ...(Array.isArray(value.columnOrder) ? { columnOrder: [...new Set(stringArray(value.columnOrder, known))] } : {}),
     ...(isRecord(value.columnFormats) ? { columnFormats: columnFormats(value.columnFormats, known) } : {}),
     // `offset` is the legacy name for the result-relative row; the engine
@@ -212,6 +214,7 @@ export function savedViewToViewState(view: SavedView): ViewState {
     hiddenColumns: [...view.hiddenColumns],
     ...(view.frozenThrough !== undefined ? { frozenThrough: view.frozenThrough } : {}),
     columnWidths: { ...view.columnWidths },
+    ...(view.noteColumnWidth !== undefined ? { noteColumnWidth: view.noteColumnWidth } : {}),
     ...(view.columnOrder ? { columnOrder: [...view.columnOrder] } : {}),
     ...(view.columnFormats ? { columnFormats: { ...view.columnFormats } } : {}),
     logicalRow: view.logicalRow ?? view.offset ?? 0,

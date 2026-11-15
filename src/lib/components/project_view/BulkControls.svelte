@@ -8,7 +8,7 @@
   import { useWorkspace } from "../../workspaceContext";
 
   const workspace = useWorkspace();
-  const { appliedResultLoading, backend, projectDetail, selectedCount, totalFilteredRows } = workspace;
+  const { appliedResultLoading, queryCountKnown, backend, projectDetail, selectedCount, totalFilteredRows } = workspace;
   const dispatch = createEventDispatcher<{ refresh: void }>();
   let target: BulkTarget = "filtered";
   let flag: BulkFlag = "keep";
@@ -47,7 +47,7 @@
 
   $: allRowCount = $projectDetail?.project.meta.total_records ?? 0;
   $: selectedTargetEmpty = target === "selection" && $selectedCount === 0;
-  $: filteredResultLoading = target === "filtered" && $appliedResultLoading;
+  $: filteredResultUnavailable = target === "filtered" && ($appliedResultLoading || !$queryCountKnown);
   $: targetEmpty = selectedTargetEmpty || (target === "filtered" && $totalFilteredRows === 0) || (target === "all" && allRowCount === 0);
   $: patch = buildBulkPatch({ flag, memo, clearMemo, tag: tagInput, tagOperation });
   $: hasPatch = Object.keys(patch).length > 0;
@@ -70,10 +70,10 @@
   const run = async (operation: "apply" | "undo") => {
     const api = get(backend), owner = get(workspace.currentProjectId);
     if (!api || !owner || busy) return;
-    if (operation === "apply" && (filteredResultLoading || !hasPatch || targetEmpty)) return;
+    if (operation === "apply" && (filteredResultUnavailable || !hasPatch || targetEmpty)) return;
     const ticket = generation;
     const owned = () => alive && get(workspace.currentProjectId) === owner;
-    const current = () => owned() && generation === ticket && !(target === "filtered" && get(workspace.appliedResultLoading));
+    const current = () => owned() && generation === ticket && !(target === "filtered" && (get(workspace.appliedResultLoading) || !get(workspace.queryCountKnown)));
     busy = true; error = ""; count = null;
     try {
       if (operation === "undo") {
@@ -105,7 +105,7 @@
   <label class="bulk-field">Rows
     <select bind:value={target} aria-label="Bulk target" disabled={busy} on:change={invalidate}>
       <option value="selection" disabled={$selectedCount === 0}>Selected ({$selectedCount})</option>
-      <option value="filtered">Current results ({filteredResultLoading ? '…' : $totalFilteredRows})</option>
+      <option value="filtered">Current results ({$queryCountKnown ? $totalFilteredRows : $appliedResultLoading ? '…' : 'unavailable'})</option>
       <option value="all">All rows ({allRowCount})</option>
     </select>
   </label>
@@ -143,7 +143,7 @@
     <span class="condition-count">Labels for related rows. Click tags to search.</span>
   </div>
   <div class="bulk-actions bulk-wide">
-    <button type="button" class="primary" on:click={() => void run("apply")} disabled={busy || !hasPatch || targetEmpty || filteredResultLoading}>Apply</button>
+    <button type="button" class="primary" on:click={() => void run("apply")} disabled={busy || !hasPatch || targetEmpty || filteredResultUnavailable}>Apply</button>
     <button type="button" class="ghost" on:click={() => void run("undo")} disabled={busy} title="Undo the last bulk annotation">Undo</button>
     {#if count !== null}<span class="condition-count" role="status">{count.toLocaleString()} rows {resultKind}</span>{/if}
     {#if selectedTargetEmpty}<span class="condition-count">No rows selected</span>{/if}

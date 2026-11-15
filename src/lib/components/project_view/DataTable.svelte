@@ -14,6 +14,7 @@
   import { errorMessage } from '../../errors';
   import {
     ROW_HEIGHT, PAGE_SIZE, SELECT_COL_WIDTH, INDEX_COL_WIDTH, FLAG_COL_WIDTH, MEMO_COL_WIDTH,
+    MIN_MEMO_WIDTH, MAX_MEMO_WIDTH,
     STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, BUFFER,
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
@@ -37,19 +38,22 @@
     tableWidth, projectDetail, columnLabels, toggleSort,
     positionToRowIndex, largePages, selectedRowIds, selectedCount,
     selectVisibleRows, rememberOffset, searchColumns, hiddenColumns, frozenThrough, backend,
-    appliedResultLoading, appliedFilters, viewGeneration,
+    appliedResultLoading, appliedFilters, viewGeneration, queryCountKnown, queryError,
   } = useWorkspace();
 
   const _toggleSort = toggleSort;
 
   export let columnWidths: Map<string, number> = new Map();
+  export let noteColumnWidth = MEMO_COL_WIDTH;
   export let ensureRangeLoaded: (start: number, end: number) => void = () => {};
   const dispatch = createEventDispatcher<{
     notify: { message: string; tone: 'success' | 'error' };
     columnRule: { columnId: string };
     columnGroup: { columnId: string };
     columnWidth: { columnId: string; width: number };
+    noteWidth: { width: number };
     columnFormat: { columnId: string; format: 'original' | 'iso' };
+    retry: void;
   }>();
 
   type CellMenuState = {
@@ -132,20 +136,21 @@
   };
 
   $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column, columnWidths));
-  $: availableDataWidth = Math.max(0, $tableWidth - STICKY_COLUMNS_WIDTH);
+  $: stickyWidth = STICKY_COLUMNS_WIDTH - MEMO_COL_WIDTH + noteColumnWidth;
+  $: availableDataWidth = Math.max(0, $tableWidth - stickyWidth);
   $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
-  $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, distributedDataWidths, $frozenThrough, STICKY_COLUMNS_WIDTH);
+  $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, distributedDataWidths, $frozenThrough, stickyWidth);
   $: focusedScrollingWidth = focusedColumnId && !frozenLayout.offsets.has(focusedColumnId)
     ? distributedDataWidths[$visibleColumns.indexOf(focusedColumnId)] : undefined;
-  $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, STICKY_COLUMNS_WIDTH,
+  $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, stickyWidth,
     $tableWidth, $scrollLeft, focusedScrollingWidth);
-  $: columnLayout = tableColumnLayout($visibleColumns, distributedDataWidths, frozenLayout.offsets, STICKY_COLUMNS_WIDTH);
+  $: columnLayout = tableColumnLayout($visibleColumns, distributedDataWidths, frozenLayout.offsets, stickyWidth);
   $: {
     const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, draggedColumnId ?? focusedColumnId);
     if (next !== renderedColumns) renderedColumns = next;
   }
   $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
-  $: totalTableWidth = STICKY_COLUMNS_WIDTH + totalDataWidth;
+  $: totalTableWidth = stickyWidth + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: horizontalMaximum = Math.max(0, effectiveTableWidth - $tableWidth);
   // Until rAF publishes the body's latest offset, the store is intentionally
@@ -158,7 +163,7 @@
     `${SELECT_COL_WIDTH}px`,
     `${INDEX_COL_WIDTH}px`,
     `${FLAG_COL_WIDTH}px`,
-    `${MEMO_COL_WIDTH}px`,
+    `${noteColumnWidth}px`,
     ...distributedDataWidths.map((width) => `${width}px`)
   ].join(' ');
 
@@ -167,7 +172,7 @@
     document.documentElement.style.setProperty('--sticky-index', `${SELECT_COL_WIDTH}px`);
     document.documentElement.style.setProperty('--sticky-flag', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH}px`);
     document.documentElement.style.setProperty('--sticky-memo', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH}px`);
-    document.documentElement.style.setProperty('--sticky-data', `${SELECT_COL_WIDTH + INDEX_COL_WIDTH + FLAG_COL_WIDTH + MEMO_COL_WIDTH}px`);
+    document.documentElement.style.setProperty('--sticky-data', `${stickyWidth}px`);
   }
 
   // The applied QuerySpec result is the only source for the table's row count.
@@ -197,7 +202,7 @@
   // lose it.
   $: {
     const maxScroll = maxScrollTop(effectiveTotalRows, $viewportHeight, $rowHeight);
-    if (!resizingRows && $pendingPages.size === 0 && $scrollTop > maxScroll) {
+    if (!resizingRows && $queryCountKnown && !$appliedResultLoading && $pendingPages.size === 0 && $scrollTop > maxScroll) {
       scrollTop.set(maxScroll);
       if ($bodyScrollEl && $bodyScrollEl.scrollTop !== maxScroll) {
         $bodyScrollEl.scrollTop = maxScroll;
@@ -463,7 +468,7 @@
     if (!$bodyScrollEl) return;
     focusedColumnId = $visibleColumns[index] ?? null;
     $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
-      frozenLayout, STICKY_COLUMNS_WIDTH, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
+      frozenLayout, stickyWidth, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
   };
 
@@ -580,8 +585,13 @@
   data-frozen-max-pan={frozenViewport.maxPan} data-frozen-reserve={frozenViewport.reserve}>
   <div class="table-meta">
     <div class="table-meta-left">
-      <strong>{$totalFilteredRows.toLocaleString()}</strong>
-      <span>of {$totalRows.toLocaleString()} rows</span>
+      {#if $queryCountKnown}
+        <strong>{$totalFilteredRows.toLocaleString()}</strong>
+        <span>of {$totalRows.toLocaleString()} rows</span>
+      {:else}
+        <strong>{$queryError ? 'Result unavailable' : 'Loading rows…'}</strong>
+        <span>· {$totalRows.toLocaleString()} source rows</span>
+      {/if}
       {#if frozenViewport.overflow}
         <span class="meta-dot">·</span>
         <span class="frozen-overflow-hint" title="The frozen data columns are wider than the available space. Scroll horizontally or focus a column to reveal them; annotation columns stay fixed.">Wide frozen columns · scroll horizontally</span>
@@ -591,9 +601,15 @@
         <span><strong>{$selectedCount}</strong> selected</span>
       {/if}
     </div>
-    <span class="table-meta-right">Flagged {$filteredFlaggedCount.toLocaleString()}</span>
+    <span class="table-meta-right">Flagged {$queryCountKnown ? $filteredFlaggedCount.toLocaleString() : '—'}</span>
   </div>
-  {#if effectiveTotalRows === 0 && $pendingPages.size === 0}
+  {#if $queryError && $queryCountKnown}
+    <div class="query-page-error" role="alert">
+      <span>Some rows could not be loaded. {$queryError.message}</span>
+      <button type="button" on:click={() => dispatch('retry')}>Retry</button>
+    </div>
+  {/if}
+  {#if $queryCountKnown && !$queryError && effectiveTotalRows === 0 && $pendingPages.size === 0}
     <div class="empty-rows">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
         <circle cx="11" cy="11" r="7" />
@@ -632,7 +648,11 @@
           </div>
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
-          <div class="header-cell sticky sticky-memo" class:frozenDataEdge={frozenLayout.offsets.size === 0}>Note</div>
+          <div class="header-cell sticky sticky-memo note-heading" class:frozenDataEdge={frozenLayout.offsets.size === 0}>
+            <span>Note</span>
+            <ColumnResizeHandle label="Note" width={noteColumnWidth} minWidth={MIN_MEMO_WIDTH} maxWidth={MAX_MEMO_WIDTH}
+              tabIndex={0} on:resize={(event) => dispatch('noteWidth', event.detail)} />
+          </div>
           {#each renderedColumns as column (column.id)}
             <div
               class="header-cell column-heading" role="group"
@@ -683,6 +703,17 @@
           {/each}
         </div>
       </div>
+      {#if !$queryCountKnown}
+        <div class="table-query-state" role={$queryError ? 'alert' : 'status'} aria-live="polite">
+          {#if $queryError}
+            <p>Could not load rows.</p>
+            <span>{$queryError.message}</span>
+            <button type="button" on:click={() => dispatch('retry')}>Retry</button>
+          {:else}
+            <p>Loading rows…</p>
+          {/if}
+        </div>
+      {/if}
       <div
         class="virtual-viewport"
         id="project-table-viewport"
@@ -763,3 +794,12 @@
       }} />
   {/key}
 {/if}
+
+<style>
+  .table-query-state { position: absolute; inset: 38px 0 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; background: var(--surface); text-align: center; }
+  .table-query-state p { margin: 0; color: var(--fg); font-size: 13px; }
+  .table-query-state span { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+  .query-page-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; color: var(--fg); background: var(--surface-weak); border: 1px solid var(--border); font-size: 11px; }
+  .query-page-error span { min-width: 0; overflow-wrap: anywhere; }
+  .query-page-error button, .table-query-state button { flex-shrink: 0; padding: 4px 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 11px; }
+</style>
