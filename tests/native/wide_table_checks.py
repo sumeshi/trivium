@@ -81,6 +81,8 @@ def verify_wide_table(web, data, root: Path, evidence: Path, report: dict) -> No
 
         web.script("document.querySelector('.data-header [aria-label=\"Select visible rows\"]').focus();")
         _keys(web, "\ue004", 1)
+        assert web.script("return document.activeElement.getAttribute('aria-label');") == "Resize column Note"
+        _keys(web, "\ue004", 1)
         _keys(web, "\ue004", 59)
         wait_for(lambda: web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
             lambda value: value == columns[names[59]], "all middle-header Tab inputs finish before an independent wheel gesture")
@@ -92,6 +94,8 @@ def verify_wide_table(web, data, root: Path, evidence: Path, report: dict) -> No
         wait_for(lambda: web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),
             lambda value: value == columns[names[60]], "Tab resumes at the logical column after a horizontal wheel")
         web.script("document.querySelector('.data-header [aria-label=\"Select visible rows\"]').focus();")
+        _keys(web, "\ue004", 1)
+        assert web.script("return document.activeElement.getAttribute('aria-label');") == "Resize column Note"
         _keys(web, "\ue004", 1)
         _keys(web, "\ue004", 119)
         wait_for(lambda: web.script("return document.activeElement.closest('[data-column-id]')?.dataset.columnId;"),

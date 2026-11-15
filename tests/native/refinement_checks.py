@@ -162,4 +162,5 @@ def verify_refinements(web, data, root: Path, evidence: Path, report: dict) -> N
     _checkboxes(web, checks)
     _bookmarked_rows(web, data, evidence, checks)
     verify_grouping(web, data, root, evidence, checks)
+    report.setdefault("boundary_expected_errors", []).extend(checks.pop("boundary_expected_errors", []))
     report["refinements"] = checks
