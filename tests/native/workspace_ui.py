@@ -607,15 +607,14 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     assert clauses[0]["value"] == r"\S", clauses
     values = [clause["value"] for clause in clauses[1:]]
     assert all("." in value and len(value.split(".")[-1].removesuffix("Z")) == 9 for value in values), values
-    while True:
-        count = web.script("return document.querySelectorAll('.condition-row').length;")
-        if not count:
-            break
-        web.named("Remove condition", ".condition-editor")
-        wait_for(lambda: web.script("return document.querySelectorAll('.condition-row').length;"), lambda value: value == count - 1, "remove gesture condition")
     web.close_drawer()
-    web.applied(condition=None)
+    web.named("Clear all filters")
+    web.applied(search="", searchColumns=[], flagFilter="all", bookmarkedOnly=False, condition=None)
     web.results(data["total"])
+    web.drawer("Conditions")
+    empty_editor = web.script("return {rows:document.querySelectorAll('.condition-row').length,groups:document.querySelectorAll('select[aria-label=\"Combine conditions\"]').length};")
+    assert empty_editor == {"rows": 0, "groups": 1}, empty_editor
+    web.close_drawer()
     report["timeline_gestures"] = {"native_wheel": wheel_supported, "native_nonzero_wheel_events": len(events) if wheel_supported else None,
                                    "zoom_and_pan": True, "native_pointer_drag": True, "exact_nanosecond_range_values": values}
 
