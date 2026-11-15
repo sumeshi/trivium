@@ -24,6 +24,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
   let writable = true;
   let disposed = false;
   let watching = false;
+  let suspended = false;
   const subscriptions: Array<() => void> = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   let viewportRevision = 0;
@@ -73,17 +74,18 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
       scrollLeft: viewport.scrollLeft, writable,
     };
   };
-  const flushPersist = async (projectId: string | null, notifyOnError = true) => {
+  const flushPersist = async (projectId: string | null, notifyOnError = true, strict = false) => {
     if (disposed || !projectId || !writable || !options.isReady() || projectId !== get(workspace.currentProjectId)) return;
     const state = buildViewState();
     try { await saveWorkspaceView(options.backend, projectId, state); }
     catch (error) {
       console.error("[view] failed to save view state:", error);
       if (notifyOnError) notify("Failed to save view settings. Evidence and annotations are unchanged.");
+      if (strict) throw error;
     }
   };
   const schedulePersist = () => {
-    if (disposed || !writable || !options.isReady()) return;
+    if (disposed || suspended || !writable || !options.isReady()) return;
     cancelScheduled();
     timer = setTimeout(() => { timer = null; void flushPersist(get(workspace.currentProjectId)); }, 250);
   };
@@ -150,7 +152,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     if (state) return saved;
     if (status === "missing") {
       const legacy = loadProjectView(projectId, detail.columns);
-      if (legacy) {
+      if (legacy && !suspended) {
         void saveWorkspaceView(options.backend, projectId, savedViewToViewState(legacy))
           .catch((error) => {
             console.error("[view] failed to migrate legacy view state:", error);
@@ -167,5 +169,10 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     cancelScheduled();
     for (const unsubscribe of subscriptions) unsubscribe();
   });
-  return { buildViewState, snapshotSession, flushPersist, schedulePersist, watch, cancelScheduled, loadSavedView };
+  const suspendPersistence = (value: boolean) => {
+    suspended = value;
+    if (value) cancelScheduled();
+  };
+  return { buildViewState, snapshotSession, flushPersist, schedulePersist, watch, cancelScheduled,
+    suspendPersistence, loadSavedView };
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorMessage } from "../../errors";
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { createLatestRequest } from "../../latestRequest";
   import type { Backend } from "../../backend";
   import type { Histogram, HistogramBucket } from "../../types";
@@ -154,6 +154,16 @@
     dragEnd = index;
     event.preventDefault();
   };
+
+  const pauseGesture = () => {
+    dragging = false;
+    dragStart = dragEnd = null;
+  };
+
+  onMount(() => {
+    window.addEventListener('trivium-pause-gestures', pauseGesture);
+    return () => window.removeEventListener('trivium-pause-gestures', pauseGesture);
+  });
 
   const endDrag = () => {
     if (!dragging) {

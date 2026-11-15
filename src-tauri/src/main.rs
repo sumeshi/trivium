@@ -24,9 +24,18 @@ fn main() {
     let (context, native_window) =
         native_test::prepare(context).expect("invalid Windows native automation configuration");
     tauri::Builder::new()
+        .manage(CloseState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if !window.state::<CloseState>().approved() {
+                    api.prevent_close();
+                    request_app_close(window.app_handle());
+                }
+            }
+        })
         .setup(move |app| {
             #[cfg(all(target_os = "windows", debug_assertions))]
             automation_phase("setup-start");
@@ -76,10 +85,21 @@ fn main() {
             load_preset,
             validate_condition_values,
             load_view_state,
-            save_view_state
+            save_view_state,
+            finish_app_close,
+            cancel_app_close,
+            app_close_requested
         ])
-        .run(context)
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if !app.state::<CloseState>().approved() {
+                    api.prevent_exit();
+                    request_app_close(app);
+                }
+            }
+        });
 }
 
 // Fixed phase names only; no case paths, values or environment contents.

@@ -5,6 +5,10 @@ use std::{
 };
 
 fn receive<T: std::fmt::Debug>(receiver: &mut Receiver<Result<T, String>>) -> Result<T, String> {
+    receive_value(receiver)
+}
+
+fn receive_value<T>(receiver: &mut Receiver<T>) -> T {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Ok(value) = receiver.try_recv() {
@@ -13,6 +17,117 @@ fn receive<T: std::fmt::Debug>(receiver: &mut Receiver<Result<T, String>>) -> Re
         assert!(Instant::now() < deadline, "storage result did not arrive");
         thread::sleep(Duration::from_millis(1));
     }
+}
+
+#[test]
+fn sealing_drains_running_and_queued_work_without_accepting_more() {
+    let pool = StorageWorker::new(1, 8).unwrap();
+    let case = Uuid::new_v4();
+    let (started, running) = mpsc::channel();
+    let (release, gate) = mpsc::channel();
+    let mut first = pool
+        .submit(case, move || {
+            started.send(()).unwrap();
+            gate.recv().unwrap();
+            Ok(1)
+        })
+        .unwrap();
+    running.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut next = pool.submit(case, || Ok(2)).unwrap();
+    let mut drained = pool.seal_and_drain().unwrap();
+    assert!(drained.try_recv().is_err());
+    assert!(pool.submit(case, || Ok(3)).unwrap_err().contains("closing"));
+    release.send(()).unwrap();
+    assert_eq!(receive(&mut first).unwrap(), 1);
+    assert_eq!(receive(&mut next).unwrap(), 2);
+    assert!(receive_value(&mut drained).result.is_ok());
+}
+
+#[test]
+fn failed_write_is_reported_even_when_its_reply_was_dropped() {
+    let pool = StorageWorker::new(1, 8).unwrap();
+    drop(
+        pool.submit::<(), _>(Uuid::new_v4(), || {
+            Err(AppError::Message("disk failed".into()))
+        })
+        .unwrap(),
+    );
+    let mut drained = pool.seal_and_drain().unwrap();
+    let failure = receive_value(&mut drained);
+    assert!(failure.result.unwrap_err().contains("disk failed"));
+    pool.resume(Some(failure.failure_sequence));
+    let mut next = pool.submit(Uuid::new_v4(), || Ok(7)).unwrap();
+    assert_eq!(receive(&mut next).unwrap(), 7);
+    let mut drained = pool.seal_and_drain().unwrap();
+    assert!(receive_value(&mut drained).result.is_ok());
+}
+
+#[test]
+fn read_errors_do_not_poison_the_save_failure_ledger() {
+    let pool = StorageWorker::new(1, 8).unwrap();
+    let mut read = pool
+        .submit_inner::<(), _>(Uuid::new_v4(), false, || {
+            Err(AppError::Message("read failed".into()))
+        })
+        .unwrap();
+    assert!(receive(&mut read).is_err());
+    let mut drained = pool.seal_and_drain().unwrap();
+    assert!(receive_value(&mut drained).result.is_ok());
+}
+
+#[test]
+fn acknowledging_one_close_attempt_never_clears_a_later_failure() {
+    let pool = StorageWorker::new(1, 8).unwrap();
+    let mut first = pool
+        .submit::<(), _>(Uuid::new_v4(), || Err(AppError::Message("first".into())))
+        .unwrap();
+    assert!(receive(&mut first).is_err());
+    let mut drained = pool.seal_and_drain().unwrap();
+    let observed = receive_value(&mut drained);
+    pool.resume(None);
+    let mut next = pool
+        .submit::<(), _>(Uuid::new_v4(), || Err(AppError::Message("later".into())))
+        .unwrap();
+    assert!(receive(&mut next).is_err());
+    // A reply can arrive just before the worker records completion. The drain
+    // barrier includes that completion, not merely the received reply.
+    let mut latest = pool.seal_and_drain().unwrap();
+    let latest = receive_value(&mut latest);
+    assert!(latest.failure_sequence > observed.failure_sequence);
+    pool.resume(Some(observed.failure_sequence));
+    let mut drained = pool.seal_and_drain().unwrap();
+    assert!(receive_value(&mut drained)
+        .result
+        .unwrap_err()
+        .contains("later"));
+}
+
+#[test]
+fn cancelling_a_drain_retains_failures_from_still_running_work() {
+    let pool = StorageWorker::new(1, 8).unwrap();
+    let (started, running) = mpsc::channel();
+    let (release, gate) = mpsc::channel();
+    let mut write = pool
+        .submit::<(), _>(Uuid::new_v4(), move || {
+            started.send(()).unwrap();
+            gate.recv().unwrap();
+            Err(AppError::Message("late failure".into()))
+        })
+        .unwrap();
+    running.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut drained = pool.seal_and_drain().unwrap();
+    pool.resume(None);
+    assert!(receive_value(&mut drained)
+        .result
+        .unwrap_err()
+        .contains("cancelled"));
+    release.send(()).unwrap();
+    assert!(receive(&mut write).is_err());
+    let mut drained = pool.seal_and_drain().unwrap();
+    assert!(receive_value(&mut drained)
+        .result
+        .unwrap_err()
+        .contains("late failure"));
 }
 
 #[test]

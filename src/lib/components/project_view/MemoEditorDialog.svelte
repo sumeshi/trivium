@@ -19,6 +19,17 @@
   const memoComposition = createCompositionGuard();
   const tagComposition = createCompositionGuard();
 
+  export function hasUnsavedChanges(): boolean {
+    const editor = get(memoEditor);
+    if (!editor || memoSaving) return false;
+    return memoDraft !== (editor.row.memo ?? '') || bookmarkDraft !== (editor.row.bookmarked ?? false)
+      || tagDraft.trim().length > 0 || JSON.stringify(tagList) !== JSON.stringify(editor.row.tags ?? []);
+  }
+
+  export function focusDraft(): void {
+    textareaEl?.focus();
+  }
+
   const closeMemoEditor = () => {
     memoEditor.set(null);
     memoDraft = '';

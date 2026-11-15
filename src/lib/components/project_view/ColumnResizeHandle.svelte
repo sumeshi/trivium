@@ -15,6 +15,7 @@
     window.removeEventListener('mouseup', finish);
     window.removeEventListener('keydown', cancel);
     window.removeEventListener('blur', finish);
+    window.removeEventListener('trivium-pause-gestures', finish);
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     start = null;
@@ -48,6 +49,7 @@
     window.addEventListener('mouseup', finish);
     window.addEventListener('keydown', cancel);
     window.addEventListener('blur', finish);
+    window.addEventListener('trivium-pause-gestures', finish);
   };
   const keydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && start) {

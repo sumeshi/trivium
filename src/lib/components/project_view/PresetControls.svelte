@@ -5,6 +5,7 @@
   import { createEventDispatcher, onDestroy } from 'svelte';
   import { applyPresetAndSaveColumns, changedPresetLayout } from '../../presetView';
   import { presetFileName } from '../../presetFileName';
+  import { acceptSave } from '../../saveDrain';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
@@ -45,23 +46,25 @@
     clearMessages();
     busy = true;
     try {
-      const destination = await save({
-        filters: [{ name: 'Trivium preset', extensions: ['json'] }],
-        defaultPath: presetFileName(sourceName),
+      await acceptSave(async () => {
+        const destination = await save({
+          filters: [{ name: 'Trivium preset', extensions: ['json'] }],
+          defaultPath: presetFileName(sourceName),
+        });
+        if (!destination || !isCurrent()) {
+          return;
+        }
+        const fileName = destination.split(/[\\/]/).pop() ?? '';
+        // The native Save dialog confirms replacing an existing destination.
+        await service.savePreset({
+          projectId,
+          name: fileName.replace(/\.json$/i, '') || null,
+          ...snapshot,
+          destination,
+          allowOverwrite: true,
+        });
+        if (isCurrent()) notice = 'Preset saved.';
       });
-      if (!destination || !isCurrent()) {
-        return;
-      }
-      const fileName = destination.split(/[\\/]/).pop() ?? '';
-      // The native Save dialog confirms replacing an existing destination.
-      await service.savePreset({
-        projectId,
-        name: fileName.replace(/\.json$/i, '') || null,
-        ...snapshot,
-        destination,
-        allowOverwrite: true,
-      });
-      if (isCurrent()) notice = 'Preset saved.';
     } catch (err) {
       console.error(err);
       if (isCurrent()) error = errorMessage(err, 'Failed to save preset.');
@@ -80,29 +83,31 @@
     busy = true;
     let applied = false;
     try {
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: 'Trivium preset', extensions: ['json'] }],
+      await acceptSave(async () => {
+        const selected = await open({
+          multiple: false,
+          filters: [{ name: 'Trivium preset', extensions: ['json'] }],
+        });
+        if (!selected || !isCurrent()) {
+          return;
+        }
+        const source = Array.isArray(selected) ? selected[0] : selected;
+        const preset = await service.loadPreset({
+          projectId,
+          source,
+        });
+        if (!isCurrent()) return;
+        if (preset.unknown_columns.length > 0) {
+          warning = `Unknown columns: ${preset.unknown_columns.join(', ')}`;
+          return;
+        }
+        applied = true;
+        await applyPresetAndSaveColumns(workspace, preset, {
+          setColumnWidths: widths => dispatch('columnWidths', widths),
+          saveHiddenColumns: hiddenColumns => service.setHiddenColumns({ projectId, hiddenColumns }),
+        });
+        if (isCurrent()) notice = 'Preset applied.';
       });
-      if (!selected || !isCurrent()) {
-        return;
-      }
-      const source = Array.isArray(selected) ? selected[0] : selected;
-      const preset = await service.loadPreset({
-        projectId,
-        source,
-      });
-      if (!isCurrent()) return;
-      if (preset.unknown_columns.length > 0) {
-        warning = `Unknown columns: ${preset.unknown_columns.join(', ')}`;
-        return;
-      }
-      applied = true;
-      await applyPresetAndSaveColumns(workspace, preset, {
-        setColumnWidths: widths => dispatch('columnWidths', widths),
-        saveHiddenColumns: hiddenColumns => service.setHiddenColumns({ projectId, hiddenColumns }),
-      });
-      if (isCurrent()) notice = 'Preset applied.';
     } catch (err) {
       console.error(err);
       if (isCurrent()) error = applied

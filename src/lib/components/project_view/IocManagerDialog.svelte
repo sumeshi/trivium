@@ -8,6 +8,7 @@
   import { applyBulkAnnotation } from '../../bulkAnnotation';
   import { iocBulkArgs, iocQueryError, isIocFlag, requireIocFlag, requireIocQuery } from '../../iocRules';
   import { SEARCH_SYNTAX_HELP } from '../../searchHelp';
+  import { acceptSave } from '../../saveDrain';
   import { normalizeIocFlag } from './state';
   import type { IocEntry } from '../../types';
   import { useWorkspace } from '../../workspaceContext';
@@ -105,14 +106,16 @@
   const importRules = async () => {
     const active = begin(); if (!active) return;
     try {
-      const selected = await open({ multiple: false, filters: [{ name: 'IOC rules', extensions: ['csv'] }] });
-      if (!selected || !active.isCurrent()) return;
-      const entries = await active.api.importIocs({ projectId: active.owner, path: Array.isArray(selected) ? selected[0] : selected });
-      if (!active.isCurrent()) return;
-      iocDraft.set(entries.map(entry => ({ ...entry, id: crypto.randomUUID() })));
-      busy = false; await close();
-      if (!alive || get(currentProjectId) !== active.owner) return;
-      dispatch('notify', { message: 'IOC rules imported.', tone: 'success' }); dispatch('refresh');
+      await acceptSave(async () => {
+        const selected = await open({ multiple: false, filters: [{ name: 'IOC rules', extensions: ['csv'] }] });
+        if (!selected || !active.isCurrent()) return;
+        const entries = await active.api.importIocs({ projectId: active.owner, path: Array.isArray(selected) ? selected[0] : selected });
+        if (!active.isCurrent()) return;
+        iocDraft.set(entries.map(entry => ({ ...entry, id: crypto.randomUUID() })));
+        busy = false; await close();
+        if (!alive || get(currentProjectId) !== active.owner) return;
+        dispatch('notify', { message: 'IOC rules imported.', tone: 'success' }); dispatch('refresh');
+      });
     } catch (err) { if (active.isCurrent()) error = errorMessage(err, 'Could not import rules.'); }
     finally { if (active.isCurrent()) busy = false; }
   };
@@ -122,11 +125,13 @@
       const entries = entriesToSave();
       if (!entries.length) throw new Error('No rules to export.');
       const stem = ($projectDetail?.project.meta.source_file_name ?? $projectDetail?.project.meta.name ?? 'rules').replace(/\.[^.]+$/, '');
-      const destination = await save({ filters: [{ name: 'IOC rules', extensions: ['csv'] }], defaultPath: `trivium-iocs-${stem}.csv` });
-      if (!destination || !active.isCurrent()) return;
-      // The native Save dialog confirms replacement before returning a path.
-      await active.api.exportIocs({ projectId: active.owner, destination, entries, allowOverwrite: true });
-      if (active.isCurrent()) notice = 'Rules exported.';
+      await acceptSave(async () => {
+        const destination = await save({ filters: [{ name: 'IOC rules', extensions: ['csv'] }], defaultPath: `trivium-iocs-${stem}.csv` });
+        if (!destination || !active.isCurrent()) return;
+        // The native Save dialog confirms replacement before returning a path.
+        await active.api.exportIocs({ projectId: active.owner, destination, entries, allowOverwrite: true });
+        if (active.isCurrent()) notice = 'Rules exported.';
+      });
     } catch (err) { if (active.isCurrent()) error = errorMessage(err, 'Could not export rules.'); }
     finally { if (active.isCurrent()) busy = false; }
   };

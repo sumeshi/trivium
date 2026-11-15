@@ -39,11 +39,13 @@
   import { createWorkspaceView } from "../workspaceView";
   import { createWorkspaceAnnotationObserver } from "../workspaceAnnotations";
   import { formatIsoCell } from "../dateDisplay";
+  import { acceptSave } from '../saveDrain';
 
   export let projectDetail: LoadProjectResponse;
   export let backend: Backend;
   export let session: WorkspaceSession | null = null;
   export let onSessionSnapshot: (session: WorkspaceSession) => void = () => {};
+  export let closing = false;
 
   const workspace = createWorkspaceController();
   provideWorkspace(workspace);
@@ -91,6 +93,9 @@
   let exportSnapshot: ExportSnapshot | null = null;
 
   let destroyed = false;
+  let closePrepared = false;
+  let persistenceWasClosing = false;
+  let memoDialog: MemoEditorDialog | undefined;
 
   const queries = createWorkspaceQuery(workspace, {
     backend,
@@ -221,6 +226,42 @@
     return view.snapshotSession();
   }
 
+  export function unsavedDraftMessage(): string | null {
+    return memoDialog?.hasUnsavedChanges() ? 'Save or cancel your note before closing.' : null;
+  }
+
+  export function focusUnsavedDraft(): void {
+    memoDialog?.focusDraft();
+  }
+
+  export function pauseForClose(): void {
+    // Finish an accepted resize and abandon an unfinished timeline selection
+    // before taking the final view snapshot. Inert alone cannot stop window listeners.
+    window.dispatchEvent(new Event('trivium-pause-gestures'));
+    view.suspendPersistence(true);
+    queries.cancel();
+    annotationObserver.suspend();
+    if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
+    annotationRefreshTimer = null;
+    if (filterTimeout) clearTimeout(filterTimeout);
+    filterTimeout = null;
+  }
+
+  export async function flushForClose(): Promise<void> {
+    const message = unsavedDraftMessage();
+    if (message) throw new Error(message);
+    closePrepared = true;
+    view.suspendPersistence(true);
+    if (pendingFilters?.resetScroll) pendingScrollRow = 0;
+    await flushPersist(projectDetail.project.meta.id, false, true);
+  }
+
+  export function resumeAfterClose(): void {
+    closePrepared = false;
+    view.suspendPersistence(false);
+    schedulePersist();
+  }
+
   const navigation = createWorkspaceNavigation(workspace, queries, {
     backend,
     isReady: () => initialized && !destroyed,
@@ -232,6 +273,7 @@
   const jumpToEnteredRow = () => navigation.jumpToEnteredRow(gotoRowInput);
 
   const queueAnnotationRefresh = () => {
+    if (closing) return;
     if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
     annotationRefreshTimer = setTimeout(() => {
       annotationRefreshTimer = null;
@@ -251,6 +293,18 @@
       }
     },
   });
+
+  $: if (closing !== persistenceWasClosing) {
+    persistenceWasClosing = closing;
+    view.suspendPersistence(closing);
+    if (closing) {
+      pauseForClose();
+    } else if (initialized) {
+      resumeAfterClose();
+      annotationObserver.initialize();
+      void forceRefreshFilteredRows(false);
+    }
+  }
 
   const applyProjectDetail = async (detail: LoadProjectResponse, _resetScroll: boolean) => {
     // Any response from the previous project or screen must be ignored from here on.
@@ -387,7 +441,7 @@
     applyingProjectId = null;
     // Always request first page to ensure flags and memos are reflected after project reload
     // Wait for the first page to load before marking as ready to render
-    requestPage(0, true).catch((error) => {
+    if (!closing) requestPage(0, true).catch((error) => {
       console.error('[debug] applyProjectDetail first page failed:', error);
     });
   };
@@ -491,6 +545,7 @@
     if (filterTimeout) {
       clearTimeout(filterTimeout);
     }
+    if (closing) return;
     filterTimeout = setTimeout(() => {
       const scheduled = pendingFilters;
       pendingFilters = null;
@@ -514,13 +569,13 @@
   };
 
   const forceRefreshFilteredRows = (resetScroll: boolean) => {
-    if (!projectDetail) return Promise.resolve();
+    if (!projectDetail || closing) return Promise.resolve();
     const restoredRow = pendingFilters?.restoredRow;
     if (filterTimeout) {
       clearTimeout(filterTimeout);
       filterTimeout = null;
-      pendingFilters = null;
     }
+    pendingFilters = null;
     return applyFilters(
       {
         search: normalizeSearchText($search),
@@ -611,6 +666,7 @@
   };
 
   const runExport = async (options: ExportOptions) => {
+    if (closing) return;
     const snapshot = exportSnapshot;
     exportSnapshot = null;
     if (!snapshot || !projectDetail) {
@@ -622,22 +678,24 @@
       && projectId === get(currentProjectId);
     isExporting.set(true);
     try {
-      const suggested = exportFileName(projectDetail.project.meta.name);
-      const selected = await save({
-        filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
-        defaultPath: suggested
-      });
-      if (!selected || !isCurrent()) {
-        return;
-      }
-      const args = buildExportArgs(projectId, snapshot, options, selected);
-      // The native Save dialog confirms replacement before returning a path.
-      const result = await backend.exportProject({ ...args, allowOverwrite: true });
-      if (!isCurrent()) return;
-      const warnings = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
-      dispatch('notify', {
-        message: `Exported ${result.rows} rows to CSV.${warnings}`,
-        tone: 'success'
+      await acceptSave(async () => {
+        const suggested = exportFileName(projectDetail.project.meta.name);
+        const selected = await save({
+          filters: [{ name: 'CSV with flags', extensions: ['csv'] }],
+          defaultPath: suggested
+        });
+        if (!selected || !isCurrent()) {
+          return;
+        }
+        const args = buildExportArgs(projectId, snapshot, options, selected);
+        // The native Save dialog confirms replacement before returning a path.
+        const result = await backend.exportProject({ ...args, allowOverwrite: true });
+        if (!isCurrent()) return;
+        const warnings = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
+        dispatch('notify', {
+          message: `Exported ${result.rows} rows to CSV.${warnings}`,
+          tone: 'success'
+        });
       });
     } catch (error) {
       if (!isCurrent()) return;
@@ -675,6 +733,7 @@
 
   onMount(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      if (closing) return;
       const target = event.target as HTMLElement | null;
       const typing = !!target && (
         target.tagName === 'INPUT' ||
@@ -717,7 +776,7 @@
     const snapshot = snapshotSession();
     if (snapshot) onSessionSnapshot(snapshot);
     // Snapshot the owned stores before disposal releases the row cache.
-    void flushPersist(projectDetail.project.meta.id, false);
+    if (!closePrepared) void flushPersist(projectDetail.project.meta.id, false);
     destroyed = true;
     workspace.dispose();
     view.cancelScheduled();
@@ -799,7 +858,7 @@
 
   <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
 
-  <MemoEditorDialog on:notify={(e) => dispatch('notify', e.detail)} />
+  <MemoEditorDialog bind:this={memoDialog} on:notify={(e) => dispatch('notify', e.detail)} />
 
   <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')}
     on:annotationsChanged={queueAnnotationRefresh} />

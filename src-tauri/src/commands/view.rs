@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::commands::storage_worker::run_storage;
+use crate::commands::storage_worker::{run_storage, run_storage_read};
 use crate::state::AppState;
 use trivium_engine::ops;
 use trivium_engine::ops::view::{SaveViewStatePayload, ViewStateLoad, ViewStateRequest};
@@ -12,7 +12,7 @@ pub async fn load_view_state(
     request: ViewStateRequest,
 ) -> Result<ViewStateLoad, String> {
     let store = state.projects.clone();
-    run_storage(request.project_id, move || {
+    run_storage_read(request.project_id, move || {
         ops::view::load_view_state(&store, request)
     })
     .await

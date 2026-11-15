@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+  import type { UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import { createBackend } from './lib/backend';
   import type { Backend } from './lib/backend';
@@ -8,6 +11,9 @@
   import ProjectView from './lib/components/ProjectView.svelte';
   import ProjectTabs from './lib/components/app/ProjectTabs.svelte';
   import Toast from './lib/components/app/Toast.svelte';
+  import CloseDialog from './lib/components/app/CloseDialog.svelte';
+  import { createAppClose, installAppCloseListener } from './lib/appClose';
+  import { acceptSave, flushAllSaves, reopenSaveAdmission, sealSaveAdmission } from './lib/saveDrain';
   import { showToast } from './lib/utils/toast';
   import { initTheme } from './lib/theme';
   import { initTableTextSize } from './lib/tableTextSize';
@@ -16,18 +22,46 @@
   import { copyWorkspaceSession } from './lib/workspaceSession';
   import type { WorkspaceSession } from './lib/workspaceSession';
 
+  // The window's native close guard is installed before any editable UI opens.
+  sealSaveAdmission();
   const backend: Backend = createBackend();
   const projectController = createProjectController(backend);
   const projectState = projectController.state;
   const canCreateProject = projectController.canCreateProject;
 
   onDestroy(() => {
+    appDestroyed = true;
+    stopCloseListener?.();
+    close.dispose();
     projectController.dispose();
     sessions.clear();
   });
 
   let sidebarOpen = true;
   let activeView: ProjectView | null = null;
+  let closeReady = false;
+  let closeListenerError = '';
+  let stopCloseListener: UnlistenFn | undefined;
+  let startingCloseListener = false;
+  let appDestroyed = false;
+  let initializedApp = false;
+  const close = createAppClose({
+    unsavedDraft: () => activeView?.unsavedDraftMessage() ?? null,
+    notifyDraft: (message) => {
+      showToast(message, 'error');
+      void tick().then(() => activeView?.focusUnsavedDraft());
+    },
+    freeze: () => activeView?.pauseForClose(),
+    drain: flushAllSaves,
+    flushActive: async () => { await tick(); await activeView?.flushForClose(); },
+    seal: sealSaveAdmission,
+    finish: () => invoke<void>('finish_app_close'),
+    cancelNative: (acknowledgeFailures) => invoke<void>('cancel_app_close', { acknowledgeFailures }),
+    resume: reopenSaveAdmission,
+  });
+  const closeState = close.state;
+  $: closing = $closeState.phase !== 'idle';
+  const editsBlocked = () => !closeReady || close.isBlocked();
   const sessions = new Map<string, WorkspaceSession>();
   $: openProjects = $projectState.openProjectIds.flatMap((id) => {
     const project = $projectState.projects.find((item) => item.meta.id === id);
@@ -53,6 +87,7 @@
   };
 
   const pickCsv = async () => {
+    if (editsBlocked()) return;
     try {
       const selected = await open({
         multiple: false,
@@ -65,7 +100,7 @@
           }
         ]
       });
-      if (!selected || Array.isArray(selected)) {
+      if (!selected || Array.isArray(selected) || editsBlocked()) {
         return;
       }
       projectController.setPendingFile(selected);
@@ -76,11 +111,15 @@
   };
 
   const createProject = async () => {
+    if (editsBlocked()) return;
     try {
-      captureActive();
-      const summary = await projectController.createProject();
-      showToast(`Imported ${summary.meta.name}`);
-      sidebarOpen = false;
+      await acceptSave(async () => {
+        captureActive();
+        const summary = await projectController.createProject();
+        showToast(`Imported ${summary.meta.name}`);
+        sidebarOpen = false;
+        await tick();
+      });
     } catch (error) {
       console.error(error);
       // Tauri commands return Result<_, String>, so the line/record reason is
@@ -90,15 +129,19 @@
   };
 
   const deleteProject = async (projectId: string) => {
+    if (editsBlocked()) return;
     const confirmed = window.confirm('Delete this project? The imported copy will be removed.');
     if (!confirmed) {
       return;
     }
     try {
-      captureActive();
-      await projectController.deleteProject(projectId);
-      sessions.delete(projectId);
-      showToast('Project deleted.');
+      await acceptSave(async () => {
+        captureActive();
+        await projectController.deleteProject(projectId);
+        sessions.delete(projectId);
+        showToast('Project deleted.');
+        await tick();
+      });
     } catch (error) {
       console.error(error);
       showToast('Failed to delete project.', 'error');
@@ -106,9 +149,13 @@
   };
 
   const handleRefreshRequest = async () => {
+    if (editsBlocked()) return;
     try {
-      captureActive();
-      await projectController.refreshSelected();
+      await acceptSave(async () => {
+        captureActive();
+        await projectController.refreshSelected();
+        await tick();
+      });
     } catch (error) {
       console.error(error);
       showToast('Failed to refresh project data.', 'error');
@@ -116,10 +163,14 @@
   };
 
   const handleSelectProject = async (projectId: string) => {
+    if (editsBlocked()) return;
     try {
-      captureActive();
-      await projectController.selectProject(projectId);
-      sidebarOpen = false;
+      await acceptSave(async () => {
+        captureActive();
+        await projectController.selectProject(projectId);
+        sidebarOpen = false;
+        await tick();
+      });
     } catch (error) {
       console.error(error);
       showToast('Failed to load project data.', 'error');
@@ -127,10 +178,14 @@
   };
 
   const handleCloseTab = async (projectId: string) => {
-    captureActive();
-    sessions.delete(projectId);
+    if (editsBlocked()) return;
     try {
-      await projectController.closeProject(projectId);
+      await acceptSave(async () => {
+        captureActive();
+        sessions.delete(projectId);
+        await projectController.closeProject(projectId);
+        await tick();
+      });
     } catch (error) {
       showToast(errorMessage(error, 'Failed to load the next project.'), 'error');
     }
@@ -140,18 +195,42 @@
     projectController.updateSummary(event.detail);
   };
 
-  onMount(() => {
-    void initTableTextSize();
-    void initTheme();
-    void projectController.loadProjects().catch((error) => {
-      console.error(error);
-      showToast('Failed to load projects.', 'error');
-    });
-  });
+  const startCloseListener = async () => {
+    if (startingCloseListener || appDestroyed) return;
+    startingCloseListener = true;
+    closeListenerError = '';
+    try {
+      stopCloseListener = await installAppCloseListener({
+        listen: (request) => listen('trivium:close-requested', request),
+        pending: () => invoke<boolean>('app_close_requested'),
+        current: () => !appDestroyed,
+        request: () => { void close.request(); },
+        enable: () => {
+          closeReady = true;
+          reopenSaveAdmission();
+          if (!initializedApp) {
+            initializedApp = true;
+            void initTableTextSize();
+            void initTheme();
+            void projectController.loadProjects().catch((error) => {
+              console.error(error); showToast('Failed to load projects.', 'error');
+            });
+          }
+        },
+      });
+    } catch (error) {
+      stopCloseListener?.(); stopCloseListener = undefined;
+      closeListenerError = errorMessage(error, 'Could not initialize safe closing.');
+    } finally {
+      startingCloseListener = false;
+    }
+  };
+
+  onMount(() => { void startCloseListener(); });
 </script>
 
-<div class="app-shell">
-  <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
+<div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle'}>
+  <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId} on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)} />
 
   {#if sidebarOpen}
@@ -194,6 +273,7 @@
           <ProjectView
             bind:this={activeView}
             {backend}
+            closing={closing || !closeReady}
             projectDetail={$projectState.projectDetail}
             session={sessions.get($projectState.selectedProjectId) ?? null}
             onSessionSnapshot={retainSession}
@@ -213,4 +293,10 @@
   </main>
 </div>
 
+  {#if closeListenerError || $closeState.phase !== 'idle'}
+    <CloseDialog phase={closeListenerError ? 'failed' : $closeState.phase}
+      message={closeListenerError || $closeState.message} startupError={Boolean(closeListenerError)}
+      on:keepOpen={() => void close.keepOpen()}
+      on:retry={() => { if (closeListenerError) void startCloseListener(); else void close.retry(); }} />
+  {/if}
   <Toast />

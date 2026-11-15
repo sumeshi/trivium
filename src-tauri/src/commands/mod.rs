@@ -1,5 +1,6 @@
 mod bulk;
 mod cell;
+mod close;
 mod cross;
 mod diff;
 mod dupes;
@@ -29,6 +30,8 @@ mod view;
 // rejected by rustc (rust-lang/rust#52234).
 pub use bulk::{bulk_preview, bulk_undo, bulk_update};
 pub use cell::get_cell;
+pub use close::{app_close_requested, cancel_app_close, finish_app_close};
+pub(crate) use close::{request_app_close, CloseState};
 pub use cross::search_projects;
 pub use diff::diff_projects;
 pub use dupes::duplicate_rows;

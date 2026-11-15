@@ -6,6 +6,7 @@ import type { LoadProjectResponse, LoadViewStateResult, ViewState } from "./type
 import { createWorkspaceController } from "./workspaceController.ts";
 import { createWorkspaceView } from "./workspaceView.ts";
 import { normalizeRow } from "./components/project_view/state.ts";
+import { flushAllSaves } from "./saveDrain.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -186,5 +187,46 @@ test("tab teardown preserves the last live viewport ahead of its published store
   signature = "different query";
   workspace.scrollTop.set(0);
   assert.equal(view.snapshotSession()?.view.logicalRow, 0, "a new result scope must not reuse the previous viewport");
+  workspace.dispose();
+});
+
+test("pausing closes the debounce window while a strict close flush saves the latest view", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { workspace, view, writes } = setup({}, "close-paused-view");
+  view.watch();
+  workspace.search.set("queued before close");
+  view.suspendPersistence(true);
+  workspace.search.set("latest accepted state");
+  t.mock.timers.tick(1000);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(writes.length, 0);
+  await view.flushPersist("close-paused-view", false, true);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].search, "latest accepted state");
+  workspace.search.set("after keep open");
+  view.suspendPersistence(false);
+  view.schedulePersist();
+  t.mock.timers.tick(250);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].search, "after keep open");
+  workspace.dispose();
+});
+
+test("a strict close flush exposes storage failure and retries a newly captured view", async () => {
+  let fail = true;
+  const writes: ViewState[] = [];
+  const { workspace, view, notices } = setup({ saveViewState: async ({ state }) => {
+    if (fail) throw new Error("view storage failed");
+    writes.push(state);
+  } }, "strict-close-view");
+  workspace.search.set("unsaved");
+  await assert.rejects(view.flushPersist("strict-close-view", false, true), /view storage failed/);
+  await flushAllSaves().catch(() => {});
+  assert.deepEqual(notices, [], "the close coordinator owns the persistent failure dialog");
+  fail = false;
+  workspace.search.set("reviewed latest");
+  await view.flushPersist("strict-close-view", false, true);
+  assert.deepEqual(writes.map(state => state.search), ["reviewed latest"]);
   workspace.dispose();
 });
