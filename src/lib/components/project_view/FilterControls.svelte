@@ -58,6 +58,18 @@
   let groupingPanel: GroupingPanel | undefined;
   let groupColumns: string[] = [];
   let groupGranularities: Record<string, GroupGranularity> = {};
+  // Keep small analysis inputs while inactive panels are unmounted. Results
+  // and request scopes remain owned by the mounted panel.
+  let timelineColumn = "";
+  let timeColumn = "";
+  let statsColumn = "";
+  let statsHistogramMode: "auto" | "datetime" = "auto";
+  let analysisProjectId = "";
+  $: if (($projectDetail?.project.meta.id ?? "") !== analysisProjectId) {
+    analysisProjectId = $projectDetail?.project.meta.id ?? "";
+    timelineColumn = timeColumn = statsColumn = "";
+    statsHistogramMode = "auto";
+  }
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
   $: categoryLabel = groups.find((group) => group.id === activeGroup)?.label ?? 'Tools';
@@ -396,13 +408,13 @@
         {#if activeTool === 'conditions'}
           <ConditionEditor />
         {:else if activeTool === 'stats'}
-          <StatsPanel open={true} />
+          <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}
           <GroupingPanel bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities} />
         {:else if activeTool === 'time'}
-          <TimePanel open={true} />
+          <TimePanel open={true} bind:column={timeColumn} />
         {:else if activeTool === 'timeline'}
-          <TimelinePanel open={true} />
+          <TimelinePanel open={true} bind:column={timelineColumn} />
         {:else if activeTool === 'presets'}
           <PresetControls {columnWidths} {defaultColumnWidths} on:columnWidths={(event) => dispatch('columnWidths', event.detail)} />
         {:else if activeTool === 'bulk'}

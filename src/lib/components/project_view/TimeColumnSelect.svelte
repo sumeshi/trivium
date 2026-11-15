@@ -13,7 +13,7 @@
   $: projectId = $projectDetail?.project.meta.id ?? "";
   $: if (projectId !== previousProject || (column && !columns.includes(column))) {
     previousProject = projectId;
-    column = initialDatetimeColumn(columns, kinds);
+    column = initialDatetimeColumn(columns, kinds, column);
   }
 </script>
 

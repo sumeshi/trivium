@@ -34,7 +34,7 @@
   const FLAG_STACK = ["unflagged", "safe", "suspicious", "critical"] as const;
   const DETAIL_FLAGS = ["safe", "suspicious", "critical", "unflagged"] as const;
 
-  let column = "";
+  export let column = "";
   let zoomRange: { min: string; max: string } | null = null;
   let histogram: Histogram | null = null;
   let autoFocus = true;

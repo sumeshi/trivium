@@ -17,3 +17,11 @@ test("absence of inferred dates requires an explicit choice instead of analyzing
   assert.deepEqual(datetimeAnalysisColumns(["MixedTime"]), { inferred: [], other: ["MixedTime"] });
   assert.deepEqual(datetimeAnalysisColumns([]), { inferred: [], other: [] });
 });
+
+
+test("reopening a datetime panel retains an explicit mixed column and rejects stale columns", () => {
+  const columns = ["MixedTime", "KnownTime"];
+  const kinds = { MixedTime: "string", KnownTime: "datetime" };
+  assert.equal(initialDatetimeColumn(columns, kinds, "MixedTime"), "MixedTime");
+  assert.equal(initialDatetimeColumn(columns, kinds, "removed"), "KnownTime");
+});

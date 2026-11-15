@@ -15,7 +15,7 @@
 
   export let open = false;
 
-  let column = "";
+  export let column = "";
   let gapSeconds: number | null = 60;
   let sessionMinutes: number | null = 30;
   let burstWindowSeconds: number | null = 60;

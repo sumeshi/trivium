@@ -15,10 +15,10 @@
 
   export let open = false;
 
-  let column = "";
+  export let column = "";
   let rareMax: number | null = 1;
   let bucketCount: number | null = 50;
-  let histogramMode: "auto" | "datetime" = "auto";
+  export let histogramMode: "auto" | "datetime" = "auto";
   let modeColumn = "";
   let stats: ColumnStats | null = null;
   let histogram: Histogram | null = null;
@@ -43,9 +43,10 @@
   $: scope = { projectId, annotationRevision };
   $: kind = stats?.column === column ? stats.kind : $projectDetail?.column_kinds?.[column] ?? "";
   $: numeric = histogramMode === "datetime" || kind === "int" || kind === "float" || kind === "datetime";
-  $: if (`${projectId}:${column}` !== modeColumn) {
-    modeColumn = `${projectId}:${column}`;
-    histogramMode = "auto";
+  $: {
+    const nextModeColumn = `${projectId}:${column}`;
+    if (modeColumn && nextModeColumn !== modeColumn) histogramMode = "auto";
+    modeColumn = nextModeColumn;
   }
   $: if (projectId && !columns.includes(column)) {
     column = columns[0] ?? "";

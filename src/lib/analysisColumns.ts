@@ -6,6 +6,7 @@ export function datetimeAnalysisColumns(columns: readonly string[], kinds: Recor
   };
 }
 
-export function initialDatetimeColumn(columns: readonly string[], kinds: Record<string, string> = {}): string {
+export function initialDatetimeColumn(columns: readonly string[], kinds: Record<string, string> = {}, preferred = ""): string {
+  if (columns.includes(preferred)) return preferred;
   return columns.find((column) => kinds[column] === "datetime") ?? "";
 }
