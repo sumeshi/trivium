@@ -56,7 +56,9 @@ pub struct QuerySpec {
 impl QuerySpec {
     /// Validate options before a metadata/cache fast path can omit resolution.
     pub fn validate_filter(&self) -> Result<(), AppError> {
-        FlagFilterMask::parse(self.flag_filter.as_deref()).map(|_| ())
+        FlagFilterMask::parse(self.flag_filter.as_deref())?;
+        crate::search::validate_search_query(self.search.as_deref().unwrap_or_default())
+            .map_err(AppError::Message)
     }
 }
 

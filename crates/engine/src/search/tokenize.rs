@@ -8,7 +8,10 @@ pub enum SearchToken {
 }
 
 fn is_operand_token(tok: &SearchToken) -> bool {
-    matches!(tok, SearchToken::Term { .. } | SearchToken::QuotedTerm { .. })
+    matches!(
+        tok,
+        SearchToken::Term { .. } | SearchToken::QuotedTerm { .. }
+    )
 }
 
 pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
@@ -21,8 +24,15 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
         match ch {
             '"' => {
                 if in_quotes {
-                    if !buf.trim().is_empty() {
-                        raw_parts.push((buf.trim().to_string(), true));
+                    if !buf.is_empty() {
+                        // A quoted space is a literal predicate, not an empty
+                        // query. Keep the existing trim for ordinary phrases.
+                        let text = if buf.trim().is_empty() {
+                            &buf
+                        } else {
+                            buf.trim()
+                        };
+                        raw_parts.push((text.to_string(), true));
                     }
                     buf.clear();
                     in_quotes = false;
@@ -61,8 +71,13 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
             _ => buf.push(ch),
         }
     }
-    if !buf.trim().is_empty() {
-        raw_parts.push((buf.trim().to_string(), in_quotes));
+    if !buf.trim().is_empty() || (in_quotes && !buf.is_empty()) {
+        let text = if in_quotes && buf.trim().is_empty() {
+            &buf
+        } else {
+            buf.trim()
+        };
+        raw_parts.push((text.to_string(), in_quotes));
     }
 
     // `col:"phrase with space"` arrives as two parts; merge them before scoping.

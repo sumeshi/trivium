@@ -88,6 +88,7 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
         if query.is_empty() {
             continue;
         }
+        validate_ioc_query(&query, &format!("IOC CSV line {line}"))?;
         entries.push(IocEntry { flag, tag, query });
     }
     Ok(entries)
@@ -154,12 +155,18 @@ fn validate_ioc_flag(value: &str, location: &str) -> Result<String> {
     Ok(flag)
 }
 
+fn validate_ioc_query(query: &str, location: &str) -> Result<()> {
+    crate::search::validate_search_query(query)
+        .map_err(|error| anyhow::anyhow!("{location}: {error}"))
+}
+
 pub fn prepare_ioc_entries(entries: Vec<IocEntry>) -> Result<Vec<IocEntry>> {
     let mut prepared = Vec::with_capacity(entries.len());
     for (index, entry) in entries.into_iter().enumerate() {
         let flag = validate_ioc_flag(&entry.flag, &format!("IOC rule {}", index + 1))?;
         let query = entry.query.trim().to_string();
         if !query.is_empty() {
+            validate_ioc_query(&query, &format!("IOC rule {}", index + 1))?;
             prepared.push(IocEntry {
                 flag,
                 tag: entry.tag.trim().to_string(),

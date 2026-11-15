@@ -6,7 +6,7 @@
   import { createLatestRequest } from '../../latestRequest';
   import { isTabKey } from '../../keyboard';
   import { applyBulkAnnotation } from '../../bulkAnnotation';
-  import { iocBulkArgs, isIocFlag, requireIocFlag } from '../../iocRules';
+  import { iocBulkArgs, iocQueryError, isIocFlag, requireIocFlag, requireIocQuery } from '../../iocRules';
   import { SEARCH_SYNTAX_HELP } from '../../searchHelp';
   import { normalizeIocFlag } from './state';
   import type { IocEntry } from '../../types';
@@ -86,6 +86,7 @@
   const entriesToSave = (): IocEntry[] => $iocDraft.map((entry, index) => {
     const tag = entry.tag.trim(), query = entry.query.trim();
     if (tag && !query) throw new Error(`Enter a query for rule ${index + 1}.`);
+    if (query) requireIocQuery(query, `IOC rule ${index + 1}`);
     return { flag: requireIocFlag(entry.flag, `IOC rule ${index + 1}`), tag, query };
   }).filter(entry => entry.query.length > 0);
 
@@ -182,12 +183,18 @@
           <p class="ioc-empty">No rules</p>
         {:else}
           {#each $iocDraft as entry, index (entry.id || `entry-${index}`)}
+            {@const queryError = entry.query.trim() ? iocQueryError(entry.query) : null}
             <div class="ioc-row">
               <FlagSelect value={entry.flag} disabled={busy} on:change={event => update(index, 'flag', event.detail)} />
               <input value={entry.tag} placeholder="Tag" aria-label={`Rule tag ${index + 1}`} on:input={event => update(index, 'tag', event.currentTarget.value)} disabled={busy} />
-              <input value={entry.query} placeholder="Search query" aria-label={`Rule query ${index + 1}`} title={SEARCH_SYNTAX_HELP} on:input={event => update(index, 'query', event.currentTarget.value)} disabled={busy} />
+              <div class="ioc-query">
+                <input value={entry.query} placeholder="Search query" aria-label={`Rule query ${index + 1}`} title={SEARCH_SYNTAX_HELP}
+                  aria-invalid={queryError ? 'true' : undefined} aria-describedby={queryError ? `ioc-query-error-${index}` : undefined}
+                  on:input={event => update(index, 'query', event.currentTarget.value)} disabled={busy} />
+                {#if queryError}<small id={`ioc-query-error-${index}`} class="ioc-query-error" role="alert">{queryError}</small>{/if}
+              </div>
               <div class="ioc-rule-actions">
-                <button type="button" class="ghost" title="Set this flag and add this tag to matching rows" on:click={() => void runRule(entry)} disabled={busy || !entry.query.trim() || !isIocFlag(entry.flag)}>Apply</button>
+                <button type="button" class="ghost" title={queryError ?? 'Set this flag and add this tag to matching rows'} on:click={() => void runRule(entry)} disabled={busy || !entry.query.trim() || Boolean(queryError) || !isIocFlag(entry.flag)}>Apply</button>
                 <button type="button" class="ghost danger ioc-icon" aria-label={`Delete rule ${index + 1}`} title="Delete rule" on:click={() => remove(index)} disabled={busy}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
                 </button>
@@ -212,6 +219,8 @@
   .ioc-table { min-height: 0; overflow: auto; }
   .ioc-row, .ioc-header { grid-template-columns: 122px minmax(80px, 130px) minmax(160px, 1fr) auto; gap: 6px; }
   .ioc-row input { min-width: 0; }
+  .ioc-query { display: grid; gap: 3px; min-width: 0; }
+  .ioc-query-error { color: var(--danger); font-size: 10px; }
   .ioc-rule-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
   .ioc-rule-actions button { padding: 3px 6px; }
   .ioc-icon { display: inline-flex; align-items: center; justify-content: center; padding: 4px; }
@@ -220,7 +229,7 @@
   @media (max-width: 700px) {
     .ioc-header { display: none; }
     .ioc-row { grid-template-columns: 122px minmax(90px, 1fr); }
-    .ioc-row > input[aria-label^="Rule query"] { grid-column: 1 / -1; }
+    .ioc-query { grid-column: 1 / -1; }
     .ioc-rule-actions { grid-column: 1 / -1; }
     .ioc-save-hint { display: none; }
     .ioc-footer { flex-wrap: wrap; }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { iocBulkArgs, isIocFlag, normalizeIocFlag, requireIocFlag } from "./iocRules.ts";
+import { iocBulkArgs, iocQueryError, isIocFlag, normalizeIocFlag, requireIocFlag, requireIocQuery } from "./iocRules.ts";
 import { applyBulkAnnotation } from "./bulkAnnotation.ts";
 import type { BulkAnnotateArgs } from "./backend";
 import type { BulkCount } from "./types";
@@ -68,4 +68,19 @@ test("IOC save/apply validation reports the invalid value without defaulting to 
     assert.throws(() => iocBulkArgs("case", { ...rule, flag }), /invalid flag/);
   }
   assert.equal(iocBulkArgs("case", { ...rule, flag: "✗" }).flag, "critical");
+});
+
+test("IOC queries need an effective term and complete OR operands before Save or Apply", () => {
+  for (const query of ['|', '||', '""', '| || ""', 'host:', '-host:', 'host:""', '|powershell', 'powershell|']) {
+    assert.ok(iocQueryError(query), query);
+    assert.throws(() => requireIocQuery(query, "IOC rule 2"), /IOC rule 2:/, query);
+    assert.throws(() => iocBulkArgs("case", { ...rule, query }), /search|query|column/i, query);
+  }
+});
+
+test("IOC input feedback preserves existing quoted literals, OR shorthand and normal words", () => {
+  for (const query of ['powershell', 'host:ws01|ws02', 'one|||two', 'one | -two', 'command:"powershell -enc"', '"|"', '"||"', '" "', 'host:" "', '"-"', '"host:"', '-', 'OR', 'one "" two', 'host:"""value', '"unterminated phrase']) {
+    assert.equal(iocQueryError(query), null, query);
+    assert.equal(requireIocQuery(` ${query} `), query);
+  }
 });

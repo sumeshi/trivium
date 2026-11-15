@@ -7,7 +7,9 @@ use crate::condition::{search_tokens_to_node, Node, PreparedNode};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
-use crate::search::{is_tag_scope, prepare_tag_tokens, tokenize_search_query, SearchToken};
+use crate::search::{
+    is_tag_scope, prepare_tag_tokens, tokenize_search_query, validate_search_tokens, SearchToken,
+};
 use crate::value_utils::{anyvalue_to_search_string, record_stringified_column_count};
 
 /// Fixed evaluation batch. Cancellation is checked at each boundary.
@@ -38,6 +40,9 @@ impl PreparedQuery {
         let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
         let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
         let tokens = search_raw.map(tokenize_search_query).unwrap_or_default();
+        if search_raw.is_some() {
+            validate_search_tokens(&tokens).map_err(AppError::Message)?;
+        }
         let reads_tags = tokens.iter().any(|token| match token {
             SearchToken::Term {
                 col: Some(column), ..
