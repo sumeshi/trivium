@@ -248,7 +248,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     const body = get(workspace.bodyScrollEl);
     const row = resetScroll ? 0 : restoredRow ?? logicalRowAt(
       body?.isConnected ? body.scrollTop : get(workspace.scrollTop),
-      get(workspace.totalFilteredRows), get(workspace.viewportHeight));
+      get(workspace.totalFilteredRows), get(workspace.viewportHeight), get(workspace.rowHeight));
     initialize(normalized);
     workspace.appliedResultLoading.set(true);
     options.scopeChanged(row);

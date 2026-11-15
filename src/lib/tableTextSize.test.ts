@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { get } from "svelte/store";
 import {
   adjustTableTextSize, DEFAULT_TABLE_TEXT_SIZE, initTableTextSize,
-  parseTableTextSize, setTableTextSize, TABLE_TEXT_SIZES, tableTextSize,
+  parseTableTextSize, setTableTextSize, TABLE_TEXT_SIZES, tableTextSize, tableRowHeight,
 } from "./tableTextSize.ts";
 
 type NativeInvoke = (command: string, args: unknown, options?: { headers?: Record<string, string> }) => Promise<unknown>;
@@ -62,9 +62,11 @@ test("size changes are bounded, resettable and restored from the saved preferenc
     assert.equal(get(tableTextSize), 145);
     assert.equal(values.get("trivium:table-text-size"), "145");
     for (let i = 0; i < 10; i++) adjustTableTextSize(-1);
-    assert.equal(get(tableTextSize), 85);
+    assert.equal(get(tableTextSize), 55);
+    assert.equal(get(tableRowHeight), 18);
     await setTableTextSize(DEFAULT_TABLE_TEXT_SIZE);
     assert.equal(get(tableTextSize), 100);
+    assert.equal(get(tableRowHeight), 32);
     values.set("trivium:table-text-size", "130");
     await initTableTextSize();
     assert.equal(get(tableTextSize), 130);

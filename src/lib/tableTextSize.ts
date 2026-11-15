@@ -1,9 +1,10 @@
-import { get, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
+import { ROW_HEIGHT } from "./virtualScroll.ts";
 
-export const TABLE_TEXT_SIZES = [85, 100, 115, 130, 145] as const;
+export const TABLE_TEXT_SIZES = [55, 70, 85, 100, 115, 130, 145] as const;
 export type TableTextSize = (typeof TABLE_TEXT_SIZES)[number];
 export const DEFAULT_TABLE_TEXT_SIZE = 100;
 const STORAGE_KEY = "trivium:table-text-size";
@@ -11,6 +12,7 @@ const STORAGE_FILE = "table-text-size.json";
 
 const current = writable<TableTextSize>(DEFAULT_TABLE_TEXT_SIZE);
 export const tableTextSize = { subscribe: current.subscribe };
+export const tableRowHeight = derived(current, (size) => Math.round(ROW_HEIGHT * size / 100));
 let revision = 0;
 let pendingWrite = Promise.resolve();
 

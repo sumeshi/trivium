@@ -25,6 +25,7 @@
   import {
     logicalRowAt,
     maxScrollTop,
+    scrollTopForRow,
     virtualWindow
   } from '../../virtualScroll';
   import { useWorkspace } from "../../workspaceContext";
@@ -32,10 +33,11 @@
   const {
     rowsCache, pendingPages, totalRows, totalFilteredRows, filteredFlaggedCount, visibleColumns,
     orderedColumns, columnOrder, columnFormats,
-    sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft,
+    sortKey, sortDirection, bodyScrollEl, headerScrollEl, viewportHeight, scrollTop, scrollLeft, rowHeight,
     tableWidth, projectDetail, columnLabels, toggleSort,
     positionToRowIndex, largePages, selectedRowIds, selectedCount,
     selectVisibleRows, rememberOffset, searchColumns, hiddenColumns, frozenThrough, backend,
+    appliedResultLoading, appliedFilters, viewGeneration,
   } = useWorkspace();
 
   const _toggleSort = toggleSort;
@@ -77,6 +79,42 @@
   let pendingScrollEl: HTMLDivElement | null = null;
   let draggedColumnId: string | null = null;
   let dropTarget: { id: string; after: boolean } | null = null;
+  let previousRowHeight = get(rowHeight);
+  let resizingRows = false;
+  let rowResizeRevision = 0;
+
+  const resizeRows = async (height: number) => {
+    const previous = previousRowHeight;
+    previousRowHeight = height;
+    const ticket = ++rowResizeRevision;
+    const body = get(bodyScrollEl), total = get(totalFilteredRows);
+    if (!body?.isConnected || !total || get(appliedResultLoading)) {
+      resizingRows = false;
+      return;
+    }
+    const anchor = logicalRowAt(body.scrollTop, total, body.clientHeight, previous);
+    const top = get(scrollTop), filters = get(appliedFilters), generation = get(viewGeneration);
+    const sorting = [get(sortKey), get(sortDirection)].join(':');
+    syncHeader(body.scrollLeft);
+    if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    pendingScrollEl = null;
+    resizingRows = true;
+    try {
+      // Commit the new spacer height before moving inside its scroll range.
+      await tick();
+      if (ticket !== rowResizeRevision || body !== get(bodyScrollEl) || !body.isConnected
+        || total !== get(totalFilteredRows) || get(appliedResultLoading)
+        || filters !== get(appliedFilters) || generation !== get(viewGeneration)
+        || sorting !== [get(sortKey), get(sortDirection)].join(':') || top !== get(scrollTop)) return;
+      body.scrollTop = scrollTopForRow(anchor, total, body.clientHeight, height);
+      scrollTop.set(body.scrollTop);
+      rememberOffset(logicalRowAt(body.scrollTop, total, body.clientHeight, height));
+    } finally {
+      if (ticket === rowResizeRevision) resizingRows = false;
+    }
+  };
+  $: if ($rowHeight !== previousRowHeight) void resizeRows($rowHeight);
 
   const resolveColumnWidth = (column: string, widths: ReadonlyMap<string, number>) => {
     const width = widths.get(column) ?? MIN_DATA_WIDTH;
@@ -138,15 +176,16 @@
     $scrollTop,
     effectiveTotalRows,
     $viewportHeight,
-    BUFFER
+    BUFFER,
+    $rowHeight,
   );
   $: startIndex = windowGeometry.start;
   $: endIndex = windowGeometry.end;
   $: offsetY = windowGeometry.innerTop;
   $: totalHeight = windowGeometry.height;
-  $: ensureRangeLoaded(startIndex, endIndex);
-  $: if (!pendingScrollEl && $bodyScrollEl
-    && maxScrollTop(effectiveTotalRows, $viewportHeight) >= $scrollTop
+  $: if (!resizingRows) ensureRangeLoaded(startIndex, endIndex);
+  $: if (!resizingRows && !pendingScrollEl && $bodyScrollEl
+    && maxScrollTop(effectiveTotalRows, $viewportHeight, $rowHeight) >= $scrollTop
     && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
     $bodyScrollEl.scrollTop = $scrollTop;
   }
@@ -157,8 +196,8 @@
   // while the saved scroll offset is being restored, and clamping then would
   // lose it.
   $: {
-    const maxScroll = maxScrollTop(effectiveTotalRows, $viewportHeight);
-    if ($pendingPages.size === 0 && $scrollTop > maxScroll) {
+    const maxScroll = maxScrollTop(effectiveTotalRows, $viewportHeight, $rowHeight);
+    if (!resizingRows && $pendingPages.size === 0 && $scrollTop > maxScroll) {
       scrollTop.set(maxScroll);
       if ($bodyScrollEl && $bodyScrollEl.scrollTop !== maxScroll) {
         $bodyScrollEl.scrollTop = maxScroll;
@@ -382,13 +421,13 @@
     if (!target?.isConnected) return;
     const top = target.scrollTop;
     if ($scrollTop !== top) scrollTop.set(top);
-    rememberOffset(logicalRowAt(top, $totalFilteredRows, $viewportHeight));
+    rememberOffset(logicalRowAt(top, $totalFilteredRows, $viewportHeight, $rowHeight));
     syncHeader(target.scrollLeft);
   };
 
   const queueScroll = (target: HTMLDivElement) => {
     if (!target.isConnected) return;
-    rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight));
+    rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight, $rowHeight));
     mirrorHorizontal(target.scrollLeft);
     if (pendingScrollEl !== target) pendingScrollEl = target;
     if (scrollFrame === null) scrollFrame = requestAnimationFrame(flushScroll);
@@ -503,7 +542,7 @@
   onMount(() => {
     const unsubscribeScroll = scrollTop.subscribe((top) => {
       const target = $bodyScrollEl;
-      if (!target?.isConnected || top > maxScrollTop($totalFilteredRows, $viewportHeight)
+      if (resizingRows || !target?.isConnected || top > maxScrollTop($totalFilteredRows, $viewportHeight, $rowHeight)
         || Math.abs(target.scrollTop - top) <= 1) return;
       // The queued frame reads this live element, so a Go/history move wins
       // without discarding a horizontal gesture awaiting the same frame.
@@ -521,6 +560,7 @@
     }
 
     return () => {
+      rowResizeRevision += 1;
       unsubscribeScroll();
       if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
       scrollFrame = null;
@@ -563,7 +603,7 @@
       <span>Adjust the search or clear a filter to see more rows.</span>
     </div>
   {:else}
-    <div class="table-scroll" style={`--table-text-scale: ${$tableTextSize / 100};`}>
+    <div class="table-scroll" style={`--table-text-scale: ${$tableTextSize / 100}; --row-height: ${$rowHeight}px;`}>
       <div
         class="table-header-scroll"
         role="presentation"

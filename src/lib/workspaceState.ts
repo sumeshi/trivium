@@ -7,6 +7,7 @@ import type { SelectionScope } from "./selection";
 import { displayColumnOrder } from "./columnLayoutActions.ts";
 import type { ColumnDisplayFormat } from "./dateDisplay";
 import { logicalRowAt } from "./virtualScroll.ts";
+import { tableRowHeight } from "./tableTextSize.ts";
 import { showToast } from "./utils/toast.ts";
 import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
 import { PAGE_SIZE, normalizeFlag, applyAnnotationEntry } from "./components/project_view/state.ts";
@@ -95,7 +96,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   /** Annotated rows inside the current result set. */
   const filteredFlaggedCount = writable(0);
   const pages = createWorkspacePages(() => Math.floor(logicalRowAt(
-    get(scrollTop), get(totalFilteredRows), get(viewportHeight),
+    get(scrollTop), get(totalFilteredRows), get(viewportHeight), get(tableRowHeight),
   ) / PAGE_SIZE));
   const {
     rowsCache, positionToRowIndex, pendingPages, loadedPages, largePages, updateCachedRow,
@@ -401,6 +402,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   };
 
   return {
+    rowHeight: tableRowHeight,
     projectDetail,
     backend,
     columnLabels,

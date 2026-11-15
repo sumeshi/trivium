@@ -3,7 +3,7 @@
 <script lang="ts">
   import { beforeUpdate } from 'svelte';
   import type { CachedRow } from './state';
-  import { ROW_HEIGHT, PAGE_SIZE, FLAG_OPTIONS, normalizeFlag } from './state';
+  import { PAGE_SIZE, FLAG_OPTIONS, normalizeFlag } from './state';
   import type { TableColumn } from '../../columnWindow';
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
@@ -89,7 +89,7 @@
   class:alt-row={position % 2 === 1}
   class:loading={!row && !largePage}
   class:bookmarked={row?.bookmarked === true}
-  style={`grid-template-columns: ${gridTemplate}; --row-height: ${ROW_HEIGHT}px;${
+  style={`grid-template-columns: ${gridTemplate};${
     row?.color
       ? ` --row-color: ${displayRowColor(row.color, $theme)};`
       : ''

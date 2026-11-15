@@ -1,4 +1,4 @@
-"""Table-only text sizing leaves navigation, evidence and other UI geometry intact."""
+"""Table text and row density preserve navigation, evidence and surrounding UI."""
 from __future__ import annotations
 
 import csv
@@ -14,6 +14,7 @@ from row_navigation import open_project, wait_for
 
 
 BASE = {"body": 10.5, "header": 9.5, "index": 10, "note": 11, "flag": 10, "tag": 10}
+SIZES = {55, 70, 85, 100, 115, 130, 145}
 
 
 def _fit_failure(percent: int, index: int, control: dict) -> None:
@@ -21,7 +22,7 @@ def _fit_failure(percent: int, index: int, control: dict) -> None:
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
     safe = {"control": "tag" if control["tag"] else "flag", "index": index}
-    if percent in {85, 100, 115, 130, 145}:
+    if percent in SIZES:
         safe["percent"] = percent
     for key in ("width", "height", "contentWidth", "contentHeight", "advanceWidth", "inkWidth", "inkHeight", "fontSize"):
         value = control.get(key)
@@ -48,15 +49,14 @@ def _size(web, action: str | None, expected: int) -> None:
         """)
         return last_controls
 
-    desired = {"text": f"{expected}%", "disabled": [expected == 85, expected == 100, expected == 145]}
+    desired = {"text": f"{expected}%", "disabled": [expected == min(SIZES), expected == 100, expected == max(SIZES)]}
     try:
         wait_for(read_controls, lambda controls: controls == desired, "table text controls update", timeout=8)
     except AssertionError as error:
         if os.environ.get("GITHUB_ACTIONS") == "true" and str(error).startswith("Timed out: table text controls update;"):
-            sizes = {85, 100, 115, 130, 145}
-            observed = next((size for size in sizes if (last_controls or {}).get("text") == f"{size}%"), None)
+            observed = next((size for size in SIZES if (last_controls or {}).get("text") == f"{size}%"), None)
             safe = {"action": action if action in {"Decrease", "Increase", "Reset"} else "read",
-                    "expected": expected if expected in sizes else None, "observed": observed}
+                    "expected": expected if expected in SIZES else None, "observed": observed}
             disabled = (last_controls or {}).get("disabled")
             if isinstance(disabled, list) and len(disabled) == 3 and all(type(value) is bool for value in disabled):
                 safe["disabled"] = disabled
@@ -99,10 +99,11 @@ def _sample(web, percent: int) -> dict:
     """)
     for kind, base in BASE.items():
         assert abs(sample["fonts"][kind] - base * percent / 100) <= .03, (percent, kind, sample)
-    assert all(height == 32 for height in sample["rowHeights"]) and sample["headerHeight"] == 38, sample
+    row_height = round(32 * percent / 100)
+    assert all(height == row_height for height in sample["rowHeights"]) and sample["headerHeight"] == 38, sample
     assert sample["sevenDigitWidth"] <= sample["indexContentWidth"] + .1, sample
     failed = [(index, control) for index, control in enumerate(sample["controls"])
-              if not control["fits"] or control["height"] != (20 if control["tag"] else 21)]
+              if not control["fits"] or control["height"] != min(20 if control["tag"] else 21, row_height - 4)]
     if failed:
         _fit_failure(percent, *failed[0])
     assert not failed, sample
@@ -110,15 +111,41 @@ def _sample(web, percent: int) -> dict:
 
 
 def _change(web, total: int, action: str, percent: int, baseline: dict) -> dict:
-    before, query, start = web.state(), web.query(), len(web.trace())
+    before, query = web.state(), web.query()
+    cached = {position for entry in web.trace() if entry["name"] == "query_project_rows" and "result" in entry
+              and all(entry["request"].get(key) == value for key, value in query.items())
+              for position in range(entry["request"]["offset"], entry["request"]["offset"] + entry["result"]["rows"])}
+    start = web.script("return performance.now();")
     _size(web, action, percent)
     after, sample = web.results(total), _sample(web, percent)
     assert sample["grid"] == baseline["grid"] and sample["outside"] == baseline["outside"], sample
     assert web.query() == query and after["selectionTotal"] == before["selectionTotal"]
-    assert [row["id"] for row in after["rows"]] == [row["id"] for row in before["rows"]]
-    assert abs(after["scrollTop"] - before["scrollTop"]) <= 1 and after["scrollLeft"] == before["scrollLeft"]
-    assert not [entry for entry in web.trace()[start:] if entry["name"] in {"query_project_rows", "locate_project_row"}], "Text size must not reload or locate data"
-    return {"percent": percent, "scroll_top": after["scrollTop"], "scroll_left": after["scrollLeft"], "fonts": sample["fonts"]}
+    visible = lambda state: [row for row in state["rows"] if row["bottom"] > state["top"] + .5 and row["top"] < state["bottom"] - .5]
+    assert visible(after)[0]["id"] == visible(before)[0]["id"], (before, after)
+    assert after["scrollLeft"] == before["scrollLeft"]
+    if action == "Decrease":
+        assert len(visible(after)) > len(visible(before)), (before, after)
+    ids = [row["id"] for row in after["rows"]]
+    assert len(ids) == len(set(ids)) and all(right - left == 2 for left, right in zip(ids, ids[1:])), after
+    assert all(abs(right["top"] - left["bottom"]) <= 1 for left, right in zip(after["rows"], after["rows"][1:])), after
+    needed = {row["id"] // 2 - 1 for row in after["rows"]} - cached
+    for entry in web.trace():
+        if entry["started"] < start:
+            continue
+        assert entry["name"] != "locate_project_row", "Density changes must preserve the source-row anchor without a lookup"
+        if entry["name"] == "query_project_rows":
+            assert all(entry["request"].get(key) == value for key, value in query.items()), entry
+            assert needed.intersection(range(entry["request"]["offset"], entry["request"]["offset"] + entry["request"]["limit"])), "Only newly exposed, uncached rows may request another page"
+    return {"percent": percent, "row_height": sample["rowHeights"][0], "rendered_rows": len(ids),
+            "scroll_top": after["scrollTop"], "scroll_left": after["scrollLeft"], "fonts": sample["fonts"]}
+
+
+def _target(web, total: int, source_row: int) -> None:
+    wait_for(web.state, lambda state: state.get("ready") and state["total"] == total
+             and all(row["id"] is not None for row in state["rows"])
+             and any(row["id"] == source_row and row["top"] >= state["top"] - 1 and row["bottom"] <= state["bottom"] + 1
+                     for row in state["rows"]), f"original #{source_row} is visible at the current density")
+    web.results(total)
 
 
 def _dialog(web) -> dict:
@@ -181,12 +208,13 @@ def verify_table_text(app, data, root: Path, evidence: Path, report: dict) -> No
         pane = web.script(pane_script)
         web.close_drawer()
         web.click(web.node('input[aria-label="Select row 2"]'))
-        checks = [_change(web, 300, "Decrease", 85, baseline), _change(web, 300, "Increase", 100, baseline)]
+        checks = [_change(web, 300, "Decrease", percent, baseline) for percent in (85, 70, 55)]
+        checks.extend(_change(web, 300, "Increase", percent, baseline) for percent in (70, 85, 100))
         web.go(300, 300, 2); _settle(web)
         checks.append(_change(web, 300, "Increase", 115, baseline))
-        web.button("Last"); web.result(300, 600, 2); _settle(web)
+        web.button("Last"); _target(web, 300, 600); _settle(web)
         checks.append(_change(web, 300, "Increase", 130, baseline))
-        web.button("First"); web.result(300, 2, 2); _settle(web)
+        web.button("First"); _target(web, 300, 2); _settle(web)
         checks.append(_change(web, 300, "Increase", 145, baseline))
         web.screenshot(evidence / "table-text-largest.png")
         web.drawer("Conditions")
@@ -222,7 +250,7 @@ def verify_table_text(app, data, root: Path, evidence: Path, report: dict) -> No
         _size(web, "Reset", 100); _sample(web, 100)
         wait_for(saved_size, lambda size: size == 100, "reset to 100% is saved in the native preference file")
         assert source.read_bytes() == original
-        report["table_text"] = {"sizes_and_positions": checks, "default_fonts": baseline["fonts"], "row_height": 32,
+        report["table_text"] = {"sizes_and_positions": checks, "default_fonts": baseline["fonts"], "default_row_height": 32,
             "header_height": 38, "seven_digit_row_number_fits": True, "toolbar_sidebar_and_dialog_unchanged": True,
             "annotation_controls_clickable": True, "global_across_tabs": True, "native_file_overrides_stale_cache": True,
             "restored_after_native_restart": 145,

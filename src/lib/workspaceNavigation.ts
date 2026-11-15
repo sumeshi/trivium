@@ -2,7 +2,7 @@ import { get, writable } from "svelte/store";
 import type { Backend } from "./backend";
 import type { WorkspaceController } from "./workspaceController";
 import type { WorkspaceQuery } from "./workspaceQuery";
-import { PAGE_SIZE, ROW_HEIGHT } from "./components/project_view/state.ts";
+import { PAGE_SIZE } from "./components/project_view/state.ts";
 import { clampRow, logicalRowAt, scrollTopForRow } from "./virtualScroll.ts";
 import { errorMessage } from "./errors.ts";
 import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
@@ -28,12 +28,12 @@ export function createWorkspaceNavigation(
   const rowOffset = () => {
     const body = get(workspace.bodyScrollEl);
     return clampRow(logicalRowAt(body?.isConnected ? body.scrollTop : get(workspace.scrollTop),
-      get(workspace.totalFilteredRows), get(workspace.viewportHeight)), get(workspace.totalFilteredRows));
+      get(workspace.totalFilteredRows), get(workspace.viewportHeight), get(workspace.rowHeight)), get(workspace.totalFilteredRows));
   };
 
   const applyScrollOffset = (offset: number, totalOverride?: number) => {
     const total = totalOverride ?? get(workspace.totalFilteredRows);
-    const px = scrollTopForRow(clampRow(offset, total), total, get(workspace.viewportHeight));
+    const px = scrollTopForRow(clampRow(offset, total), total, get(workspace.viewportHeight), get(workspace.rowHeight));
     workspace.scrollTop.set(px);
     const body = get(workspace.bodyScrollEl);
     if (body) body.scrollTop = px;
@@ -46,7 +46,7 @@ export function createWorkspaceNavigation(
     const target = clampRow(position, total);
     options.beforeScroll();
     const top = center
-      ? Math.max(0, target - Math.floor(get(workspace.viewportHeight) / ROW_HEIGHT / 2))
+      ? Math.max(0, target - Math.floor(get(workspace.viewportHeight) / get(workspace.rowHeight) / 2))
       : target;
     applyScrollOffset(top, total);
     workspace.rememberOffset(rowOffset());

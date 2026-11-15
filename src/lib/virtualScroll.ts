@@ -1,7 +1,7 @@
 /**
  * Physical/logical row mapping for the fixed-height virtual table.
  *
- * The rendered row height never changes. Only the scrollable spacer height is
+ * Rows have one shared height at each table text size. The spacer height is
  * capped, so a result with millions of rows does not request a DOM element
  * taller than the browser can represent. All conversions between a physical
  * `scrollTop` and a result-relative logical row live here; other components
@@ -30,18 +30,19 @@ function normalizeViewport(height: number): number {
 }
 
 /** Physical spacer height for a result set. */
-export function physicalHeight(totalRows: number): number {
+export function physicalHeight(totalRows: number, rowHeight = ROW_HEIGHT): number {
   const total = normalizeTotal(totalRows);
-  return Math.min(total * ROW_HEIGHT, MAX_PHYSICAL_HEIGHT);
+  return Math.min(total * rowHeight, MAX_PHYSICAL_HEIGHT);
 }
 
 /** Largest useful `scrollTop` for the current result and viewport. */
 export function maxScrollTop(
   totalRows: number,
-  viewportHeight: number
+  viewportHeight: number,
+  rowHeight = ROW_HEIGHT,
 ): number {
   const viewport = normalizeViewport(viewportHeight);
-  return Math.max(0, physicalHeight(totalRows) - viewport);
+  return Math.max(0, physicalHeight(totalRows, rowHeight) - viewport);
 }
 
 /** Clamps a zero-based result row to the current result set. */
@@ -60,13 +61,14 @@ export function clampRow(row: number, totalRows: number): number {
 export function logicalOffsetAt(
   scrollTop: number,
   totalRows: number,
-  viewportHeight: number
+  viewportHeight: number,
+  rowHeight = ROW_HEIGHT,
 ): number {
   const total = normalizeTotal(totalRows);
-  const physicalMax = maxScrollTop(total, viewportHeight);
+  const physicalMax = maxScrollTop(total, viewportHeight, rowHeight);
   if (physicalMax === 0) return 0;
   const top = Number.isFinite(scrollTop) ? clamp(scrollTop, 0, physicalMax) : 0;
-  const logicalMax = Math.max(0, total * ROW_HEIGHT - normalizeViewport(viewportHeight));
+  const logicalMax = Math.max(0, total * rowHeight - normalizeViewport(viewportHeight));
   if (logicalMax === physicalMax) return top;
   return (top / physicalMax) * logicalMax;
 }
@@ -75,13 +77,14 @@ export function logicalOffsetAt(
 export function logicalRowAt(
   scrollTop: number,
   totalRows: number,
-  viewportHeight: number
+  viewportHeight: number,
+  rowHeight = ROW_HEIGHT,
 ): number {
   const total = normalizeTotal(totalRows);
   if (total === 0) {
     return 0;
   }
-  return clampRow(logicalOffsetAt(scrollTop, total, viewportHeight) / ROW_HEIGHT, total);
+  return clampRow(logicalOffsetAt(scrollTop, total, viewportHeight, rowHeight) / rowHeight, total);
 }
 
 /**
@@ -92,45 +95,47 @@ export function logicalRowAt(
 export function scrollTopForRow(
   rowIndex: number,
   totalRows: number,
-  viewportHeight: number
+  viewportHeight: number,
+  rowHeight = ROW_HEIGHT,
 ): number {
   const total = normalizeTotal(totalRows);
   if (total === 0) {
     return 0;
   }
-  const logicalMax = Math.max(0, total * ROW_HEIGHT - normalizeViewport(viewportHeight));
+  const logicalMax = Math.max(0, total * rowHeight - normalizeViewport(viewportHeight));
   if (logicalMax === 0) return 0;
-  const logicalTop = Math.min(clampRow(rowIndex, total) * ROW_HEIGHT, logicalMax);
-  const physicalMax = maxScrollTop(total, viewportHeight);
+  const logicalTop = Math.min(clampRow(rowIndex, total) * rowHeight, logicalMax);
+  const physicalMax = maxScrollTop(total, viewportHeight, rowHeight);
   return logicalMax === physicalMax ? logicalTop : (logicalTop / logicalMax) * physicalMax;
 }
 
 /**
  * One geometry contract for DOM placement and backend page selection.
  *
- * Rows remain ROW_HEIGHT pixels apart. The absolute inner top compensates for
+ * Rows remain rowHeight pixels apart. The absolute inner top compensates for
  * the difference between physical and logical offsets; the browser itself
  * subtracts physical scrollTop exactly once. The extra end row handles a
- * partially visible row when the viewport height is not a multiple of ROW_HEIGHT.
+ * partially visible row when the viewport height is not a multiple of rowHeight.
  */
 export function virtualWindow(
   scrollTop: number,
   totalRows: number,
   viewportHeight: number,
-  bufferRows = 0
+  bufferRows = 0,
+  rowHeight = ROW_HEIGHT,
 ): { start: number; end: number; innerTop: number; height: number } {
   const total = normalizeTotal(totalRows);
-  const viewport = normalizeViewport(viewportHeight) || ROW_HEIGHT;
+  const viewport = normalizeViewport(viewportHeight) || rowHeight;
   const buffer = Number.isFinite(bufferRows) ? Math.max(0, Math.floor(bufferRows)) : 0;
   const physicalTop = Number.isFinite(scrollTop)
-    ? clamp(scrollTop, 0, maxScrollTop(total, viewport)) : 0;
-  const logicalTop = logicalOffsetAt(physicalTop, total, viewport);
-  const start = Math.max(0, Math.floor(logicalTop / ROW_HEIGHT) - buffer);
-  const end = Math.min(total, Math.ceil((logicalTop + viewport) / ROW_HEIGHT) + buffer);
+    ? clamp(scrollTop, 0, maxScrollTop(total, viewport, rowHeight)) : 0;
+  const logicalTop = logicalOffsetAt(physicalTop, total, viewport, rowHeight);
+  const start = Math.max(0, Math.floor(logicalTop / rowHeight) - buffer);
+  const end = Math.min(total, Math.ceil((logicalTop + viewport) / rowHeight) + buffer);
   return {
     start,
     end,
-    innerTop: physicalTop + start * ROW_HEIGHT - logicalTop,
-    height: physicalHeight(total),
+    innerTop: physicalTop + start * rowHeight - logicalTop,
+    height: physicalHeight(total, rowHeight),
   };
 }

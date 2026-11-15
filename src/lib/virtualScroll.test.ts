@@ -9,16 +9,16 @@ const BUFFER = 8;
 const close = (actual: number, expected: number) =>
   assert.ok(Math.abs(actual - expected) < 0.00001, `${actual} != ${expected}`);
 
-function assertCoverage(top: number, total: number, viewport: number) {
-  const window = virtualWindow(top, total, viewport, BUFFER);
-  const physicalTop = Math.max(0, Math.min(top, maxScrollTop(total, viewport)));
+function assertCoverage(top: number, total: number, viewport: number, rowHeight = ROW_HEIGHT) {
+  const window = virtualWindow(top, total, viewport, BUFFER, rowHeight);
+  const physicalTop = Math.max(0, Math.min(top, maxScrollTop(total, viewport, rowHeight)));
   const positions: number[] = [];
   const bounds: Array<{ top: number; bottom: number }> = [];
   for (let row = window.start; row < window.end; row += 1) {
-    const y = window.innerTop + (row - window.start) * ROW_HEIGHT - physicalTop;
-    if (y < viewport && y + ROW_HEIGHT > 0) {
+    const y = window.innerTop + (row - window.start) * rowHeight - physicalTop;
+    if (y < viewport && y + rowHeight > 0) {
       positions.push(row);
-      bounds.push({ top: y, bottom: y + ROW_HEIGHT });
+      bounds.push({ top: y, bottom: y + rowHeight });
     }
   }
   assert.ok(bounds.length > 0, `empty viewport: ${JSON.stringify(window)}`);
@@ -29,10 +29,26 @@ function assertCoverage(top: number, total: number, viewport: number) {
     assert.equal(positions[index], positions[index - 1] + 1);
     close(bounds[index].top, bounds[index - 1].bottom);
   }
-  assert.ok(window.end - window.start <= Math.ceil(viewport / ROW_HEIGHT) + BUFFER * 2 + 1);
+  assert.ok(window.end - window.start <= Math.ceil(viewport / rowHeight) + BUFFER * 2 + 1);
   assert.ok(window.height <= MAX_PHYSICAL_HEIGHT);
   return window;
 }
+
+test("table density keeps endpoint and middle rows visible with one shared geometry", () => {
+  const viewport = 517;
+  for (const total of [5_199, 2_000_000]) {
+    for (const height of [18, 22, 27, 32, 46]) {
+      const first = assertCoverage(0, total, viewport, height);
+      assert.equal(first.end, Math.ceil(viewport / height) + BUFFER);
+      for (const target of [Math.floor(total / 2), total - 1]) {
+        const top = scrollTopForRow(target, total, viewport, height);
+        const window = assertCoverage(top, total, viewport, height);
+        const y = window.innerTop + (target - window.start) * height - top;
+        assert.ok(y >= -0.00001 && y + height <= viewport + 0.00001);
+      }
+    }
+  }
+});
 
 test("uncompressed offsets remain exact pixel identities", () => {
   for (const total of [1_000, 5_199]) {
