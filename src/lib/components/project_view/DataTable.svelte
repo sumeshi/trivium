@@ -83,6 +83,10 @@
   let pendingScrollEl: HTMLDivElement | null = null;
   let draggedColumnId: string | null = null;
   let dropTarget: { id: string; after: boolean } | null = null;
+  let columnDrag: { pointerId: number; projectId: string; generation: number; columnId: string;
+    startX: number; startY: number; x: number; y: number; element: HTMLElement; active: boolean } | null = null;
+  let columnDragFrame: number | null = null;
+  let suppressSortClick = false;
   let previousRowHeight = get(rowHeight);
   let resizingRows = false;
   let rowResizeRevision = 0;
@@ -210,6 +214,7 @@
     }
   }
   $: projectId = $projectDetail?.project.meta.id ?? '';
+  $: if (columnDrag && (columnDrag.projectId !== projectId || columnDrag.generation !== $viewGeneration)) cancelColumnDrag();
   const headerActivationIdentity = (target: EventTarget | null) => ({
     projectId, rowIndex: null,
     columnId: target instanceof Element ? target.closest<HTMLElement>('[data-column-id]')?.dataset.columnId ?? null : null,
@@ -319,44 +324,119 @@
       event.preventDefault(); event.stopPropagation(); void focusHeaderColumn(columnId);
     } else columnTab(event, index);
   };
-  const dragColumn = (event: DragEvent, columnId: string) => {
-    if (!event.dataTransfer || !projectId) return;
-    columnMenu = null;
-    draggedColumnId = columnId;
-    focusedColumnId = columnId;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('application/x-trivium-column', JSON.stringify({ projectId, columnId }));
-  };
-  const dragOverColumn = (event: DragEvent, columnId: string) => {
-    if (!draggedColumnId || !event.dataTransfer) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    dropTarget = { id: columnId, after: event.clientX >= rect.left + rect.width / 2 };
-  };
-  const scrollDuringDrag = (event: DragEvent) => {
-    const body = get(bodyScrollEl), header = get(headerScrollEl);
-    if (!draggedColumnId || !body || !header) return;
-    const rect = header.getBoundingClientRect();
-    const direction = event.clientX > rect.right - 40 ? 1
-      : event.clientX < rect.left + Math.min(frozenViewport.edge, rect.width - 40) + 20 ? -1 : 0;
-    if (direction) {
-      body.scrollLeft += direction * 60;
-      queueScroll(body);
+  const endColumnDrag = () => {
+    const gesture = columnDrag;
+    columnDrag = null;
+    draggedColumnId = null;
+    dropTarget = null;
+    if (columnDragFrame !== null) cancelAnimationFrame(columnDragFrame);
+    columnDragFrame = null;
+    window.removeEventListener('pointermove', moveColumnPointer);
+    window.removeEventListener('pointerup', dropColumnPointer);
+    window.removeEventListener('pointercancel', cancelColumnPointer);
+    window.removeEventListener('lostpointercapture', cancelColumnPointer);
+    window.removeEventListener('keydown', columnDragKey, true);
+    window.removeEventListener('blur', cancelColumnDrag);
+    window.removeEventListener('trivium-pause-gestures', cancelColumnDrag);
+    if (gesture?.element.hasPointerCapture(gesture.pointerId)) {
+      gesture.element.releasePointerCapture(gesture.pointerId);
     }
   };
-  const finishDrag = () => { draggedColumnId = null; dropTarget = null; };
-  const dropColumn = (event: DragEvent, target: string) => {
-    if (!draggedColumnId || !event.dataTransfer) return;
+  const cancelColumnDrag = () => {
+    if (!columnDrag) return;
+    suppressSortClick = true;
+    endColumnDrag();
+  };
+  const cancelColumnPointer = (event: PointerEvent) => {
+    if (!columnDrag || columnDrag.pointerId !== event.pointerId) return;
+    // Touch/pen implicitly captures the pressed button. Moving capture to its
+    // heading is expected; only losing the active heading's capture cancels.
+    if (event.type === 'lostpointercapture' && columnDrag.active && event.target !== columnDrag.element) return;
+    cancelColumnDrag();
+  };
+  const columnDragKey = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' && !isTabKey(event)) return;
+    cancelColumnDrag();
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+  };
+  const updateColumnDropTarget = () => {
+    const gesture = columnDrag, header = get(headerScrollEl);
+    if (!gesture?.active || !header) return;
+    // Pointer capture keeps events on the source. Hit-test the actual pointer
+    // position so virtualized/frozen headings remain valid drop targets.
+    const heading = document.elementFromPoint(gesture.x, gesture.y)?.closest<HTMLElement>('.column-heading[data-column-id]');
+    if (!heading || !header.contains(heading)) { dropTarget = null; return; }
+    const rect = heading.getBoundingClientRect();
+    const id = heading.dataset.columnId!, after = gesture.x >= rect.left + rect.width / 2;
+    if (dropTarget?.id !== id || dropTarget.after !== after) dropTarget = { id, after };
+  };
+  const panColumnDrag = () => {
+    columnDragFrame = null;
+    const gesture = columnDrag, body = get(bodyScrollEl), header = get(headerScrollEl);
+    if (!gesture?.active || !body || !header) return;
+    const rect = header.getBoundingClientRect();
+    const direction = gesture.y < rect.top || gesture.y > rect.bottom ? 0
+      : gesture.x > rect.right - 40 ? 1
+      : gesture.x < rect.left + Math.min(frozenViewport.edge, rect.width - 40) + 20 ? -1 : 0;
+    const previousLeft = body.scrollLeft;
+    if (direction) {
+      body.scrollLeft += direction * 14;
+      if (body.scrollLeft !== previousLeft) queueScroll(body);
+    }
+    updateColumnDropTarget();
+    if (body.scrollLeft !== previousLeft) columnDragFrame = requestAnimationFrame(panColumnDrag);
+  };
+  const moveColumnPointer = (event: PointerEvent) => {
+    const gesture = columnDrag;
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    gesture.x = event.clientX;
+    gesture.y = event.clientY;
+    if (!gesture.active) {
+      if (Math.hypot(gesture.x - gesture.startX, gesture.y - gesture.startY) < 5) return;
+      gesture.active = true;
+      draggedColumnId = focusedColumnId = gesture.columnId;
+      cellMenu = columnMenu = null;
+      gesture.element.setPointerCapture(gesture.pointerId);
+    }
     event.preventDefault();
-    const after = dropTarget?.id === target && dropTarget.after;
-    try {
-      const source = JSON.parse(event.dataTransfer.getData('application/x-trivium-column'));
-      if (source.projectId === projectId && source.columnId === draggedColumnId) {
-        void moveColumn(source.columnId, target, after);
-      }
-    } catch { /* Only columns dragged from this table can change its order. */ }
-    finishDrag();
+    updateColumnDropTarget();
+    if (columnDragFrame === null) columnDragFrame = requestAnimationFrame(panColumnDrag);
+  };
+  const dropColumnPointer = (event: PointerEvent) => {
+    const gesture = columnDrag;
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    gesture.x = event.clientX;
+    gesture.y = event.clientY;
+    updateColumnDropTarget();
+    const target = dropTarget;
+    if (gesture.active) { event.preventDefault(); suppressSortClick = true; }
+    endColumnDrag();
+    if (gesture.active && target && gesture.projectId === projectId && gesture.generation === $viewGeneration) {
+      void moveColumn(gesture.columnId, target.id, target.after);
+    }
+  };
+  const beginColumnDrag = (event: PointerEvent, columnId: string) => {
+    if (!event.isPrimary || event.button !== 0 || !projectId || event.altKey || event.ctrlKey || event.metaKey
+      || !(event.target instanceof Element) || !event.target.closest('.column-sort')) return;
+    endColumnDrag();
+    suppressSortClick = false;
+    columnDrag = { pointerId: event.pointerId, projectId, generation: $viewGeneration, columnId,
+      startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY,
+      element: event.currentTarget as HTMLElement, active: false };
+    window.addEventListener('pointermove', moveColumnPointer, { passive: false });
+    window.addEventListener('pointerup', dropColumnPointer);
+    window.addEventListener('pointercancel', cancelColumnPointer);
+    window.addEventListener('lostpointercapture', cancelColumnPointer);
+    window.addEventListener('keydown', columnDragKey, true);
+    window.addEventListener('blur', cancelColumnDrag);
+    window.addEventListener('trivium-pause-gestures', cancelColumnDrag);
+  };
+  const sortColumn = (event: MouseEvent, columnId: string) => {
+    if (suppressSortClick && event.detail > 0) {
+      suppressSortClick = false;
+      event.preventDefault(); event.stopPropagation(); return;
+    }
+    _toggleSort(columnId);
   };
 
   const buildVirtualRows = (
@@ -565,6 +645,7 @@
     }
 
     return () => {
+      endColumnDrag();
       rowResizeRevision += 1;
       unsubscribeScroll();
       if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
@@ -625,7 +706,6 @@
         role="presentation"
         bind:this={$headerScrollEl}
         on:wheel={forwardWheel}
-        on:dragover={scrollDuringDrag}
       >
         <div
           class="data-header"
@@ -660,20 +740,15 @@
               class:lastFrozenData={frozenLayout.lastColumn === column.id}
               data-column-id={column.id}
               data-frozen={column.frozen}
-              draggable="true"
               class:dragging={draggedColumnId === column.id}
               class:dropBefore={dropTarget?.id === column.id && !dropTarget.after}
               class:dropAfter={dropTarget?.id === column.id && dropTarget.after}
-              on:dragstart={(event) => dragColumn(event, column.id)}
-              on:dragenter={(event) => dragOverColumn(event, column.id)}
-              on:dragover={(event) => dragOverColumn(event, column.id)}
-              on:drop={(event) => dropColumn(event, column.id)}
-              on:dragend={finishDrag}
+              on:pointerdown={(event) => beginColumnDrag(event, column.id)}
               style={`grid-column: ${column.index + 5};${column.frozen ? ` --sticky-data-left: ${(frozenLayout.offsets.get(column.id) ?? 0) - frozenViewport.pan}px;` : ''}`}
               class:sorted={$sortKey === column.id}
             >
               <button type="button" class="column-sort"
-                on:click={() => _toggleSort(column.id)}
+                on:click={(event) => sortColumn(event, column.id)}
                 on:focus={() => focusColumn(column.index)}
                 on:contextmenu={(event) => openColumnMenu(event, column.id)}
                 on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnHeaderKey(event, column.id); }}
@@ -794,6 +869,8 @@
 {/if}
 
 <style>
+  .column-sort { user-select: none; -webkit-user-select: none; touch-action: none; }
+  .column-heading.dragging .column-sort { cursor: grabbing; }
   .table-query-state { position: absolute; inset: 38px 0 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; background: var(--surface); text-align: center; }
   .table-query-state p { margin: 0; color: var(--fg); font-size: 13px; }
   .table-query-state span { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }

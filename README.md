@@ -38,6 +38,8 @@ JSON imports support up to 4,096 flattened columns; files exceeding this limit a
 
 You can open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
+Drop data files into the window, then review the import settings before opening them.
+
 ### Search & Filter
 
 Search for keywords, limit searches to specific columns, or build more complex conditions using AND, OR, and NOT. Use the back and forward buttons to revisit previous filter rules.

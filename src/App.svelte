@@ -2,6 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import { createBackend } from './lib/backend';
@@ -12,6 +13,8 @@
   import ProjectTabs from './lib/components/app/ProjectTabs.svelte';
   import Toast from './lib/components/app/Toast.svelte';
   import CloseDialog from './lib/components/app/CloseDialog.svelte';
+  import FileDropOverlay from './lib/components/app/FileDropOverlay.svelte';
+  import { createFileDrop } from './lib/fileDrop';
   import { createAppClose, installAppCloseListener } from './lib/appClose';
   import { acceptSave, flushAllSaves, reopenSaveAdmission, sealSaveAdmission } from './lib/saveDrain';
   import { showToast } from './lib/utils/toast';
@@ -32,6 +35,8 @@
   onDestroy(() => {
     appDestroyed = true;
     stopCloseListener?.();
+    stopFileDropListener?.();
+    fileDrop.dispose();
     close.dispose();
     projectController.dispose();
     sessions.clear();
@@ -42,6 +47,7 @@
   let closeReady = false;
   let closeListenerError = '';
   let stopCloseListener: UnlistenFn | undefined;
+  let stopFileDropListener: UnlistenFn | undefined;
   let startingCloseListener = false;
   let appDestroyed = false;
   let initializedApp = false;
@@ -62,6 +68,20 @@
   const closeState = close.state;
   $: closing = $closeState.phase !== 'idle';
   const editsBlocked = () => !closeReady || close.isBlocked();
+  const fileDrop = createFileDrop({
+    blocked: () => !closeReady ? 'Wait for the app to be ready.'
+      : close.isBlocked() ? 'Finish the close request before adding files.'
+      : $projectState.creating ? 'An import is already running.'
+      : document.querySelector('.cell-dialog-backdrop') ? 'Close the dialog before adding files.' : null,
+    select: (paths) => {
+      projectController.setPendingFiles(paths);
+      sidebarOpen = true;
+      void tick().then(() => document.querySelector<HTMLElement>('.workspace-drawer [aria-label="CSV delimiter"], .workspace-drawer .button.primary')?.focus());
+    },
+    notify: message => showToast(message, 'error'),
+  });
+  const fileDropState = fileDrop.state;
+  $: if (closing) fileDrop.clear();
   const sessions = new Map<string, WorkspaceSession>();
   $: openProjects = $projectState.openProjectIds.flatMap((id) => {
     const project = $projectState.projects.find((item) => item.meta.id === id);
@@ -234,8 +254,15 @@
     }
   };
 
-  onMount(() => { void startCloseListener(); });
+  onMount(() => {
+    void startCloseListener();
+    void getCurrentWebview().onDragDropEvent(event => fileDrop.handle(event.payload))
+      .then(stop => { if (appDestroyed) stop(); else stopFileDropListener = stop; })
+      .catch(() => { if (!appDestroyed) showToast('Could not enable file drops. Use Choose data files.', 'error'); });
+  });
 </script>
+
+<svelte:window on:blur={() => fileDrop.clear()} on:keydown={(event) => { if (event.key === 'Escape') fileDrop.clear(); }} />
 
 <div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle'}>
   <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
@@ -302,6 +329,8 @@
     {/if}
   </main>
 </div>
+
+{#if $fileDropState}<FileDropOverlay state={$fileDropState} />{/if}
 
   {#if closeListenerError || $closeState.phase !== 'idle'}
     <CloseDialog phase={closeListenerError ? 'failed' : $closeState.phase}

@@ -48,8 +48,7 @@ def _unchanged(web, query: dict) -> None:
 
 
 def _native_drag(web, start: dict, end: dict) -> None:
-    # WebKitWebDriver does not reliably complete HTML5 dragging. As with the
-    # native context-click check, XTest delivers actual OS button input.
+    # Match the context-click check: XTest delivers actual OS pointer input.
     from ctypes import CDLL, c_char_p, c_int, c_ulong, c_void_p
     x11, xtest = CDLL("libX11.so.6"), CDLL("libXtst.so.6")
     x11.XOpenDisplay.argtypes, x11.XOpenDisplay.restype = [c_char_p], c_void_p
@@ -94,11 +93,14 @@ def _drag(web, source: str, target: str, after: bool = False) -> dict:
     web.script("""
       window.__columnDrag=[];window.__columnDragOver=null;
       window.__columnDragAudit=e=>{
-        const h=e.target.closest?.('.column-heading'),r=h?.getBoundingClientRect();
-        const item={type:e.type,trusted:e.isTrusted,columnId:h?.dataset.columnId??null,x:e.clientX,midpoint:r?r.left+r.width/2:null};
-        if(e.type==='dragover')window.__columnDragOver=item;else window.__columnDrag.push(item);
+        const h=document.elementFromPoint(e.clientX,e.clientY)?.closest('.column-heading'),r=h?.getBoundingClientRect(),
+          overlay=document.querySelector('.file-drop-overlay');
+        const item={type:e.type,trusted:e.isTrusted,columnId:h?.dataset.columnId??null,x:e.clientX,y:e.clientY,
+          midpoint:r?r.left+r.width/2:null,fileOverlay:!!overlay&&overlay.getBoundingClientRect().width>0};
+        if(e.type==='pointermove')window.__columnDragOver=item;
+        window.__columnDrag.push(item);
       };
-      for(const name of ['dragstart','dragover','drop','dragend'])document.addEventListener(name,window.__columnDragAudit,true);
+      for(const name of ['pointerdown','pointermove','pointerup','pointercancel','dragstart'])document.addEventListener(name,window.__columnDragAudit,true);
     """)
     start, end = points["start"], points["end"]
     try:
@@ -117,16 +119,23 @@ def _drag(web, source: str, target: str, after: bool = False) -> dict:
             method = "WebDriver pointer"
         _settle(web)
         events = web.script("return window.__columnDrag;")
+        pressed = next((event for event in events if event["type"] == "pointerdown" and event["trusted"]), None)
+        moved = pressed and any(event["type"] == "pointermove" and event["trusted"]
+            and abs(event["x"] - pressed["x"]) + abs(event["y"] - pressed["y"]) >= 5 for event in events)
+        released = any(event["type"] == "pointerup" and event["trusted"] for event in events)
+        assert not any(event["type"] == "dragstart" for event in events), events
+        assert not any(event["fileOverlay"] for event in events), "Internal column movement must not open the file-drop overlay"
+        assert not web.script("const e=document.querySelector('.file-drop-overlay');return !!e&&e.getBoundingClientRect().width>0;"), events
         return {"events": events, "last_over": web.script("return window.__columnDragOver;"),
-                "delivered": any(event["type"] == "drop" and event["trusted"] for event in events), "input": method}
+                "delivered": bool(pressed and moved and released), "input": method, "file_overlay_absent": True}
     finally:
         web.request("DELETE", web.route("actions"))
-        web.script("for(const name of ['dragstart','dragover','drop','dragend'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;delete window.__columnDragOver;")
+        web.script("for(const name of ['pointerdown','pointermove','pointerup','pointercancel','dragstart'])document.removeEventListener(name,window.__columnDragAudit,true);delete window.__columnDragAudit;delete window.__columnDrag;delete window.__columnDragOver;")
 
 
 def _reorder(web, source: str, target: str, expected: list[str], after: bool = False) -> dict:
     drag = _drag(web, source, target, after)
-    assert drag["delivered"], f"Native column reordering requires an actual trusted HTML5 drop: {drag}"
+    assert drag["delivered"], f"Native column reordering requires an actual trusted pointer gesture: {drag}"
     wait_for(lambda: _order(web), lambda order: order == expected, "the trusted drag changes the display order")
     return drag
 
