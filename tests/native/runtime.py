@@ -21,33 +21,20 @@ class NormalWindowClose:
     def __init__(self, application):
         self.process = application.process if application is not None else None
         if os.name == "nt":
-            from ctypes import POINTER, WinDLL, WINFUNCTYPE, byref
-            from ctypes.wintypes import BOOL, DWORD, HWND, LPARAM
             assert self.process is not None, "Windows normal close requires the owned app process"
             self.pid = self.process.pid
-            user = WinDLL("user32", use_last_error=True)
-            user.GetWindowThreadProcessId.argtypes = [HWND, POINTER(DWORD)]
-            user.IsWindowVisible.argtypes, user.IsWindowVisible.restype = [HWND], BOOL
-            found = []
-            callback_type = WINFUNCTYPE(BOOL, HWND, LPARAM)
-            @callback_type
-            def visit(window, _):
-                pid = DWORD()
-                user.GetWindowThreadProcessId(window, byref(pid))
-                if pid.value == self.pid and user.IsWindowVisible(window):
-                    found.append(int(window))
-                return True
-            user.EnumWindows(visit, 0)
-            assert len(found) == 1, f"Expected one owned native window, found {len(found)}"
-            self.window = found[0]
+            self.window = _windows_main_window(self.pid)
         else:
             self.window, self.pid = _x11_window()
 
     def request(self) -> None:
         if os.name == "nt":
-            from ctypes import WinDLL, c_size_t, c_ssize_t, c_uint, c_void_p
-            user = WinDLL("user32", use_last_error=True)
-            user.PostMessageW.argtypes = [c_void_p, c_uint, c_size_t, c_ssize_t]
+            from ctypes import byref
+            from ctypes.wintypes import DWORD
+            user, _ = _windows_user32()
+            pid = DWORD()
+            user.GetWindowThreadProcessId(self.window, byref(pid))
+            assert pid.value == self.pid and not self.exited(), "WM_CLOSE must target the same owned process"
             assert user.PostMessageW(self.window, 0x0010, 0, 0), "WM_CLOSE must reach the owned app"
             return
         from ctypes import Structure, Union, byref, c_char, c_int, c_long, c_short, c_ulong, c_void_p
@@ -85,15 +72,97 @@ class NormalWindowClose:
         if self.exited():
             return False
         if os.name == "nt":
-            from ctypes import WinDLL, c_void_p
-            user = WinDLL("user32", use_last_error=True)
-            user.IsWindow.argtypes = [c_void_p]
+            user, _ = _windows_user32()
             return bool(user.IsWindow(self.window))
         x11, display = _x11_open()
         try:
             return self.window in _x11_children(x11, display)
         finally:
             x11.XCloseDisplay(display)
+
+
+def _windows_user32():
+    """Keep HWNDs and LPARAMs pointer-sized on the Windows x64 test runner."""
+    from ctypes import POINTER, WinDLL, WINFUNCTYPE, c_ssize_t
+    from ctypes.wintypes import BOOL, DWORD, HWND, INT, LPARAM, LPWSTR, RECT, UINT, WPARAM
+    user = WinDLL("user32", use_last_error=True)
+    callback = WINFUNCTYPE(BOOL, HWND, LPARAM)
+    signatures = {
+        "EnumWindows": ([callback, LPARAM], BOOL),
+        "GetWindowThreadProcessId": ([HWND, POINTER(DWORD)], DWORD),
+        "IsWindow": ([HWND], BOOL), "IsWindowVisible": ([HWND], BOOL),
+        "GetAncestor": ([HWND, UINT], HWND), "GetWindow": ([HWND, UINT], HWND),
+        "GetWindowLongPtrW": ([HWND, INT], c_ssize_t),
+        "GetWindowTextLengthW": ([HWND], INT), "GetWindowTextW": ([HWND, LPWSTR, INT], INT),
+        "GetClassNameW": ([HWND, LPWSTR, INT], INT), "GetClientRect": ([HWND, POINTER(RECT)], BOOL),
+        "PostMessageW": ([HWND, UINT, WPARAM, LPARAM], BOOL),
+    }
+    for name, (arguments, result) in signatures.items():
+        function = getattr(user, name)
+        function.argtypes, function.restype = arguments, result
+    return user, callback
+
+
+def _select_windows_main_window(windows: list[dict], pid: int) -> int:
+    owned = [window for window in windows if window["pid"] == pid]
+    main = [window for window in owned if window["visible"] and window["is_root"] and not window["owned_popup"]
+            and window["caption"] and not window["child"] and not window["tool"] and window["title_matches"]
+            and window["class_name"] == "Tauri Window"
+            and window["client_width"] >= 300 and window["client_height"] >= 200]
+    if len(main) != 1:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # Fixed labels and numeric counts only: this annotation is public.
+            counts = {"owned_total": len(owned), "owned_visible": sum(window["visible"] for window in owned),
+                "titled_trivium": sum(window["title_matches"] for window in owned),
+                "unowned": sum(not window["owned_popup"] for window in owned),
+                "caption": sum(window["caption"] for window in owned),
+                "class_matches": sum(window["class_name"] == "Tauri Window" for window in owned),
+                "candidates": len(main)}
+            print("::error title=Native window lookup::" + ", ".join(f"{key}={value}" for key, value in counts.items()), flush=True)
+        # Never expose native window titles, which may contain document names.
+        diagnostic = {"owned_total": len(owned), "owned_visible": sum(window["visible"] for window in owned),
+            "matching_main": len(main), "windows": [{
+                **{key: window[key] for key in ("visible", "is_root", "owned_popup", "caption", "child", "tool", "title_matches", "client_width", "client_height")},
+                "class_name": window["class_name"] if re.fullmatch(r"[A-Za-z0-9_. -]{1,80}", window["class_name"]) else "unrecognized",
+            } for window in owned[:16]]}
+        raise AssertionError(f"Expected one owned native main window: {json.dumps(diagnostic, separators=(',', ':'))}")
+    return main[0]["handle"]
+
+
+def _windows_main_window(pid: int) -> int:
+    from ctypes import byref, create_unicode_buffer, get_last_error
+    from ctypes.wintypes import DWORD, RECT
+    user, callback_type = _windows_user32()
+    windows, errors = [], []
+    @callback_type
+    def visit(window, _):
+        try:
+            owner = DWORD()
+            user.GetWindowThreadProcessId(window, byref(owner))
+            if owner.value != pid:
+                return True
+            title = create_unicode_buffer(min(user.GetWindowTextLengthW(window) + 1, 4096))
+            user.GetWindowTextW(window, title, len(title))
+            classname = create_unicode_buffer(256)
+            user.GetClassNameW(window, classname, len(classname))
+            client = RECT()
+            geometry = user.GetClientRect(window, byref(client))
+            style, extended = user.GetWindowLongPtrW(window, -16), user.GetWindowLongPtrW(window, -20)
+            windows.append({"handle": int(window), "pid": owner.value, "visible": bool(user.IsWindowVisible(window)),
+                "is_root": user.GetAncestor(window, 2) == window, "owned_popup": bool(user.GetWindow(window, 4)),
+                "caption": style & 0x00c00000 == 0x00c00000, "child": bool(style & 0x40000000), "tool": bool(extended & 0x80),
+                "title_matches": title.value == "Trivium", "class_name": classname.value,
+                "client_width": client.right - client.left if geometry else 0,
+                "client_height": client.bottom - client.top if geometry else 0})
+            return True
+        except Exception as error:
+            errors.append(type(error).__name__)
+            return False
+    enumerated = user.EnumWindows(visit, 0)
+    assert not errors, f"Owned native window probe failed: {errors}"
+    if not enumerated:
+        raise OSError(get_last_error(), "Could not enumerate owned native windows")
+    return _select_windows_main_window(windows, pid)
 
 
 def _x11_open():

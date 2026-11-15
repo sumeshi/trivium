@@ -11,7 +11,7 @@ from urllib.error import URLError
 import unittest
 from unittest.mock import patch
 
-from runtime import ApplicationSession, isolated_environment, debuggable_webview, emit_failure_annotation
+from runtime import ApplicationSession, isolated_environment, debuggable_webview, emit_failure_annotation, _select_windows_main_window
 
 
 class Process:
@@ -23,6 +23,50 @@ class Process:
 
 
 class RuntimeTests(unittest.TestCase):
+    @staticmethod
+    def window(**changes):
+        return {"handle": 0x123456789, "pid": 42, "visible": True, "is_root": True,
+                "owned_popup": False, "caption": True, "child": False, "tool": False,
+                "title_matches": True, "class_name": "Tauri Window", "client_width": 1280,
+                "client_height": 827, **changes}
+
+    def test_windows_main_window_ignores_owned_helpers_and_other_processes(self):
+        main = self.window()
+        helpers = [self.window(handle=index, **changes) for index, changes in enumerate([
+            {"class_name": "IME"}, {"class_name": "Chrome_WidgetWin_0", "caption": False},
+            {"tool": True}, {"owned_popup": True}, {"visible": False}, {"title_matches": False},
+            {"pid": 99},
+        ])]
+        self.assertEqual(_select_windows_main_window(helpers + [main], 42), main["handle"])
+
+    def test_windows_main_window_requires_every_primary_window_constraint(self):
+        for changes in [{"visible": False}, {"is_root": False}, {"owned_popup": True}, {"caption": False},
+                        {"child": True}, {"tool": True}, {"title_matches": False}, {"class_name": "Window Class"},
+                        {"client_width": 299}, {"client_height": 199}, {"pid": 99}]:
+            with self.subTest(changes=changes), patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+                with self.assertRaisesRegex(AssertionError, '"matching_main":0'):
+                    _select_windows_main_window([self.window(**changes)], 42)
+
+    def test_windows_main_window_rejects_ambiguity_instead_of_guessing(self):
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+            with self.assertRaisesRegex(AssertionError, '"matching_main":2'):
+                _select_windows_main_window([self.window(), self.window(handle=7, client_width=900)], 42)
+
+    def test_windows_lookup_annotation_contains_only_fixed_numeric_counts(self):
+        windows = [self.window(class_name="private\\user%title\n"), self.window(pid=99)]
+        output = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), redirect_stdout(output):
+            with self.assertRaises(AssertionError) as failure:
+                _select_windows_main_window(windows, 42)
+        self.assertEqual(output.getvalue(), "::error title=Native window lookup::owned_total=1, owned_visible=1, titled_trivium=1, unowned=1, caption=1, class_matches=0, candidates=0\n")
+        self.assertNotIn("private", str(failure.exception))
+        self.assertNotIn(str(0x123456789), str(failure.exception))
+        output = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), redirect_stdout(output):
+            with self.assertRaises(AssertionError):
+                _select_windows_main_window(windows, 42)
+        self.assertEqual(output.getvalue(), "")
+
     def test_linux_retains_the_tauri_driver_launch_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
