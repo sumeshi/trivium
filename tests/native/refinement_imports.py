@@ -135,6 +135,9 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
         requests = [entry for entry in web.trace()[start:] if entry["name"] == "create_project"]
         assert [entry["request"]["path"] for entry in requests] == [str(source) for source in batch_sources], requests
         assert [bool(entry.get("error")) for entry in requests] == [False, True, False], requests
+        assert requests[1]["error"] == "Failed to parse JSON: expected value at line 1 column 9", requests[1]
+        report.setdefault("boundary_expected_errors", []).append(
+            {key: requests[1][key] for key in ("name", "request", "error")})
         assert all(later["started"] >= earlier["decode_done"] for earlier, later in zip(requests, requests[1:])), requests
         for request, csv in zip(requests, [True, False, False]):
             assert request["request"]["restore_annotations"] is csv, request

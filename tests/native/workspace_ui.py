@@ -29,6 +29,7 @@ from refinement_checks import verify_refinements
 from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
+from refinement_imports import verify_import_identity
 from scroll_render_checks import verify_scroll_rendering
 from toolbar_checks import verify_toolbar, verify_condition_buttons, verify_drawer_interaction
 from datetime_group_checks import verify_datetime_groups
@@ -48,6 +49,7 @@ from boundary_integrity_checks import verify_boundary_integrity
 from annotation_restore_checks import verify_annotation_restore
 from storage_responsiveness_checks import verify_storage_responsiveness
 from graceful_close_checks import verify_graceful_close
+from review_fixes_checks import verify_review_fixes
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -875,6 +877,7 @@ def main() -> None:
     parser.add_argument("--integrity-only", action="store_true")
     parser.add_argument("--boundary-only", action="store_true")
     parser.add_argument("--close-only", action="store_true")
+    parser.add_argument("--review-fixes-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -894,6 +897,7 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("review query feedback, note width and row navigation", lambda: verify_review_fixes(web, data, root, evidence, report)),
                 ("normal close drains saves before exit", lambda: verify_graceful_close(app, data, root, evidence, report)),
                 ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
                 ("explicit GUI annotation restore", lambda: verify_annotation_restore(web, data, root, evidence, report)),
@@ -901,6 +905,7 @@ def main() -> None:
                 ("native content security policy", lambda: verify_content_policy(web, report)),
                 ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
                 ("analysis preserves investigation rules", lambda: verify_investigation_filters(web, data, root, evidence, report)),
+                ("multiple-file import options and failure isolation", lambda: verify_import_identity(web, data, root, report)),
                 ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
                 ("drawer switching and blank-area dismissal", lambda: verify_drawer_interaction(web, data, evidence, report)),
                 ("condition add button affordance", lambda: verify_condition_buttons(web, evidence, report)),
@@ -928,6 +933,10 @@ def main() -> None:
                 ("note text and composition confirmation", lambda: verify_memo_ime(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
+                if stage == "multiple-file import options and failure isolation" and not args.review_fixes_only:
+                    continue  # Covered by the full refinement checks below.
+                if args.review_fixes_only and stage not in {"review query feedback, note width and row navigation", "compact scrollable row detail", "multiple-file import options and failure isolation"}:
+                    continue
                 if args.close_only and stage != "normal close drains saves before exit":
                     continue
                 if args.memo_ime_only and stage != "note text and composition confirmation":

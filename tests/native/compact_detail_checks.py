@@ -59,10 +59,14 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
         for height in ((827,) if measure_only else (827, 620)):
             web.request("POST", web.route("window/rect"), {"width": 1280, "height": height})
+            opened = len(web.trace())
+            clicked = web.script("return document.querySelector('.data-row .stickyData').closest('[data-column-id]').dataset.columnId;")
             web.click(web.script("return document.querySelector('.data-row .stickyData');"))
             wait_for(lambda: web.script("return document.querySelectorAll('.row-detail-field').length;"), lambda count: count == len(columns), "all67 detail fields render")
-            wait_for(lambda: web.script("return document.querySelector(arguments[0])?.querySelector('.row-field-value')?.textContent;", f'.row-detail-field[data-column-id="{columns["very_long"]}"]'), lambda value: value == long_value, "full long field arrives before scroll checks")
             _settle(web)
+            initial_reads = [entry for entry in web.trace()[opened:] if entry["name"] == "get_cell"]
+            assert not any(entry["request"].get("columnId") == columns["very_long"] for entry in initial_reads), "An offscreen truncated field waits until it is revealed"
+            assert not any(entry["request"].get("columnId") == clicked for entry in initial_reads), "The clicked complete cell reuses its exact cached value"
             before = _geometry(web, columns["last_field"])
             _wheel(web, 900)
             _settle(web)
@@ -78,7 +82,13 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
             for _ in range(18):
                 current = _geometry(web, columns["last_field"])
                 if current["last"]["visible"]:
-                    break
+                    # Revealing the bottom queues its truncated field lazily.
+                    # Its full text can increase height and move the last row.
+                    wait_for(lambda: web.script("return document.querySelector(arguments[0])?.querySelector('.row-field-value')?.textContent;", f'.row-detail-field[data-column-id="{columns["very_long"]}"]'),
+                        lambda value: value == long_value, "scrolling reveals and loads the full long field")
+                    _settle(web)
+                    if _geometry(web, columns["last_field"])["last"]["visible"]:
+                        break
                 _wheel(web, 900)
                 _settle(web)
             wheel_end = _geometry(web, columns["last_field"])
@@ -95,12 +105,14 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
             _settle(web)
             keyboard_end = wait_for(lambda: _geometry(web, columns["last_field"]),
                 lambda g: g["last"]["visible"] and g["last"]["clickable"], "End exposes a clickable last detail field")
+            wait_for(lambda: web.script("return !document.querySelector('.row-detail-dialog [aria-label=\"Filter in last_field\"]').disabled;"),
+                bool, "the last visible field is loaded before keyboard activation")
             assert web.script("return [...document.querySelectorAll('.row-field-actions button')].every(e=>!e.textContent.trim());"), "Field actions are compact icons with accessible names"
             assert not web.script("return !!document.querySelector('.row-detail-dialog [aria-label^=\"Filter out \"]');")
             web.screenshot(evidence / f"dense-detail-last-{height}.png")
             checks.append({"height": height, "before": before, "wheel_end": wheel_end, "keyboard_end": keyboard_end})
             if height == 827:
-                web.script("document.querySelector('.row-detail-dialog [aria-label=Close]').focus();")
+                first = web.script("const e=document.querySelector('.row-detail-dialog button:not(:disabled)');e.focus();return e.getAttribute('aria-label');")
                 web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "dense-row-detail-keys", "actions": [{"type": "keyDown", "value": "\ue008"}]}]})
                 try:
                     _key(web, "\ue004")
@@ -110,7 +122,7 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
                     lambda label: label == "Filter in last_field", "Shift+Tab wraps within the row inspector")
                 _key(web, "\ue004")
                 wait_for(lambda: web.script("return document.activeElement.getAttribute('aria-label');"),
-                    lambda label: label == "Close", "Tab returns from the last field action to Close")
+                    lambda label: label == first, "Tab returns from the last field action to the first enabled control")
                 web.named("Close", ".row-detail-dialog")
         if not measure_only:
             _copy_audit(web)
@@ -134,7 +146,9 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
             _clear(web, 2)
             assert not any(entry["name"] == "surrounding_rows" for entry in web.trace()[start:])
         report["compact_row_detail"] = {"fields": len(columns), "short_fields": 64, "long_characters": len(long_value),
-            "measure_only": measure_only, "sizes": checks, "scroll_inputs": "Trusted WebDriver wheel, Home, PageDown and End; no assigned scroll offsets"}
+            "measure_only": measure_only, "sizes": checks, "cached_clicked_cell_without_io": True,
+            "offscreen_long_field_deferred": True,
+            "scroll_inputs": "Trusted WebDriver wheel, Home, PageDown and End; no assigned scroll offsets"}
     finally:
         if web.script("return !!document.querySelector('.row-detail-dialog');"):
             web.named("Close", ".row-detail-dialog")
