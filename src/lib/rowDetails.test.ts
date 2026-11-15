@@ -25,7 +25,7 @@ function loaded(fields: ReadonlyMap<string, DetailField>, column: string): GetCe
   return field.value;
 }
 
-test('one row expands only clicked/truncated/legacy fields, with at most two reads and exact text', async () => {
+test('one row expands only clicked and visible unresolved fields, with at most two reads and exact text', async () => {
   let fields: ReadonlyMap<string, DetailField> = new Map();
   let running = 0, peak = 0;
   const calls: string[] = [];
@@ -45,6 +45,9 @@ test('one row expands only clicked/truncated/legacy fields, with at most two rea
     bigint: source(bigint), nanos: source(nanos), wide: source('preview…', true),
     legacy: { text: 'old preview', kind: 'string' }, focus: source('focus preview', true),
   });
+  assert.deepEqual(calls, ['focus']);
+  assert.equal(fields.get('wide')?.state, 'idle');
+  loader.setVisible(['wide', 'legacy']);
   assert.deepEqual(calls, ['focus', 'wide']);
   assert.equal(loaded(fields, 'bigint').text, bigint);
   assert.equal(loaded(fields, 'nanos').text, nanos);
@@ -59,6 +62,48 @@ test('one row expands only clicked/truncated/legacy fields, with at most two rea
   assert.equal(detailFilterValue(loaded(fields, 'focus')), exact);
   assert.equal(detailCopyValue(loaded(fields, 'nanos')), nanos);
   loader.dispose(); assert.equal(fields.size, 0);
+});
+
+test('a hundred unresolved columns do not trigger a hundred reads or retain crossed viewport work', async () => {
+  let fields: ReadonlyMap<string, DetailField> = new Map();
+  const calls: string[] = [];
+  const pending = new Map<string, ReturnType<typeof deferred<GetCellResult>>>();
+  const columns = Array.from({ length: 100 }, (_, index) => `field-${index}`);
+  const loader = createRowDetails({
+    cancel() {}, changed(next) { fields = next; },
+    read(_target, column) {
+      calls.push(column);
+      const value = deferred<GetCellResult>(); pending.set(column, value); return value.promise;
+    },
+  });
+  loader.load({ ...target, columnId: 'field-95' }, columns, {});
+  assert.deepEqual(calls, ['field-95']);
+  loader.setVisible(['field-93', 'field-94', 'field-95', 'field-96']);
+  assert.deepEqual(calls, ['field-95', 'field-93']);
+  loader.setVisible(['field-10', 'field-11']);
+  assert.equal(fields.get('field-94')?.state, 'idle');
+  assert.equal(fields.get('field-96')?.state, 'idle');
+  pending.get('field-93')!.resolve(full('old viewport')); await turn();
+  assert.deepEqual(calls, ['field-95', 'field-93', 'field-10']);
+  pending.get('field-10')!.resolve(full('visible')); await turn();
+  assert.deepEqual(calls, ['field-95', 'field-93', 'field-10', 'field-11']);
+  assert.equal(fields.get('field-0')?.state, 'idle');
+  assert.equal(fields.get('field-99')?.state, 'idle');
+  loader.dispose();
+});
+
+test('exact clicked and visible cells reuse their original text without any reads', () => {
+  let fields: ReadonlyMap<string, DetailField> = new Map();
+  const loader = createRowDetails({
+    cancel() {}, changed(next) { fields = next; },
+    read() { throw new Error('Complete cells must not be fetched again.'); },
+  });
+  const exact = '<CommandLine>whoami</CommandLine>\n18446744073709551615';
+  loader.load(target, ['focus', 'hidden'], { focus: source(exact), hidden: source('complete hidden field') });
+  loader.setVisible(['focus', 'hidden']);
+  assert.equal(loaded(fields, 'focus').text, exact);
+  assert.equal(loaded(fields, 'hidden').text, 'complete hidden field');
+  loader.dispose();
 });
 
 test('switching or closing a row cancels reads, clears full values, and rejects late replies', async () => {

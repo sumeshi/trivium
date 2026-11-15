@@ -4,7 +4,7 @@ import { errorMessage } from "./errors.ts";
 
 export type DetailTarget = { projectId: string; rowIndex: number; columnId: string };
 export type DetailField =
-  | { state: "loading" }
+  | { state: "idle" | "loading" }
   | { state: "loaded"; value: GetCellResult }
   | { state: "error"; error: string };
 
@@ -33,6 +33,7 @@ export function createRowDetails(options: DetailOptions) {
   let fields = new Map<string, DetailField>();
   let pending: string[] = [];
   let running = 0;
+  const active = new Set<string>();
   const publish = () => options.changed(new Map(fields));
 
   const pump = (ticket: number) => {
@@ -40,6 +41,7 @@ export function createRowDetails(options: DetailOptions) {
       const column = pending.shift()!;
       const activeTarget = target;
       running += 1;
+      active.add(column);
       void (async () => {
         try {
           const value = await options.read(activeTarget, column);
@@ -52,6 +54,7 @@ export function createRowDetails(options: DetailOptions) {
         } finally {
           if (!disposed && ticket === generation) {
             running -= 1;
+            active.delete(column);
             publish();
             pump(ticket);
           }
@@ -66,6 +69,7 @@ export function createRowDetails(options: DetailOptions) {
     target = null;
     pending = [];
     running = 0;
+    active.clear();
     fields = new Map();
     publish();
   };
@@ -75,14 +79,36 @@ export function createRowDetails(options: DetailOptions) {
       if (disposed) return;
       clear();
       target = { ...next };
-      // Fetch the clicked field first. Other immutable DTOs with an explicit
-      // untruncated marker already contain exact text, including null/missing.
+      // Exact previews need no IO, including the clicked field. Hidden and
+      // offscreen fields remain idle until the detail viewport reveals them.
       const ordered = [...new Set([next.columnId, ...columns])];
       for (const column of ordered) {
         const cell = cells[column];
-        if (column !== next.columnId && cell?.truncated === false) {
+        if (cell?.truncated === false) {
           fields.set(column, { state: "loaded", value: { ...cell, truncated: false, length: cell.length ?? null } });
         } else {
+          fields.set(column, { state: "idle" });
+        }
+      }
+      if (fields.get(next.columnId)?.state === "idle") {
+        fields.set(next.columnId, { state: "loading" });
+        pending.push(next.columnId);
+      }
+      publish();
+      pump(generation);
+    },
+    setVisible(columns: readonly string[]) {
+      if (disposed || !target) return;
+      const wanted = new Set([target.columnId, ...columns]);
+      // A fast scroll must not leave a queue for every field crossed. Already
+      // running reads finish, while unseen queued fields return to idle.
+      pending = pending.filter((column) => {
+        if (wanted.has(column)) return true;
+        fields.set(column, { state: "idle" });
+        return false;
+      });
+      for (const column of wanted) {
+        if (!active.has(column) && fields.get(column)?.state === "idle") {
           fields.set(column, { state: "loading" });
           pending.push(column);
         }
