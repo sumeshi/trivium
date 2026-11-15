@@ -87,6 +87,17 @@ def wait_for(read: Callable[[], Any], ready: Callable[[Any], bool], label: str, 
     raise AssertionError(f"Timed out: {label}; last observation: {json.dumps(last, ensure_ascii=False)}")
 
 
+def completed_ipc(entries: list[dict[str, Any]], after: float, expected: dict[str, Any]) -> dict[str, Any] | None:
+    """Require the newest matching request to finish, even if its rows were already visible."""
+    for entry in reversed(entries):
+        if entry.get("started", -1) < after or any(entry["request"].get(key) != value for key, value in expected.items()):
+            continue
+        if entry.get("error"):
+            raise AssertionError(f"Expected native operation failed: {json.dumps(entry, ensure_ascii=False)}")
+        return entry if "result" in entry else None
+    return None
+
+
 class WebView:
     def __init__(self, port: int):
         self.origin = f"http://127.0.0.1:{port}"
@@ -170,9 +181,17 @@ class WebView:
 
     def _view(self) -> dict[str, Any]:
         return self.script(r"""
+          const input=document.querySelector('.row-jump input');
+          const boundary=[...document.querySelectorAll('.row-jump button')];
+          const trace=window.__navigationIpc??window.__workspaceIpc??[];
+          const latestQuery=trace.findLast(entry=>entry.name==='query_project_rows');
+          const navigation={lookup_busy:input?.getAttribute('aria-busy')==='true',
+            input_disabled:input?.disabled??true,boundaries_disabled:boundary.map(e=>e.disabled),
+            loading_rows:document.querySelectorAll('.data-row.loading').length,
+            latest_query:latestQuery?{request:latestQuery.request,responded:'result' in latestQuery,failed:!!latestQuery.error}:null};
           const viewport=document.querySelector('.virtual-viewport');
           const count=document.querySelector('.table-meta-left strong');
-          if(!viewport||!count)return {ready:false};
+          if(!viewport||!count)return {ready:false,navigation};
           const box=viewport.getBoundingClientRect();
           const top=box.top+viewport.clientTop,bottom=top+viewport.clientHeight;
           const rows=[...viewport.querySelectorAll('.data-row')].map(row=>{
@@ -187,7 +206,7 @@ class WebView:
           });
           const selected=[...document.querySelectorAll('.data-header button[aria-pressed=true]')]
             .map(e=>e.textContent.trim());
-          return {ready:true,total:Number(count.textContent.replaceAll(',','')),top,bottom,
+          return {ready:true,navigation,total:Number(count.textContent.replaceAll(',','')),top,bottom,
             viewportHeight:viewport.clientHeight,scrollTop:viewport.scrollTop,
             scrollHeight:viewport.scrollHeight,rows,selected,
             search:document.querySelector('input[type=search]')?.value??'',
@@ -232,10 +251,33 @@ class WebView:
         return view
 
     def go(self, number: int | str, count: int, stride: int = 1, *, enter: bool = False) -> dict[str, Any]:
+        self.navigation_idle()
+        checkpoint = self.script("return performance.now();")
+        project_id = self.script("return document.querySelector('[role=tab][aria-selected=true]')?.id.replace(/^project-tab-/, '')??null;")
         self.input('.row-jump input[type="number"]', str(number), enter=enter)
         if not enter:
             self.button("Go")
+        expected = {"rowIndex": int(number) - 1}
+        if project_id:
+            expected["projectId"] = project_id
+        self.wait_ipc("locate_project_row", checkpoint, expected)
+        self.navigation_idle()
         return self.result(count, int(number), stride)
+
+    def navigation_idle(self) -> dict[str, Any]:
+        return wait_for(lambda: self.view().get("navigation"),
+            lambda state: bool(state and not state["lookup_busy"] and not state["input_disabled"]
+                               and state["boundaries_disabled"] == [False, False]),
+            "row navigation is ready after pending lookup and query completion")
+
+    def wait_ipc(self, name: str, after: float, expected: dict[str, Any]) -> dict[str, Any]:
+        def latest():
+            entries = self.script("""
+              return (window.__navigationIpc??window.__workspaceIpc??[])
+                .filter(entry=>entry.name===arguments[0]&&entry.started>=arguments[1]);
+            """, name, after)
+            return completed_ipc(entries, after, expected)
+        return wait_for(latest, bool, f"fresh completed {name}: {expected}")
 
     def instrument(self) -> None:
         assert self.script("""
@@ -392,10 +434,20 @@ def scenario(web: WebView, directory: Path, total: int, progress: dict[str, Any]
     header = web.script("return [...document.querySelectorAll('.data-header button')].find(e=>e.querySelector('.header-label')?.textContent.trim()==='score');")
     assert header, "score column header not found"
     stage("numeric score sort ascending")
+    checkpoint = web.script("return performance.now();")
     web.click(header)
+    applied = web.wait_ipc("query_project_rows", checkpoint,
+        {"projectId": project_id, "search": "keep", "sortKey": score, "sortDirection": "asc", "offset": 0})
+    assert applied["result"]["total_filtered_rows"] == filtered, applied
+    web.navigation_idle()
     web.result(filtered, 2, 2)
     stage("numeric score sort descending")
+    checkpoint = web.script("return performance.now();")
     web.click(header)
+    applied = web.wait_ipc("query_project_rows", checkpoint,
+        {"projectId": project_id, "search": "keep", "sortKey": score, "sortDirection": "desc", "offset": 0})
+    assert applied["result"]["total_filtered_rows"] == filtered, applied
+    web.navigation_idle()
     last_even = total - total % 2
     web.result(filtered, last_even, -2)
     original = (total * 3 // 4) // 2 * 2
