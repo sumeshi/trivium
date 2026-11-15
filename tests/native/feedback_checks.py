@@ -170,7 +170,7 @@ const result=[];let overlaps=0;
 for(const row of rows){const moving=[...row.children].filter(c=>!c.classList.contains('sticky'));
  for(const cell of row.querySelectorAll(':scope > .sticky')){const r=cell.getBoundingClientRect(),s=getComputedStyle(cell),rs=getComputedStyle(row),hit=document.elementFromPoint(Math.round((r.left+r.right)/2),Math.round((r.top+r.bottom)/2));
   overlaps+=moving.filter(m=>{const a=m.getBoundingClientRect();return a.left<r.right&&a.right>r.left;}).length;
-  result.push({classes:cell.className,background:s.backgroundColor,opaque:opaque(s.backgroundColor),opacity:s.opacity,rowOpacity:rs.opacity,topmost:!!hit&&cell.contains(hit)});
+  result.push({classes:cell.className,background:s.backgroundColor,opaque:opaque(s.backgroundColor),opacity:s.opacity,rowOpacity:rs.opacity,topmost:!!hit&&cell.contains(hit),queryCovered:!!hit?.closest('.table-query-state[role="status"]')});
  }}
 const custom=rows.find(r=>r.style.getPropertyValue('--row-color'));
 const plain=rows.find(r=>r.classList.contains('data-row')&&!r.style.getPropertyValue('--row-color')&&!r.classList.contains('alt-row'));
@@ -178,10 +178,13 @@ return {cells:result,overlaps,customColourApplied:!!custom&&!!plain&&getComputed
 """
 
 
-def _check_sticky(web, selector: str, label: str) -> dict[str, Any]:
+def _check_sticky(web, selector: str, label: str, *, query_loading: bool = False) -> dict[str, Any]:
     state = web.script(_STICKY, selector)
     assert len(state["cells"]) >= 10 and state["overlaps"] > 0 and state["scrollLeft"] >= 699, (label, state)
-    assert all(c["opaque"] and c["opacity"] == "1" and c["rowOpacity"] == "1" and c["topmost"] for c in state["cells"]), (label, state)
+    assert all(c["opaque"] and c["opacity"] == "1" and c["rowOpacity"] == "1"
+        and (c["topmost"] or (query_loading and c["queryCovered"])) for c in state["cells"]), (label, state)
+    if query_loading:
+        assert any(c["queryCovered"] for c in state["cells"]), "Pending query status must cover the body, not the header"
     return state
 
 
@@ -220,10 +223,12 @@ def _sticky_feedback(web, data, evidence, report) -> None:
         wait_for(lambda: web.script("return window.__workspaceHold.ready;"), bool, "real native query response held for loading-row check")
         wait_for(lambda: web.script("return document.querySelectorAll('.data-row.loading').length;"), lambda n: n >= 2, "loading rows displayed")
         _horizontal_to(web, 700)
-        loading = _check_sticky(web, ".data-row.loading", "loading")
+        assert "Loading rows" in web.script("return document.querySelector('.table-query-state[role=status]')?.textContent??'';")
+        loading = _check_sticky(web, ".data-row.loading", "loading", query_loading=True)
         web.screenshot(evidence / "feedback-sticky-loading.png")
         web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
         web.applied(search="keep"); web.results(data["total"] - data["total"] // 5)
+        _check_sticky(web, ".data-row:not(.loading)", "loaded after pending query")
         report["sticky_paint"] = {"samples": samples, "loading": loading, "actual_horizontal_scroll": 700,
             "normal_alternate_hover_custom_rows": True, "opaque_topmost_pinned_cells": True}
     finally:
