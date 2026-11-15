@@ -15,6 +15,7 @@ mod report;
 mod rows;
 mod rules;
 mod stats;
+mod storage_worker;
 mod surround;
 mod time;
 mod value_validation;
