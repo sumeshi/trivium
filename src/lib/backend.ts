@@ -44,6 +44,8 @@ export interface CreateProjectArgs extends RequestOwned {
   description?: string | null;
   path?: string;
   delimiter?: string | null;
+  /** Explicitly interpret Trivium's exported CSV columns as annotations. */
+  restoreAnnotations?: boolean;
 }
 
 /** Partial updates preserve omitted fields; explicit memo null clears it. */
@@ -358,6 +360,7 @@ class NativeBackend implements Backend {
         path: args.path,
         description: args.description ?? null,
         delimiter: args.delimiter ?? null,
+        restore_annotations: args.restoreAnnotations === true,
       },
     }, args);
   }

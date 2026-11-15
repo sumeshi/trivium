@@ -13,6 +13,7 @@
   export let pendingDescription: string;
   export let pendingFileName: string;
   export let pendingDelimiter: string;
+  export let pendingRestoreAnnotations = false;
   export let canCreateProject: boolean;
 
   $: selectedFormat = pendingFileName.split('.').at(-1)?.toLowerCase() ?? '';
@@ -114,6 +115,15 @@
           </label>
         {/if}
       </div>
+
+      {#if csvSettingsRelevant}
+        <label class="restore-annotations" title="Read flags, notes, tags and bookmarks from Trivium's exported CSV columns. Leave off for ordinary source data.">
+          <input type="checkbox" aria-label="Restore Trivium annotations"
+            checked={pendingRestoreAnnotations} disabled={creating}
+            on:change={(event) => dispatch('restoreAnnotationsChange', event.currentTarget.checked)} />
+          <span>Restore Trivium annotations</span>
+        </label>
+      {/if}
 
       <button
         class="button primary full"
@@ -347,6 +357,8 @@
     display: grid;
     gap: 8px;
   }
+
+  .restore-annotations { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 
   .field {
     display: flex;

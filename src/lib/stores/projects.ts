@@ -16,6 +16,7 @@ export interface ProjectsState {
   pendingFilePath: string | null;
   pendingFileName: string;
   pendingDelimiter: string;
+  pendingRestoreAnnotations: boolean;
 }
 
 export function createProjectController(backend: Backend) {
@@ -28,7 +29,7 @@ export function createProjectController(backend: Backend) {
     projects: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
     isLoadingProjects: false, isLoadingDetail: false, creating: false,
     projectsLoaded: false, pendingDescription: "", pendingFilePath: null,
-    pendingFileName: "", pendingDelimiter: "",
+    pendingFileName: "", pendingDelimiter: "", pendingRestoreAnnotations: false,
   });
   const canCreateProject = derived(state, ($state) => Boolean($state.pendingFilePath));
 
@@ -40,17 +41,24 @@ export function createProjectController(backend: Backend) {
     state.update((value) => ({ ...value, pendingDelimiter }));
   }
 
+  function setPendingRestoreAnnotations(restore: boolean) {
+    state.update((value) => ({ ...value,
+      pendingRestoreAnnotations: restore && /\.csv$/i.test(value.pendingFileName),
+    }));
+  }
+
   function setPendingFile(pendingFilePath: string | null) {
     state.update((value) => ({
       ...value, pendingFilePath,
       pendingFileName: pendingFilePath?.split(/[/\\]/).at(-1) ?? "",
+      pendingRestoreAnnotations: false,
     }));
   }
 
   function resetPending() {
     state.update((value) => ({
       ...value, pendingDescription: "", pendingFilePath: null,
-      pendingFileName: "", pendingDelimiter: "",
+      pendingFileName: "", pendingDelimiter: "", pendingRestoreAnnotations: false,
     }));
   }
 
@@ -149,6 +157,7 @@ export function createProjectController(backend: Backend) {
       const summary = await backend.createProject({
         path: current.pendingFilePath, description: current.pendingDescription || null,
         delimiter: current.pendingDelimiter,
+        restoreAnnotations: current.pendingRestoreAnnotations && /\.csv$/i.test(current.pendingFileName),
       });
       if (disposed) return summary;
       resetPending();
@@ -203,7 +212,7 @@ export function createProjectController(backend: Backend) {
     state.update((value) => ({
       ...value, projects: [], openProjectIds: [], selectedProjectId: null,
       projectDetail: null, isLoadingProjects: false, isLoadingDetail: false,
-      pendingFilePath: null,
+      pendingFilePath: null, pendingRestoreAnnotations: false,
     }));
   }
 
@@ -211,7 +220,7 @@ export function createProjectController(backend: Backend) {
     dispose,
     state: { subscribe: state.subscribe }, canCreateProject, loadProjects,
     loadProjectDetail, selectProject, closeProject, refreshSelected, createProject,
-    deleteProject, setPendingDescription, setPendingDelimiter, setPendingFile,
+    deleteProject, setPendingDescription, setPendingDelimiter, setPendingFile, setPendingRestoreAnnotations,
     resetPending, updateSummary,
   };
 }
