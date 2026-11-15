@@ -641,9 +641,6 @@
               on:change={toggleVisibleRows}
               aria-label="Select visible rows"
               title="Select or clear the rows currently on screen"
-              on:keydown={(event) => {
-                if (isTabKey(event) && !event.shiftKey) columnTab(event, -1);
-              }}
             />
           </div>
           <div class="header-cell sticky sticky-index">#</div>
@@ -651,7 +648,8 @@
           <div class="header-cell sticky sticky-memo note-heading" class:frozenDataEdge={frozenLayout.offsets.size === 0}>
             <span>Note</span>
             <ColumnResizeHandle label="Note" width={noteColumnWidth} minWidth={MIN_MEMO_WIDTH} maxWidth={MAX_MEMO_WIDTH}
-              tabIndex={0} on:resize={(event) => dispatch('noteWidth', event.detail)} />
+              tabIndex={0} on:resize={(event) => dispatch('noteWidth', event.detail)}
+              on:keydown={(event) => { if (isTabKey(event) && !event.shiftKey) columnTab(event, -1); }} />
           </div>
           {#each renderedColumns as column (column.id)}
             <div
