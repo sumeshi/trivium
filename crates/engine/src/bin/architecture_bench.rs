@@ -124,14 +124,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         "parquet_bytes":fs::metadata(&path)?.len()})
     );
     scenarios::isolated_searches(&root, id)?;
-    let column = |source: &str| -> String {
-        meta.columns
-            .iter()
-            .find(|column| column.source == source)
-            .unwrap()
-            .id
-            .clone()
-    };
+    let column = |source: &str| scenarios::source_column(&meta, source);
     measure("reopen_compat_250", trials(), || {
         let fresh = ProjectsStore::new(root.clone())?;
         let response = load_project(&fresh, ProjectRequest { project_id: id })?;
@@ -166,7 +159,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         Ok(())
     })?;
     let spec = QuerySpec {
-        search: Some(format!("{}:alice", column("user"))),
+        search: Some(format!("{}:alice", column("user")?)),
         ..QuerySpec::default()
     };
     measure("query_scoped_cold", trials(), || {
@@ -181,7 +174,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
             &store,
             ColumnStatsPayload {
                 project_id: id,
-                column: column("host"),
+                column: column("host")?,
                 rare_max: 1,
                 spec: spec.clone(),
             },
@@ -206,7 +199,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
     }
     for (label, sort_key) in [
         ("query_sparse_100_cold", None),
-        ("query_sparse_100_sorted_cold", Some(column("ts"))),
+        ("query_sparse_100_sorted_cold", Some(column("ts")?)),
     ] {
         let sparse_spec = QuerySpec {
             bookmarked_only: Some(true),
@@ -222,7 +215,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         })?;
     }
     let sort = QuerySpec {
-        sort_key: Some(column("ts")),
+        sort_key: Some(column("ts")?),
         sort_direction: Some("desc".into()),
         ..QuerySpec::default()
     };
@@ -232,7 +225,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
             &store,
             id,
             QuerySpec {
-                sort_key: Some(column("EventID")),
+                sort_key: Some(column("EventID")?),
                 sort_direction: Some("desc".into()),
                 ..QuerySpec::default()
             },

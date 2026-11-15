@@ -28,10 +28,12 @@ use uuid::Uuid;
 
 use super::{measure, status_kib, trials, PAGE};
 
-fn source_column(meta: &ProjectMeta, source: &str) -> Result<String> {
+pub(super) fn source_column(meta: &ProjectMeta, source: &str) -> Result<String> {
+    let pointer = format!("/{source}");
     meta.columns
         .iter()
-        .find(|column| column.source == source)
+        .find(|column| column.source == source || column.source == pointer)
+        .or_else(|| meta.columns.iter().find(|column| column.label == source))
         .map(|column| column.id.clone())
         .with_context(|| format!("fixture has no {source} column"))
 }
@@ -142,11 +144,7 @@ fn cancel_search(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> Result<()>
 }
 
 pub fn sorted_pages(store: &ProjectsStore, id: Uuid, meta: &ProjectMeta) -> Result<()> {
-    let (source, distribution) = if meta
-        .columns
-        .iter()
-        .any(|column| column.source == "sort_key")
-    {
+    let (source, distribution) = if source_column(meta, "sort_key").is_ok() {
         (
             "sort_key",
             "deterministic unique permutation, unrelated to source order",
