@@ -16,6 +16,150 @@ from urllib.parse import urlsplit
 from startup_diagnostics import startup_diagnostics
 
 
+class NormalWindowClose:
+    """An owned native window; WM_CLOSE/WM_DELETE_WINDOW follows normal app shutdown."""
+    def __init__(self, application):
+        self.process = application.process if application is not None else None
+        if os.name == "nt":
+            from ctypes import POINTER, WinDLL, WINFUNCTYPE, byref
+            from ctypes.wintypes import BOOL, DWORD, HWND, LPARAM
+            assert self.process is not None, "Windows normal close requires the owned app process"
+            self.pid = self.process.pid
+            user = WinDLL("user32", use_last_error=True)
+            user.GetWindowThreadProcessId.argtypes = [HWND, POINTER(DWORD)]
+            user.IsWindowVisible.argtypes, user.IsWindowVisible.restype = [HWND], BOOL
+            found = []
+            callback_type = WINFUNCTYPE(BOOL, HWND, LPARAM)
+            @callback_type
+            def visit(window, _):
+                pid = DWORD()
+                user.GetWindowThreadProcessId(window, byref(pid))
+                if pid.value == self.pid and user.IsWindowVisible(window):
+                    found.append(int(window))
+                return True
+            user.EnumWindows(visit, 0)
+            assert len(found) == 1, f"Expected one owned native window, found {len(found)}"
+            self.window = found[0]
+        else:
+            self.window, self.pid = _x11_window()
+
+    def request(self) -> None:
+        if os.name == "nt":
+            from ctypes import WinDLL, c_size_t, c_ssize_t, c_uint, c_void_p
+            user = WinDLL("user32", use_last_error=True)
+            user.PostMessageW.argtypes = [c_void_p, c_uint, c_size_t, c_ssize_t]
+            assert user.PostMessageW(self.window, 0x0010, 0, 0), "WM_CLOSE must reach the owned app"
+            return
+        from ctypes import Structure, Union, byref, c_char, c_int, c_long, c_short, c_ulong, c_void_p
+        class Data(Union):
+            _fields_ = [("b", c_char * 20), ("s", c_short * 10), ("l", c_long * 5)]
+        class Client(Structure):
+            _fields_ = [("type", c_int), ("serial", c_ulong), ("send_event", c_int), ("display", c_void_p),
+                        ("window", c_ulong), ("message_type", c_ulong), ("format", c_int), ("data", Data)]
+        class Event(Union):
+            _fields_ = [("client", Client), ("pad", c_long * 24)]
+        x11, display = _x11_open()
+        try:
+            event = Event()
+            event.client.type, event.client.display, event.client.window = 33, display, self.window
+            event.client.message_type = x11.XInternAtom(display, b"WM_PROTOCOLS", 0)
+            event.client.format = 32
+            event.client.data.l[0] = x11.XInternAtom(display, b"WM_DELETE_WINDOW", 0)
+            x11.XSendEvent.argtypes = [c_void_p, c_ulong, c_int, c_long, c_void_p]
+            assert x11.XSendEvent(display, self.window, 0, 0, byref(event)), "WM_DELETE_WINDOW must reach the owned app"
+            x11.XSync(display, 0)
+        finally:
+            x11.XCloseDisplay(display)
+
+    def exited(self) -> bool:
+        if self.process is not None:
+            return self.process.poll() is not None
+        try:
+            # The driver's child can briefly remain a zombie before being reaped.
+            stat = Path(f"/proc/{self.pid}/stat").read_text()
+            return stat.rsplit(")", 1)[1].strip().startswith("Z")
+        except FileNotFoundError:
+            return True
+
+    def open(self) -> bool:
+        if self.exited():
+            return False
+        if os.name == "nt":
+            from ctypes import WinDLL, c_void_p
+            user = WinDLL("user32", use_last_error=True)
+            user.IsWindow.argtypes = [c_void_p]
+            return bool(user.IsWindow(self.window))
+        x11, display = _x11_open()
+        try:
+            return self.window in _x11_children(x11, display)
+        finally:
+            x11.XCloseDisplay(display)
+
+
+def _x11_open():
+    from ctypes import CDLL, c_char_p, c_int, c_ulong, c_void_p
+    x11 = CDLL("libX11.so.6")
+    x11.XOpenDisplay.argtypes, x11.XOpenDisplay.restype = [c_char_p], c_void_p
+    x11.XCloseDisplay.argtypes = [c_void_p]
+    x11.XDefaultRootWindow.argtypes, x11.XDefaultRootWindow.restype = [c_void_p], c_ulong
+    x11.XInternAtom.argtypes, x11.XInternAtom.restype = [c_void_p, c_char_p, c_int], c_ulong
+    x11.XFree.argtypes = [c_void_p]
+    x11.XSync.argtypes = [c_void_p, c_int]
+    display = x11.XOpenDisplay(None)
+    assert display, "Normal Linux close requires the owned Xvfb display"
+    return x11, display
+
+
+def _x11_children(x11, display) -> list[int]:
+    from ctypes import POINTER, byref, c_int, c_uint, c_ulong, c_void_p
+    parent, root, count, children = c_ulong(), c_ulong(), c_uint(), POINTER(c_ulong)()
+    x11.XQueryTree.argtypes = [c_void_p, c_ulong, POINTER(c_ulong), POINTER(c_ulong), POINTER(POINTER(c_ulong)), POINTER(c_uint)]
+    x11.XQueryTree.restype = c_int
+    assert x11.XQueryTree(display, x11.XDefaultRootWindow(display), byref(root), byref(parent), byref(children), byref(count))
+    try:
+        return [int(children[index]) for index in range(count.value)]
+    finally:
+        if children:
+            x11.XFree(children)
+
+
+def _x11_window() -> tuple[int, int]:
+    from ctypes import POINTER, byref, c_char_p, c_int, c_long, c_ubyte, c_ulong, c_void_p, cast
+    x11, display = _x11_open()
+    found = []
+    try:
+        x11.XFetchName.argtypes = [c_void_p, c_ulong, POINTER(c_void_p)]
+        x11.XGetWindowProperty.argtypes = [c_void_p, c_ulong, c_ulong, c_long, c_long, c_int, c_ulong,
+                                          POINTER(c_ulong), POINTER(c_int), POINTER(c_ulong), POINTER(c_ulong), POINTER(POINTER(c_ubyte))]
+        pid_atom = x11.XInternAtom(display, b"_NET_WM_PID", 1)
+        assert pid_atom, "The owned GTK window must identify its process"
+        for window in _x11_children(x11, display):
+            name = c_void_p()
+            if not x11.XFetchName(display, window, byref(name)) or not name:
+                continue
+            try:
+                if cast(name, c_char_p).value != b"Trivium":
+                    continue
+            finally:
+                x11.XFree(name)
+            data, actual, kind, count, remaining = POINTER(c_ubyte)(), c_ulong(), c_int(), c_ulong(), c_ulong()
+            status = x11.XGetWindowProperty(display, window, pid_atom, 0, 1, 0, 0,
+                byref(actual), byref(kind), byref(count), byref(remaining), byref(data))
+            try:
+                if status == 0 and kind.value == 32 and count.value == 1 and data:
+                    pid = int(cast(data, POINTER(c_ulong))[0])
+                    executable = Path(f"/proc/{pid}/exe").resolve().name
+                    if executable.startswith("trivium-desktop"):
+                        found.append((window, pid))
+            finally:
+                if data:
+                    x11.XFree(data)
+        assert len(found) == 1, f"Expected one owned Trivium window in Xvfb, found {len(found)}"
+        return found[0]
+    finally:
+        x11.XCloseDisplay(display)
+
+
 def native_driver_default() -> str:
     name = "msedgedriver" if os.name == "nt" else "WebKitWebDriver"
     return os.environ.get("TRIVIUM_NATIVE_DRIVER") or shutil.which(name) or name

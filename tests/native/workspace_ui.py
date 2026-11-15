@@ -47,6 +47,7 @@ from csp_checks import verify_content_policy
 from boundary_integrity_checks import verify_boundary_integrity
 from annotation_restore_checks import verify_annotation_restore
 from storage_responsiveness_checks import verify_storage_responsiveness
+from graceful_close_checks import verify_graceful_close
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
@@ -309,6 +310,7 @@ class NativeApp:
         self.web.request("POST", self.web.route("window/rect"), {"width": 1280, "height": 827})
         wait_for(lambda: self.web.script("return typeof window.__TAURI_INTERNALS__?.invoke==='function';"), bool, "Tauri IPC ready")
         wait_for(lambda: self.web.script("return !!document.querySelector('.app-header');"), bool, "native workspace UI ready")
+        wait_for(lambda: self.web.script("const shell=document.querySelector('.app-shell');return !!shell&&!shell.inert;"), bool, "native close guard ready for editing")
         assert ":5173" not in self.web.script("return location.href;"), "Embedded native app required"
         self.web.instrument()
         if self.web.script("return !!document.querySelector('.workspace-drawer');"):
@@ -316,14 +318,20 @@ class NativeApp:
             wait_for(lambda: self.web.script("return !document.querySelector('.workspace-drawer');"), bool, "initial project menu closes")
         return self.web
 
-    def end_session(self) -> None:
+    def end_session(self, captured_diagnostics: dict[str, Any] | None = None) -> None:
         try:
             if self.web.session:
-                diagnostic = self.web.diagnostics()
+                diagnostic = captured_diagnostics if captured_diagnostics is not None else self.web.diagnostics()
                 if self.application is not None:
                     diagnostic["startup"] = self.application.details
                 self.sessions.append(diagnostic)
-                self.web.request("DELETE", f"/session/{self.web.session}")
+                try:
+                    self.web.request("DELETE", f"/session/{self.web.session}")
+                except (AssertionError, OSError) as error:
+                    if captured_diagnostics is None:
+                        raise
+                    # Normal OS close has already exited the measured process.
+                    diagnostic["closed_session_cleanup"] = type(error).__name__
         finally:
             self.web.session = None
             if self.application is not None:
@@ -866,6 +874,7 @@ def main() -> None:
     parser.add_argument("--memo-ime-only", action="store_true")
     parser.add_argument("--integrity-only", action="store_true")
     parser.add_argument("--boundary-only", action="store_true")
+    parser.add_argument("--close-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -885,6 +894,7 @@ def main() -> None:
             report["default_viewport"] = {"window": [1280, 827], "table_height": web.view()["viewportHeight"]}
             web.screenshot(evidence / "default-table.png")
             for stage, run in [
+                ("normal close drains saves before exit", lambda: verify_graceful_close(app, data, root, evidence, report)),
                 ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
                 ("explicit GUI annotation restore", lambda: verify_annotation_restore(web, data, root, evidence, report)),
                 ("responsive storage writes under SQLite lock", lambda: verify_storage_responsiveness(web, data, root, evidence, report)),
@@ -918,6 +928,8 @@ def main() -> None:
                 ("note text and composition confirmation", lambda: verify_memo_ime(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
             ]:
+                if args.close_only and stage != "normal close drains saves before exit":
+                    continue
                 if args.memo_ime_only and stage != "note text and composition confirmation":
                     continue
                 if args.boundary_only and stage not in {"IOC validation and ordered annotation export", "explicit GUI annotation restore", "responsive storage writes under SQLite lock"}:
@@ -928,6 +940,7 @@ def main() -> None:
                     continue
                 print(f"CHECK: {stage}", flush=True)
                 run()
+                web = app.web
                 report["stages"].append(stage)
                 print(f"PASS: {stage}", flush=True)
             stage = "final validation"

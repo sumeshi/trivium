@@ -534,6 +534,7 @@ def main() -> None:
                 web.request("POST", web.route("timeouts"), {"script": 600000, "pageLoad": 60000, "implicit": 0})
                 web.request("POST", web.route("window/rect"), {"width": 1280, "height": 827})
                 wait_for(lambda: web.script("return typeof window.__TAURI_INTERNALS__?.invoke==='function';"), bool, "Tauri IPC ready")
+                wait_for(lambda: web.script("const shell=document.querySelector('.app-shell');return !!shell&&!shell.inert;"), bool, "native close guard ready for editing")
                 assert ":5173" not in web.script("return location.href;"), "Use an embedded custom-protocol build"
                 web.instrument()
                 for rows in args.rows:
