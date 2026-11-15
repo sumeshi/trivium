@@ -517,3 +517,38 @@ test("superseded and disposed queries never retry a late annotation-invalidated 
     workspace.dispose(); forgetAnnotationVersion(projectId);
   }
 });
+
+for (const included of [true, false]) {
+  test(`settling a pending flag after a new query recounts ${included ? "included offscreen" : "excluded"} rows`, async () => {
+    const projectId = `annotation-unknown-membership-${included}`;
+    const mutation = deferred<UpdateFlagResult>();
+    let saved = false, requests = 0;
+    const { workspace, queries } = setup({
+      updateFlag: async () => {
+        const result = await mutation.promise;
+        saved = true;
+        markAnnotationsChanged(projectId);
+        return result;
+      },
+      queryProjectRows: async (args) => {
+        requests++;
+        return { ...response(args.offset ?? 0, [row(1000)], 1000),
+          annotated_total: saved ? 1 : 0, annotated_filtered: saved && included ? 1 : 0 };
+      },
+    }, projectId);
+    workspace.registerLoadedPage(0, 0, [normalizeRow(row(2))]);
+    const saving = workspace.setFlag(get(workspace.rowsCache).get(2)!, "critical");
+    await queries.applyFilters(filters("a different query"), true, true);
+    assert.equal(requests, 1);
+    assert.equal(get(workspace.rowsCache).has(2), false);
+    assert.equal(get(workspace.flaggedCount), 1);
+    assert.equal(get(workspace.filteredFlaggedCount), 0, "membership is unknown until committed recount");
+    mutation.resolve({ entry: { flag: "critical", memo: null, tags: [], bookmarked: false }, revision: 1, flaggedRecords: 1 });
+    await saving; await settle();
+    assert.equal(requests, 2);
+    assert.equal(get(workspace.flaggedCount), 1);
+    assert.equal(get(workspace.filteredFlaggedCount), included ? 1 : 0);
+    assert.equal(get(workspace.rowsCache).has(2), false, "recount cannot repopulate an offscreen row");
+    workspace.dispose(); forgetAnnotationVersion(projectId);
+  });
+}

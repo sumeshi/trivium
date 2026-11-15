@@ -1,17 +1,19 @@
 import { derived, get, writable } from "svelte/store";
-import type { Backend } from "./backend";
-import type { FlagFilterValue, FlagSymbol, IocEntry, LoadProjectResponse } from "./types";
+import type { AnnotationPatch, Backend } from "./backend";
+import type { FlagEntry, FlagFilterValue, FlagSymbol, IocEntry, LoadProjectResponse } from "./types";
 import { createWorkspacePages } from "./workspacePages.ts";
 import { emptySelection, selectionAfterScopeChange, setRowsSelected, toggleRowId } from "./selection.ts";
 import type { SelectionScope } from "./selection";
 import { displayColumnOrder } from "./columnLayoutActions.ts";
 import type { ColumnDisplayFormat } from "./dateDisplay";
 import { logicalRowAt } from "./virtualScroll.ts";
+import { showToast } from "./utils/toast.ts";
+import { effectiveSearchColumns, normalizeSearchText } from "./searchScope.ts";
 import { PAGE_SIZE, normalizeFlag, applyAnnotationEntry } from "./components/project_view/state.ts";
 import type { AppliedFilters, CachedRow, MemoEditorTarget } from "./components/project_view/state";
 
 /** Owns one active investigation's stores, bounded pages and row mutations. */
-export function createWorkspaceState() {
+export function createWorkspaceState(notifyError = (message: string) => showToast(message, "error")) {
   let disposed = false;
   const projectDetail = writable<LoadProjectResponse | null>(null);
   const backend = writable<Backend | null>(null);
@@ -79,6 +81,9 @@ export function createWorkspaceState() {
 
   function invalidateViewRequests(): void {
     viewGeneration.update((value) => value + 1);
+    pendingAnnotations.clear();
+    lastAnnotationRevision = -1;
+    needsAnnotationRefresh = false;
   }
   const totalRows = writable(0);
   /** Rows matching the applied QuerySpec. Sole source for the virtual row count. */
@@ -94,8 +99,22 @@ export function createWorkspaceState() {
   ) / PAGE_SIZE));
   const {
     rowsCache, positionToRowIndex, pendingPages, loadedPages, largePages, updateCachedRow,
-    currentVisiblePage, touchPage, registerLoadedPage, resetPageCache,
+    currentVisiblePage, touchPage, registerLoadedPage: registerPage, resetPageCache,
   } = pages;
+
+  function registerLoadedPage(page: number, offset: number, rows: CachedRow[]): void {
+    registerPage(page, offset, rows.map((row) => {
+      const pending = pendingAnnotations.get(row.row_index);
+      if (!pending) return row;
+      // The query has already rejected stale annotation versions. This row is a
+      // newer committed baseline, including bulk edits made between local saves.
+      pending.confirmed = annotationEntry(row);
+      pending.scopeKey = annotationScopeKey();
+      const entry = pendingEntry(pending);
+      pending.displayedFlag = normalizeFlag(entry.flag);
+      return applyAnnotationEntry(row, entry);
+    }));
+  }
 
   /**
    * Explicit row selection, keyed by original row id. Row objects are never
@@ -152,23 +171,122 @@ export function createWorkspaceState() {
   const memoEditor = writable<MemoEditorTarget | null>(null);
   const iocManagerOpen = writable(false);
 
-  /**
-   * Monotonic per-row request sequence shared by flag updates and memo saves.
-   * Only the latest request for a row may roll its optimistic change back.
-   */
-  const annotationRequestSeq = new Map<number, number>();
+  interface PendingAnnotation {
+    confirmed: FlagEntry;
+    patches: Map<number, AnnotationPatch>;
+    displayedFlag: string;
+    revision: number;
+    scopeKey: string;
+  }
+  // Retain only annotation fields for rows with outstanding saves, never row data.
+  const pendingAnnotations = new Map<number, PendingAnnotation>();
+  let annotationSequence = 0;
+  let lastAnnotationRevision = -1;
+  const annotationRefreshRequested = writable(0);
+  let needsAnnotationRefresh = false;
 
-  function nextAnnotationRequest(rowIndex: number): number {
-    const next = (annotationRequestSeq.get(rowIndex) ?? 0) + 1;
-    annotationRequestSeq.set(rowIndex, next);
-    return next;
+  function annotationScopeKey(): string {
+    const filters = get(appliedFilters);
+    return JSON.stringify([normalizeSearchText(filters.search), filters.flag, filters.bookmarkedOnly,
+      effectiveSearchColumns(filters.search, filters.searchColumns), filters.condition]);
   }
 
-  function isLatestAnnotationRequest(
-    rowIndex: number,
-    requestSeq: number
-  ): boolean {
-    return annotationRequestSeq.get(rowIndex) === requestSeq;
+  function annotationEntry(row: CachedRow): FlagEntry {
+    return { flag: normalizeFlag(row.flag), memo: row.memo,
+      tags: [...(row.tags ?? [])], bookmarked: row.bookmarked ?? false };
+  }
+
+  function pendingEntry(state: PendingAnnotation): FlagEntry {
+    let entry = { ...state.confirmed };
+    for (const patch of state.patches.values()) entry = { ...entry, ...patch };
+    return entry;
+  }
+
+  function pendingFlagDelta(filtered = false): number {
+    let delta = 0;
+    const scopeKey = filtered ? annotationScopeKey() : null;
+    for (const state of pendingAnnotations.values()) {
+      if (!filtered || state.scopeKey === scopeKey) {
+        delta += Number(Boolean(state.displayedFlag)) - Number(Boolean(state.confirmed.flag));
+      }
+    }
+    return delta;
+  }
+
+  /** Backend counts describe committed annotations; add only outstanding changes. */
+  function applyAnnotationCounts(total: number, filtered: number): void {
+    flaggedCount.set(Math.max(0, total + pendingFlagDelta()));
+    filteredFlaggedCount.set(Math.max(0, filtered + pendingFlagDelta(true)));
+  }
+
+  function publishAnnotation(rowIndex: number, state: PendingAnnotation): void {
+    const entry = pendingEntry(state);
+    const flag = normalizeFlag(entry.flag);
+    const delta = Number(Boolean(flag)) - Number(Boolean(state.displayedFlag));
+    state.displayedFlag = flag;
+    updateCachedRow(rowIndex, (cached) => applyAnnotationEntry(cached, entry));
+    if (delta !== 0) {
+      flaggedCount.update((value) => Math.max(0, value + delta));
+      if (state.scopeKey === annotationScopeKey()) {
+        filteredFlaggedCount.update((value) => Math.max(0, value + delta));
+      }
+    }
+  }
+
+  /** Reconcile every save against confirmed storage, then replay pending fields. */
+  async function saveAnnotation(projectId: string, row: CachedRow, patch: AnnotationPatch): Promise<boolean> {
+    if (disposed || get(projectDetail)?.project.meta.id !== projectId) return false;
+    const rowIndex = row.row_index;
+    const generation = get(viewGeneration);
+    let state = pendingAnnotations.get(rowIndex);
+    if (!state) {
+      const baseline = get(rowsCache).get(rowIndex) ?? row;
+      state = {
+        confirmed: annotationEntry(baseline),
+        patches: new Map(), displayedFlag: normalizeFlag(baseline.flag), revision: -1,
+        scopeKey: annotationScopeKey(),
+      };
+      pendingAnnotations.set(rowIndex, state);
+    }
+    const sequence = ++annotationSequence;
+    state.patches.set(sequence, { ...patch, ...(patch.tags ? { tags: [...patch.tags] } : {}) });
+    publishAnnotation(rowIndex, state);
+    const isCurrent = () => !disposed && get(viewGeneration) === generation
+      && get(projectDetail)?.project.meta.id === projectId && pendingAnnotations.get(rowIndex) === state;
+    try {
+      const api = get(backend);
+      if (!api) throw new Error("Backend is not available.");
+      const updated = await api.updateFlag({ projectId, rowIndex, ...patch });
+      if (!isCurrent()) return false;
+      if (updated.revision >= state.revision) {
+        state.confirmed = { flag: normalizeFlag(updated.entry?.flag), memo: updated.entry?.memo ?? "",
+          tags: [...(updated.entry?.tags ?? [])], bookmarked: updated.entry?.bookmarked ?? false };
+        state.revision = updated.revision;
+      }
+      state.patches.delete(sequence);
+      publishAnnotation(rowIndex, state);
+      if (updated.revision >= lastAnnotationRevision) {
+        lastAnnotationRevision = updated.revision;
+        flaggedCount.set(Math.max(0, updated.flaggedRecords + pendingFlagDelta()));
+      }
+      // A changed result may contain this row outside its loaded pages. Let the
+      // existing query path recount it instead of guessing result membership.
+      if (state.scopeKey !== annotationScopeKey()) needsAnnotationRefresh = true;
+      return true;
+    } catch (error) {
+      if (!isCurrent()) return false;
+      state.patches.delete(sequence);
+      publishAnnotation(rowIndex, state);
+      throw error;
+    } finally {
+      if (isCurrent() && state.patches.size === 0) {
+        pendingAnnotations.delete(rowIndex);
+        if (pendingAnnotations.size === 0 && needsAnnotationRefresh) {
+          needsAnnotationRefresh = false;
+          annotationRefreshRequested.update((value) => value + 1);
+        }
+      }
+    }
   }
 
   const viewportHeight = writable(0);
@@ -207,71 +325,14 @@ export function createWorkspaceState() {
 
   const setFlag = async (row: CachedRow, flag: FlagSymbol) => {
     if (disposed) return;
-    const rowIndex = row.row_index;
-    // Read the latest optimistic row so rapid clicks toggle from what the table
-    // currently shows instead of a stale click-time snapshot.
-    const currentRow = get(rowsCache).get(rowIndex) ?? row;
-    const currentFlag = normalizeFlag(currentRow.flag);
-    const nextFlag = currentFlag === flag ? "" : flag;
-    const previousHadFlag = Boolean(currentFlag);
-    const nextHasFlag = Boolean(nextFlag);
-    const flaggedDelta = (nextHasFlag ? 1 : 0) - (previousHadFlag ? 1 : 0);
-    const requestSeq = nextAnnotationRequest(rowIndex);
-    let requestProjectId: string | null = null;
-
-    // Optimistic update: Update UI immediately
-    updateCachedRow(rowIndex, (cached) => ({ ...cached, flag: nextFlag }));
-
-    if (flaggedDelta !== 0) {
-      flaggedCount.update((value) => Math.max(0, value + flaggedDelta));
-      filteredFlaggedCount.update((value) => Math.max(0, value + flaggedDelta));
-    }
-
+    const projectId = get(projectDetail)?.project.meta.id;
+    if (!projectId) return;
+    const currentRow = get(rowsCache).get(row.row_index) ?? row;
+    const nextFlag = normalizeFlag(currentRow.flag) === flag ? "" : flag;
     try {
-      const backendInstance = get(backend);
-      const projectDetailInstance = get(projectDetail);
-      if (!backendInstance || !projectDetailInstance) {
-        throw new Error("Backend or project detail not available");
-      }
-      requestProjectId = projectDetailInstance.project.meta.id;
-      const updated = await backendInstance.updateFlag({
-        projectId: requestProjectId,
-        rowIndex,
-        flag: nextFlag ?? "",
-      });
-
-      // The project may have changed while the request was in flight. Never
-      // apply this row id to another project's cache.
-      if (get(projectDetail)?.project.meta.id !== requestProjectId) return;
-
-      // A stale success must not overwrite a newer optimistic change.
-      if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
-        updateCachedRow(rowIndex, (cached) =>
-          applyAnnotationEntry(cached, updated.entry)
-        );
-        flaggedCount.set(updated.flaggedRecords);
-      }
-    } catch (error) {
-      console.error(error);
-      // A request from a project that is no longer displayed has nothing to
-      // roll back on screen.
-      if (
-        requestProjectId &&
-        get(projectDetail)?.project.meta.id !== requestProjectId
-      ) {
-        return;
-      }
-      // Roll back only this request, and only while it is still the newest one.
-      if (!isLatestAnnotationRequest(rowIndex, requestSeq)) return;
-
-      updateCachedRow(rowIndex, (cached) => ({ ...cached, flag: currentFlag }));
-
-      if (flaggedDelta !== 0) {
-        flaggedCount.update((value) => Math.max(0, value - flaggedDelta));
-        filteredFlaggedCount.update((value) =>
-          Math.max(0, value - flaggedDelta)
-        );
-      }
+      await saveAnnotation(projectId, row, { flag: nextFlag });
+    } catch {
+      notifyError("Failed to save flag.");
     }
   };
 
@@ -318,7 +379,6 @@ export function createWorkspaceState() {
     resetPageCache();
     selectedRowIds.set(new Set());
     selectionScope = null;
-    annotationRequestSeq.clear();
     expandedCell.set(null);
     memoEditor.set(null);
     iocDraft.set([]);
@@ -366,8 +426,9 @@ export function createWorkspaceState() {
     expandedCell,
     memoEditor,
     iocManagerOpen,
-    nextAnnotationRequest,
-    isLatestAnnotationRequest,
+    saveAnnotation,
+    applyAnnotationCounts,
+    annotationRefreshRequested,
     updateCachedRow,
     viewportHeight,
     scrollTop,

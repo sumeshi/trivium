@@ -162,14 +162,13 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
               await options.restoreViewport(response, isFresh);
               if (!isCurrent()) return true;
               if (!isFresh()) return false;
-              workspace.flaggedCount.set(response.annotated_total);
-              workspace.filteredFlaggedCount.set(response.annotated_filtered);
               workspace.appliedResultLoading.set(false);
               timing?.rows(response.rows.length, Object.keys(response.rows[0]?.cells ?? {}).length);
               timing?.mark("normalizeStarted");
               const rows = response.rows.map(normalizeRow);
               timing?.mark("normalized");
               workspace.registerLoadedPage(Math.floor(response.offset / PAGE_SIZE), response.offset, rows);
+              workspace.applyAnnotationCounts(response.annotated_total, response.annotated_filtered);
               timing?.mark("published");
               options.summary();
               timing?.present(isCurrent);
@@ -262,8 +261,12 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     return requestPage(Math.floor(row / PAGE_SIZE), true);
   };
 
+  const stopAnnotationRefresh = workspace.annotationRefreshRequested.subscribe((sequence) => {
+    if (sequence > 0 && !disposed && options.isReady()) void requestPage(workspace.currentVisiblePage(), true);
+  });
   const dispose = () => {
     if (disposed) return;
+    stopAnnotationRefresh();
     disposed = true;
     revision += 1;
     reads.dispose();

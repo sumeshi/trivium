@@ -1,12 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import { applyAnnotationEntry } from './state';
   import { createCompositionGuard } from '../../keyboard';
   import { useWorkspace } from "../../workspaceContext";
   const {
-    memoEditor, backend, nextAnnotationRequest, isLatestAnnotationRequest, updateCachedRow,
-    flaggedCount, currentProjectId,
+    memoEditor, backend, saveAnnotation, currentProjectId,
   } = useWorkspace();
 
   const dispatch = createEventDispatcher();
@@ -70,41 +68,16 @@
     const memo = memoDraft;
     const tags = [...tagList];
     const bookmarked = bookmarkDraft;
-    const rowIndex = editor.rowIndex;
-    const requestSeq = nextAnnotationRequest(rowIndex);
     memoSaving = true;
     memoError = null;
 
-    // The row may no longer be cached. Saving still uses the captured
-    // project id and original row id, and display updates are skipped.
-    updateCachedRow(rowIndex, (cached) => ({
-      ...cached,
-      memo,
-      tags,
-      bookmarked,
-      displayCache: { ...cached.displayCache, memo },
-    }));
-
     try {
-      const updated = await backendInstance.updateFlag({
-        projectId: editor.projectId,
-        rowIndex,
+      const saved = await saveAnnotation(editor.projectId, editor.row, {
         memo: memo.length ? memo : null,
         tags,
         bookmarked,
       });
-
-      // The project may have changed while the request was in flight. Never
-      // apply this row id to another project's cache or dialog state.
-      if (get(currentProjectId) !== editor.projectId) return;
-
-      // A stale success must not overwrite a newer optimistic change.
-      if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
-        updateCachedRow(rowIndex, (cached) =>
-          applyAnnotationEntry(cached, updated.entry)
-        );
-        flaggedCount.set(updated.flaggedRecords);
-      }
+      if (!saved || get(currentProjectId) !== editor.projectId) return;
 
       dispatch('notify', { message: 'Note updated.', tone: 'success' });
       if (get(memoEditor) === editor) {
@@ -113,19 +86,8 @@
     } catch (error) {
       console.error('saveMemo: Backend updateFlag failed:', error);
       if (get(currentProjectId) !== editor.projectId) return;
-      // Only the latest request for this row may roll its fields back. The
-      // draft stays in the dialog so the user can retry.
-      if (isLatestAnnotationRequest(rowIndex, requestSeq)) {
-        const baseline = editor.row;
-        updateCachedRow(rowIndex, (cached) => ({
-          ...cached,
-          memo: baseline.memo,
-          tags: [...(baseline.tags ?? [])],
-          bookmarked: baseline.bookmarked ?? false,
-          displayCache: { ...cached.displayCache, memo: baseline.memo },
-        }));
-        memoError = 'Failed to update note.';
-      }
+      // The saved baseline is restored by the workspace; keep the draft for retry.
+      memoError = 'Failed to update note.';
       dispatch('notify', { message: 'Failed to update note.', tone: 'error' });
     } finally {
       memoSaving = false;
