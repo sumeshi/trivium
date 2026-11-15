@@ -3,6 +3,7 @@ export const SEARCH_EXAMPLES = [
   ['error | warning', 'Either term (OR)'],
   ['-noise', 'Exclude rows containing noise'],
   ['"failed login"', 'Keep the phrase together'],
+  ['-"failed login"', 'Exclude the phrase'],
   ['column:value', 'Search one named column'],
   ['column:"failed login"', 'A phrase in one column'],
   ['@tag:review', 'Rows with the tag review'],

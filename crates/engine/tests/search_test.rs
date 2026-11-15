@@ -62,6 +62,45 @@ fn tokenize_readme_examples_and_implementation_behaviour() {
         ),
         ("\"-keyword\"", vec![quoted("-keyword")]),
         (
+            r#"-"powershell -enc""#,
+            vec![SearchToken::Not, quoted("powershell -enc")],
+        ),
+        (r#""-powershell""#, vec![quoted("-powershell")]),
+        (
+            r#"-command:"powershell -enc""#,
+            vec![SearchToken::Not, quoted_col("command", "powershell -enc")],
+        ),
+        (
+            r#"allow -"powershell -enc""#,
+            vec![
+                term("allow"),
+                SearchToken::And,
+                SearchToken::Not,
+                quoted("powershell -enc"),
+            ],
+        ),
+        (
+            r#"command:notepad|-"powershell -enc""#,
+            vec![
+                term_col("command", "notepad"),
+                SearchToken::Or,
+                SearchToken::Not,
+                quoted_col("command", "powershell -enc"),
+            ],
+        ),
+        // A quoted pipe/backslash stays literal under NOT too.
+        (r#"-"a|b""#, vec![SearchToken::Not, quoted("a|b")]),
+        (
+            r#"-"C:\Windows\powershell -enc""#,
+            vec![SearchToken::Not, quoted(r"c:\windows\powershell -enc")],
+        ),
+        // A standalone minus is still literal, including before a separate phrase.
+        ("-", vec![term("-")]),
+        (
+            r#"- "powershell -enc""#,
+            vec![term("-"), SearchToken::And, quoted("powershell -enc")],
+        ),
+        (
             "com:WS01|WS02",
             vec![term_col("com", "ws01"), SearchToken::Or, term_col("com", "ws02")],
         ),
@@ -142,6 +181,17 @@ fn rpn_operator_precedence_is_not_then_and_then_or() {
         (
             "-a|b",
             vec![term("a"), SearchToken::Not, term("b"), SearchToken::Or],
+        ),
+        (
+            r#"-"powershell -enc" allow|notepad"#,
+            vec![
+                quoted("powershell -enc"),
+                SearchToken::Not,
+                term("allow"),
+                SearchToken::And,
+                term("notepad"),
+                SearchToken::Or,
+            ],
         ),
         // Left-associative OR
         (

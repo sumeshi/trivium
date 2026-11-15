@@ -15,16 +15,18 @@ fn is_operand_token(tok: &SearchToken) -> bool {
 }
 
 pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
-    let mut raw_parts: Vec<(String, bool)> = Vec::new();
+    // Text, quoted, and a minus directly before the opening quote.
+    let mut raw_parts: Vec<(String, bool, bool)> = Vec::new();
     let mut buf = String::new();
     let mut in_quotes = false;
+    let mut quoted_negated = false;
     let mut chars = input.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
             '"' => {
                 if in_quotes {
-                    if !buf.is_empty() {
+                    if !buf.is_empty() || quoted_negated {
                         // A quoted space is a literal predicate, not an empty
                         // query. Keep the existing trim for ordinary phrases.
                         let text = if buf.trim().is_empty() {
@@ -32,13 +34,16 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
                         } else {
                             buf.trim()
                         };
-                        raw_parts.push((text.to_string(), true));
+                        raw_parts.push((text.to_string(), true, quoted_negated));
                     }
                     buf.clear();
                     in_quotes = false;
+                    quoted_negated = false;
                 } else {
-                    if !buf.trim().is_empty() {
-                        raw_parts.push((buf.trim().to_string(), false));
+                    if buf == "-" {
+                        quoted_negated = true;
+                    } else if !buf.trim().is_empty() {
+                        raw_parts.push((buf.trim().to_string(), false, false));
                     }
                     buf.clear();
                     in_quotes = true;
@@ -49,10 +54,10 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
                     buf.push(ch);
                 } else {
                     if !buf.trim().is_empty() {
-                        raw_parts.push((buf.trim().to_string(), false));
+                        raw_parts.push((buf.trim().to_string(), false, false));
                     }
                     buf.clear();
-                    raw_parts.push(("|".to_string(), false));
+                    raw_parts.push(("|".to_string(), false, false));
                     while let Some('|') = chars.peek() {
                         chars.next();
                     }
@@ -63,7 +68,7 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
                     buf.push(c);
                 } else {
                     if !buf.trim().is_empty() {
-                        raw_parts.push((buf.trim().to_string(), false));
+                        raw_parts.push((buf.trim().to_string(), false, false));
                     }
                     buf.clear();
                 }
@@ -71,34 +76,42 @@ pub fn tokenize_search_query(input: &str) -> Vec<SearchToken> {
             _ => buf.push(ch),
         }
     }
-    if !buf.trim().is_empty() || (in_quotes && !buf.is_empty()) {
+    if !buf.trim().is_empty() || (in_quotes && (!buf.is_empty() || quoted_negated)) {
         let text = if in_quotes && buf.trim().is_empty() {
             &buf
         } else {
             buf.trim()
         };
-        raw_parts.push((text.to_string(), in_quotes));
+        raw_parts.push((text.to_string(), in_quotes, quoted_negated));
     }
 
     // `col:"phrase with space"` arrives as two parts; merge them before scoping.
-    let mut merged: Vec<(String, bool)> = Vec::new();
+    let mut merged: Vec<(String, bool, bool)> = Vec::new();
     let mut i = 0usize;
     while i < raw_parts.len() {
-        let (ref part, quoted) = raw_parts[i];
-        if !quoted && part.ends_with(':') && i + 1 < raw_parts.len() && raw_parts[i + 1].1 {
+        let (ref part, quoted, negated) = raw_parts[i];
+        if !quoted
+            && part.ends_with(':')
+            && i + 1 < raw_parts.len()
+            && raw_parts[i + 1].1
+            && !raw_parts[i + 1].2
+        {
             let col = part[..part.len() - 1].to_string();
             let phrase = raw_parts[i + 1].0.clone();
-            merged.push((format!("{}:\"{}\"", col, phrase), true));
+            merged.push((format!("{}:\"{}\"", col, phrase), true, negated));
             i += 2;
             continue;
         }
-        merged.push((part.clone(), quoted));
+        merged.push((part.clone(), quoted, negated));
         i += 1;
     }
 
     // Words AND/OR/NOT are not operators. Only space, '|', and a leading '-' are.
     let mut tokens: Vec<SearchToken> = Vec::new();
-    for (mut part, quoted) in merged {
+    for (mut part, quoted, negated) in merged {
+        if negated {
+            tokens.push(SearchToken::Not);
+        }
         // The merged `-column:"phrase"` retains its quotes, but its leading
         // minus is still the same NOT operator as in `-column:value`.
         // A quoted literal such as `"-column:value"` remains literal.

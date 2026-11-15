@@ -58,6 +58,7 @@ Text search is intended for quickly narrowing down the data. It is case-insensit
 | `-test` | Exclude rows containing `test` (NOT) |
 | `EventID:4624` | Find rows containing `4624` in the `EventID` column |
 | `"powershell -enc"` | Search for an exact phrase |
+| `-"powershell -enc"` | Exclude rows containing the phrase |
 | `@tag:review` | Find rows tagged with `review` |
 | `@tag:*` | Find rows with any tag |
 

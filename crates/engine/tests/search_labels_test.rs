@@ -140,6 +140,75 @@ fn csv_scopes_preserve_quoted_literals_negation_case_and_or_carry() {
 }
 
 #[test]
+fn negated_phrases_filter_imported_rows_and_preserve_literal_minus_and_scopes() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        "phrases.csv",
+        concat!(
+            "command,detail\n",
+            "powershell -enc AAA,allow\n",
+            "powershell -nop,allow\n",
+            "notepad,powershell -enc\n",
+            "-powershell,allow\n",
+            "cmd.exe,allow\n",
+            "powershell.exe -enc,allow\n",
+            "C:\\Windows\\powershell -enc,allow\n",
+            "blocked|literal,allow\n",
+        ),
+    );
+    for (query, expected) in [
+        (r#"-"powershell -enc""#, vec![1, 3, 4, 5, 7]),
+        (r#""-powershell""#, vec![3]),
+        (r#"-command:"powershell -enc""#, vec![1, 2, 3, 4, 5, 7]),
+        (r#"allow -"powershell -enc""#, vec![1, 3, 4, 5, 7]),
+        (
+            r#"command:notepad|-"powershell -enc""#,
+            vec![1, 2, 3, 4, 5, 7],
+        ),
+        (
+            r#"-"powershell -enc"|command:notepad"#,
+            vec![1, 2, 3, 4, 5, 7],
+        ),
+        (
+            r#"command:notepad|detail:allow -"powershell -enc""#,
+            vec![1, 2, 3, 4, 5, 7],
+        ),
+        (r#"-"blocked|literal""#, vec![0, 1, 2, 3, 4, 5, 6]),
+        (
+            r#"-"C:\Windows\powershell -enc""#,
+            vec![0, 1, 2, 3, 4, 5, 7],
+        ),
+    ] {
+        for converted in [false, true] {
+            let spec = QuerySpec {
+                search: (!converted).then(|| query.into()),
+                condition: converted.then(|| {
+                    let scoped = query
+                        .replace("command:", &format!("{}:", fixture.columns["command"]))
+                        .replace("detail:", &format!("{}:", fixture.columns["detail"]));
+                    trivium_engine::condition::search_to_node(&scoped).expect("condition tree")
+                }),
+                ..Default::default()
+            };
+            assert_eq!(
+                fixture.query(spec),
+                expected,
+                "query: {query}; converted: {converted}"
+            );
+        }
+    }
+    // Unscoped negation honors Search in, instead of reading unrelated fields.
+    assert_eq!(
+        fixture.query(QuerySpec {
+            search: Some(r#"-"powershell -enc""#.into()),
+            search_columns: Some(vec![fixture.columns["command"].clone()]),
+            ..Default::default()
+        }),
+        [1, 2, 3, 4, 5, 7]
+    );
+}
+
+#[test]
 fn jsonl_nested_display_labels_and_original_pointers_work_with_stable_ids() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new(
