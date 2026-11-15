@@ -114,6 +114,7 @@ jobs:
           python tests/check_build_identity.py
           python scripts/third_party_licenses.py --check
           python tests/package_artifacts_test.py
+          python tests/gen_fixture_test.py
           bash scripts/check_rust_size.sh
           rust_gate clippy cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
           rust_gate tests cargo test --locked -p trivium-engine

@@ -44,6 +44,7 @@ jobs:
 
       - name: Quality gates
         run: |
+          python3 tests/gen_fixture_test.py
           bash scripts/check_rust_size.sh
           cargo clippy --locked -p trivium-engine --all-targets -- -D warnings
           cargo test --locked -p trivium-engine
