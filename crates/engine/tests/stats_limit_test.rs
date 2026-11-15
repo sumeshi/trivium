@@ -13,7 +13,7 @@ fn top_and_rare_lists_are_capped() {
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
     let series = Series::new("token", &refs);
 
-    let stats = summarize_series("token", &series, 100);
+    let stats = summarize_series("token", &series, 100).unwrap();
 
     assert_eq!(stats.unique, 50);
     assert_eq!(stats.top.len(), 20);
@@ -37,7 +37,7 @@ fn bounded_ranking_retains_historical_count_then_lexical_order() {
         }
     }
     values.extend([None, Some(String::new())]);
-    let stats = summarize_series("token", &Series::new("token", values), 3);
+    let stats = summarize_series("token", &Series::new("token", values), 3).unwrap();
     let mut expected = counts.into_iter().collect::<Vec<_>>();
     expected.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let actual = stats

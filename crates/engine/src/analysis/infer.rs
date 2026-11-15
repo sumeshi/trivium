@@ -66,7 +66,15 @@ pub(crate) struct KindFlags {
 
 impl KindFlags {
     pub(crate) fn observe(&mut self, value: &AnyValue) {
-        match classify_any(value) {
+        self.observe_kind(classify_any(value));
+    }
+
+    pub(crate) fn observe_text(&mut self, text: &str) {
+        self.observe_kind(classify_text(text));
+    }
+
+    fn observe_kind(&mut self, kind: Option<ColumnKind>) {
+        match kind {
             None | Some(ColumnKind::Null) => {}
             Some(ColumnKind::Int) => self.saw_int = true,
             Some(ColumnKind::Float) => self.saw_float = true,

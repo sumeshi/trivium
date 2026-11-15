@@ -97,6 +97,7 @@
       if (!statsRequests.isCurrent(ticket)) {
         return;
       }
+      stats = null;
       error = errorMessage(err);
     } finally {
       if (statsRequests.isCurrent(ticket)) statsLoading = false;
@@ -210,7 +211,7 @@
     </section>
   {/if}
   <details class="rare-section">
-      <summary>Rare values <span>{stats?.rare.length ?? 0}</span></summary>
+      <summary>Rare values <span>Showing up to 20 values</span></summary>
       <label class="rare-control">
         Maximum frequency
         <input type="number" min="1" step="1" bind:value={rareMax} aria-label="Rare maximum frequency" />
