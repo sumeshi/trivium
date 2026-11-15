@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
-  import { get } from "svelte/store";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
   import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS } from "../../grouping";
@@ -108,7 +107,8 @@
 
   function applyPath(path: GroupTreeNode[]) {
     if (!tree || loading) return;
-    conditionTree.set(appendGroupPath(get(conditionTree), tree.columns, path));
+    const columns = tree.columns;
+    conditionTree.update((root) => appendGroupPath(root, columns, path));
   }
 </script>
 

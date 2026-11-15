@@ -1,7 +1,7 @@
 import { derived, writable } from "svelte/store";
 import type { CompareOp, ConditionNode } from "../types";
 import {
-  appendFilterCondition,
+  appendFilterCondition, appendConditionsAnd,
   type FilterConditionOp,
 } from "../conditionFilters.ts";
 
@@ -70,7 +70,29 @@ function rootGroup(): EditorGroup {
 
 /** One editor tree per active investigation. */
 export function createConditionState() {
-  const conditionTree = writable<EditorGroup>(rootGroup());
+  const tree = writable<EditorGroup>(rootGroup());
+  // Only untouched ranges added by this analysis control can be replaced. A
+  // restored tree or a user-edited range becomes an ordinary investigation rule.
+  const ranges = new Map<string, { id: string; signature: string }>();
+  const signature = (node: EditorNode) => JSON.stringify(node,
+    (key, value: unknown) => key === "collapsed" ? undefined : value);
+  const conditionTree = {
+    subscribe: tree.subscribe,
+    set(root: EditorGroup): void {
+      ranges.clear();
+      tree.set(root);
+    },
+    update(update: (root: EditorGroup) => EditorGroup): void {
+      tree.update((root) => {
+        const next = update(root);
+        for (const [source, owned] of ranges) {
+          const node = next.kind === "and" && next.children.find((child) => child.id === owned.id);
+          if (!node || signature(node) !== owned.signature) ranges.delete(source);
+        }
+        return next;
+      });
+    },
+  };
 
   function leaf(column: string): EditorCondition {
     return {
@@ -108,44 +130,17 @@ export function createConditionState() {
     conditionTree.update(update);
   }
 
-  /** Replaces the editor with one `in` condition so a stats value filters the table. */
+  /** Drilldowns narrow the current expression while keeping literal values whole. */
   function filterByValue(column: string, value: string): void {
-    const row: EditorCondition = {
-      type: "condition",
-      id: crypto.randomUUID(),
-      column,
-      op: "in",
-      value,
-      exact: true,
-      negated: false,
-    };
-    conditionTree.set({
-      type: "group",
-      id: ROOT_ID,
-      kind: "and",
-      collapsed: false,
-      children: [row],
-    });
+    filterByValues([{ column, value }]);
   }
 
-  /** Replaces the editor with an AND of `in` conditions, one per grouping level. */
   function filterByValues(filters: Array<{ column: string; value: string }>): void {
     const children: EditorCondition[] = filters.map(({ column, value }) => ({
-      type: "condition",
-      id: crypto.randomUUID(),
-      column,
-      op: "in",
-      value,
-      exact: true,
-      negated: false,
+      type: "condition", id: crypto.randomUUID(), column, op: "in", value,
+      exact: true, negated: false,
     }));
-    conditionTree.set({
-      type: "group",
-      id: ROOT_ID,
-      kind: "and",
-      collapsed: false,
-      children,
-    });
+    conditionTree.update((root) => appendConditionsAnd(root, children));
   }
 
   /**
@@ -160,23 +155,23 @@ export function createConditionState() {
     conditionTree.update((root) => appendFilterCondition(root, column, op, value));
   }
 
-  /** Replaces the editor with `column >= start AND column <= end`. */
-  function filterByRange(column: string, start: string, end: string): void {
-    const bound = (op: "ge" | "le", value: string): EditorCondition => ({
-      type: "condition",
-      id: crypto.randomUUID(),
-      column,
-      op,
-      value,
-      exact: true,
-      negated: false,
+  /** Add a range; subsequent adjustments replace only this control's own range. */
+  function filterByRange(column: string, start: string, end: string, source = "timeline"): void {
+    const bound = (op: "regex" | "ge" | "le", value: string): EditorCondition => ({
+      type: "condition", id: crypto.randomUUID(), column, op, value,
+      exact: true, negated: false,
     });
-    conditionTree.set({
-      type: "group",
-      id: ROOT_ID,
-      kind: "and",
-      collapsed: false,
-      children: [bound("ge", start), bound("le", end)],
+    const range: EditorGroup = {
+      type: "group", id: crypto.randomUUID(), kind: "and", collapsed: false,
+      children: [bound("regex", "\\S"), bound("ge", start), bound("le", end)],
+    };
+    conditionTree.update((root) => {
+      const owned = ranges.get(source);
+      const next = owned
+        ? { ...root, children: root.children.map((node) => node.id === owned.id ? range : node) }
+        : appendConditionsAnd(root, [range]);
+      ranges.set(source, { id: range.id, signature: signature(range) });
+      return next;
     });
   }
 

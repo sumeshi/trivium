@@ -1,7 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { FLAG_FILTER_OPTIONS } from './state';
-  import { get } from 'svelte/store';
   import { appendEmptyColumnRule } from '../../appliedFilterSummary';
   import { MAX_GROUP_LEVELS } from '../../grouping';
   import type { GroupGranularity } from '../../grouping';
@@ -98,12 +97,16 @@
 
   export async function openRuleForColumn(columnId: string): Promise<void> {
     if (!$projectDetail?.columns.includes(columnId)) return;
-    const result = appendEmptyColumnRule(get(conditionTree), columnId);
-    conditionTree.set(result.tree);
+    let ruleId = "";
+    conditionTree.update((root) => {
+      const result = appendEmptyColumnRule(root, columnId);
+      ruleId = result.ruleId;
+      return result.tree;
+    });
     drawerTrigger = document.getElementById('tool-group-filters') as HTMLButtonElement | null;
     await selectTool('conditions');
     await tick();
-    drawerEl?.querySelector<HTMLInputElement>(`[data-condition-id="${result.ruleId}"]`)?.focus();
+    drawerEl?.querySelector<HTMLInputElement>(`[data-condition-id="${ruleId}"]`)?.focus();
   }
   export async function openGroupingForColumn(columnId: string): Promise<void> {
     if (!$projectDetail?.columns.includes(columnId)) return;

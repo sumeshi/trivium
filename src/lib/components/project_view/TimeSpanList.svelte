@@ -33,7 +33,7 @@
           type="button"
           class="span-row"
           title={`Filter ${column}: ${span.start} – ${span.end}; ${kind === "gap" ? `${span.count.toLocaleString()} elapsed seconds` : `${span.count.toLocaleString()} events`}`}
-          on:click={() => filterByRange(column, span.start, span.end)}
+          on:click={() => filterByRange(column, span.start, span.end, "time-analysis")}
         >
           <span class="span-dates"><span>{compactTimestamp(span.start)}</span><span>{compactTimestamp(span.end)}</span></span>
           <span class="span-measures">

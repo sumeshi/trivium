@@ -63,7 +63,8 @@ test("a slow preset metadata save cannot overwrite subsequent investigation and 
   assert.deepEqual(writes, [["c1"], ["c2"]]);
   assert.deepEqual([...get(workspace.hiddenColumns)], persisted);
   assert.deepEqual(persisted, ["c2"]);
-  assert.deepEqual(get(workspace.conditionPayload), { column: "c1", op: "in", values: ["later rule"], negated: false });
+  assert.deepEqual(get(workspace.conditionPayload), { kind: "and", children: [preset.condition,
+    { column: "c1", op: "in", values: ["later rule"], negated: false }] });
   assert.equal(get(workspace.sortKey), "c1"); assert.equal(get(workspace.sortDirection), "desc");
   assert.deepEqual(get(workspace.columnOrder), ["c1", "c2"]);
   assert.deepEqual(widths, { c1: 400 });

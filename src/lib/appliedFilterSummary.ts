@@ -1,3 +1,4 @@
+import { appendConditionsAnd } from "./conditionFilters.ts";
 import type { ConditionNode } from "./types";
 import type { AppliedFilters } from "./components/project_view/state";
 import type { WorkspaceController } from "./workspaceController";
@@ -71,8 +72,5 @@ export function appendEmptyColumnRule(tree: import("./stores/condition").EditorG
   const rule: import("./stores/condition").EditorCondition = {
     type: "condition", id: ruleId, column, op: "contains", value: "", negated: false,
   };
-  const existing = structuredClone(tree);
-  const children = existing.kind === "or" && existing.children.length > 0
-    ? [{ ...existing, id: crypto.randomUUID() }, rule] : [...existing.children, rule];
-  return { tree: { ...existing, kind: "and", collapsed: false, children }, ruleId };
+  return { tree: appendConditionsAnd(tree, [rule]), ruleId };
 }

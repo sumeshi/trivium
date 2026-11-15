@@ -1,3 +1,4 @@
+import { appendConditionsAnd } from "./conditionFilters.ts";
 import type { GroupTreeNode } from "./types";
 import type { EditorCondition, EditorGroup } from "./stores/condition";
 import type * as Wire from "./generated/engine";
@@ -88,10 +89,5 @@ export function appendGroupPath(
       children.push(condition("eq", node.label));
     }
   });
-  if (children.length === 0) return root;
-  if (root.kind === "and") return { ...root, children: [...root.children, ...children] };
-  return {
-    type: "group", id: root.id, kind: "and", collapsed: false,
-    children: [{ ...root, id: createId() }, ...children],
-  };
+  return appendConditionsAnd(root, children, createId);
 }
