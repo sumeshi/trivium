@@ -90,20 +90,21 @@
     if (editsBlocked()) return;
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         // Linux file-dialog filters are case-sensitive, so list the uppercase
         // spellings as well. The backend lowercases the extension again.
         filters: [
           {
-            name: 'Data files (CSV, JSON, JSONL)',
+            name: 'Data files (CSV / JSON / JSONL / NDJSON)',
             extensions: ['csv', 'CSV', 'json', 'JSON', 'jsonl', 'JSONL', 'ndjson', 'NDJSON']
           }
         ]
       });
-      if (!selected || Array.isArray(selected) || editsBlocked()) {
+      if (!selected || editsBlocked()) {
         return;
       }
-      projectController.setPendingFile(selected);
+      const paths = Array.isArray(selected) ? selected : [selected];
+      if (paths.length) projectController.setPendingFiles(paths);
     } catch (error) {
       console.error(error);
       showToast('Failed to open file picker.', 'error');
@@ -115,9 +116,16 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        const summary = await projectController.createProject();
-        showToast(`Imported ${summary.meta.name}`);
-        sidebarOpen = false;
+        const result = await projectController.createProjects();
+        if (result.failures.length) {
+          const failure = result.failures[0];
+          showToast(`${failure.fileName}: ${failure.message}`, 'error');
+        } else if (result.openError) showToast(result.openError, 'error');
+        else {
+          showToast(result.imported.length === 1
+            ? `Imported ${result.imported[0].meta.name}` : `Imported ${result.imported.length} files`);
+          sidebarOpen = false;
+        }
         await tick();
       });
     } catch (error) {
@@ -240,9 +248,11 @@
       isLoadingProjects={$projectState.isLoadingProjects}
       creating={$projectState.creating}
       pendingDescription={$projectState.pendingDescription}
-      pendingFileName={$projectState.pendingFileName}
+      pendingFilePaths={$projectState.pendingFilePaths}
       pendingDelimiter={$projectState.pendingDelimiter}
       pendingRestoreAnnotations={$projectState.pendingRestoreAnnotations}
+      importProgress={$projectState.importProgress}
+      importFailures={$projectState.importFailures}
       canCreateProject={$canCreateProject}
       on:descriptionChange={(e) => projectController.setPendingDescription(e.detail)}
       on:delimiterChange={(e) => projectController.setPendingDelimiter(e.detail)}

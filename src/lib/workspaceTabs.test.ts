@@ -93,8 +93,8 @@ test("an import finishing after a user switches tabs does not steal the active t
   const imported = deferred<ProjectSummary>();
   const { controller } = fixture({ createProject: () => imported.promise });
   await controller.loadProjects();
-  controller.setPendingFile("/tmp/c.csv");
-  const creating = controller.createProject();
+  controller.setPendingFiles(["/tmp/c.csv"]);
+  const creating = controller.createProjects();
   await controller.selectProject("b");
   imported.resolve(summary("c"));
   await creating;

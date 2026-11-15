@@ -3,6 +3,7 @@
   import { fade, fly } from 'svelte/transition';
   import dayjs from 'dayjs';
   import type { ProjectSummary } from '../../types';
+  import type { ProjectImportFailure } from '../../stores/projects';
 
   const dispatch = createEventDispatcher();
 
@@ -11,13 +12,15 @@
   export let isLoadingProjects: boolean;
   export let creating: boolean;
   export let pendingDescription: string;
-  export let pendingFileName: string;
+  export let pendingFilePaths: string[] = [];
   export let pendingDelimiter: string;
   export let pendingRestoreAnnotations = false;
+  export let importProgress: { index: number; total: number; fileName: string } | null = null;
+  export let importFailures: ProjectImportFailure[] = [];
   export let canCreateProject: boolean;
 
-  $: selectedFormat = pendingFileName.split('.').at(-1)?.toLowerCase() ?? '';
-  $: csvSettingsRelevant = selectedFormat === 'csv';
+  $: pendingFileName = pendingFilePaths[0]?.split(/[/\\]/).at(-1) ?? '';
+  $: csvSettingsRelevant = pendingFilePaths.some((path) => /\.csv$/i.test(path));
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
 
   const truncateText = (text: string, length: number) => {
@@ -70,7 +73,7 @@
 
     <section class="import-panel">
       <div class="import-heading">
-        <h3>Open a data file</h3>
+        <h3>Open data files</h3>
         <p id="import-formats">CSV / JSON / JSONL / NDJSON</p>
       </div>
       <button class="button choose-file full" disabled={creating}
@@ -78,13 +81,20 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 7h7l2-3h9v16H3V7Z" />
         </svg>
-        {pendingFileName ? 'Choose another file' : 'Choose data file'}
+        {pendingFileName ? 'Choose other files' : 'Choose data files'}
       </button>
       {#if pendingFileName}
-        <div class="pending-file" title={pendingFileName}>
+        <div class="pending-file" title={pendingFilePaths.join('\n') || pendingFileName}>
           <span class="pending-dot"></span>
-          <span>{pendingFileName}</span>
+          <span>{pendingFilePaths.length > 1 ? `${pendingFilePaths.length} files selected` : pendingFileName}</span>
         </div>
+        {#if pendingFilePaths.length > 1}
+          <ul class="pending-files" aria-label="Selected data files">
+            {#each pendingFilePaths as path}
+              <li title={path}>{path.split(/[/\\]/).at(-1)}</li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
 
       <div class="field-grid">
@@ -130,8 +140,18 @@
         disabled={!canCreateProject || creating}
         on:click={() => dispatch('createProject')}
       >
-        {creating ? 'Importing…' : 'Import and open'}
+        {creating ? (importProgress ? `Importing ${importProgress.index} / ${importProgress.total}…` : 'Importing…') : 'Import and open'}
       </button>
+      {#if creating && importProgress}
+        <p class="import-help" role="status">{importProgress.fileName}</p>
+      {/if}
+      {#if importFailures.length}
+        <ul class="import-failures" aria-label="Files that could not be imported" role="status">
+          {#each importFailures as failure}
+            <li><strong title={failure.path}>{failure.fileName}</strong>: {failure.message}</li>
+          {/each}
+        </ul>
+      {/if}
       <p class="import-help">Source file is opened read-only.</p>
     </section>
 
@@ -344,6 +364,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .pending-files, .import-failures { margin: 0; padding-left: 16px; font-size: 11px; line-height: 1.5; max-height: 112px; overflow: auto; }
+  .pending-files { color: var(--muted); }
+  .pending-files li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .import-failures { color: var(--danger); overflow-wrap: anywhere; }
 
   .pending-dot {
     width: 6px;

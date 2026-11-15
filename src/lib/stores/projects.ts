@@ -1,5 +1,6 @@
 import { derived, get, writable } from "svelte/store";
 import { createOwnedRequests } from "../workspaceRequests.ts";
+import { errorMessage } from "../errors.ts";
 import type { Backend } from "../backend";
 import type { LoadProjectResponse, ProjectSummary } from "../types";
 
@@ -13,11 +14,27 @@ export interface ProjectsState {
   creating: boolean;
   projectsLoaded: boolean;
   pendingDescription: string;
-  pendingFilePath: string | null;
-  pendingFileName: string;
+  pendingFilePaths: string[];
   pendingDelimiter: string;
   pendingRestoreAnnotations: boolean;
+  importProgress: { index: number; total: number; fileName: string } | null;
+  importFailures: ProjectImportFailure[];
 }
+
+export interface ProjectImportFailure {
+  path: string;
+  fileName: string;
+  message: string;
+}
+
+export interface ProjectImportResult {
+  imported: ProjectSummary[];
+  failures: ProjectImportFailure[];
+  openError?: string;
+}
+
+const fileName = (path: string) => path.split(/[/\\]/).at(-1) ?? path;
+const isCsv = (path: string) => /\.csv$/i.test(path);
 
 export function createProjectController(backend: Backend) {
   // Only the active detail is retained; inactive tabs have IDs and UI snapshots.
@@ -28,10 +45,11 @@ export function createProjectController(backend: Backend) {
   const state = writable<ProjectsState>({
     projects: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
     isLoadingProjects: false, isLoadingDetail: false, creating: false,
-    projectsLoaded: false, pendingDescription: "", pendingFilePath: null,
-    pendingFileName: "", pendingDelimiter: "", pendingRestoreAnnotations: false,
+    projectsLoaded: false, pendingDescription: "", pendingFilePaths: [],
+    pendingDelimiter: "", pendingRestoreAnnotations: false,
+    importProgress: null, importFailures: [],
   });
-  const canCreateProject = derived(state, ($state) => Boolean($state.pendingFilePath));
+  const canCreateProject = derived(state, ($state) => $state.pendingFilePaths.length > 0);
 
   function setPendingDescription(pendingDescription: string) {
     state.update((value) => ({ ...value, pendingDescription }));
@@ -43,22 +61,22 @@ export function createProjectController(backend: Backend) {
 
   function setPendingRestoreAnnotations(restore: boolean) {
     state.update((value) => ({ ...value,
-      pendingRestoreAnnotations: restore && /\.csv$/i.test(value.pendingFileName),
+      pendingRestoreAnnotations: restore && value.pendingFilePaths.some(isCsv),
     }));
   }
 
-  function setPendingFile(pendingFilePath: string | null) {
+  function setPendingFiles(paths: string[]) {
+    const pendingFilePaths = [...new Set(paths.filter((path) => path.length > 0))];
     state.update((value) => ({
-      ...value, pendingFilePath,
-      pendingFileName: pendingFilePath?.split(/[/\\]/).at(-1) ?? "",
-      pendingRestoreAnnotations: false,
+      ...value, pendingFilePaths,
+      pendingRestoreAnnotations: false, importFailures: [],
     }));
   }
 
   function resetPending() {
     state.update((value) => ({
-      ...value, pendingDescription: "", pendingFilePath: null,
-      pendingFileName: "", pendingDelimiter: "", pendingRestoreAnnotations: false,
+      ...value, pendingDescription: "", pendingFilePaths: [],
+      pendingDelimiter: "", pendingRestoreAnnotations: false, importFailures: [],
     }));
   }
 
@@ -148,34 +166,65 @@ export function createProjectController(backend: Backend) {
     await loadProjects(true);
   }
 
-  async function createProject() {
+  async function createProjects(): Promise<ProjectImportResult> {
     const current = get(state);
-    if (!current.pendingFilePath) throw new Error("Select a CSV, JSON, JSONL, or NDJSON file first.");
+    if (!current.pendingFilePaths.length) throw new Error("Select a CSV, JSON, JSONL, or NDJSON file first.");
+    if (current.creating) throw new Error("Files are already being imported.");
     const navigationAtStart = detailGeneration;
-    state.update((value) => ({ ...value, creating: true }));
+    const paths = [...current.pendingFilePaths];
+    const result: ProjectImportResult = { imported: [], failures: [] };
+    state.update((value) => ({ ...value, creating: true, importFailures: [] }));
     try {
-      const summary = await backend.createProject({
-        path: current.pendingFilePath, description: current.pendingDescription || null,
-        delimiter: current.pendingDelimiter,
-        restoreAnnotations: current.pendingRestoreAnnotations && /\.csv$/i.test(current.pendingFileName),
-      });
-      if (disposed) return summary;
-      resetPending();
-      await loadProjects(true);
-      if (disposed) return summary;
-      // A user may have switched tabs while import was running. Its late
-      // response may add the new tab, but must not replace that newer choice.
-      state.update((value) => ({
-        ...value, openProjectIds: value.openProjectIds.includes(summary.meta.id)
-          ? value.openProjectIds : [...value.openProjectIds, summary.meta.id],
-      }));
-      if (navigationAtStart === detailGeneration) await loadProjectDetail(summary.meta.id);
-      state.update((value) => ({ ...value, creating: false }));
-      return summary;
-    } catch (error) {
-      if (disposed) throw error;
-      state.update((value) => ({ ...value, creating: false }));
-      throw error;
+      for (const [index, path] of paths.entries()) {
+        if (disposed) break;
+        state.update((value) => ({ ...value, importProgress: { index: index + 1, total: paths.length, fileName: fileName(path) } }));
+        try {
+          const summary = await backend.createProject({
+            path, description: current.pendingDescription || null,
+            delimiter: isCsv(path) ? current.pendingDelimiter : "",
+            restoreAnnotations: current.pendingRestoreAnnotations && isCsv(path),
+          });
+          result.imported.push(summary);
+          if (disposed) continue;
+          // A list read started before this import may omit its new project.
+          // Supersede it and refresh the complete list once the batch finishes.
+          listGeneration += 1;
+          // Each completed import needs only its summary. Inactive tabs never
+          // load pages or retain an extra detail payload during the batch.
+          state.update((value) => ({
+            ...value, projects: [summary, ...value.projects.filter((item) => item.meta.id !== summary.meta.id)],
+            isLoadingProjects: false,
+            openProjectIds: value.openProjectIds.includes(summary.meta.id)
+              ? value.openProjectIds : [...value.openProjectIds, summary.meta.id],
+          }));
+        } catch (error) {
+          const failure = { path, fileName: fileName(path), message: errorMessage(error, "Failed to import file.") };
+          result.failures.push(failure);
+          if (!disposed) state.update((value) => ({ ...value, importFailures: [...result.failures] }));
+        }
+      }
+      if (disposed) return result;
+      if (result.failures.length) {
+        const pendingFilePaths = result.failures.map((failure) => failure.path);
+        state.update((value) => ({
+          ...value, pendingFilePaths,
+          pendingRestoreAnnotations: current.pendingRestoreAnnotations && pendingFilePaths.some(isCsv),
+        }));
+      } else resetPending();
+      // A user may switch or close tabs while importing. Add the new tabs, but
+      // never let the batch's late response replace that newer choice.
+      const last = result.imported.at(-1);
+      if (last) {
+        if (navigationAtStart === detailGeneration) {
+          try { await loadProjectDetail(last.meta.id); }
+          catch (error) { result.openError = errorMessage(error, "Could not open the imported project."); }
+        }
+        try { await loadProjects(true); }
+        catch (error) { result.openError ??= errorMessage(error, "Could not refresh the project list."); }
+      }
+      return result;
+    } finally {
+      if (!disposed) state.update((value) => ({ ...value, creating: false, importProgress: null }));
     }
   }
 
@@ -212,15 +261,16 @@ export function createProjectController(backend: Backend) {
     state.update((value) => ({
       ...value, projects: [], openProjectIds: [], selectedProjectId: null,
       projectDetail: null, isLoadingProjects: false, isLoadingDetail: false,
-      pendingFilePath: null, pendingRestoreAnnotations: false,
+      pendingFilePaths: [], pendingRestoreAnnotations: false,
+      creating: false, importProgress: null, importFailures: [],
     }));
   }
 
   return {
     dispose,
     state: { subscribe: state.subscribe }, canCreateProject, loadProjects,
-    loadProjectDetail, selectProject, closeProject, refreshSelected, createProject,
-    deleteProject, setPendingDescription, setPendingDelimiter, setPendingFile, setPendingRestoreAnnotations,
+    loadProjectDetail, selectProject, closeProject, refreshSelected, createProjects,
+    deleteProject, setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations,
     resetPending, updateSummary,
   };
 }

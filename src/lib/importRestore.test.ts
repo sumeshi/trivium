@@ -30,22 +30,22 @@ test("annotation restoration is opt-in for CSV and never carried to another sele
   assert.equal(get(controller.state).pendingRestoreAnnotations, false);
   controller.setPendingRestoreAnnotations(true);
   assert.equal(get(controller.state).pendingRestoreAnnotations, false);
-  controller.setPendingFile("/source/ordinary.csv");
-  await controller.createProject();
+  controller.setPendingFiles(["/source/ordinary.csv"]);
+  await controller.createProjects();
   assert.equal(args.at(-1)?.restoreAnnotations, false);
-  controller.setPendingFile("C:\\export.CSV");
+  controller.setPendingFiles(["C:\\export.CSV"]);
   controller.setPendingRestoreAnnotations(true);
   assert.equal(get(controller.state).pendingRestoreAnnotations, true);
-  await controller.createProject();
+  await controller.createProjects();
   assert.equal(args.at(-1)?.restoreAnnotations, true);
   assert.equal(get(controller.state).pendingRestoreAnnotations, false);
   for (const next of ["/source/other.csv", "/source/data.json", "/source/data.jsonl", "/source/data.ndjson"]) {
-    controller.setPendingFile("/source/export.csv");
+    controller.setPendingFiles(["/source/export.csv"]);
     controller.setPendingRestoreAnnotations(true);
-    controller.setPendingFile(next);
+    controller.setPendingFiles([next]);
     assert.equal(get(controller.state).pendingRestoreAnnotations, false);
     if (!next.endsWith(".csv")) controller.setPendingRestoreAnnotations(true);
-    await controller.createProject();
+    await controller.createProjects();
     assert.equal(args.at(-1)?.restoreAnnotations, false);
   }
   controller.dispose();
@@ -53,19 +53,20 @@ test("annotation restoration is opt-in for CSV and never carried to another sele
 
 test("failed imports retain the explicit restore choice for retry; reset and dispose clear it", async () => {
   const { controller, args, fail } = fixture();
-  controller.setPendingFile("/source/export.csv");
+  controller.setPendingFiles(["/source/export.csv"]);
   controller.setPendingRestoreAnnotations(true);
   fail(true);
-  await assert.rejects(controller.createProject(), /import failed/);
-  assert.equal(get(controller.state).pendingFilePath, "/source/export.csv");
+  const failed = await controller.createProjects();
+  assert.equal(failed.failures[0]?.message, "import failed");
+  assert.deepEqual(get(controller.state).pendingFilePaths, ["/source/export.csv"]);
   assert.equal(get(controller.state).pendingRestoreAnnotations, true);
   fail(false);
-  await controller.createProject();
+  await controller.createProjects();
   assert.equal(args.at(-1)?.restoreAnnotations, true);
-  controller.setPendingFile("/source/export.csv"); controller.setPendingRestoreAnnotations(true);
+  controller.setPendingFiles(["/source/export.csv"]); controller.setPendingRestoreAnnotations(true);
   controller.resetPending();
   assert.equal(get(controller.state).pendingRestoreAnnotations, false);
-  controller.setPendingFile("/source/export.csv"); controller.setPendingRestoreAnnotations(true);
+  controller.setPendingFiles(["/source/export.csv"]); controller.setPendingRestoreAnnotations(true);
   controller.dispose();
   assert.equal(get(controller.state).pendingRestoreAnnotations, false);
 });
