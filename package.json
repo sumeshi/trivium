@@ -1,6 +1,6 @@
 {
   "name": "trivium-desktop",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,11 @@
     "contracts:generate": "cargo run --locked -p trivium-engine --bin export_contracts",
     "test:ui": "node --test --experimental-strip-types src/lib/*.test.ts",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "prelint": "node scripts/generate-themes.mjs",
+    "prelint:test": "node scripts/generate-themes.mjs",
+    "pretest:ui": "node scripts/generate-themes.mjs",
+    "definitions:check": "node scripts/generate-themes.mjs --check"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
