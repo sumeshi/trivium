@@ -225,13 +225,6 @@ export function createConditionState(scope: {
       ? { ...node, children: [...node.children, child] } : node) as EditorGroup);
   }
 
-  /** An extraction drilldown narrows the whole existing expression. */
-  function filterByFormat(columns: readonly string[], format: FormatDefinition, equals?: string): void {
-    const child: EditorFormatCondition = { type: "format", id: crypto.randomUUID(), columns: [...columns],
-      format: structuredClone(format), negated: false, ...(equals === undefined ? {} : { equals }) };
-    conditionTree.update(root => appendConditionsAnd(root, [child]));
-  }
-
   function patchFormatCondition(id: string, patch: Partial<Pick<EditorFormatCondition, "columns" | "format" | "equals" | "negated">>): void {
     const snapshot = structuredClone(patch);
     edit(root => mapNode(root, node => node.type === "format" && node.id === id
@@ -356,7 +349,7 @@ export function createConditionState(scope: {
   });
 
   return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, addCondition, addGroup,
-    addFormatCondition, filterByFormat, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
+    addFormatCondition, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
     removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }
 

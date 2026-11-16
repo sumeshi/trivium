@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import type { LoadProjectResponse, ProjectMeta } from '../../types';
+  import type { LoadProjectResponse } from '../../types';
   import { theme, setTheme, themeOptions } from '../../theme';
   import AppearanceDialog from './AppearanceDialog.svelte';
   import { parseTheme } from '../../themeModel';
@@ -8,7 +8,6 @@
   import { tableTextSize, TABLE_TEXT_SIZES, DEFAULT_TABLE_TEXT_SIZE, adjustTableTextSize, setTableTextSize } from '../../tableTextSize';
 
   export let projectDetail: LoadProjectResponse | null;
-  export let projectMeta: ProjectMeta | null = null;
 
   const dispatch = createEventDispatcher();
   let menuEl: HTMLDetailsElement;
@@ -17,7 +16,7 @@
   let copyMessage = '';
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  $: meta = projectMeta ?? projectDetail?.project.meta;
+  $: meta = projectDetail?.project.meta;
   $: fileName = meta?.source_file_name || meta?.name || '';
   $: sourcePath = meta?.source_path || '';
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;

@@ -1,35 +1,35 @@
-use std::{fs, path::PathBuf, sync::OnceLock};
-
-use parking_lot::{Mutex, MutexGuard};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use super::*;
 use crate::{
     condition::{Condition, Node, Op},
     formats::FormatDefinition,
     jobs::{self, JobKind},
+    models::ProjectSummary,
     ops::{
-        projects::{create_project, CreateProjectPayload},
-        query::QuerySpec,
+        projects::{
+            create_project, delete_project, is_temporary_project, list_projects, load_project,
+            CreateProjectPayload, ProjectRequest,
+        },
+        rows::{query_project_rows, QueryRowsPayload, QuerySpec},
     },
     store::ProjectsStore,
 };
+use sha2::{Digest, Sha256};
 
-// Every extraction test uses the same bounded process cache, just as the UI.
-// Serializing this module avoids asserting residency while another test
-// deliberately evicts/release entries; other engine tests remain parallel.
-pub(super) fn serial() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock()
-}
-
-pub(super) struct Case {
-    pub store: ProjectsStore,
+struct Case {
+    store: ProjectsStore,
     root: PathBuf,
     id: uuid::Uuid,
     columns: Vec<String>,
 }
 impl Case {
-    pub fn csv() -> Self {
+    fn csv() -> Self {
         Self::new("sample.csv", "CommandLine,Other,Scope\n\"日本語 10.0.0.1,10.0.0.1 and 8.8.8.8\",10.0.0.1,keep\n8.8.8.8,127.0.0.1,drop\n256.1.2.3,,keep\n")
     }
     fn new(name: &str, text: &str) -> Self {
@@ -61,7 +61,7 @@ impl Case {
             id: meta.id,
         }
     }
-    pub fn payload(&self) -> ExtractPayload {
+    fn payload(&self) -> ExtractPayload {
         ExtractPayload {
             project_id: self.id,
             columns: self.columns[..2].to_vec(),
@@ -70,20 +70,24 @@ impl Case {
             spec: QuerySpec::default(),
         }
     }
-    pub fn values(&self, id: uuid::Uuid) -> Vec<ExtractValue> {
-        extract_values_page(
-            &self.store,
-            ExtractPagePayload {
-                result_id: id,
-                offset: 0,
-                limit: 100,
-            },
-        )
-        .unwrap()
-        .rows
+    fn values(&self, result: &ProjectSummary) -> Vec<csv::StringRecord> {
+        let path = result.meta.source_path.as_ref().unwrap();
+        let mut csv = csv::Reader::from_path(path).unwrap();
+        assert_eq!(
+            csv.headers().unwrap().iter().collect::<Vec<_>>(),
+            vec!["Value", "Count", "Rows", "Scope"]
+        );
+        csv.records().collect::<Result<Vec<_>, _>>().unwrap()
     }
-    pub fn output_path(&self, name: &str) -> PathBuf {
-        self.root.join(name)
+    fn recent(&self) -> Vec<uuid::Uuid> {
+        list_projects(&self.store)
+            .unwrap()
+            .iter()
+            .map(|project| project.meta.id)
+            .collect()
+    }
+    fn assert_no_generation_files(&self) {
+        assert_eq!(fs::read_dir(self.store.staging_root()).unwrap().count(), 0);
     }
 }
 impl Drop for Case {
@@ -91,95 +95,109 @@ impl Drop for Case {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
-
 fn ipv4() -> FormatDefinition {
     serde_json::from_str(include_str!("../../../../../definitions/formats/ipv4.json")).unwrap()
 }
-
-#[test]
-fn adjacent_values_unicode_counts_rows_and_provenance_are_exact() {
-    let _lock = serial();
-    let case = Case::csv();
-    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
-    assert_eq!(
-        (
-            result.source_rows,
-            result.total_occurrences,
-            result.matched_rows,
-            result.unique_values
-        ),
-        (3, 6, 2, 3)
-    );
-    let rows = case.values(result.result_id);
-    assert_eq!(
-        rows.iter()
-            .map(|row| (
-                row.value.as_str(),
-                row.count,
-                row.rows,
-                row.scope.as_deref()
-            ))
-            .collect::<Vec<_>>(),
-        vec![
-            ("10.0.0.1", 3, 1, Some("Private")),
-            ("8.8.8.8", 2, 2, Some("Public")),
-            ("127.0.0.1", 1, 1, Some("Special"))
-        ]
-    );
-    let first = extract_value_sources(
-        &case.store,
-        ExtractSourcesPayload {
-            result_id: result.result_id,
-            value: "10.0.0.1".into(),
-            offset: 0,
-            limit: 2,
-        },
-        &JobContext::none(),
-    )
-    .unwrap();
-    assert!(first.has_more);
-    assert_eq!(
-        first
-            .rows
-            .iter()
-            .map(|row| (row.row_index, row.column.as_str(), row.start, row.end))
-            .collect::<Vec<_>>(),
-        vec![
-            (0, case.columns[0].as_str(), 10, 18),
-            (0, case.columns[0].as_str(), 19, 27)
-        ]
-    );
-    let last = extract_value_sources(
-        &case.store,
-        ExtractSourcesPayload {
-            result_id: result.result_id,
-            value: "10.0.0.1".into(),
-            offset: 2,
-            limit: 2,
-        },
-        &JobContext::none(),
-    )
-    .unwrap();
-    assert!(!last.has_more);
-    assert_eq!(last.rows[0].column, case.columns[1]);
-    assert!(release_extract_result(result.result_id));
-    assert!(!release_extract_result(result.result_id));
-    assert!(extract_values_page(
-        &case.store,
-        ExtractPagePayload {
-            result_id: result.result_id,
-            offset: 0,
-            limit: 10
+fn record(value: &str, count: &str, rows: &str, scope: &str) -> csv::StringRecord {
+    csv::StringRecord::from(vec![value, count, rows, scope])
+}
+fn cancellable() -> jobs::JobGuard {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Ok(guard) = jobs::try_begin_job(JobKind::Analysis, None) {
+            return guard;
         }
-    )
-    .is_err());
+        assert!(
+            Instant::now() < deadline,
+            "other test jobs did not release their slots"
+        );
+        std::thread::yield_now();
+    }
 }
 
 #[test]
-fn filtered_scope_and_all_scope_share_definitions_without_changing_source() {
-    let _lock = serial();
+fn extracted_csv_is_an_ordinary_queryable_case_with_exact_counts_and_classification() {
     let case = Case::csv();
-    let before = fs::read(case.root.join("sample.csv")).unwrap();
+    let original = fs::read(case.root.join("sample.csv")).unwrap();
+    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
+    assert_eq!(result.meta.total_records, 3);
+    assert_eq!(
+        case.values(&result),
+        vec![
+            record("10.0.0.1", "3", "1", "Private"),
+            record("8.8.8.8", "2", "2", "Public"),
+            record("127.0.0.1", "1", "1", "Special")
+        ]
+    );
+    assert_eq!(
+        case.recent(),
+        vec![case.id],
+        "generated results must not enter Recent"
+    );
+    assert_eq!(
+        case.store.try_all().unwrap().len(),
+        2,
+        "ordinary addressing still discovers the case"
+    );
+    assert!(is_temporary_project(&case.store, &result.meta.id));
+    let source = PathBuf::from(result.meta.source_path.as_ref().unwrap());
+    assert_eq!(
+        source,
+        fs::canonicalize(case.store.project_dir(&result.meta.id))
+            .unwrap()
+            .join("source.csv")
+    );
+    let bytes = fs::read(&source).unwrap();
+    assert_eq!(result.meta.source_size, Some(bytes.len() as u64));
+    assert_eq!(
+        result.meta.source_sha256,
+        Some(format!("{:x}", Sha256::digest(&bytes)))
+    );
+    assert_eq!(fs::read(case.root.join("sample.csv")).unwrap(), original);
+    case.assert_no_generation_files();
+
+    let loaded = load_project(
+        &case.store,
+        ProjectRequest {
+            project_id: result.meta.id,
+        },
+    )
+    .unwrap();
+    assert_eq!(loaded.initial_rows.len(), 3);
+    let count = result
+        .meta
+        .columns
+        .iter()
+        .find(|column| column.label == "Count")
+        .unwrap()
+        .id
+        .clone();
+    let page = query_project_rows(
+        &case.store,
+        QueryRowsPayload {
+            project_id: result.meta.id,
+            spec: QuerySpec {
+                sort_key: Some(count.clone()),
+                sort_direction: Some("asc".into()),
+                ..Default::default()
+            },
+            offset: Some(0),
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        page.rows
+            .iter()
+            .map(|row| row.cells[&count].text.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["1", "2", "3"]
+    );
+}
+
+#[test]
+fn filtered_and_all_scopes_create_stable_independent_csvs() {
+    let case = Case::csv();
     let mut payload = case.payload();
     payload.spec.condition = Some(Node::Condition(Condition {
         column: case.columns[2].clone(),
@@ -188,19 +206,23 @@ fn filtered_scope_and_all_scope_share_definitions_without_changing_source() {
         negated: false,
     }));
     let filtered = extract_values(&case.store, payload.clone(), &JobContext::none()).unwrap();
-    assert_eq!((filtered.source_rows, filtered.total_occurrences), (2, 4));
-    assert_eq!(case.values(filtered.result_id).len(), 2);
+    assert_eq!(
+        case.values(&filtered),
+        vec![
+            record("10.0.0.1", "3", "1", "Private"),
+            record("8.8.8.8", "1", "1", "Public")
+        ]
+    );
     payload.scope = ExtractScope::All;
     let all = extract_values(&case.store, payload, &JobContext::none()).unwrap();
-    assert_eq!((all.source_rows, all.total_occurrences), (3, 6));
-    assert_eq!(fs::read(case.root.join("sample.csv")).unwrap(), before);
-    release_extract_result(filtered.result_id);
-    release_extract_result(all.result_id);
+    assert_eq!(case.values(&all).len(), 3);
+    assert_ne!(all.meta.id, filtered.meta.id);
+    assert_eq!(case.recent(), vec![case.id]);
+    case.assert_no_generation_files();
 }
 
 #[test]
-fn metadata_and_missing_columns_are_rejected_without_partial_result() {
-    let _lock = serial();
+fn internal_missing_and_repeated_column_inputs_do_not_publish_partial_cases() {
     let case = Case::csv();
     for columns in [
         vec![],
@@ -212,10 +234,9 @@ fn metadata_and_missing_columns_are_rejected_without_partial_result() {
         payload.columns = columns;
         assert!(extract_values(&case.store, payload, &JobContext::none()).is_err());
     }
-    let payload = case.payload();
     let error = scan::build(
         &case.store,
-        payload,
+        case.payload(),
         aggregate::Limits {
             distinct: 1,
             bytes: 4096,
@@ -225,18 +246,15 @@ fn metadata_and_missing_columns_are_rejected_without_partial_result() {
     .err()
     .unwrap();
     assert!(error.to_string().contains("no complete result"));
-    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
-    assert_eq!(result.unique_values, 3);
-    release_extract_result(result.result_id);
+    assert_eq!(case.store.try_all().unwrap().len(), 1);
+    case.assert_no_generation_files();
 }
 
 #[test]
-fn cancellation_does_not_publish_a_result() {
-    let _lock = serial();
+fn cancelling_before_scan_or_during_csv_creation_leaves_no_case_or_generation_files() {
     let case = Case::csv();
-    let guard = jobs::try_begin_job(JobKind::Analysis, Some(case.id)).unwrap();
-    let id = guard.id();
-    jobs::request_cancel(id);
+    let guard = cancellable();
+    jobs::request_cancel(guard.id());
     let error = extract_values(
         &case.store,
         case.payload(),
@@ -244,98 +262,92 @@ fn cancellation_does_not_publish_a_result() {
     )
     .unwrap_err();
     assert_eq!(error.to_string(), "Cancelled.");
+    let table = scan::build(
+        &case.store,
+        case.payload(),
+        aggregate::Limits::default(),
+        &JobContext::none(),
+    )
+    .unwrap();
+    let guard = cancellable();
+    let id = guard.id();
+    let progress: jobs::ProgressFn = Arc::new(move |progress| {
+        if progress.message.as_deref() == Some("Preparing extracted CSV") {
+            jobs::request_cancel(id);
+        }
+    });
+    let error = output::open_csv(
+        &case.store,
+        table,
+        &JobContext::with_job(guard, Some(progress)),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "Cancelled.");
+    assert_eq!(case.store.try_all().unwrap().len(), 1);
+    case.assert_no_generation_files();
 }
 
 #[test]
-fn csv_export_is_complete_atomic_and_requires_overwrite_consent() {
-    let _lock = serial();
+fn ordinary_export_and_delete_work_without_an_extract_specific_lifetime_or_paging_api() {
+    use crate::ops::export::{export_project, ExportProjectPayload};
     let case = Case::csv();
     let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
-    let path = case.root.join("extract.csv");
-    fs::write(&path, "keep me").unwrap();
-    let payload = |overwrite| ExportExtractPayload {
-        result_id: result.result_id,
-        destination: path.to_string_lossy().into(),
-        allow_overwrite: overwrite,
+    let destination = case.root.join("saved.csv");
+    let export = |destination: PathBuf| ExportProjectPayload {
+        project_id: result.meta.id,
+        destination: destination.to_string_lossy().into(),
+        allow_overwrite: false,
+        scope: Some("all".into()),
+        spec: QuerySpec::default(),
+        columns: None,
+        row_indices: None,
+        include_annotations: Some(false),
     };
-    let error = export_extract(&case.store, payload(false), &JobContext::none()).unwrap_err();
-    assert!(error
-        .to_string()
-        .starts_with("Overwrite confirmation required:"));
-    assert_eq!(fs::read_to_string(&path).unwrap(), "keep me");
     assert_eq!(
-        export_extract(&case.store, payload(true), &JobContext::none())
+        export_project(&case.store, export(destination.clone()))
             .unwrap()
             .rows,
         3
     );
-    let mut reader = csv::Reader::from_path(path).unwrap();
-    assert_eq!(
-        reader.headers().unwrap().iter().collect::<Vec<_>>(),
-        vec!["Value", "Count", "Rows", "Scope"]
-    );
-    assert_eq!(reader.records().count(), 3);
-    let managed = case.store.project_dir(&case.id).join("result.csv");
-    assert!(export_extract(
+    let rows = csv::Reader::from_path(destination)
+        .unwrap()
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(rows, case.values(&result));
+    assert!(export_project(
         &case.store,
-        ExportExtractPayload {
-            result_id: result.result_id,
-            destination: managed.to_string_lossy().into(),
-            allow_overwrite: true
-        },
-        &JobContext::none()
+        export(PathBuf::from(result.meta.source_path.as_ref().unwrap()))
     )
     .is_err());
-    release_extract_result(result.result_id);
+    delete_project(
+        &case.store,
+        ProjectRequest {
+            project_id: result.meta.id,
+        },
+    )
+    .unwrap();
+    assert!(!case.store.project_dir(&result.meta.id).exists());
+    assert_eq!(case.recent(), vec![case.id]);
 }
 
 #[test]
 fn json_cells_are_not_duplicated_from_internal_original_records() {
-    let _lock = serial();
     let case = Case::new(
         "nested.jsonl",
         "{\"details\":{\"message\":\"IP=10.1.2.3\"},\"other\":\"10.1.2.3\"}\n{\"other\":null}\n",
     );
     let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
     assert_eq!(
-        (
-            result.total_occurrences,
-            result.matched_rows,
-            result.unique_values
-        ),
-        (2, 1, 1)
+        case.values(&result),
+        vec![record("10.1.2.3", "2", "1", "Private")]
     );
-    assert_eq!(case.values(result.result_id)[0].rows, 1);
-    release_extract_result(result.result_id);
+    case.assert_no_generation_files();
 }
 
 #[test]
-fn closed_or_changed_sources_cannot_be_rescanned() {
-    let _lock = serial();
-    let case = Case::csv();
-    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
-    fs::write(
-        case.store.project_dir(&case.id).join("data.parquet"),
-        "changed",
-    )
-    .unwrap();
-    let error = extract_values_page(
-        &case.store,
-        ExtractPagePayload {
-            result_id: result.result_id,
-            offset: 0,
-            limit: 10,
-        },
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("source data changed"));
-    release_extract_result(result.result_id);
-}
-
-#[test]
-fn a_filtered_result_keeps_its_original_membership_after_flags_change() {
+fn result_csv_remains_unchanged_when_source_annotations_change() {
     use crate::ops::flags::{update_flag, UpdateFlagPayload};
-    let _lock = serial();
     let case = Case::csv();
     let flag = |row, value: &str| {
         update_flag(
@@ -355,34 +367,22 @@ fn a_filtered_result_keeps_its_original_membership_after_flags_change() {
     let mut payload = case.payload();
     payload.spec.flag_filter = Some("critical".into());
     let first = extract_values(&case.store, payload.clone(), &JobContext::none()).unwrap();
+    let original = case.values(&first);
     flag(0, "safe");
     flag(1, "critical");
-    let sources = extract_value_sources(
-        &case.store,
-        ExtractSourcesPayload {
-            result_id: first.result_id,
-            value: "8.8.8.8".into(),
-            offset: 0,
-            limit: 10,
-        },
-        &JobContext::none(),
-    )
-    .unwrap();
-    assert_eq!(sources.rows.len(), 1);
-    assert_eq!(
-        sources.rows[0].row_index, 0,
-        "an old result must not adopt newly matching rows"
-    );
     let second = extract_values(&case.store, payload, &JobContext::none()).unwrap();
-    assert_eq!(second.total_occurrences, 2);
-    assert_eq!(first.total_occurrences, 4);
-    release_extract_result(first.result_id);
-    release_extract_result(second.result_id);
+    assert_eq!(case.values(&first), original);
+    assert_eq!(
+        case.values(&second),
+        vec![
+            record("127.0.0.1", "1", "1", "Special"),
+            record("8.8.8.8", "1", "1", "Public")
+        ]
+    );
 }
 
 #[test]
-fn byte_and_value_limits_fail_without_truncation() {
-    let _lock = serial();
+fn byte_and_value_limits_fail_without_truncating_or_publishing_a_case() {
     let case = Case::csv();
     let error = scan::build(
         &case.store,
@@ -410,46 +410,48 @@ fn byte_and_value_limits_fail_without_truncation() {
         classifier: None,
         examples: None,
     };
-    let error = extract_values(&long.store, payload, &JobContext::none()).unwrap_err();
-    assert!(error.to_string().contains("64 KiB"));
+    assert!(extract_values(&long.store, payload, &JobContext::none())
+        .unwrap_err()
+        .to_string()
+        .contains("64 KiB"));
+    assert_eq!(long.store.try_all().unwrap().len(), 1);
 }
 
 #[test]
-fn transient_cache_evicts_old_results_and_pages_stay_bounded() {
-    let _lock = serial();
-    let case = Case::csv();
-    let mut results = Vec::new();
-    for _ in 0..5 {
-        results.push(
-            extract_values(&case.store, case.payload(), &JobContext::none())
-                .unwrap()
-                .result_id,
-        );
-    }
-    assert!(extract_values_page(
-        &case.store,
-        ExtractPagePayload {
-            result_id: results[0],
-            offset: 0,
-            limit: 10
-        }
-    )
-    .unwrap_err()
-    .to_string()
-    .contains("evicted"));
-    let last = *results.last().unwrap();
-    let page = extract_values_page(
-        &case.store,
-        ExtractPagePayload {
-            result_id: last,
-            offset: 1,
-            limit: 1,
-        },
-    )
-    .unwrap();
-    assert_eq!((page.rows.len(), page.total, page.offset), (1, 3, 1));
-    assert_eq!(page.rows[0].value, "8.8.8.8");
-    for id in results {
-        release_extract_result(id);
-    }
+fn a_normal_case_named_like_an_extraction_stays_in_recent_and_temporary_cases_survive_store_reopen()
+{
+    let case = Case::new("extract-ipv4-user.csv", "first,second\n10.0.0.1,none\n");
+    assert!(!is_temporary_project(&case.store, &case.id));
+    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
+    let reopened = ProjectsStore::new(case.root.join("store")).unwrap();
+    assert!(reopened.try_find(&result.meta.id).unwrap().is_some());
+    assert_eq!(
+        list_projects(&reopened)
+            .unwrap()
+            .iter()
+            .map(|summary| summary.meta.id)
+            .collect::<Vec<_>>(),
+        vec![case.id]
+    );
+    assert!(PathBuf::from(result.meta.source_path.unwrap()).is_file());
+}
+
+#[test]
+fn no_matches_opens_a_valid_header_only_csv() {
+    let case = Case::new("empty.csv", "first,second\nno-address,none\n");
+    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
+    assert_eq!(result.meta.total_records, 0);
+    assert!(case.values(&result).is_empty());
+    assert_eq!(
+        load_project(
+            &case.store,
+            ProjectRequest {
+                project_id: result.meta.id
+            }
+        )
+        .unwrap()
+        .columns
+        .len(),
+        4
+    );
 }

@@ -5,7 +5,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites.ts";
 import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationRead, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
 import type { FormatDefinition, FormatCatalogEntry } from "./formats";
-import type { ExtractBackend, ExtractPayload, ExtractResult, ExtractPage, ExtractSources, ExtractExport } from "./extractTypes";
+import type { ExtractBackend, ExtractPayload } from "./extractTypes";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 import { waitForWorkspaceSave } from "./workspaceSession.ts";
@@ -365,29 +365,15 @@ class NativeBackend implements Backend {
     return acceptSave(() => invoke("delete_format", { payload: { id } }));
   }
 
-  extractValues(args: ExtractPayload & RequestOwned): Promise<ExtractResult> {
+  extractValues(args: ExtractPayload & RequestOwned): Promise<ProjectSummary> {
     const { requestId, ...payload } = structuredClone(args);
     const token = { cancelled: false };
     if (requestId) this.pendingExtractions.set(requestId, token);
     return queueAnnotationRead(payload.projectId, () => {
       if (token.cancelled) throw new Error("Cancelled.");
-      return invokeOwned<ExtractResult>("extract_values", { payload }, { requestId });
+      return invokeOwned<ProjectSummary>("extract_values", { payload }, { requestId });
     }).finally(() => { if (requestId) this.pendingExtractions.delete(requestId); });
   }
-  extractValuesPage(args: { resultId: string; offset: number; limit: number } & RequestOwned): Promise<ExtractPage> {
-    const { requestId, ...payload } = args;
-    return invokeOwned("extract_values_page", { payload }, { requestId });
-  }
-  extractValueSources(args: { resultId: string; value: string; offset: number; limit: number } & RequestOwned): Promise<ExtractSources> {
-    const { requestId, ...payload } = args;
-    return invokeOwned("extract_value_sources", { payload }, { requestId });
-  }
-  exportExtract(args: { resultId: string; destination: string; allowOverwrite?: boolean } & RequestOwned): Promise<ExtractExport> {
-    const { requestId, ...payload } = structuredClone(args);
-    return acceptSave(() => invokeOwned("export_extract", { payload }, { requestId }));
-  }
-  releaseExtractResult(resultId: string): Promise<boolean> { return invoke("release_extract_result", { resultId }); }
-
   listProjects(): Promise<ProjectSummary[]> {
     return invoke("list_projects");
   }

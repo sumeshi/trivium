@@ -24,11 +24,13 @@ use sha2::{Digest, Sha256};
 use super::query::cache_remove_project;
 mod load;
 mod profile;
+mod temporary;
 
 pub use load::{
     load_column_kinds_with_job, load_project, load_project_metadata_with_job, load_project_with_job,
 };
 use profile::{save_import_profile, KindAccumulator};
+pub use temporary::is_temporary_project;
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
 /// Fixed-size streaming buffer. The whole source is never held in memory just
@@ -196,6 +198,9 @@ pub fn list_projects(store: &ProjectsStore) -> Result<Vec<ProjectSummary>, AppEr
     let metas = store.try_all().map_err(AppError::from)?;
     let mut result = Vec::with_capacity(metas.len());
     for meta in metas {
+        if is_temporary_project(store, &meta.id) {
+            continue;
+        }
         result.push(ProjectSummary { meta: meta.clone() });
     }
     result.sort_by_key(|summary| std::cmp::Reverse(summary.meta.created_at));
@@ -220,6 +225,25 @@ pub fn create_project_with_job(
     store: &ProjectsStore,
     payload: CreateProjectPayload,
     job: &JobContext,
+) -> Result<ProjectSummary, AppError> {
+    create_project_impl(store, payload, job, false)
+}
+
+/// Extraction results use the ordinary import/storage/query path. Their owned
+/// marker is published with the case, so they never enter the Recent list.
+pub(crate) fn create_temporary_project_with_job(
+    store: &ProjectsStore,
+    payload: CreateProjectPayload,
+    job: &JobContext,
+) -> Result<ProjectSummary, AppError> {
+    create_project_impl(store, payload, job, true)
+}
+
+fn create_project_impl(
+    store: &ProjectsStore,
+    payload: CreateProjectPayload,
+    job: &JobContext,
+    temporary: bool,
 ) -> Result<ProjectSummary, AppError> {
     job.check_cancelled()?;
     let source_path = PathBuf::from(&payload.path);
@@ -315,10 +339,13 @@ pub fn create_project_with_job(
         source_format: Some(source_format.to_string()),
         source_size: Some(copied.size),
         source_path: Some(
-            fs::canonicalize(&source_path)
-                .unwrap_or_else(|_| source_path.clone())
-                .to_string_lossy()
-                .to_string(),
+            if temporary {
+                temporary::source_path(store, &project_id)?
+            } else {
+                fs::canonicalize(&source_path).unwrap_or_else(|_| source_path.clone())
+            }
+            .to_string_lossy()
+            .to_string(),
         ),
         hidden_columns: Vec::new(),
         // New projects always use internal column ids and the `__original`
@@ -346,10 +373,15 @@ pub fn create_project_with_job(
         save_flags(&flags_path, &imported.flags).map_err(AppError::from)?;
     }
 
-    // The copied input is not part of the project. Remove it before the
-    // completed staging directory is renamed into place.
-    fs::remove_file(&copied.path)
-        .map_err(|e| AppError::Message(format!("Failed to remove temporary import file: {}", e)))?;
+    // Ordinary imports discard the copied source. Temporary extraction cases
+    // keep their generated CSV and marker inside the atomic publication.
+    if temporary {
+        temporary::retain_source(staging.path(), &copied.path)?;
+    } else {
+        fs::remove_file(&copied.path).map_err(|e| {
+            AppError::Message(format!("Failed to remove temporary import file: {}", e))
+        })?;
+    }
 
     // Metadata belongs to the same staged case database as its settings and
     // annotations. Publishing the directory then exposes one complete case;

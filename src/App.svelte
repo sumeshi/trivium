@@ -14,11 +14,10 @@
   import Toast from './lib/components/app/Toast.svelte';
   import CloseDialog from './lib/components/app/CloseDialog.svelte';
   import FileDropOverlay from './lib/components/app/FileDropOverlay.svelte';
-  import ExtractView from './lib/components/project_view/ExtractView.svelte';
   import WallpaperLayer from './lib/components/app/WallpaperLayer.svelte';
   import { initWallpaper } from './lib/appearance';
-  import { createExtractTabs } from './lib/extractTabs';
-  import type { ExtractIntent, ExtractFilter, ExtractNavigation } from './lib/extractTypes';
+  import { createExtractScan } from './lib/extractScan';
+  import type { ExtractIntent } from './lib/extractTypes';
   import { createFileDrop } from './lib/fileDrop';
   import { createAppClose, installAppCloseListener } from './lib/appClose';
   import { acceptSave, flushAllSaves, reopenSaveAdmission, sealSaveAdmission } from './lib/saveDrain';
@@ -36,14 +35,10 @@
   const projectController = createProjectController(backend);
   const projectState = projectController.state;
   const canCreateProject = projectController.canCreateProject;
-  const extractions = createExtractTabs(backend, message => showToast(message, 'error'));
+  const extractions = createExtractScan(backend, message => showToast(message, 'error'));
   const extractState = extractions.state;
-  let selectedExtractId: string | null = null;
   let navigationVersion = 0;
   let stopExtractJobs: UnlistenFn | undefined;
-  $: activeExtract = $extractState.tabs.find(tab => tab.id === selectedExtractId) ?? null;
-  $: extractProjectMeta = activeExtract
-    ? $projectState.projects.find(project => project.meta.id === activeExtract.request.projectId)?.meta ?? null : null;
 
   onDestroy(() => {
     appDestroyed = true;
@@ -74,7 +69,11 @@
     },
     freeze: () => { extractions.cancel(); activeView?.pauseForClose(); },
     drain: flushAllSaves,
-    flushActive: async () => { await tick(); await activeView?.flushForClose(); },
+    flushActive: async () => {
+      await tick();
+      await activeView?.flushForClose();
+      await projectController.cleanupTemporaryProjects(tick);
+    },
     seal: sealSaveAdmission,
     finish: () => invoke<void>('finish_app_close'),
     cancelNative: (acknowledgeFailures) => invoke<void>('cancel_app_close', { acknowledgeFailures }),
@@ -150,7 +149,6 @@
   const createProject = async () => {
     if (editsBlocked()) return;
     navigationVersion += 1;
-    selectedExtractId = null;
     try {
       await acceptSave(async () => {
         captureActive();
@@ -188,8 +186,6 @@
         pendingDeletions.add(projectId);
         try {
           const result = await projectController.deleteProject(projectId, tick);
-          if ($extractState.tabs.some(tab => tab.id === selectedExtractId && tab.request.projectId === projectId)) selectedExtractId = null;
-          await extractions.closeProject(projectId);
           sessions.delete(projectId);
           showToast(result?.adjacentLoadFailed ? 'Project deleted. Could not open the next tab.' : 'Project deleted.',
             result?.adjacentLoadFailed ? 'error' : 'success');
@@ -206,7 +202,6 @@
 
   const handleRefreshRequest = async () => {
     if (editsBlocked()) return;
-    if (activeExtract && !await selectExtractionSource(activeExtract.request.projectId)) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
@@ -226,7 +221,6 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        selectedExtractId = null;
         await projectController.selectProject(projectId);
         sidebarOpen = false;
         await tick();
@@ -243,8 +237,12 @@
     try {
       await acceptSave(async () => {
         captureActive();
+        if ($projectState.temporaryProjectIds.includes(projectId)) {
+          pendingDeletions.add(projectId);
+          try { await projectController.deleteProject(projectId, tick); }
+          finally { pendingDeletions.delete(projectId); }
+        } else await projectController.closeProject(projectId);
         sessions.delete(projectId);
-        await projectController.closeProject(projectId);
         await tick();
       });
     } catch (error) {
@@ -256,54 +254,22 @@
     projectController.updateSummary(event.detail);
   };
 
-  const selectExtraction = (id: string) => {
-    if (editsBlocked() || !$extractState.tabs.some(tab => tab.id === id)) return;
-    navigationVersion += 1;
-    captureActive();
-    selectedExtractId = id;
-    sidebarOpen = false;
-  };
-  const closeExtraction = async (id: string) => {
-    if (editsBlocked()) return;
-    navigationVersion += 1;
-    const index = $extractState.tabs.findIndex(tab => tab.id === id);
-    const remaining = $extractState.tabs.filter(tab => tab.id !== id);
-    if (selectedExtractId === id) selectedExtractId = remaining[Math.min(index, remaining.length - 1)]?.id ?? null;
-    await extractions.close(id);
-    await tick();
-    const target = selectedExtractId ? `extract-tab-${selectedExtractId}` : `project-tab-${$projectState.selectedProjectId}`;
-    document.getElementById(target)?.focus();
-  };
   const startExtraction = async (intent: ExtractIntent) => {
     if (editsBlocked()) return;
     const ticket = navigationVersion;
     const previousProject = $projectState.selectedProjectId;
-    const previousExtract = selectedExtractId;
     try {
-      const tab = await extractions.start(intent);
-      if (!tab) return;
-      if (ticket === navigationVersion && previousProject === $projectState.selectedProjectId &&
-        previousExtract === selectedExtractId && !activeView?.unsavedDraftMessage() && !editsBlocked() && !$projectState.creating) {
-        selectExtraction(tab.id);
-      } else showToast(`Extraction ready: ${tab.result.format.name} — ${tab.sourceName}`);
+      await acceptSave(async () => {
+        const result = await extractions.start(intent);
+        if (!result) return;
+        if (editsBlocked()) { await backend.deleteProject(result.meta.id); return; }
+        const activate = ticket === navigationVersion && previousProject === $projectState.selectedProjectId &&
+          !activeView?.unsavedDraftMessage() && !$projectState.creating;
+        if (activate) { captureActive(); navigationVersion += 1; sidebarOpen = false; }
+        await projectController.adoptTemporaryProject(result, activate);
+        if (!activate) showToast(`Extracted CSV ready: ${result.meta.source_file_name || result.meta.name}`);
+      });
     } catch (error) { showToast(errorMessage(error, 'Could not start extraction.'), 'error'); }
-  };
-  const selectExtractionSource = async (projectId: string): Promise<boolean> => {
-    if (editsBlocked()) return false;
-    const selection = handleSelectProject(projectId);
-    const ticket = navigationVersion;
-    await selection;
-    await tick();
-    return ticket === navigationVersion && !editsBlocked() && !selectedExtractId &&
-      $projectState.selectedProjectId === projectId;
-  };
-  const navigateExtraction = async (target: ExtractNavigation) => {
-    if (await selectExtractionSource(target.projectId) && target.rowIndex !== null) {
-      activeView?.jumpToOriginalRow(target.rowIndex);
-    }
-  };
-  const filterExtraction = async (filter: ExtractFilter) => {
-    if (await selectExtractionSource(filter.projectId)) activeView?.applyExtractFilter(filter);
   };
 
   const startCloseListener = async () => {
@@ -353,16 +319,15 @@
 
 <div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle'}>
   <WallpaperLayer />
-  <Header projectDetail={$projectState.projectDetail} projectMeta={extractProjectMeta} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
+  <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId}
-    extractions={$extractState.tabs} {selectedExtractId}
-    on:selectExtract={(event) => selectExtraction(event.detail)} on:closeExtract={(event) => void closeExtraction(event.detail)}
+    temporaryProjectIds={$projectState.temporaryProjectIds}
     on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)} />
 
   {#if sidebarOpen}
     <Sidebar
-      projects={$projectState.projects}
-      selectedProjectId={activeExtract?.request.projectId ?? $projectState.selectedProjectId}
+      projects={$projectState.projects.filter(project => !$projectState.temporaryProjectIds.includes(project.meta.id))}
+      selectedProjectId={$projectState.selectedProjectId}
       isLoadingProjects={$projectState.isLoadingProjects}
       creating={$projectState.creating}
       pendingDescription={$projectState.pendingDescription}
@@ -390,16 +355,7 @@
   {/if}
 
   <main class="app-main">
-    {#if activeExtract}
-      {#key activeExtract.id}
-        <div class="flex-1 min-h-0" id={`extract-panel-${activeExtract.id}`} role="tabpanel" aria-labelledby={`extract-tab-${activeExtract.id}`}>
-          <ExtractView {backend} tab={activeExtract}
-            on:navigate={(event) => void navigateExtraction(event.detail)}
-            on:filter={(event) => void filterExtraction(event.detail)}
-            on:rerun={(event) => void startExtraction(event.detail)} on:notify={handleNotify} />
-        </div>
-      {/key}
-    {:else if $projectState.selectedProjectId}
+    {#if $projectState.selectedProjectId}
       {#if $projectState.isLoadingDetail}
         <div class="flex flex-1 items-center justify-center text-muted">
           Loading project…
@@ -411,6 +367,7 @@
             bind:this={activeView}
             {backend}
             closing={closing || !closeReady}
+            temporary={$projectState.temporaryProjectIds.includes($projectState.selectedProjectId)}
             projectDetail={$projectState.projectDetail}
             session={sessions.get($projectState.selectedProjectId) ?? null}
             extractPending={$extractState.pending}

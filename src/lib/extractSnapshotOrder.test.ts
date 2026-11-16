@@ -36,7 +36,9 @@ test('extraction freezes its request after earlier annotations and before later 
     assert.deepEqual(payload.columns, ['c1']);
     assert.equal((payload.format as { pattern: string }).pattern, 'match');
     assert.equal(payload.requestId, undefined);
-    order.push('scan'); await scanning.promise; return { resultId: 'snapshot' };
+    order.push('scan'); await scanning.promise; return { meta: { id: 'snapshot', name: 'Extract Test',
+      source_file_name: 'Extract Test.csv', created_at: '2026-11-16', total_records: 1,
+      flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } };
   }, async backend => {
     const first = backend.updateFlag({ projectId: 'extract-snapshot', rowIndex: 0, flag: 'safe' });
     const args = { ...request('extract-snapshot'), requestId: 'scan-owner' };

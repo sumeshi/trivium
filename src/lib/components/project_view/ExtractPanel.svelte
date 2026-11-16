@@ -32,7 +32,6 @@
     const all = scope === 'all';
     dispatch('extract', structuredClone({
       sourceName: detail.project.meta.source_file_name || detail.project.meta.name,
-      sourceColumns: columns.map(id => ({ id, label: get(columnLabels).get(id) ?? id })),
       request: { projectId: detail.project.meta.id, columns: selected, format, scope,
         search: all ? '' : filters.search, searchColumns: all ? [] : filters.searchColumns,
         flagFilter: all ? 'all' : filters.flag, bookmarkedOnly: !all && filters.bookmarkedOnly,

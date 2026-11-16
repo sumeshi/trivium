@@ -6,6 +6,7 @@
     flagFilter, bookmarkedOnly, conditionTree } = useWorkspace();
   const dispatch = createEventDispatcher<{ clear: void }>();
   export let height = 26;
+  export let temporary = false;
   let expanded = false;
   $: description = describeAppliedFilters($appliedFilters, $columnLabels);
   $: canClear = description.active || $search !== '' || $searchColumns.length > 0 ||
@@ -24,6 +25,7 @@
     {:else}
       <span class="filter-summary-empty">No filters applied</span>
     {/if}
+    {#if temporary}<span class="temporary-result" title="This extracted CSV is removed when its tab closes. Export it to keep the data and annotations.">Temporary CSV · export to keep</span>{/if}
     <button type="button" class="clear-filters" aria-label="Clear all filters"
       title="Clear search, search columns, rules, flags and bookmark filters"
       disabled={!canClear} on:click={() => { expanded = false; dispatch('clear'); }}>Clear filters</button>
@@ -46,6 +48,7 @@
   .filter-summary > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .detail-toggle { flex-shrink: 0; color: var(--muted); }
   .filter-summary-empty { flex: 1; }
+  .temporary-result { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .clear-filters { flex-shrink: 0; padding: 2px 5px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg); font-size: inherit; }
   .clear-filters:hover:not(:disabled), .filter-summary:hover { color: var(--accent); }
   .clear-filters:disabled { opacity: .45; cursor: default; }

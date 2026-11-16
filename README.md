@@ -70,9 +70,9 @@ Text search is intended for quickly narrowing down the data. It is case-insensit
 
 ### Extract
 
-Open **Filter → Extract**, choose all rows or the current results and the source columns, then select a pattern. The result opens in a separate tab with extracted values, occurrence counts, and the number of source rows. Three occurrences in one row count as **3 occurrences / 1 row**. Hidden source columns can be included.
+Open **Filter → Extract**, choose all rows or the current results and the source columns, then select a pattern. Trivium creates a temporary CSV and opens it in a normal table tab. It contains the extracted values, occurrence counts, and the number of source rows. Three occurrences in one row count as **3 occurrences / 1 row**. Hidden source columns can be included.
 
-IPv4 results also show Private, Public, Special, or Unclassified address scope. Open an occurrence to locate its original row, filter by an exact extracted value, or export the complete ranking to CSV. Result tabs are temporary analyses and do not create projects in Recent. If an exact aggregation reaches its memory limit, narrow the source rows or columns and run it again.
+IPv4 results also show Private, Public, Special, or Unclassified address scope. Search, sort, and export use the same controls as any other CSV. Export the result to keep it; temporary result tabs do not appear in Recent and are removed when closed. If an exact aggregation reaches its memory limit, narrow the source rows or columns and run it again.
 
 Bundled patterns and themes are defined in `definitions/formats/` and `definitions/themes/`. Adding one valid JSON file registers it in the next build. Pattern JSON can also be imported from the pattern picker.
 

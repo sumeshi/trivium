@@ -58,10 +58,10 @@ from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, na
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
 TOOLS = {"Conditions": "conditions", "Extract": "extract", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
-HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree", "extract_values", "extract_value_sources"}
+HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree", "extract_values"}
 IPC_COMMANDS = frozenset({
-    "list_formats", "validate_format", "save_format", "delete_format", "extract_values", "extract_values_page",
-    "extract_value_sources", "export_extract", "release_extract_result", "import_wallpaper", "load_wallpaper", "clear_wallpaper",
+    "list_formats", "validate_format", "save_format", "delete_format", "extract_values",
+    "import_wallpaper", "load_wallpaper", "clear_wallpaper",
     "list_projects", "create_project", "delete_project", "load_project", "query_project_rows",
     "locate_project_row", "get_cell", "cancel_job", "cancel_request_jobs", "active_jobs",
     "save_iocs", "import_iocs", "export_iocs", "update_flag", "set_hidden_columns", "export_project",
@@ -207,8 +207,6 @@ class WorkspaceView(WebView):
                   if(response.headers.get('Tauri-Response')==='ok'){
                     entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,revision:value?.revision,
                       rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
-                      resultId:value?.resultId,sourceRows:value?.sourceRows,matchedRows:value?.matchedRows,
-                      totalOccurrences:value?.totalOccurrences,uniqueValues:value?.uniqueValues,
                       total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
                   }else entry.error=String(value);
                   const hold=window.__workspaceHold;
@@ -993,7 +991,7 @@ def main() -> None:
                 ("table text size without layout changes", lambda: verify_table_text(app, data, root, evidence, report)),
                 ("note text and composition confirmation", lambda: verify_memo_ime(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
-                ("shared patterns and extraction result tabs", lambda: verify_extract(app.web, data, root, evidence, report)),
+                ("shared patterns and extraction result tabs", lambda: verify_extract(app, data, root, evidence, report)),
                 ("custom themes and managed wallpaper", lambda: verify_appearance(app, data, root, evidence, report)),
             ]:
                 if args.extensions_only and stage not in {"shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:

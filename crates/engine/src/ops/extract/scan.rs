@@ -1,36 +1,30 @@
-use std::{mem::size_of, path::Path, sync::Arc};
+use std::{fs, path::Path, sync::Arc, time::SystemTime};
 
 use crate::{
     error::AppError,
-    formats::{CompiledFormat, FormatOccurrence},
+    formats::CompiledFormat,
     jobs::JobContext,
-    ops::query::QuerySpec,
+    ops::{
+        analysis_data::{AnalysisSource, SelectedRows},
+        query::QuerySpec,
+    },
     project_io::ProjectBatchReader,
     store::ProjectsStore,
     value_utils::bounded_text::present_text,
 };
 
 use super::{
-    aggregate::{limit_error, Accumulator, Limits},
-    cache::{Revision, Snapshot},
-    ExtractPayload, ExtractResult, ExtractScope, ExtractValue,
+    aggregate::{limit_error, Accumulator, ExtractValue, Limits},
+    ExtractPayload, ExtractScope,
 };
-use crate::ops::analysis_data::{AnalysisSource, SelectedRows};
 
 const MAX_METADATA_BYTES: usize = 512 * 1024;
 const MAX_COLUMNS: usize = 4096;
 
-pub(super) trait Visitor {
-    fn available(&self) -> usize;
-    /// False stops a provenance page after finding its next-page sentinel.
-    fn occurrence(
-        &mut self,
-        row: usize,
-        column: &str,
-        found: FormatOccurrence<'_>,
-        transient: usize,
-        matcher: &CompiledFormat,
-    ) -> Result<bool, AppError>;
+pub(super) struct ExtractedTable {
+    pub values: Vec<ExtractValue>,
+    pub filename: String,
+    pub description: String,
 }
 
 pub(super) fn build(
@@ -38,22 +32,21 @@ pub(super) fn build(
     payload: ExtractPayload,
     limits: Limits,
     job: &JobContext,
-) -> Result<Snapshot, AppError> {
+) -> Result<ExtractedTable, AppError> {
     job.check_cancelled()?;
     if payload.columns.is_empty() || payload.columns.len() > MAX_COLUMNS {
         return Err(AppError::Message(
             "Choose between 1 and 4,096 data columns to extract.".into(),
         ));
     }
-    let metadata_bytes = metadata_size(&payload)?;
+    validate_metadata_size(&payload)?;
     let matcher = CompiledFormat::new(&payload.format)?;
     let path = store.project_dir(&payload.project_id).join("data.parquet");
-    let revision = Revision::read(&path)?;
-    // Display order has no effect on membership or value frequency. Avoid
-    // materializing a sorted column merely to scan in physical source order.
+    let before = revision(&path)?;
+    // Ranking membership is independent of the source table's display order.
     let mut spec = match payload.scope {
         ExtractScope::All => QuerySpec::default(),
-        ExtractScope::Filtered => payload.spec.clone(),
+        ExtractScope::Filtered => payload.spec,
     };
     spec.sort_key = None;
     spec.sort_direction = None;
@@ -67,6 +60,20 @@ pub(super) fn build(
     }
     let total_rows = source.target.total_rows;
     let source_rows = source.target.ids.len();
+    let name = source
+        .meta
+        .source_file_name
+        .as_deref()
+        .unwrap_or(&source.meta.name);
+    let filename = format!(
+        "extract-{}-{}.csv",
+        payload.format.id,
+        safe_name(&source.meta.name)
+    );
+    let description = format!(
+        "{} extracted from {} ({} source rows)",
+        payload.format.name, name, source_rows
+    );
     let ids = (source_rows != total_rows).then(|| Arc::clone(&source.target.ids));
     drop(source);
     let mut accumulator = Accumulator::new(limits);
@@ -79,67 +86,60 @@ pub(super) fn build(
         &mut accumulator,
         job,
     )?;
-    job.check_cancelled()?;
-    let occurrences = accumulator.occurrences;
-    let matched_rows = accumulator.matched_rows;
+    if before != revision(&path)? {
+        return Err(AppError::Message(
+            "The source data changed. Run extraction again.".into(),
+        ));
+    }
     let values = accumulator.finish(job)?;
-    let has_classification = payload.format.classifier.is_some();
-    let summary = ExtractResult {
-        result_id: uuid::Uuid::new_v4(),
-        project_id: payload.project_id,
-        format: payload.format,
-        columns,
-        scope: payload.scope,
-        source_rows,
-        total_occurrences: occurrences,
-        matched_rows,
-        unique_values: values.len(),
-        has_classification,
-    };
-    let bytes = values
-        .capacity()
-        .saturating_mul(size_of::<ExtractValue>())
-        .saturating_add(
-            values
-                .iter()
-                .map(|value| {
-                    value.value.capacity() + value.scope.as_ref().map_or(0, String::capacity) + 64
-                })
-                .sum::<usize>(),
-        )
-        .saturating_add(
-            ids.as_ref()
-                .map_or(0, |ids| ids.capacity() * size_of::<usize>()),
-        )
-        // The matcher limits its program and search caches. Reserve their
-        // worst-case capacity as well as its cloned definition/classifier.
-        // Short strings in vectors can retain much more heap space than their
-        // JSON representation. Include cloned snapshots and allocation slots.
-        .saturating_add(metadata_bytes * 64)
-        .saturating_add(8 * 1024 * 1024);
-    let snapshot = Snapshot {
-        summary,
+    Ok(ExtractedTable {
         values,
-        matcher,
-        path,
-        revision,
-        total_rows,
-        ids,
-        _query: payload.spec,
-        bytes,
-    };
-    snapshot.validate(store)?;
-    job.check_cancelled()?;
-    Ok(snapshot)
+        filename,
+        description,
+    })
 }
 
-pub(super) fn walk(
+fn revision(path: &Path) -> Result<(u64, SystemTime), AppError> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| AppError::Message(format!("Could not read extraction source: {error}")))?;
+    Ok((
+        metadata.len(),
+        metadata
+            .modified()
+            .map_err(|error| AppError::Message(error.to_string()))?,
+    ))
+}
+
+fn safe_name(name: &str) -> String {
+    let mut safe = String::new();
+    for character in name.chars() {
+        let character = if character.is_control() || r#"<>:"/\|?*"#.contains(character) {
+            '_'
+        } else {
+            character
+        };
+        // Leave room for the format ID and extension on filesystems whose
+        // component limit is measured in bytes, including Japanese filenames.
+        if safe.len() + character.len_utf8() > 80 {
+            break;
+        }
+        safe.push(character);
+    }
+    let name = safe.trim_end_matches([' ', '.']);
+    if name.is_empty() {
+        "source".into()
+    } else {
+        name.into()
+    }
+}
+
+fn walk(
     path: &Path,
     columns: &[String],
     total_rows: usize,
     ids: Option<&[usize]>,
     matcher: &CompiledFormat,
-    visitor: &mut impl Visitor,
+    accumulator: &mut Accumulator,
     job: &JobContext,
 ) -> Result<(), AppError> {
     let mut reader = match ids {
@@ -170,13 +170,13 @@ pub(super) fn walk(
             {
                 continue;
             }
-            for (column, series) in columns.iter().zip(&series) {
+            for series in &series {
                 job.check_cancelled()?;
                 let value = series
                     .get(local)
                     .map_err(|error| AppError::Other(error.into()))?;
                 let Some(text) =
-                    present_text(&value, visitor.available()).map_err(|_| limit_error())?
+                    present_text(&value, accumulator.available()).map_err(|_| limit_error())?
                 else {
                     continue;
                 };
@@ -189,9 +189,7 @@ pub(super) fn walk(
                         job.check_cancelled()?;
                     }
                     checked = checked.wrapping_add(1);
-                    if !visitor.occurrence(row, column, found, transient, matcher)? {
-                        return Ok(());
-                    }
+                    accumulator.observe(row, found, transient, matcher)?;
                 }
             }
             read_rows += 1;
@@ -208,15 +206,10 @@ pub(super) fn walk(
             "Extraction source rows changed while scanning.".into(),
         ));
     }
-    job.report_progress(
-        expected as u64,
-        Some(expected as u64),
-        Some("Extraction complete".into()),
-    );
     Ok(())
 }
 
-fn metadata_size(payload: &ExtractPayload) -> Result<usize, AppError> {
+fn validate_metadata_size(payload: &ExtractPayload) -> Result<(), AppError> {
     struct Counter(usize);
     impl std::io::Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -230,11 +223,23 @@ fn metadata_size(payload: &ExtractPayload) -> Result<usize, AppError> {
             Ok(())
         }
     }
-    let mut count = Counter(0);
-    serde_json::to_writer(&mut count, payload).map_err(|_| {
+    serde_json::to_writer(&mut Counter(0), payload).map_err(|_| {
         AppError::Message(
             "Extraction request exceeds 512 KiB. Reduce its columns or conditions.".into(),
         )
-    })?;
-    Ok(count.0)
+    })
+}
+
+#[cfg(test)]
+mod filename_tests {
+    use super::safe_name;
+
+    #[test]
+    fn generated_csv_names_bound_utf8_bytes_and_remove_path_separators() {
+        let name = safe_name(&"調査🔍".repeat(50));
+        assert!(name.len() <= 80 && !name.is_empty());
+        assert!("調査🔍".repeat(50).starts_with(&name));
+        assert_eq!(safe_name("host/path\\log:one. "), "host_path_log_one");
+        assert_eq!(safe_name("..."), "source");
+    }
 }

@@ -6,6 +6,8 @@ import type { LoadProjectResponse, ProjectSummary } from "../types";
 
 export interface ProjectsState {
   projects: ProjectSummary[];
+  /** Generated CSVs reuse the normal viewer but never enter Recent. */
+  temporaryProjectIds: string[];
   openProjectIds: string[];
   selectedProjectId: string | null;
   projectDetail: LoadProjectResponse | null;
@@ -43,8 +45,9 @@ export function createProjectController(backend: Backend) {
   let detailGeneration = 0;
   let listGeneration = 0;
   const deletingProjects = new Set<string>();
+  const temporaryProjects = new Map<string, ProjectSummary>();
   const state = writable<ProjectsState>({
-    projects: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
+    projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
     isLoadingProjects: false, isLoadingDetail: false, creating: false,
     projectsLoaded: false, pendingDescription: "", pendingFilePaths: [],
     pendingDelimiter: "", pendingRestoreAnnotations: false,
@@ -87,8 +90,9 @@ export function createProjectController(backend: Backend) {
     const generation = ++listGeneration;
     state.update((value) => ({ ...value, isLoadingProjects: true }));
     try {
-      const projects = await backend.listProjects();
+      const savedProjects = await backend.listProjects();
       if (disposed || generation !== listGeneration) return;
+      const projects = [...savedProjects.filter(project => !temporaryProjects.has(project.meta.id)), ...temporaryProjects.values()];
       const existing = new Set(projects.map((project) => project.meta.id));
       const current = get(state);
       const openProjectIds = current.openProjectIds.filter((id) => existing.has(id));
@@ -141,6 +145,26 @@ export function createProjectController(backend: Backend) {
     if (current.selectedProjectId === projectId && (current.projectDetail || current.isLoadingDetail)) return;
     await loadProjectDetail(projectId);
   }
+
+  /** A generated CSV is already imported; opening it needs no second import. */
+  async function adoptTemporaryProject(summary: ProjectSummary, activate = true) {
+    const id = summary.meta.id;
+    if (disposed) { await backend.deleteProject(id); return; }
+    const snapshot = structuredClone(summary);
+    temporaryProjects.set(id, snapshot);
+    // A list read started before adoption must not prune the new tab.
+    listGeneration += 1;
+    state.update(value => ({ ...value, projects: [snapshot, ...value.projects.filter(project => project.meta.id !== id)],
+      temporaryProjectIds: [...temporaryProjects.keys()], isLoadingProjects: false,
+      openProjectIds: value.openProjectIds.includes(id) ? value.openProjectIds : [...value.openProjectIds, id] }));
+    if (activate) await selectProject(id);
+  }
+
+  const forgetTemporaryProject = (projectId: string) => {
+    if (!temporaryProjects.delete(projectId)) return;
+    state.update(value => ({ ...value, temporaryProjectIds: [...temporaryProjects.keys()],
+      projects: value.projects.filter(project => project.meta.id !== projectId) }));
+  };
 
   /** Closing a tab only changes this workspace; it never deletes a project. */
   async function closeProject(projectId: string) {
@@ -249,6 +273,7 @@ export function createProjectController(backend: Backend) {
       // The app passes tick so the old ProjectView enqueues its final save.
       await afterClose();
       await backend.deleteProject(projectId);
+      forgetTemporaryProject(projectId);
     } catch (error) {
       if (!disposed && index >= 0) {
         state.update((value) => {
@@ -272,6 +297,27 @@ export function createProjectController(backend: Backend) {
     return { adjacentLoadFailed };
   }
 
+  /** The close caller has already flushed and prepared its active view.
+   * Delete inactive CSVs first and never mount a neighboring case during exit.
+   * A failed removal keeps that case and its tab available for an explicit retry.
+   */
+  async function cleanupTemporaryProjects(afterClose: () => Promise<void> = async () => {}) {
+    const active = get(state).selectedProjectId;
+    const ids = [...temporaryProjects.keys()].sort((a, b) => Number(a === active) - Number(b === active));
+    await afterClose();
+    for (const id of ids) {
+      await backend.deleteProject(id);
+      temporaryProjects.delete(id);
+      const wasSelected = get(state).selectedProjectId === id;
+      if (wasSelected) { detailGeneration += 1; reads.cancelAll(); }
+      state.update(value => ({ ...value, temporaryProjectIds: [...temporaryProjects.keys()],
+        projects: value.projects.filter(project => project.meta.id !== id),
+        openProjectIds: value.openProjectIds.filter(projectId => projectId !== id),
+        ...(value.selectedProjectId === id ? { selectedProjectId: null, projectDetail: null, isLoadingDetail: false } : {}) }));
+      await afterClose();
+    }
+  }
+
   function updateSummary(payload: {
     projectId?: string; flagged: number; iocApplied: number; hiddenColumns: string[];
   }) {
@@ -282,6 +328,7 @@ export function createProjectController(backend: Backend) {
         ...value.projectDetail.project.meta, flagged_records: payload.flagged,
         ioc_applied_records: payload.iocApplied, hidden_columns: payload.hiddenColumns,
       };
+      if (temporaryProjects.has(meta.id)) temporaryProjects.set(meta.id, { meta });
       return {
         ...value,
         projectDetail: { ...value.projectDetail, project: { meta }, hidden_columns: payload.hiddenColumns },
@@ -296,8 +343,9 @@ export function createProjectController(backend: Backend) {
     detailGeneration += 1;
     listGeneration += 1;
     reads.dispose();
+    temporaryProjects.clear();
     state.update((value) => ({
-      ...value, projects: [], openProjectIds: [], selectedProjectId: null,
+      ...value, projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null,
       projectDetail: null, isLoadingProjects: false, isLoadingDetail: false,
       pendingFilePaths: [], pendingRestoreAnnotations: false,
       creating: false, importProgress: null, importFailures: [],
@@ -308,7 +356,8 @@ export function createProjectController(backend: Backend) {
     dispose,
     state: { subscribe: state.subscribe }, canCreateProject, loadProjects,
     loadProjectDetail, selectProject, closeProject, refreshSelected, createProjects,
-    deleteProject, setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations,
+    deleteProject, adoptTemporaryProject, cleanupTemporaryProjects,
+    setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations,
     resetPending, updateSummary,
   };
 }

@@ -71,14 +71,17 @@ test("drilldowns wrap an OR tree once and keep chips at the root instead of dupl
   state.addPatternSnippet(ipv4);
   const snippet = structuredClone(get(state.patternSnippets)[0]);
   state.filterByValue("host", "WS01");
-  state.filterByFormat(["command", "hidden"], ipv4, "192.0.2.1");
+  state.filterByValue("command", "TOKEN");
   const tree = get(state.conditionTree);
   assert.deepEqual(tree.snippets, [snippet]);
   assert.equal(tree.children[0].type, "group");
   assert.equal((tree.children[0] as EditorGroup).snippets, undefined);
-  const condition = tree.children[2] as EditorFormatCondition;
-  assert.deepEqual(condition.columns, ["command", "hidden"]);
-  assert.equal(condition.equals, "192.0.2.1");
+  const payload = get(state.conditionPayload)!;
+  assert.equal("kind" in payload && payload.kind, "and");
+  assert.equal(tree.children.length, 3);
+  assert.ok("children" in payload);
+  assert.equal(payload.children.length, 2);
+  assert.deepEqual(payload.children[1], { columns: ["host", "command", "hidden"], format: ipv4, negated: false });
 });
 
 test("saved views and history preserve selected pattern definitions and their removal", () => {

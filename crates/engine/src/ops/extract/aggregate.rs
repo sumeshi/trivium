@@ -6,7 +6,12 @@ use crate::{
     jobs::JobContext,
 };
 
-use super::{scan::Visitor, ExtractValue};
+pub(super) struct ExtractValue {
+    pub value: String,
+    pub count: u64,
+    pub rows: u64,
+    pub scope: Option<String>,
+}
 
 pub(super) const MAX_VALUE_BYTES: usize = 64 * 1024;
 pub(super) const MAX_DISTINCT: usize = 100_000;
@@ -40,9 +45,6 @@ pub(super) struct Accumulator {
     counts: HashMap<String, Count>,
     bytes: usize,
     limits: Limits,
-    pub occurrences: u64,
-    pub matched_rows: usize,
-    last_row: Option<usize>,
 }
 
 pub(super) fn limit_error() -> AppError {
@@ -55,9 +57,6 @@ impl Accumulator {
             counts: HashMap::new(),
             bytes: 0,
             limits,
-            occurrences: 0,
-            matched_rows: 0,
-            last_row: None,
         }
     }
 
@@ -90,21 +89,17 @@ impl Accumulator {
         job.check_cancelled()?;
         Ok(values)
     }
-}
-
-impl Visitor for Accumulator {
-    fn available(&self) -> usize {
+    pub fn available(&self) -> usize {
         self.limits.bytes.saturating_sub(self.retained())
     }
 
-    fn occurrence(
+    pub fn observe(
         &mut self,
         row: usize,
-        _column: &str,
         found: FormatOccurrence<'_>,
         transient: usize,
         matcher: &CompiledFormat,
-    ) -> Result<bool, AppError> {
+    ) -> Result<(), AppError> {
         let value = found.value;
         if value.len() > MAX_VALUE_BYTES {
             return Err(AppError::Message("An extracted value exceeds 64 KiB. Choose a narrower pattern; no complete result was produced.".into()));
@@ -161,12 +156,7 @@ impl Visitor for Accumulator {
                 return Err(limit_error());
             }
         }
-        self.occurrences = self.occurrences.checked_add(1).ok_or_else(limit_error)?;
-        if self.last_row != Some(row) {
-            self.matched_rows += 1;
-            self.last_row = Some(row);
-        }
-        Ok(true)
+        Ok(())
     }
 }
 

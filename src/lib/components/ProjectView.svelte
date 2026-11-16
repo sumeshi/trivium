@@ -15,7 +15,7 @@
   import { parseFlagFilter } from '../flagFilters';
   import type { LoadProjectResponse } from '../types';
   import type { Backend } from '../backend';
-  import type { ExtractFilter, ExtractIntent, ExtractPending } from '../extractTypes';
+  import type { ExtractIntent, ExtractPending } from '../extractTypes';
   import { errorMessage } from '../errors';
   import { buildExportArgs, exportFileName } from '../exportFlow';
   import './project-view.css';
@@ -47,6 +47,7 @@
   export let session: WorkspaceSession | null = null;
   export let onSessionSnapshot: (session: WorkspaceSession) => void = () => {};
   export let closing = false;
+  export let temporary = false;
   export let extractPending: ExtractPending | null = null;
   export let extractError: string | null = null;
 
@@ -84,8 +85,6 @@
   let lastSearchColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
   let applyingHistory: number | null = null;
-  let pendingOriginalRow: number | null = null;
-  let pendingExtractFilter: ExtractFilter | null = null;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
   let pendingScrollLeft: number | null = null;
@@ -239,26 +238,6 @@
 
   export function snapshotSession(): WorkspaceSession | null {
     return view.snapshotSession();
-  }
-
-  export function jumpToOriginalRow(rowIndex: number): void {
-    pendingOriginalRow = rowIndex;
-  }
-
-  export function applyExtractFilter(filter: ExtractFilter): void {
-    pendingExtractFilter = structuredClone(filter);
-  }
-
-  $: if (initialized && pendingExtractFilter) {
-    const filter = pendingExtractFilter;
-    pendingExtractFilter = null;
-    workspace.filterByFormat(filter.columns, filter.format, filter.value);
-  }
-  $: if (initialized && pendingOriginalRow !== null && ($queryCountKnown || $queryError)) {
-    const row = pendingOriginalRow;
-    pendingOriginalRow = null;
-    if ($queryCountKnown) void navigation.jumpToEnteredRow(row + 1);
-    else dispatch('notify', { message: 'Current results are unavailable. Check the filters before locating the original row.', tone: 'error' });
   }
 
   export function unsavedDraftMessage(): string | null {
@@ -915,5 +894,5 @@
     on:columnWidth={changeColumnWidth} on:columnFormat={changeColumnFormat}
     on:columnRule={(event) => void filterControls?.openRuleForColumn(event.detail.columnId)}
     on:columnGroup={(event) => void filterControls?.openGroupingForColumn(event.detail.columnId)} />
-  <FilterStatus bind:height={filterStatusHeight} on:clear={clearAllFilters} />
+  <FilterStatus bind:height={filterStatusHeight} {temporary} on:clear={clearAllFilters} />
 </section>

@@ -195,18 +195,6 @@ export type ValueCount = { value: string, count: number, };
 export type ColumnStats = { column: string, kind: string, missing: number, unique: number, top: Array<ValueCount>, rare: Array<ValueCount>, };
 export type ExtractScope = "all" | "filtered";
 export type ExtractPayload = { projectId: string, columns: Array<string>, format: FormatDefinition, scope: ExtractScope, search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
-export type ExtractResult = { resultId: string, projectId: string, format: FormatDefinition, columns: Array<string>, scope: ExtractScope, sourceRows: number, totalOccurrences: number, matchedRows: number, uniqueValues: number, hasClassification: boolean, };
-export type ExtractValue = { value: string, count: number, rows: number, scope: string | null, };
-export type ExtractPagePayload = { resultId: string, offset: number, limit: number, };
-export type ExtractPage = { rows: Array<ExtractValue>, total: number, offset: number, };
-export type ExtractSourcesPayload = { resultId: string, value: string, offset: number, limit: number, };
-export type ExtractSource = { rowIndex: number, column: string,
-/**
- * UTF-8 byte offsets into the original decoded cell, not file bytes.
- */
-start: number, end: number, };
-export type ExtractSources = { rows: Array<ExtractSource>, offset: number, hasMore: boolean, };
-export type ExportExtractPayload = { resultId: string, destination: string, allowOverwrite: boolean, };
 export type HistogramBucket = { start: string, end: string, count: number, flags: HistogramFlags, end_inclusive: boolean, };
 export type HistogramFlags = { safe: number, suspicious: number, critical: number, unflagged: number, };
 export type HistogramRangeInfo = { min: string, max: string, };
