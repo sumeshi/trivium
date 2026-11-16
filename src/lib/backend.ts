@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { queueHiddenColumnWrite, waitForHiddenColumnWrites } from "./hiddenColumnWrites.ts";
-import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
+import { forgetAnnotationWrites, queueAfterAnnotationWrites, queueAnnotationRead, queueAnnotationWrite, waitForAnnotationWrites } from "./annotationWrites.ts";
+import type { FormatDefinition, FormatCatalogEntry } from "./formats";
+import type { ExtractBackend, ExtractPayload, ExtractResult, ExtractPage, ExtractSources, ExtractExport } from "./extractTypes";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 import { waitForWorkspaceSave } from "./workspaceSession.ts";
@@ -273,8 +275,12 @@ export interface BulkUndoArgs extends RequestOwned {
   projectId: string;
 }
 
-export interface Backend {
+export interface Backend extends ExtractBackend {
   readonly isNative: boolean;
+  listFormats(): Promise<FormatCatalogEntry[]>;
+  validateFormat(definition: FormatDefinition): Promise<void>;
+  saveFormat(definition: FormatDefinition): Promise<FormatCatalogEntry>;
+  deleteFormat(id: string): Promise<void>;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
   deleteProject(projectId: string): Promise<void>;
@@ -348,6 +354,39 @@ function invokeOwned<T>(command: string, wire: Record<string, unknown>, owner: R
 
 class NativeBackend implements Backend {
   readonly isNative = true;
+  private readonly pendingExtractions = new Map<string, { cancelled: boolean }>();
+
+  listFormats(): Promise<FormatCatalogEntry[]> { return invoke("list_formats"); }
+  validateFormat(definition: FormatDefinition): Promise<void> { return invoke("validate_format", { definition }); }
+  saveFormat(definition: FormatDefinition): Promise<FormatCatalogEntry> {
+    return acceptSave(() => invoke("save_format", { payload: { definition } }));
+  }
+  deleteFormat(id: string): Promise<void> {
+    return acceptSave(() => invoke("delete_format", { payload: { id } }));
+  }
+
+  extractValues(args: ExtractPayload & RequestOwned): Promise<ExtractResult> {
+    const { requestId, ...payload } = structuredClone(args);
+    const token = { cancelled: false };
+    if (requestId) this.pendingExtractions.set(requestId, token);
+    return queueAnnotationRead(payload.projectId, () => {
+      if (token.cancelled) throw new Error("Cancelled.");
+      return invokeOwned<ExtractResult>("extract_values", { payload }, { requestId });
+    }).finally(() => { if (requestId) this.pendingExtractions.delete(requestId); });
+  }
+  extractValuesPage(args: { resultId: string; offset: number; limit: number } & RequestOwned): Promise<ExtractPage> {
+    const { requestId, ...payload } = args;
+    return invokeOwned("extract_values_page", { payload }, { requestId });
+  }
+  extractValueSources(args: { resultId: string; value: string; offset: number; limit: number } & RequestOwned): Promise<ExtractSources> {
+    const { requestId, ...payload } = args;
+    return invokeOwned("extract_value_sources", { payload }, { requestId });
+  }
+  exportExtract(args: { resultId: string; destination: string; allowOverwrite?: boolean } & RequestOwned): Promise<ExtractExport> {
+    const { requestId, ...payload } = structuredClone(args);
+    return acceptSave(() => invokeOwned("export_extract", { payload }, { requestId }));
+  }
+  releaseExtractResult(resultId: string): Promise<boolean> { return invoke("release_extract_result", { resultId }); }
 
   listProjects(): Promise<ProjectSummary[]> {
     return invoke("list_projects");
@@ -708,6 +747,8 @@ class NativeBackend implements Backend {
   }
 
   cancelRequest(requestId: string): Promise<number> {
+    const pending = this.pendingExtractions.get(requestId);
+    if (pending) pending.cancelled = true;
     return invoke("cancel_request_jobs", { requestId });
   }
 

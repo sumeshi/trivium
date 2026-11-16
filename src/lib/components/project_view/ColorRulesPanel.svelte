@@ -4,6 +4,7 @@
   import { get } from "svelte/store";
   import type { ColorRule, CompareOp, ConditionNode } from "../../types";
   import { COMPARE_OPS } from '../../stores/condition';
+  import { describeCondition } from '../../appliedFilterSummary';
   import { theme } from "../../theme";
   import {
     CONDITION_COLORS,
@@ -41,14 +42,7 @@
     error = "";
   }
 
-  const describe = (node: ConditionNode): string => {
-    if ("kind" in node) {
-      return `${node.kind.toUpperCase()}(${node.children.map(describe).join(", ")})`;
-    }
-    const label = COMPARE_OPS.find((item) => item.value === node.op)?.label ?? node.op;
-    const column = $columnLabels.get(node.column) ?? node.column;
-    return `${column} ${label} ${node.values.join(", ")}`;
-  };
+  const describe = (node: ConditionNode): string => describeCondition(node, $columnLabels);
 
   const addRule = () => {
     const trimmed = value.trim();

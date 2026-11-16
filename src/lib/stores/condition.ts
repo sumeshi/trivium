@@ -1,5 +1,8 @@
 import { derived, writable } from "svelte/store";
+import type { Readable } from "svelte/store";
 import type { CompareOp, ConditionNode } from "../types";
+import type { FormatDefinition } from "../formats";
+import { isFormatDefinition, formatDefinitionKey } from "../formats.ts";
 import {
   appendFilterCondition, appendConditionsAnd,
   type FilterConditionOp,
@@ -38,9 +41,25 @@ export interface EditorGroup {
   kind: "and" | "or";
   collapsed: boolean;
   children: EditorNode[];
+  /** Search chips belong to the root expression and combine with Rules by AND. */
+  snippets?: FormatSnippet[];
 }
 
-export type EditorNode = EditorCondition | EditorGroup;
+export interface FormatSnippet {
+  id: string;
+  format: FormatDefinition;
+}
+
+export interface EditorFormatCondition {
+  type: "format";
+  id: string;
+  columns: string[];
+  format: FormatDefinition;
+  equals?: string;
+  negated: boolean;
+}
+
+export type EditorNode = EditorCondition | EditorFormatCondition | EditorGroup;
 
 /** Newly added text-match rules stay inactive until their value is entered. */
 export function isIncompleteTextCondition(row: Pick<EditorCondition, "op" | "value" | "sourceValues">): boolean {
@@ -69,7 +88,10 @@ function rootGroup(): EditorGroup {
 }
 
 /** One editor tree per active investigation. */
-export function createConditionState() {
+export function createConditionState(scope: {
+  columns?: Readable<readonly string[]>;
+  searchColumns?: Readable<readonly string[]>;
+} = {}) {
   const tree = writable<EditorGroup>(rootGroup());
   // Only untouched ranges added by this analysis control can be replaced. A
   // restored tree or a user-edited range becomes an ordinary investigation rule.
@@ -195,6 +217,37 @@ export function createConditionState() {
     }) as EditorGroup);
   }
 
+  function addFormatCondition(groupId: string, columns: readonly string[], format: FormatDefinition, equals?: string): void {
+    const child: EditorFormatCondition = { type: "format", id: crypto.randomUUID(),
+      columns: [...columns], format: structuredClone(format), negated: false,
+      ...(equals === undefined ? {} : { equals }) };
+    edit(root => mapNode(root, node => node.type === "group" && node.id === groupId
+      ? { ...node, children: [...node.children, child] } : node) as EditorGroup);
+  }
+
+  /** An extraction drilldown narrows the whole existing expression. */
+  function filterByFormat(columns: readonly string[], format: FormatDefinition, equals?: string): void {
+    const child: EditorFormatCondition = { type: "format", id: crypto.randomUUID(), columns: [...columns],
+      format: structuredClone(format), negated: false, ...(equals === undefined ? {} : { equals }) };
+    conditionTree.update(root => appendConditionsAnd(root, [child]));
+  }
+
+  function patchFormatCondition(id: string, patch: Partial<Pick<EditorFormatCondition, "columns" | "format" | "equals" | "negated">>): void {
+    const snapshot = structuredClone(patch);
+    edit(root => mapNode(root, node => node.type === "format" && node.id === id
+      ? { ...node, ...snapshot } : node) as EditorGroup);
+  }
+
+  function addPatternSnippet(format: FormatDefinition): void {
+    const snapshot = structuredClone(format);
+    conditionTree.update(root => root.snippets?.some(snippet => formatDefinitionKey(snippet.format) === formatDefinitionKey(snapshot))
+      ? root : { ...root, snippets: [...(root.snippets ?? []), { id: crypto.randomUUID(), format: snapshot }] });
+  }
+
+  function removePatternSnippet(id: string): void {
+    conditionTree.update(root => ({ ...root, snippets: root.snippets?.filter(snippet => snippet.id !== id) }));
+  }
+
   function removeNode(id: string): void {
     if (id === ROOT_ID) {
       return;
@@ -272,6 +325,10 @@ export function createConditionState() {
         negated: node.negated,
       };
     }
+    if (node.type === "format") {
+      return { columns: [...node.columns], format: structuredClone(node.format),
+        negated: node.negated, ...(node.equals === undefined ? {} : { equals: node.equals }) };
+    }
     const children = node.children
       .map((child) => toNode(child))
       .filter((child): child is ConditionNode => child != null);
@@ -285,9 +342,22 @@ export function createConditionState() {
   }
 
 
-  const conditionPayload = derived(conditionTree, ($tree) => toNode($tree));
+  const patternSnippets = derived(conditionTree, root => root.snippets ?? []);
+  const conditionPayload = derived([conditionTree, scope.columns ?? writable<readonly string[]>([]),
+    scope.searchColumns ?? writable<readonly string[]>([])], ([root, columns, selected]) => {
+    const known = new Set(columns);
+    const targets = selected.length ? selected.filter(column => known.has(column)) : [...columns];
+    const manual = toNode(root);
+    const children: ConditionNode[] = manual ? [manual] : [];
+    for (const snippet of root.snippets ?? []) children.push({
+      columns: [...targets], format: structuredClone(snippet.format), negated: false,
+    });
+    return children.length === 0 ? null : children.length === 1 ? children[0] : { kind: "and" as const, children };
+  });
 
-  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, addCondition, addGroup, removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
+  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, addCondition, addGroup,
+    addFormatCondition, filterByFormat, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
+    removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }
 
 const COMPARE_OP_SET = new Set<CompareOp>(COMPARE_OPS.map((option) => option.value));
@@ -338,6 +408,13 @@ function fromNode(value: unknown): EditorNode | null {
       collapsed: false,
       children,
     };
+  }
+  if (isFormatDefinition(value.format) && Array.isArray(value.columns)
+    && value.columns.every(column => typeof column === "string")
+    && (value.equals === undefined || typeof value.equals === "string")) {
+    return { type: "format", id: crypto.randomUUID(), columns: [...value.columns],
+      format: structuredClone(value.format), negated: value.negated === true,
+      ...(value.equals === undefined ? {} : { equals: value.equals }) };
   }
   return conditionFromNode(value);
 }

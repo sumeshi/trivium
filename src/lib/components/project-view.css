@@ -1103,6 +1103,12 @@ button.primary:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* Wallpaper affects only row paint. Frozen cells keep their opaque --row-bg. */
+html[data-wallpaper-table] .table-scroll { background: transparent; }
+html[data-wallpaper-table] .data-row {
+  background: color-mix(in srgb, var(--row-bg) 80%, transparent);
+}
+
 .large-page-notice {
   grid-column: 3 / -1;
   color: var(--muted);

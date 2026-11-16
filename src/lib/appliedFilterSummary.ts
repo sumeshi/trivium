@@ -22,6 +22,12 @@ export function describeCondition(node: ConditionNode | null, labels: ReadonlyMa
     if (children.length === 1) return children[0];
     return `(${children.join(` ${node.kind.toUpperCase()} `)})`;
   }
+  if ("format" in node) {
+    const columns = node.columns.map(column => labels.get(column) ?? column).join(", ");
+    const expression = `${columns || "No columns"} matches ${node.format.name}${
+      node.equals === undefined ? "" : ` = ${JSON.stringify(node.equals)}`}`;
+    return node.negated ? `NOT (${expression})` : expression;
+  }
   const column = node.column ? labels.get(node.column) ?? node.column : "Any search column";
   const values = node.values.map((value) => JSON.stringify(value));
   const value = node.op === "in" ? `[${values.join(", ")}]` : values.join(", ");

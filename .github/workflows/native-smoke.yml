@@ -73,6 +73,9 @@ jobs:
       - name: Windows table presentation smoke
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --table-presentation-only
+      - name: Windows patterns, extraction and appearance
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --extensions-only
       - name: Windows memo and composition event checks
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --memo-ime-only

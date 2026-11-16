@@ -20,6 +20,8 @@ The separate `trivium-cli` executable provides an automation interface for scrip
 
 Choose from a variety of color themes to suit your preferences.
 
+Use **⋮ → Appearance** to export a theme JSON, edit its colors, and import your own copy. You can also choose a local PNG, JPEG, or WebP background. **Show behind table** is optional; fixed columns stay opaque.
+
 <img src="assets/screenshots/themes-light-dark.png" alt="Light and Dark themes" width="720">
 
 <img src="assets/screenshots/themes-toki-sakura-kohaku-yukari.png" alt="Toki, Sakura, Kohaku, and Yukari themes" width="720">
@@ -46,11 +48,13 @@ Search for keywords, limit searches to specific columns, or build more complex c
 
 Save filter rules, column layouts, and sort order as presets to reuse them across files with matching columns.
 
+Use **.* → Patterns** beside the search box to select saved regular expressions or create your own. Text, selected patterns, and Rules are combined with AND. **Search in** applies to both text and patterns. Applied definitions are saved with the investigation; editing a pattern does not change an existing investigation silently.
+
 <img src="assets/screenshots/filter-rules.png" alt="Filter rules matching EventID 4624" width="720">
 
 ### Search Syntax
 
-Text search is intended for quickly narrowing down the data. It is case-insensitive and does not support parentheses for grouping or regular expressions. For regular expressions, numeric or datetime comparisons, and more complex AND/OR conditions, use **Filter → Rules**.
+Text search is intended for quickly narrowing down the data. It is case-insensitive and does not interpret parentheses or regular expressions directly. Choose **.* → Patterns** for regular expression snippets, or use **Filter → Rules** for grouped AND/OR and numeric or datetime comparisons.
 
 | Example | Description |
 | --- | --- |
@@ -63,6 +67,14 @@ Text search is intended for quickly narrowing down the data. It is case-insensit
 | `-"powershell -enc"` | Exclude rows containing the phrase |
 | `@tag:review` | Find rows tagged with `review` |
 | `@tag:*` | Find rows with any tag |
+
+### Extract
+
+Open **Filter → Extract**, choose all rows or the current results and the source columns, then select a pattern. The result opens in a separate tab with extracted values, occurrence counts, and the number of source rows. Three occurrences in one row count as **3 occurrences / 1 row**. Hidden source columns can be included.
+
+IPv4 results also show Private, Public, Special, or Unclassified address scope. Open an occurrence to locate its original row, filter by an exact extracted value, or export the complete ranking to CSV. Result tabs are temporary analyses and do not create projects in Recent. If an exact aggregation reaches its memory limit, narrow the source rows or columns and run it again.
+
+Bundled patterns and themes are defined in `definitions/formats/` and `definitions/themes/`. Adding one valid JSON file registers it in the next build. Pattern JSON can also be imported from the pattern picker.
 
 ### Flag & Annotate
 

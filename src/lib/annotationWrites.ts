@@ -46,7 +46,15 @@ export function queueAnnotationWrite<T>(projectId: string, write: () => Promise<
 
 /** A strict snapshot runs after earlier saves and before later ones. */
 export function queueAfterAnnotationWrites<T>(projectId: string, read: () => Promise<T>): Promise<T> {
-  return acceptSave(() => {
+  return acceptSave(() => queueSnapshot(projectId, read, "Export"));
+}
+
+/** A cancellable analysis shares the snapshot order without becoming a save. */
+export function queueAnnotationRead<T>(projectId: string, read: () => Promise<T>): Promise<T> {
+  return queueSnapshot(projectId, read, "Extraction");
+}
+
+function queueSnapshot<T>(projectId: string, read: () => Promise<T>, label: "Export" | "Extraction"): Promise<T> {
     const queue = queueFor(projectId);
     const acknowledgedAtRequest = queue.acknowledgedFailures;
     return enqueue(projectId, queue, async () => {
@@ -54,11 +62,10 @@ export function queueAfterAnnotationWrites<T>(projectId: string, read: () => Pro
         // Every export requested before this warning must stop. A fresh explicit
         // retry may export the confirmed state after the user has checked it.
         queue.acknowledgedFailures = queue.failures;
-        throw new Error("Export stopped because an annotation could not be saved. Check the annotations before retrying the export.");
+        throw new Error(`${label} stopped because an annotation could not be saved. Check the annotations before retrying the ${label.toLowerCase()}.`);
       }
       return read();
     });
-  });
 }
 
 /** A successfully deleted case no longer needs its remembered save failures. */

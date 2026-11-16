@@ -44,7 +44,9 @@ function structureKey(node: EditorNode): string {
   if (node.type === "condition") {
     return `c:${node.column}:${node.op}:${node.negated ? 1 : 0}`;
   }
-  return `g:${node.kind}:${node.children.map((child) => structureKey(child)).join(",")}`;
+  if (node.type === "format") return `f:${node.columns.join(",")}:${node.format.id}:${node.negated ? 1 : 0}`;
+  return `g:${node.kind}:${node.children.map((child) => structureKey(child)).join(",")}:s:${
+    (node.snippets ?? []).map(snippet => `${snippet.id}:${snippet.format.id}`).join(",")}`;
 }
 
 export function emptyHistory(condition: EditorGroup, offset: number): History {

@@ -3,6 +3,7 @@ import type { EditorGroup } from "./stores/condition";
 import type { SavedView } from "./viewState";
 import { isFlagFilterValue } from "./flagFilters.ts";
 import type { ColumnDisplayFormat } from "./dateDisplay";
+import { isFormatDefinition } from "./formats.ts";
 
 const COMPARE_OPS = new Set([
   "eq",
@@ -39,13 +40,20 @@ function isNode(value: unknown): boolean {
         value.sourceValues.every((item) => typeof item === "string")))
     );
   }
+  if (value.type === "format") {
+    return typeof value.id === "string" && Array.isArray(value.columns)
+      && value.columns.every(column => typeof column === "string") && isFormatDefinition(value.format)
+      && typeof value.negated === "boolean" && (value.equals === undefined || typeof value.equals === "string");
+  }
   if (value.type === "group") {
     return (
       typeof value.id === "string" &&
       (value.kind === "and" || value.kind === "or") &&
       typeof value.collapsed === "boolean" &&
       Array.isArray(value.children) &&
-      value.children.every((child) => isNode(child))
+      value.children.every((child) => isNode(child)) &&
+      (value.snippets === undefined || (Array.isArray(value.snippets) && value.snippets.every(snippet =>
+        isRecord(snippet) && typeof snippet.id === "string" && isFormatDefinition(snippet.format))))
     );
   }
   return false;

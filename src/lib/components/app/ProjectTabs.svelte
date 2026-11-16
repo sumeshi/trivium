@@ -1,11 +1,23 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import type { ProjectSummary } from '../../types';
+  import type { ExtractTab } from '../../extractTypes';
 
   export let projects: ProjectSummary[] = [];
   export let selectedProjectId: string | null = null;
-  const dispatch = createEventDispatcher<{ select: string; close: string }>();
+  export let extractions: ExtractTab[] = [];
+  export let selectedExtractId: string | null = null;
+  const dispatch = createEventDispatcher<{ select: string; close: string; selectExtract: string; closeExtract: string }>();
   const label = (project: ProjectSummary) => project.meta.source_file_name || project.meta.name;
+  $: tabs = [
+    ...projects.map(project => ({ id: project.meta.id, kind: 'project' as const, label: label(project) })),
+    ...extractions.map(tab => ({ id: tab.id, kind: 'extract' as const, label: `${tab.result.format.name} — ${tab.sourceName}` })),
+  ];
+  const tabId = (tab: { id: string; kind: string }) => `${tab.kind}-tab-${tab.id}`;
+  const active = (tab: { id: string; kind: string }, projectId: string | null, extractId: string | null) =>
+    tab.kind === 'extract' ? extractId === tab.id : !extractId && projectId === tab.id;
+  const select = (tab: typeof tabs[number]) => dispatch(tab.kind === 'extract' ? 'selectExtract' : 'select', tab.id);
+  const close = (tab: typeof tabs[number]) => dispatch(tab.kind === 'extract' ? 'closeExtract' : 'close', tab.id);
   let tabList: HTMLDivElement;
   let stripEl: HTMLDivElement;
   let hasOverflow = false;
@@ -21,8 +33,9 @@
   };
 
   const revealSelected = () => {
-    if (!tabList || !selectedProjectId) return;
-    const tab = document.getElementById(`project-tab-${selectedProjectId}`)?.parentElement;
+    if (!tabList) return;
+    const selected = tabs.find(tab => active(tab, selectedProjectId, selectedExtractId));
+    const tab = selected && document.getElementById(tabId(selected))?.parentElement;
     if (!tab || !tabList.contains(tab)) return;
     const viewport = tabList.getBoundingClientRect();
     const bounds = tab.getBoundingClientRect();
@@ -55,7 +68,7 @@
 
   // Counts/annotations may replace summary objects without changing tab layout.
   // Those updates must not move a manually scrolled strip back to its selection.
-  $: layoutKey = JSON.stringify([selectedProjectId, projects.map((project) => [project.meta.id, label(project)])]);
+  $: layoutKey = JSON.stringify([selectedProjectId, selectedExtractId, tabs.map(tab => [tab.kind, tab.id, tab.label])]);
   $: void refreshLayout(layoutKey);
 
   const scrollTabs = (direction: -1 | 1) => {
@@ -78,21 +91,21 @@
   const navigate = (event: KeyboardEvent, index: number) => {
     if (event.key === 'Delete') {
       event.preventDefault();
-      dispatch('close', projects[index].meta.id);
+      close(tabs[index]);
       return;
     }
-    const next = event.key === 'ArrowRight' ? (index + 1) % projects.length
-      : event.key === 'ArrowLeft' ? (index + projects.length - 1) % projects.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? projects.length - 1 : -1;
+    const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+      : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
     if (next < 0) return;
     event.preventDefault();
-    const tabs = (event.currentTarget as HTMLElement).closest('[role=tablist]')?.querySelectorAll<HTMLButtonElement>('[role=tab]');
-    tabs?.[next]?.focus();
-    dispatch('select', projects[next].meta.id);
+    const buttons = (event.currentTarget as HTMLElement).closest('[role=tablist]')?.querySelectorAll<HTMLButtonElement>('[role=tab]');
+    buttons?.[next]?.focus();
+    select(tabs[next]);
   };
 </script>
 
-{#if projects.length > 0}
+{#if tabs.length > 0}
   <div class="project-tab-strip" bind:this={stripEl} use:observeStrip>
     {#if hasOverflow}
       <button class="tab-scroll" type="button" aria-label="Scroll tabs left" title="Scroll tabs left"
@@ -102,27 +115,27 @@
     {/if}
   <div class="project-tabs" bind:this={tabList} role="tablist" aria-label="Open projects"
     on:wheel|nonpassive={handleWheel} on:scroll={updateScrollEdges}>
-    {#each projects as project, index (project.meta.id)}
-      <div class="project-tab" class:active={selectedProjectId === project.meta.id} role="presentation">
+    {#each tabs as tab, index (`${tab.kind}:${tab.id}`)}
+      <div class="project-tab" class:active={active(tab, selectedProjectId, selectedExtractId)} role="presentation">
         <button
           class="tab-label"
           type="button"
           role="tab"
-          id={`project-tab-${project.meta.id}`}
-          aria-selected={selectedProjectId === project.meta.id}
-          aria-controls={`project-panel-${project.meta.id}`}
-          tabindex={selectedProjectId === project.meta.id ? 0 : -1}
-          title={label(project)}
-          on:click={() => dispatch('select', project.meta.id)}
+          id={tabId(tab)}
+          aria-selected={active(tab, selectedProjectId, selectedExtractId)}
+          aria-controls={`${tab.kind === 'project' ? 'project' : 'extract'}-panel-${tab.id}`}
+          tabindex={active(tab, selectedProjectId, selectedExtractId) ? 0 : -1}
+          title={tab.kind === 'extract' ? `Extract: ${tab.label}` : tab.label}
+          on:click={() => select(tab)}
           on:keydown={(event) => navigate(event, index)}
-        >{label(project)}</button>
+        >{#if tab.kind === 'extract'}<span aria-hidden="true">⌕ </span>{/if}{tab.label}</button>
         <button
           class="tab-close"
           type="button"
-          aria-label={`Close ${label(project)}`}
-          title="Close tab; saved project and annotations are kept"
-          tabindex={selectedProjectId === project.meta.id ? 0 : -1}
-          on:click={() => dispatch('close', project.meta.id)}
+          aria-label={tab.kind === 'extract' ? `Close extraction ${tab.label}` : `Close ${tab.label}`}
+          title={tab.kind === 'extract' ? 'Close extraction result' : 'Close tab; saved project and annotations are kept'}
+          tabindex={active(tab, selectedProjectId, selectedExtractId) ? 0 : -1}
+          on:click={() => close(tab)}
         >
           <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M6 18 18 6" /></svg>
         </button>

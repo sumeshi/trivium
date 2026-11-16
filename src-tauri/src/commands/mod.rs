@@ -1,10 +1,13 @@
 mod bulk;
+mod appearance;
 mod cell;
 mod close;
 mod cross;
 mod diff;
 mod dupes;
 mod export;
+mod extract;
+mod formats;
 mod flags;
 mod group;
 mod histogram;
@@ -29,6 +32,7 @@ mod view;
 // path-based re-exports of macro-expanded `#[macro_export]` macros are
 // rejected by rustc (rust-lang/rust#52234).
 pub use bulk::{bulk_preview, bulk_undo, bulk_update};
+pub use appearance::{clear_wallpaper, import_wallpaper, load_wallpaper};
 pub use cell::get_cell;
 pub use close::{app_close_requested, cancel_app_close, finish_app_close};
 pub(crate) use close::{request_app_close, CloseState};
@@ -36,6 +40,8 @@ pub use cross::search_projects;
 pub use diff::diff_projects;
 pub use dupes::duplicate_rows;
 pub use export::export_project;
+pub use extract::{extract_value_sources, extract_values, extract_values_page, export_extract, release_extract_result};
+pub use formats::{delete_format, list_formats, save_format, validate_format};
 pub use flags::{set_hidden_columns, update_flag};
 pub use group::group_tree;
 pub use histogram::histogram;

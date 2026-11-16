@@ -1,20 +1,23 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import type { LoadProjectResponse } from '../../types';
-  import { theme, setTheme, THEME_OPTIONS } from '../../theme';
+  import type { LoadProjectResponse, ProjectMeta } from '../../types';
+  import { theme, setTheme, themeOptions } from '../../theme';
+  import AppearanceDialog from './AppearanceDialog.svelte';
   import { parseTheme } from '../../themeModel';
   import { BUILD_LABEL } from '../../buildInfo';
   import { tableTextSize, TABLE_TEXT_SIZES, DEFAULT_TABLE_TEXT_SIZE, adjustTableTextSize, setTableTextSize } from '../../tableTextSize';
 
   export let projectDetail: LoadProjectResponse | null;
+  export let projectMeta: ProjectMeta | null = null;
 
   const dispatch = createEventDispatcher();
   let menuEl: HTMLDetailsElement;
   let menuOpen = false;
+  let appearanceOpen = false;
   let copyMessage = '';
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  $: meta = projectDetail?.project.meta;
+  $: meta = projectMeta ?? projectDetail?.project.meta;
   $: fileName = meta?.source_file_name || meta?.name || '';
   $: sourcePath = meta?.source_path || '';
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
@@ -125,7 +128,7 @@
         <label class="theme-setting">
           <span>Theme</span>
           <select aria-label="Theme" value={$theme} on:change={changeTheme}>
-            {#each THEME_OPTIONS as option}
+            {#each $themeOptions as option}
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>
@@ -147,6 +150,7 @@
             </button>
           </div>
         </div>
+        <button type="button" class="menu-action" on:click={() => { menuOpen = false; appearanceOpen = true; }}>Appearance…</button>
         <button
           type="button"
           class="menu-action"
@@ -178,6 +182,8 @@
     </details>
   </div>
 </header>
+
+{#if appearanceOpen}<AppearanceDialog on:close={() => { appearanceOpen = false; menuEl?.querySelector('summary')?.focus(); }} />{/if}
 
 <style>
   .app-header {

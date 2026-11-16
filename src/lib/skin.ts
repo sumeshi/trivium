@@ -10,8 +10,8 @@ export const FLAG_HINTS: Record<FlagSymbol, string> = {
 };
 
 // 条件色パレット。name は colors.json に保存しない識別子で、
-// app.css の CSS 変数 --rule-<name> と対応する。
-// 両テーマの hex は src/app.css の --rule-<name> と同期させること。
+// definitions/themes の CSS 変数 --rule-<name> と対応する。
+// 両テーマの hex は保存済み色の識別にも使うため維持する。
 export interface ConditionColorEntry {
   name: string;
   dark: string;

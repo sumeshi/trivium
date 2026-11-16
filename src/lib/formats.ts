@@ -1,0 +1,43 @@
+import type * as Wire from "./generated/engine";
+
+/** Frozen wire definitions are shared by filtering, extraction and the catalog. */
+export type FormatDefinition = Wire.FormatDefinition;
+export type FormatCatalogEntry = Wire.FormatCatalogEntry;
+export type FormatCondition = Wire.FormatCondition;
+
+/** Field order can change during a persisted JSON round trip. */
+export function formatDefinitionKey(value: FormatDefinition): string {
+  return JSON.stringify([value.schemaVersion, value.id, value.name, value.pattern, value.valueGroup ?? null,
+    value.classifier ? [value.classifier.kind, value.classifier.default,
+      value.classifier.rules.map(rule => [rule.cidr, rule.label])] : null,
+    value.examples?.map(example => [example.text, example.values]) ?? []]);
+}
+
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Structural checks only. The Rust matcher validates regexes and classifiers. */
+export function isFormatDefinition(value: unknown): value is FormatDefinition {
+  if (!record(value) || value.schemaVersion !== 1 || typeof value.id !== "string" || !value.id.trim()
+    || typeof value.name !== "string" || !value.name.trim() || typeof value.pattern !== "string") return false;
+  if (value.valueGroup !== undefined && typeof value.valueGroup !== "string") return false;
+  if (value.classifier !== undefined) {
+    const classifier = value.classifier;
+    if (!record(classifier) || classifier.kind !== "ipv4-cidr" || typeof classifier.default !== "string"
+      || !Array.isArray(classifier.rules) || !classifier.rules.every(rule => record(rule)
+        && typeof rule.cidr === "string" && typeof rule.label === "string")) return false;
+  }
+  return value.examples === undefined || (Array.isArray(value.examples) && value.examples.every(example =>
+    record(example) && typeof example.text === "string" && Array.isArray(example.values)
+    && example.values.every(item => typeof item === "string")));
+}
+
+export function parseFormatDefinition(value: unknown): FormatDefinition {
+  if (!isFormatDefinition(value)) throw new Error("Invalid pattern definition. Expected a version 1 pattern file.");
+  return structuredClone(value);
+}
+
+export function formatFileName(definition: FormatDefinition): string {
+  const name = definition.name.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 80).replace(/[.-]+$/g, "");
+  return `trivium-pattern-${name || "custom"}.json`;
+}

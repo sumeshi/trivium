@@ -51,13 +51,17 @@ from storage_responsiveness_checks import verify_storage_responsiveness
 from graceful_close_checks import verify_graceful_close
 from review_fixes_checks import verify_review_fixes
 from file_drop_checks import verify_file_drop
+from extract_checks import verify_extract
+from appearance_checks import verify_appearance
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
 
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
-TOOLS = {"Conditions": "conditions", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
-HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree"}
+TOOLS = {"Conditions": "conditions", "Extract": "extract", "Column stats": "stats", "Groups": "groups", "Time analysis": "time", "Timeline": "timeline", "Presets": "presets", "Bulk annotation": "bulk", "IOC rules": "iocs"}
+HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree", "extract_values", "extract_value_sources"}
 IPC_COMMANDS = frozenset({
+    "list_formats", "validate_format", "save_format", "delete_format", "extract_values", "extract_values_page",
+    "extract_value_sources", "export_extract", "release_extract_result", "import_wallpaper", "load_wallpaper", "clear_wallpaper",
     "list_projects", "create_project", "delete_project", "load_project", "query_project_rows",
     "locate_project_row", "get_cell", "cancel_job", "cancel_request_jobs", "active_jobs",
     "save_iocs", "import_iocs", "export_iocs", "update_flag", "set_hidden_columns", "export_project",
@@ -293,7 +297,7 @@ class WorkspaceView(WebView):
     def drawer(self, name: str) -> None:
         before = self.view().get("viewportHeight")
         tool = TOOLS[name]
-        group = "Filter" if tool in {"conditions", "presets"} else "Annotate" if tool in {"bulk", "iocs"} else "Analyze"
+        group = "Filter" if tool in {"conditions", "presets", "extract"} else "Annotate" if tool in {"bulk", "iocs"} else "Analyze"
         if not self.script("return !!document.querySelector(arguments[0]);", f"#tool-tab-{tool}"):
             self.named(f"Open {group}")
         self.click(self.element(f"#tool-tab-{tool}"))
@@ -931,6 +935,7 @@ def main() -> None:
     parser.add_argument("--close-only", action="store_true")
     parser.add_argument("--review-fixes-only", action="store_true")
     parser.add_argument("--file-drop-only", action="store_true")
+    parser.add_argument("--extensions-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -986,7 +991,11 @@ def main() -> None:
                 ("table text size without layout changes", lambda: verify_table_text(app, data, root, evidence, report)),
                 ("note text and composition confirmation", lambda: verify_memo_ime(app, data, root, evidence, report)),
                 ("all available themes and actual restarts", lambda: themes(app, root, evidence, report)),
+                ("shared patterns and extraction result tabs", lambda: verify_extract(app.web, data, root, evidence, report)),
+                ("custom themes and managed wallpaper", lambda: verify_appearance(app, data, root, evidence, report)),
             ]:
+                if args.extensions_only and stage not in {"shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:
+                    continue
                 if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:
                     continue
                 if stage == "multiple-file import options and failure isolation" and not args.review_fixes_only:

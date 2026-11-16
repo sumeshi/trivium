@@ -1,79 +1,111 @@
-import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, readTextFile, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { writable } from "svelte/store";
-import { createThemePreference, DEFAULT_THEME, parseSavedTheme, parseTheme } from "./themeModel.ts";
-import type { Theme } from "./themeModel";
+import { createThemePreference, DEFAULT_THEME, EDITABLE_THEME_COLORS, getUserTheme, parseSavedTheme,
+  parseTheme, parseUserTheme, registerUserTheme, THEME_OPTIONS, themeBase } from "./themeModel.ts";
+import type { Theme, UserTheme } from "./themeModel";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 
 export { THEME_OPTIONS } from "./themeModel.ts";
 export type { Theme } from "./themeModel";
-
 const THEME_KEY = "trivium:theme";
-const THEME_FILE = "theme.json";
 let themeRevision = 0;
+let catalogRevision = 0;
+let catalogLoad = 0;
+const modifiedThemes = new Map<string, number>();
 let pendingWrite = Promise.resolve();
-
 export const theme = writable<Theme>(DEFAULT_THEME);
+export const themeOptions = writable<Array<{ value: Theme; label: string }>>([...THEME_OPTIONS]);
+export const themeCatalogWarning = writable("");
 
 function applyThemeAttr(next: Theme) {
   const root = document.documentElement;
-  root.setAttribute("data-theme", next);
+  for (const key of EDITABLE_THEME_COLORS) root.style.removeProperty(`--${key}`);
+  root.setAttribute("data-theme", themeBase(next));
+  for (const [key, value] of Object.entries(getUserTheme(next)?.colors ?? {})) root.style.setProperty(`--${key}`, value);
 }
-
-export async function initTheme() {
-  const revision = ++themeRevision;
-  let loaded: Theme | null = null;
-  try {
-    loaded = parseSavedTheme(localStorage.getItem(THEME_KEY));
-  } catch (_err) {
-    // ignore
-  }
-
-  if (!loaded) {
-    try {
-      const base = await appLocalDataDir();
-      const path = await join(base, THEME_FILE);
-      const text = await readTextFile(path);
-      loaded = parseSavedTheme(text);
-    } catch (_err) {
-      // ignore (first run or not available)
-    }
-  }
-
-  // A theme chosen while the file was loading takes precedence over that read.
-  if (revision !== themeRevision) return;
-  const next = loaded ?? DEFAULT_THEME;
-  applyThemeAttr(next);
-  theme.set(next);
+function addCatalogTheme(definition: UserTheme, readAt?: number) {
+  const value = `user:${definition.id}` as Theme;
+  if (readAt !== undefined && (modifiedThemes.get(definition.id) ?? 0) > readAt) return value;
+  if (readAt === undefined) modifiedThemes.set(definition.id, ++catalogRevision);
+  registerUserTheme(definition);
+  themeOptions.update(options => [...options.filter(option => option.value !== value), { value, label: definition.name }]);
+  return value;
 }
-
-function persistTheme(next: Theme): Promise<void> {
-  try {
-    localStorage.setItem(THEME_KEY, JSON.stringify(createThemePreference(next)));
-  } catch (_err) {
-    // ignore
-  }
-  // Serialize writes so rapid changes cannot leave an older choice on disk.
-  const write = pendingWrite.then(async () => {
-    const base = await appLocalDataDir();
-    await mkdir(base, { recursive: true });
-    const path = await join(base, THEME_FILE);
-    await writeTextFile(path, JSON.stringify(createThemePreference(next), null, 2));
-  });
-  // Keep browser fallback behavior, but a normal close must notice a failed
-  // native save rather than mistaking the swallowed error for durable success.
+function queueWrite(work: () => Promise<void>) {
+  const write = pendingWrite.then(work);
   trackAcceptedSave(write);
   pendingWrite = write.catch(() => {});
-  return pendingWrite;
+  return write;
 }
-
+async function themeDirectory() {
+  return join(await appLocalDataDir(), "themes");
+}
+async function readThemeFile(path: string) {
+  const info = await stat(path);
+  if (info.size > 65_536) throw new Error("Theme JSON must be 64 KiB or smaller.");
+  return parseUserTheme(await readTextFile(path));
+}
+export async function initTheme() {
+  const revision = ++themeRevision;
+  const load = ++catalogLoad, readAt = catalogRevision;
+  try {
+    const directory = await themeDirectory();
+    await mkdir(directory, { recursive: true });
+    const files = (await readDir(directory)).filter(entry => entry.isFile && entry.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
+    if (files.length > 128) throw new Error("The theme folder contains more than 128 theme files.");
+    const invalid: string[] = [];
+    for (const entry of files) {
+      try {
+        const definition = await readThemeFile(await join(directory, entry.name));
+        if (load === catalogLoad) addCatalogTheme(definition, readAt);
+      }
+      catch { invalid.push(entry.name); }
+    }
+    if (load === catalogLoad) themeCatalogWarning.set(invalid.length ? `Could not load themes: ${invalid.join(", ")}` : "");
+  } catch (error) {
+    if (load === catalogLoad) themeCatalogWarning.set(error instanceof Error ? error.message : "Could not load custom themes.");
+  }
+  let loaded: Theme | null = null;
+  try { loaded = parseSavedTheme(localStorage.getItem(THEME_KEY)); } catch {}
+  if (!loaded) {
+    try { loaded = parseSavedTheme(await readTextFile(await join(await appLocalDataDir(), "theme.json"))); } catch {}
+  }
+  if (revision !== themeRevision) return;
+  const next = loaded ?? DEFAULT_THEME;
+  applyThemeAttr(next); theme.set(next);
+}
+function persistTheme(next: Theme) {
+  const preference = JSON.stringify(createThemePreference(next), null, 2);
+  try { localStorage.setItem(THEME_KEY, preference); } catch {}
+  const write = queueWrite(async () => {
+    const base = await appLocalDataDir();
+    await mkdir(base, { recursive: true });
+    await writeTextFile(await join(base, "theme.json"), preference);
+  });
+  // Browser fallback remains usable; the raw failure stays in the close drain.
+  return write.catch(() => {});
+}
 export function setTheme(next: Theme): Promise<void> {
   const selected = parseTheme(next);
   if (!selected) return Promise.resolve();
   return acceptSave(() => {
-    themeRevision += 1;
-    applyThemeAttr(selected);
-    theme.set(selected);
+    themeRevision += 1; applyThemeAttr(selected); theme.set(selected);
     return persistTheme(selected);
+  });
+}
+export function importThemeFile(path: string, confirmReplace: (name: string) => boolean = () => false): Promise<Theme | null> {
+  return acceptSave(async () => {
+    const definition = await readThemeFile(path);
+    const selected = `user:${definition.id}` as Theme;
+    if (parseTheme(selected) && !confirmReplace(definition.name)) return null;
+    await queueWrite(async () => {
+      const directory = await themeDirectory();
+      await mkdir(directory, { recursive: true });
+      await writeTextFile(await join(directory, `${definition.id}.json`), JSON.stringify(definition, null, 2));
+    });
+    const value = addCatalogTheme(definition);
+    await setTheme(value);
+    return value;
   });
 }

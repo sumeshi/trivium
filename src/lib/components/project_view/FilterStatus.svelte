@@ -9,7 +9,7 @@
   let expanded = false;
   $: description = describeAppliedFilters($appliedFilters, $columnLabels);
   $: canClear = description.active || $search !== '' || $searchColumns.length > 0 ||
-    $flagFilter !== 'all' || $bookmarkedOnly || $conditionTree.children.length > 0;
+    $flagFilter !== 'all' || $bookmarkedOnly || $conditionTree.children.length > 0 || ($conditionTree.snippets?.length ?? 0) > 0;
 </script>
 
 <footer class="applied-filter-status" bind:offsetHeight={height} class:has-filters={description.active} aria-label="Applied filters">

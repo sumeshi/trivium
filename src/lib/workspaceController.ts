@@ -2,11 +2,15 @@ import { createWorkspaceState } from "./workspaceState.ts";
 import { createConditionState } from "./stores/condition.ts";
 import { createViewHistory } from "./stores/viewHistory.ts";
 import { createOwnedRequests } from "./workspaceRequests.ts";
+import { derived } from "svelte/store";
 
 /** A mounted investigation owns data; inactive tabs retain only snapshots. */
 export function createWorkspaceController() {
   const state = createWorkspaceState();
-  const conditions = createConditionState();
+  const conditions = createConditionState({
+    columns: derived(state.projectDetail, detail => detail?.columns ?? []),
+    searchColumns: state.searchColumns,
+  });
   const history = createViewHistory();
   const cleanups = new Set<() => void>();
   let disposed = false;

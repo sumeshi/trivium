@@ -3,6 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
+execFileSync(process.execPath, ['scripts/generate-themes.mjs'], { stdio: 'inherit' });
+
 const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version as string;
 let commit = process.env.GITHUB_SHA ?? '';
 if (!/^[a-f0-9]{7,40}$/i.test(commit)) {

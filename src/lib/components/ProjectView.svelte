@@ -15,6 +15,7 @@
   import { parseFlagFilter } from '../flagFilters';
   import type { LoadProjectResponse } from '../types';
   import type { Backend } from '../backend';
+  import type { ExtractFilter, ExtractIntent, ExtractPending } from '../extractTypes';
   import { errorMessage } from '../errors';
   import { buildExportArgs, exportFileName } from '../exportFlow';
   import './project-view.css';
@@ -46,6 +47,8 @@
   export let session: WorkspaceSession | null = null;
   export let onSessionSnapshot: (session: WorkspaceSession) => void = () => {};
   export let closing = false;
+  export let extractPending: ExtractPending | null = null;
+  export let extractError: string | null = null;
 
   const workspace = createWorkspaceController();
   provideWorkspace(workspace);
@@ -54,7 +57,7 @@
     restoreHistory, setHistoryProject, projectDetail: projectDetailStore, backend: backendStore,
     visibleColumns, hiddenColumns, frozenThrough, columnOrder, columnFormats, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
-    totalRows, totalFilteredRows, appliedResultLoading, queryCountKnown, flaggedCount,
+    totalRows, totalFilteredRows, appliedResultLoading, queryCountKnown, queryError, flaggedCount,
     expandedCell, memoEditor, iocManagerOpen, scrollLeft,
     bodyScrollEl, headerScrollEl, iocDraft, currentProjectId, lastHiddenColumnsRef,
     viewGeneration, invalidateViewRequests, selectedRowIds, appliedFilters, sortRevision,
@@ -65,6 +68,8 @@
     refresh: void;
     notify: { message: string; tone: 'success' | 'error' };
     summary: { projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] };
+    extract: ExtractIntent;
+    cancelExtract: void;
   }>();
 
   let filterControls: FilterControls | undefined;
@@ -79,6 +84,8 @@
   let lastSearchColumnsSignature: string | null = null;
   let lastConditionJson = 'null';
   let applyingHistory: number | null = null;
+  let pendingOriginalRow: number | null = null;
+  let pendingExtractFilter: ExtractFilter | null = null;
   let appliedRestoreNonce = 0;
   let pendingScrollRow: number | null = null;
   let pendingScrollLeft: number | null = null;
@@ -232,6 +239,26 @@
 
   export function snapshotSession(): WorkspaceSession | null {
     return view.snapshotSession();
+  }
+
+  export function jumpToOriginalRow(rowIndex: number): void {
+    pendingOriginalRow = rowIndex;
+  }
+
+  export function applyExtractFilter(filter: ExtractFilter): void {
+    pendingExtractFilter = structuredClone(filter);
+  }
+
+  $: if (initialized && pendingExtractFilter) {
+    const filter = pendingExtractFilter;
+    pendingExtractFilter = null;
+    workspace.filterByFormat(filter.columns, filter.format, filter.value);
+  }
+  $: if (initialized && pendingOriginalRow !== null && ($queryCountKnown || $queryError)) {
+    const row = pendingOriginalRow;
+    pendingOriginalRow = null;
+    if ($queryCountKnown) void navigation.jumpToEnteredRow(row + 1);
+    else dispatch('notify', { message: 'Current results are unavailable. Check the filters before locating the original row.', tone: 'error' });
   }
 
   export function unsavedDraftMessage(): string | null {
@@ -815,6 +842,8 @@
 
 <section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
   <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
+    {extractPending} {extractError}
+    on:extract={(event) => dispatch('extract', event.detail)} on:cancelExtract={() => dispatch('cancelExtract')}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
     on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 

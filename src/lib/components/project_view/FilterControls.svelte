@@ -16,6 +16,8 @@
   import PresetControls from './PresetControls.svelte';
   import BulkControls from './BulkControls.svelte';
   import TimelinePanel from './TimelinePanel.svelte';
+  import ExtractPanel from './ExtractPanel.svelte';
+  import type { ExtractPending } from '../../extractTypes';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
@@ -25,6 +27,8 @@
 
   export let columnWidths: ReadonlyMap<string, number> = new Map();
   export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
+  export let extractPending: ExtractPending | null = null;
+  export let extractError: string | null = null;
 
   let toolbarHeight = 0;
   let toolbarEl: HTMLElement;
@@ -40,6 +44,7 @@
   ] as const;
   const tools = [
     { id: 'conditions', label: 'Rules', group: 'filters' },
+    { id: 'extract', label: 'Extract', group: 'filters' },
     { id: 'presets', label: 'Presets', group: 'filters' },
     { id: 'timeline', label: 'Timeline', group: 'analysis' },
     { id: 'time', label: 'Time analysis', group: 'analysis' },
@@ -65,9 +70,13 @@
   let statsColumn = "";
   let statsHistogramMode: "auto" | "datetime" = "auto";
   let analysisProjectId = "";
+  let extractColumns: string[] | null = null;
+  let extractScope: 'all' | 'filtered' = 'filtered';
   $: if (($projectDetail?.project.meta.id ?? "") !== analysisProjectId) {
     analysisProjectId = $projectDetail?.project.meta.id ?? "";
     timelineColumn = timeColumn = statsColumn = "";
+    extractColumns = null;
+    extractScope = 'filtered';
     statsHistogramMode = "auto";
   }
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
@@ -407,6 +416,11 @@
       <div class="analysis-body" id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
         {#if activeTool === 'conditions'}
           <ConditionEditor />
+        {:else if activeTool === 'extract'}
+          <ExtractPanel open={true} pending={extractPending} error={extractError}
+            bind:selectedColumns={extractColumns} bind:scope={extractScope}
+            on:extract={(event) => dispatch('extract', event.detail)}
+            on:cancel={() => dispatch('cancelExtract')} />
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}

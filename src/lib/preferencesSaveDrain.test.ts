@@ -22,7 +22,9 @@ async function withPreferences(write: (value: unknown) => Promise<void>, run: (c
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => { values.set(key, value); },
   } });
-  Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: { setAttribute() {} } } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: {
+    setAttribute() {}, style: { removeProperty() {}, setProperty() {} },
+  } } });
   Object.defineProperty(globalThis, "window", { configurable: true, value: { __TAURI_INTERNALS__: {
     invoke: async (command: string, args: unknown) => {
       if (command === "plugin:path|resolve_directory") return "/synthetic";

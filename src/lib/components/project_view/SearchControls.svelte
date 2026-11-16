@@ -2,36 +2,42 @@
   import { createEventDispatcher } from 'svelte';
   import { useWorkspace } from '../../workspaceContext';
   import { SEARCH_EXAMPLES, SEARCH_SYNTAX_HELP } from '../../searchHelp';
-  const { search, searchColumns, projectDetail, columnLabels } = useWorkspace();
+  import PatternPicker from './PatternPicker.svelte';
+  const { search, searchColumns, projectDetail, columnLabels, patternSnippets, addPatternSnippet, removePatternSnippet } = useWorkspace();
   const dispatch = createEventDispatcher<{ open: void }>();
   let searchToolsEl: HTMLDivElement | null = null;
   let scopeOpen = false;
   let helpOpen = false;
+  let patternsOpen = false;
   let scopeSearch = '';
   let scopeTrigger: HTMLButtonElement | null = null;
   let helpTrigger: HTMLButtonElement | null = null;
+  let patternsTrigger: HTMLButtonElement | null = null;
+  let searchInput: HTMLInputElement | null = null;
   $: scopeColumns = ($projectDetail?.columns ?? []).filter((column) =>
     ($columnLabels.get(column) ?? column).toLocaleLowerCase().includes(scopeSearch.trim().toLocaleLowerCase()));
   $: selectedNames = $searchColumns.map((column) => $columnLabels.get(column) ?? column);
   $: scopeLabel = selectedNames.length === 0 ? 'All columns' : selectedNames.length === 1
     ? selectedNames[0] : `${selectedNames.length} columns`;
-  $: scopeTitle = `Search columns: ${selectedNames.length ? selectedNames.join(', ') : 'all data columns'}.`;
-  export function close(): void { scopeOpen = helpOpen = false; }
+  $: scopeTitle = `Search columns: ${selectedNames.length ? selectedNames.join(', ') : 'all data columns'}. Applies to text and patterns.`;
+  export function close(): void { scopeOpen = helpOpen = patternsOpen = false; }
   const toggleSearchColumn = (column: string) => {
     searchColumns.update((current) => current.includes(column)
       ? current.filter((item) => item !== column) : [...current, column]);
   };
-  const openSearchPopover = (kind: 'scope' | 'help') => {
-    if (kind === 'scope') { scopeOpen = !scopeOpen; helpOpen = false; }
-    else { helpOpen = !helpOpen; scopeOpen = false; }
-    if (scopeOpen || helpOpen) dispatch('open');
+  const openSearchPopover = (kind: 'scope' | 'help' | 'patterns') => {
+    const next = kind === 'scope' ? !scopeOpen : kind === 'help' ? !helpOpen : !patternsOpen;
+    scopeOpen = kind === 'scope' && next;
+    helpOpen = kind === 'help' && next;
+    patternsOpen = kind === 'patterns' && next;
+    if (next) dispatch('open');
   };
   const outside = (event: MouseEvent) => {
-    if ((scopeOpen || helpOpen) && !searchToolsEl?.contains(event.target as Node)) close();
+    if ((scopeOpen || helpOpen || patternsOpen) && !searchToolsEl?.contains(event.target as Node)) close();
   };
   const escape = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape' || (!scopeOpen && !helpOpen)) return;
-    (scopeOpen ? scopeTrigger : helpTrigger)?.focus();
+    if (event.key !== 'Escape' || (!scopeOpen && !helpOpen && !patternsOpen)) return;
+    (scopeOpen ? scopeTrigger : patternsOpen ? patternsTrigger : helpTrigger)?.focus();
     close();
   };
 </script>
@@ -45,7 +51,21 @@
     </svg>
     <input placeholder='Search: error timeout · error | warning · -noise' aria-label="Search rows"
       title={SEARCH_SYNTAX_HELP}
-      bind:value={$search} type="search" />
+      bind:this={searchInput} bind:value={$search} type="search" />
+    {#if $patternSnippets.length}
+      <div class="pattern-chips" aria-label="Active search patterns">
+        {#each $patternSnippets as snippet (snippet.id)}
+          <span class="pattern-chip" title={`${snippet.format.name}\n${snippet.format.pattern}\nSearch in: ${selectedNames.length ? selectedNames.join(', ') : 'all data columns'}`}>
+            <span>{snippet.format.name}</span>
+            <button type="button" aria-label={`Remove pattern ${snippet.format.name}`} title={`Remove ${snippet.format.name}`}
+              on:click={() => removePatternSnippet(snippet.id)}>×</button>
+          </span>
+        {/each}
+      </div>
+    {/if}
+    <button type="button" class="patterns-trigger" bind:this={patternsTrigger} aria-label="Choose search patterns" title="Patterns"
+      aria-controls="search-pattern-menu" aria-expanded={patternsOpen} class:active={patternsOpen}
+      on:click={() => openSearchPopover('patterns')}><span aria-hidden="true">.*</span></button>
     <button type="button" class="scope-chip scope-trigger" bind:this={scopeTrigger} aria-label="Choose search columns"
       aria-controls="search-column-menu" aria-expanded={scopeOpen} class:active={scopeOpen}
       title={scopeTitle}
@@ -59,7 +79,7 @@
   {#if scopeOpen}
     <div class="search-popover scope-panel" id="search-column-menu" role="group" aria-label="Search columns">
       <div class="search-popover-head"><strong>Search columns</strong><button type="button" on:click={() => (scopeOpen = false)}>Done</button></div>
-      <p>Search selected columns. <code>column:value</code> targets a named column.</p>
+      <p>Search text and patterns in selected columns. <code>column:value</code> targets a named column.</p>
       <button type="button" class="all-search-columns" class:active={$searchColumns.length === 0}
         on:click={() => searchColumns.set([])}>All data columns</button>
       <input type="search" class="column-search" aria-label="Find a search column" placeholder="Find column" bind:value={scopeSearch} />
@@ -73,6 +93,12 @@
         {#if scopeColumns.length === 0}<p>No matching columns</p>{/if}
       </div>
       <p class="scope-footnote">No selected columns means all data columns.</p>
+    </div>
+  {:else if patternsOpen}
+    <div class="search-popover" id="search-pattern-menu" role="group" aria-label="Search patterns">
+      <div class="search-popover-head"><strong>Patterns</strong><button type="button" aria-label="Close search patterns" title="Close" on:click={() => { patternsOpen = false; patternsTrigger?.focus(); }}>×</button></div>
+      <p>Patterns narrow the current search. All selected patterns must match.</p>
+      <PatternPicker on:choose={(event) => { addPatternSnippet(event.detail); patternsOpen = false; searchInput?.focus(); }} />
     </div>
   {:else if helpOpen}
     <div class="search-popover search-help" id="search-syntax-help" role="note" aria-label="Search syntax">
@@ -98,6 +124,12 @@
   .scope-trigger:hover, .scope-trigger.active { color: var(--fg); background: var(--surface-weak); }
   .search-help-trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 23px; width: 23px; height: 23px; border: 1px solid var(--border); border-radius: 50%; padding: 0; background: transparent; color: var(--muted); font-size: 11px; margin-right: 5px; }
   .search-help-trigger:hover { color: var(--fg); border-color: var(--accent-border); }
+  .patterns-trigger { flex: 0 0 25px; width: 25px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font: 600 13px var(--font-mono); }
+  .patterns-trigger:hover, .patterns-trigger.active { color: var(--accent); background: var(--surface-weak); }
+  .pattern-chips { display: flex; flex: 0 1 auto; align-items: center; gap: 3px; max-width: 40%; overflow-x: auto; scrollbar-width: thin; }
+  .pattern-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; padding: 1px 3px 1px 5px; border: 1px solid var(--accent-border); border-radius: 4px; color: var(--fg); background: var(--accent-soft); font-size: 10px; }
+  .pattern-chip > span { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pattern-chip button { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 18px; border: 0; padding: 0; color: var(--fg); background: transparent; }
   .search-popover { position: absolute; top: calc(100% + 5px); right: 0; width: min(430px, calc(100vw - 30px)); z-index: 45; padding: 9px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); box-shadow: var(--shadow-soft); color: var(--fg); font-size: 11px; }
   .search-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
   .search-popover-head button { border: 0; padding: 2px 4px; background: transparent; color: var(--accent); font-size: 11px; }

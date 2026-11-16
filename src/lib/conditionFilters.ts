@@ -19,9 +19,11 @@ export function appendConditionsAnd(
   if (root.kind === "and" || root.children.length === 0) {
     return { ...root, kind: "and", children: [...root.children, ...children] };
   }
+  const { snippets: _snippets, ...manualRoot } = root;
   return {
     type: "group", id: root.id, kind: "and", collapsed: false,
-    children: [{ ...root, id: createId() }, ...children],
+    ...(root.snippets ? { snippets: root.snippets } : {}),
+    children: [{ ...manualRoot, id: createId() }, ...children],
   };
 }
 

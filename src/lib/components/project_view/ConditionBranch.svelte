@@ -1,13 +1,17 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
+  import { onMount } from 'svelte';
   import type { CompareOp } from "../../types";
   import type { EditorNode } from "../../stores/condition";
   import ConditionValueInput from "./ConditionValueInput.svelte";
+  import FormatConditionFields from './FormatConditionFields.svelte';
+  import { formats, formatCatalogError, ensureFormatsLoaded } from '../../patternCatalog';
 
   import { COMPARE_OPS } from '../../stores/condition';
   import { useWorkspace } from "../../workspaceContext";
   const {
     columnLabels, addCondition, addGroup, moveNode, patchCondition, removeNode,
-    setGroupKind, toggleCollapsed,
+    setGroupKind, toggleCollapsed, backend, addFormatCondition,
   } = useWorkspace();
 
   export let node: EditorNode;
@@ -16,6 +20,10 @@
   export let index = 0;
   export let siblingCount = 1;
   export let isRoot = false;
+  onMount(() => {
+    const service = get(backend);
+    if (isRoot && service) void ensureFormatsLoaded(service).catch(() => {});
+  });
 
   const setOp = (id: string, value: string) => {
     patchCondition(id, { op: value as CompareOp });
@@ -53,6 +61,12 @@
         <button type="button" class="group-add" on:click={() => addGroup(node.id)} aria-label="Add group" title="Add nested AND/OR group">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H4v16h4m8-16h4v16h-4M8 12h8m-4-4v8" /></svg><span>Group</span>
         </button>
+        <select class="add-format" aria-label="Add format condition" value="" title="Add a format condition"
+          on:change={(event) => { const entry = $formats.find(item => item.definition.id === event.currentTarget.value);
+            if (entry) addFormatCondition(node.id, columns.length ? [columns[0]] : [], entry.definition); event.currentTarget.value = ''; }}>
+          <option value="" disabled>＋ Format</option>
+          {#each $formats as entry (entry.definition.id)}<option value={entry.definition.id}>{entry.definition.name}</option>{/each}
+        </select>
         {#if !isRoot}
           <button type="button" class="branch-icon" disabled={index === 0} on:click={() => moveNode(node.id, -1)} aria-label="Move group up" title="Move group up">
             <span aria-hidden="true">↑</span>
@@ -70,6 +84,7 @@
           <button type="button" class="branch-icon" on:click={() => removeNode(node.id)} aria-label="Remove group" title="Remove group"><span aria-hidden="true">×</span></button>
         {/if}
       </div>
+      {#if isRoot && $formatCatalogError}<p class="format-load-error" role="alert">{$formatCatalogError}</p>{/if}
       {#if !node.collapsed}
         <div class="group-children">
         {#each node.children as child, childIndex (child.id)}
@@ -85,6 +100,15 @@
         {#if node.children.length === 0}<p class="empty-group">Add a condition or nested group.</p>{/if}
         </div>
       {/if}
+    </div>
+  {:else if node.type === 'format'}
+    <div class="condition-row">
+      <FormatConditionFields {node} {columns} />
+      <div class="condition-actions">
+        <button type="button" class="branch-icon" disabled={index === 0} on:click={() => moveNode(node.id, -1)} aria-label="Move condition up" title="Move condition up"><span aria-hidden="true">↑</span></button>
+        <button type="button" class="branch-icon" disabled={index >= siblingCount - 1} on:click={() => moveNode(node.id, 1)} aria-label="Move condition down" title="Move condition down"><span aria-hidden="true">↓</span></button>
+        <button type="button" class="branch-icon" on:click={() => removeNode(node.id)} aria-label="Remove condition" title="Remove condition"><span aria-hidden="true">×</span></button>
+      </div>
     </div>
   {:else}
     <div class="condition-row">
@@ -138,6 +162,8 @@
 </div>
 
 <style>
+  .add-format { max-width: 100px; min-height: 25px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 10px; }
+  .format-load-error { margin: 4px 0; color: var(--danger); font-size: 10px; overflow-wrap: anywhere; }
   .condition-branch { gap: 0; min-width: 0; }
   .condition-group { gap: 5px; min-width: 0; border: 0; padding: 0; }
   .group-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }

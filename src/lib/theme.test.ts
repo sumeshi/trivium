@@ -36,7 +36,8 @@ test("existing saved row colours follow the selected theme without rewriting sto
 import { readFileSync } from "node:fs";
 import { createThemePreference, DEFAULT_THEME, PASTEL_THEME_OPTIONS, parseSavedTheme, THEME_OPTIONS } from "./themeModel.ts";
 
-const stylesheet = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+const stylesheet = readFileSync(new URL("./themeCatalog.generated.css", import.meta.url), "utf8")
+  + readFileSync(new URL("../app.css", import.meta.url), "utf8");
 function cssTokens(themeName: string): Map<string, string> {
   const values = new Map<string, string>();
   for (const block of stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -82,14 +83,16 @@ function readable(tokens: Map<string, string>, foreground: string, background: s
 
 test("neutral Light and the retained palettes keep their current names and distinct accents", () => {
   assert.equal(DEFAULT_THEME, "light");
-  assert.deepEqual(THEME_OPTIONS.map(({ value }) => value), ["trivium", "light", "dark", "toki", "sakura", "kohaku", "hisui", "nagi", "sora", "yukari", "sumire", "yozora", "shion", "kasumi"]);
-  assert.deepEqual(new Set(PASTEL_THEME_OPTIONS.map(({ value }) => value)), new Set(["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"]));
+  const retained = ["trivium", "light", "dark", "toki", "sakura", "kohaku", "hisui", "nagi", "sora", "yukari", "sumire", "yozora", "shion", "kasumi"];
+  assert.deepEqual(THEME_OPTIONS.map(({ value }) => value).filter(value => retained.includes(value)), retained);
+  assert.deepEqual(PASTEL_THEME_OPTIONS.map(({ value }) => value), BUILTIN_THEMES.filter(definition => definition.pastel).map(definition => definition.id));
   for (const { value } of THEME_OPTIONS) assert.equal(parseTheme(value), value);
   assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
   assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
   for (const { value } of PASTEL_THEME_OPTIONS) assert.equal(isLightTheme(value), true);
   assert.equal(isLightTheme("shion"), false);
-  const palettes = new Set(PASTEL_THEME_OPTIONS.map(({ value }) => {
+  const baselinePastels = ["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"];
+  const palettes = new Set(PASTEL_THEME_OPTIONS.filter(({ value }) => baselinePastels.includes(value)).map(({ value }) => {
     const tokens = cssTokens(value);
     return colour(tokens, "bg") + colour(tokens, "accent");
   }));
@@ -240,4 +243,34 @@ test("Sumire is an offered light neutral with restrained silver surfaces and dar
   assert.ok(Math.max(...silver) - Math.min(...silver) < 12, "Sumire surfaces remain neutral silver");
   assert.ok(luminance(surface) > .7 && luminance(accent) < .04, "Sumire pairs light silver with near-black controls");
   assert.ok(Math.max(...dark) - Math.min(...dark) < 20, "Sumire accents avoid a strong colour cast");
+});
+
+// Frozen before migrating 0.2.4 CSS into JSON: every palette token must match.
+import { createHash } from "node:crypto";
+import { BUILTIN_THEMES } from "./themeCatalog.generated.ts";
+test("JSON palettes preserve every pre-migration token exactly", () => {
+  const baseline: Record<string, string> = {
+  "trivium": "d9469c98746320d7832213b322c5e7e96456687ca78482432862ccb962c3a356",
+  "light": "48d5215e2f600a3ab894a7e4792f788d3900299340da6de5f3c43f7a1b278336",
+  "dark": "d11851c82a953bac48e8416a29e83c3ccc3664911fa1452e96eb67f2751ef310",
+  "toki": "c2c14b7654933665bf917c67566ddff52012656970f15a73af5d92aa3024d263",
+  "sakura": "1edca68ba6be1a948c6ec4b77b2c3d3d30c760b6bb303496df3a68e165eaac9d",
+  "kohaku": "38a08cff49c677a03cbffea50267a383f53983b39c03ccc22564cbbfc23af2a1",
+  "hisui": "119db5eb1b5ac9fa8b6f215769c08a4dcf60fac42006101ab6f425848df8e9b9",
+  "nagi": "5199f8acb0a3c22534efee198e81ac672d5b0ac1d4e3e27fb46ed17c8327a4cc",
+  "sora": "7d0fdcd718a62b5a8f56557163cfe6b3acad5d2f9612de9f195b3a4e3f9d7ef6",
+  "yukari": "bd34d56cd07d6eaefbdc829c3f378e5e566dd1459a3980dc787ac2c66ac303ec",
+  "sumire": "0733a2f36bbea45889fee7e0310b734c16cfa53877cf68ec32d7a323315a113d",
+  "yozora": "4cdae398d399e58bd14934f67abab376dcf81bb1ac839c60bb989352eb137283",
+  "shion": "2ffa439be6ddd32b2424a51d57685a2e094b4d552386e535ba3bbcd0fa3d3842",
+  "kasumi": "777ce8ce1322be121ac3d8cc48953164a631583e596f2db72e91d5a9ec3d1704"
+};
+  for (const definition of BUILTIN_THEMES) {
+    if (!Object.prototype.hasOwnProperty.call(baseline, definition.id)) continue;
+    const css = cssTokens(definition.id);
+    const actual = Object.fromEntries([...css].filter(([key]) => !key.startsWith("font-") && !key.startsWith("radius"))
+      .sort(([a], [b]) => a.localeCompare(b)));
+    const hash = createHash("sha256").update(JSON.stringify(actual)).digest("hex");
+    assert.equal(hash, baseline[definition.id], definition.id);
+  }
 });
