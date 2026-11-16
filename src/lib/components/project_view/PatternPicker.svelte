@@ -9,6 +9,7 @@
   import type { FormatCatalogEntry, FormatDefinition } from '../../formats';
   import { acceptSave } from '../../saveDrain';
   import { errorMessage } from '../../errors';
+  import PatternLabel from './PatternLabel.svelte';
 
   const { backend } = useWorkspace();
   const dispatch = createEventDispatcher<{ choose: FormatDefinition }>();
@@ -119,8 +120,9 @@
       {#each visible as entry (entry.definition.id)}
         <div class="pattern-row">
           <button type="button" class="pattern-select" aria-label={`Use pattern ${entry.definition.name}`} title={entry.definition.pattern} disabled={busy}
+            aria-describedby={`search-pattern-${entry.definition.id}`}
             on:click={() => dispatch('choose', structuredClone(entry.definition))}>
-            <strong>{entry.definition.name}</strong><span>{entry.definition.pattern}</span>
+            <PatternLabel {entry} descriptionId={`search-pattern-${entry.definition.id}`} /><span class="pattern-expression">{entry.definition.pattern}</span>
           </button>
           <button type="button" class="pattern-icon" aria-label={`${entry.builtin ? 'Copy' : 'Edit'} ${entry.definition.name}`} title={entry.builtin ? 'Copy definition' : 'Edit definition'} on:click={() => edit(entry)} disabled={busy}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z" /></svg>
@@ -156,7 +158,7 @@
   .pattern-list { max-height: min(300px, 40vh); overflow: auto; }
   .pattern-row { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); }
   .pattern-select { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: start; gap: 2px; padding: 5px; text-align: left; border: 0; background: transparent; color: var(--fg); }
-  .pattern-select span { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--font-mono); }
+  .pattern-expression { display: block; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 400 10px/14px var(--font-mono); }
   .pattern-select:hover { background: var(--surface-weak); }
   .pattern-icon { flex: 0 0 25px; width: 25px; height: 25px; display: inline-flex; align-items: center; justify-content: center; padding: 2px; color: var(--muted); border: 1px solid transparent; background: transparent; border-radius: 4px; }
   .pattern-icon:hover { color: var(--fg); background: var(--surface-weak); }

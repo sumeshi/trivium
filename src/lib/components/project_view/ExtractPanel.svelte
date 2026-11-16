@@ -5,6 +5,7 @@
   import { formats, formatCatalogError, ensureFormatsLoaded } from '../../patternCatalog';
   import type { FormatDefinition } from '../../formats';
   import type { ExtractIntent, ExtractPending } from '../../extractTypes';
+  import PatternLabel from './PatternLabel.svelte';
   const { backend, projectDetail, columnLabels, appliedFilters, queryCountKnown, totalFilteredRows } = useWorkspace();
   export let open = false;
   export let pending: ExtractPending | null = null;
@@ -91,8 +92,9 @@
   <div class="pattern-list">
     {#each patterns as entry (entry.definition.id)}
       <button type="button" class="pattern-button" disabled={cannotRun} on:click={() => run(entry.definition)}
+        aria-label={entry.definition.name} aria-describedby={`extract-pattern-${entry.definition.id}`}
         title={`Extract ${entry.definition.name} from the selected columns`}>
-        <span>{entry.definition.name}</span>
+        <PatternLabel {entry} showExample descriptionId={`extract-pattern-${entry.definition.id}`} />
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 4h16v4l-6 6v5l-4 2v-7L4 8Z" /></svg>
       </button>
     {/each}
@@ -120,7 +122,8 @@
   .column-list label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .column-list input { min-height: 0; flex-shrink: 0; }
   .pattern-list { display: flex; flex-direction: column; gap: 5px; max-height: 300px; overflow: auto; }
-  .pattern-button { display: flex; align-items: center; justify-content: space-between; gap: 7px; text-align: left; }
+  .pattern-button { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 7px; text-align: left; }
+  .pattern-button > svg { flex: 0 0 14px; }
   .scan-progress { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 7px; background: var(--surface-weak); border-radius: 4px; }
   progress { width: 100%; height: 6px; accent-color: var(--accent); }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }

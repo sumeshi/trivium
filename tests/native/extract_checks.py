@@ -55,6 +55,12 @@ def _custom_pattern(web, name):
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:]) if item["name"] == "save_format"), None),
         lambda item: bool(item and "result" in item), "custom pattern saves through the actual Rust catalog")
     definition = entry["request"]["definition"]
+    custom = wait_for(lambda: web.script("""
+      const button=[...document.querySelectorAll('#search-pattern-menu .pattern-select')]
+        .find(e=>e.querySelector('strong')?.textContent.trim()===arguments[0]);
+      return button?.textContent.includes('Custom')??false;
+    """, name), bool, "user-created patterns are visibly marked Custom")
+    assert custom
     _pattern(web, name); web.results(1)
     assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [2]
     frozen = web.query()
@@ -64,7 +70,7 @@ def _custom_pattern(web, name):
     web.tap(button)
     wait_for(lambda: web.script("return !!document.querySelector('#search-pattern-menu [aria-label=\"Pattern definition JSON\"]');"),
              bool, "Edit keeps the selected pattern editor open")
-    changed = {**definition, "pattern": "TOKEN-99"}
+    changed = {**definition, "pattern": "TOKEN-99", "examples": [{"text": "TOKEN-99", "values": ["TOKEN-99"]}]}
     web.write('[aria-label="Pattern definition JSON"]', json.dumps(changed))
     checkpoint = len(web.trace())
     web.named("Save pattern", "#search-pattern-menu")
@@ -186,6 +192,17 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             .filter(e=>e.querySelector('[aria-label^="Copy "]')).map(e=>e.querySelector('strong').textContent.trim());
         """), lambda names: len(names) >= 30, "expanded built-in pattern catalogue is available")
         assert "IPv4" in bundled and not any("phone" in name.lower() for name in bundled), bundled
+        presentation = web.script("""
+          const button=[...document.querySelectorAll('#search-pattern-menu .pattern-select')]
+            .find(e=>e.querySelector('strong')?.textContent.trim()==='IPv4'),
+            expression=button.querySelector('.pattern-expression');
+          return {custom:button.textContent.includes('Custom'),
+            weight:Number(getComputedStyle(expression).fontWeight),
+            regexSize:parseFloat(getComputedStyle(expression).fontSize),
+            nameSize:parseFloat(getComputedStyle(button.querySelector('strong')).fontSize)};
+        """)
+        assert not presentation["custom"] and presentation["weight"] <= 400, presentation
+        assert presentation["regexSize"] < presentation["nameSize"], presentation
         _pattern(web, "IPv4"); web.results(2)
         assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [0, 1]
         assert web.script("return document.querySelector('[aria-label=\"Search rows\"]').value;") == ""
@@ -205,6 +222,20 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
 
         _extract_panel(web)
         assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "filtered"
+        assert web.script("""
+          const buttons=[...document.querySelectorAll('.extract-panel .pattern-button')],
+            ipv4=buttons.find(e=>e.getAttribute('aria-label')==='IPv4'),
+            custom=buttons.find(e=>e.getAttribute('aria-label')===arguments[0]);
+          return ipv4?.textContent.includes('10.0.0.1')&&!ipv4.textContent.includes('Custom')&&
+            custom?.textContent.includes('Custom')&&custom.textContent.includes('TOKEN-99');
+        """, f"Native token {project_id[:8]}"), "Extract shows example values and marks edited user definitions"
+        assert web.script("""
+          return [...document.querySelectorAll('.extract-panel .pattern-button')].every(button=>{
+            const bounds=button.getBoundingClientRect(),sample=button.querySelector('.pattern-example');
+            return !sample||sample.getBoundingClientRect().bottom<=bounds.bottom-2;
+          });
+        """), "Example captions must fit inside their buttons when the list scrolls"
+        web.screenshot(evidence / "extract-pattern-examples.png")
         web.named("Choose extraction columns", ".extract-panel")
         web.named("Deselect all", ".extract-panel")
         wait_for(lambda: web.script("return document.querySelectorAll('.extract-panel .pattern-button').length;"),
@@ -271,6 +302,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         assert {item["meta"]["id"] for item in web.command("list_projects")} == project_ids
         assert source.read_bytes() == original and source.is_file()
         report["extract"] = {"named_pattern_search": True, "shared_search_columns": True,
+            "subtle_search_expression": True, "example_values_and_custom_markers": True,
             "custom_pattern_save_and_edit": True, "applied_pattern_is_frozen": True,
             "filtered_and_all_row_scopes": True, "zero_columns_disabled": True,
             "all_columns_include_hidden": True, "selected_hidden_column_only": True,
