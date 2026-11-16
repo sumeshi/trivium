@@ -209,14 +209,12 @@ fn managed_directory_and_definition_symlinks_are_rejected() {
 }
 
 #[test]
-fn classifier_capture_and_examples_round_trip_as_a_complete_definition_snapshot() {
+fn validation_capture_and_examples_round_trip_as_a_complete_definition_snapshot() {
     let directory = Directory::new();
     let definition: FormatDefinition = serde_json::from_value(json!({
         "schemaVersion": 1, "id": "exact-ip", "name": "確認用IP",
-        "pattern": "(?P<value>1\\.2\\.3\\.4)", "valueGroup": "value",
-        "classifier": {"kind": "ipv4-cidr", "default": "Unclassified",
-            "rules": [{"cidr": "1.2.3.0/24", "label": "Public"}]},
-        "examples": [{"text": "日本語 1.2.3.4", "values": ["1.2.3.4"]}]
+        "pattern": "(?P<value>2001:db8::1)", "valueGroup": "value", "validation": "ipv6",
+        "examples": [{"text": "日本語 2001:db8::1", "values": ["2001:db8::1"]}]
     }))
     .unwrap();
     let saved = save_format(&directory.0, &definition).unwrap();
@@ -227,26 +225,53 @@ fn classifier_capture_and_examples_round_trip_as_a_complete_definition_snapshot(
         .find(|entry| entry.definition.id == "exact-ip")
         .unwrap();
     assert_eq!(stored.definition, definition);
-    assert_eq!(
-        CompiledFormat::new(&stored.definition)
-            .unwrap()
-            .classify("1.2.3.4"),
-        Some("Public")
-    );
+    assert!(CompiledFormat::new(&stored.definition)
+        .unwrap()
+        .has_match("日本語 2001:db8::1", Some("2001:db8::1")));
 }
 
 #[test]
-fn unknown_definition_fields_are_rejected_without_rewriting_user_files() {
+fn legacy_classifier_is_ignored_and_omitted_when_the_definition_is_saved_again() {
     let directory = Directory::new();
     fs::create_dir_all(&directory.0).unwrap();
     let path = directory.0.join("marker.json");
-    let mut definition = serde_json::to_value(custom("marker")).unwrap();
-    definition["script"] = json!("not executable");
-    let original = serde_json::to_vec(&definition).unwrap();
+    let expected = custom("marker");
+    let mut legacy = serde_json::to_value(&expected).unwrap();
+    legacy["classifier"] = json!({
+        "kind": "ipv4-cidr", "default": "Unclassified",
+        "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
+    });
+    let original = serde_json::to_vec(&legacy).unwrap();
     fs::write(&path, &original).unwrap();
-    assert!(list_formats(&directory.0)
-        .unwrap_err()
-        .to_string()
-        .contains("unknown field"));
-    assert_eq!(fs::read(path).unwrap(), original);
+    let entries = list_formats(&directory.0).unwrap();
+    let loaded = entries
+        .iter()
+        .find(|entry| entry.definition.id == "marker")
+        .unwrap();
+    assert_eq!(loaded.definition, expected);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "reading a legacy definition does not rewrite it"
+    );
+    assert!(serde_json::to_value(&loaded.definition)
+        .unwrap()
+        .get("classifier")
+        .is_none());
+    let frozen_matcher = CompiledFormat::new(&loaded.definition).unwrap();
+    assert!(frozen_matcher.has_match("x MARKER-42 y", Some("MARKER-42")));
+    save_format(&directory.0, &loaded.definition).unwrap();
+    let regenerated: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(regenerated.get("classifier").is_none());
+    assert_eq!(regenerated, serde_json::to_value(&expected).unwrap());
+    assert!(frozen_matcher.has_match("x MARKER-42 y", Some("MARKER-42")));
+    let reopened = list_formats(&directory.0).unwrap();
+    assert_eq!(
+        reopened
+            .iter()
+            .find(|entry| entry.definition.id == "marker")
+            .unwrap()
+            .definition,
+        expected
+    );
 }

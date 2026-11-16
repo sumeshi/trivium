@@ -87,7 +87,7 @@ def _value_rows(web, columns):
       const ids=arguments[0],cell=(row,id)=>row.querySelector('[data-column-id="'+id+'"] .cell-text')?.textContent.trim()??'';
       return Object.fromEntries([...document.querySelectorAll('.data-row:not(.loading)')].map(row=>{
         const value=cell(row,ids.Value);return [value,{count:Number(cell(row,ids.Count).replaceAll(',','')),
-          rows:Number(cell(row,ids.Rows).replaceAll(',','')),scope:cell(row,ids.Scope)}];
+          rows:Number(cell(row,ids.Rows).replaceAll(',',''))}];
       }));
     """, columns)
 
@@ -112,7 +112,7 @@ def _scan(web, project_id, values):
     web.applied(projectId=derived_id); web.results(len(values))
     detail = web.command("load_project", {"projectId": derived_id}, request=True)
     columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
-    assert list(columns) == ["Value", "Count", "Rows", "Scope"], columns
+    assert list(columns) == ["Value", "Count", "Rows"], columns
     ranked = _ranking(web, values, columns)
     assert not web.script("return !!document.querySelector('.extract-view');"), "Results reuse the existing table"
     assert web.script("return document.querySelector('.applied-filter-status .temporary-result')?.textContent.includes('Temporary CSV');")
@@ -215,8 +215,8 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         generated.append(first)
         assert set(first["request"]["columns"]) == set(columns.values())
         assert first["request"]["search"] == "cohort:keep" and first["request"]["scope"] == "filtered"
-        assert first["values"]["10.0.0.1"] == {"count": 3, "rows": 1, "scope": "Private"}
-        assert first["values"]["192.0.2.1"]["scope"] == "Special" and first["values"]["8.8.8.8"]["scope"] == "Public"
+        assert first["values"] == {"10.0.0.1": {"count": 3, "rows": 1},
+            "192.0.2.1": {"count": 1, "rows": 1}, "8.8.8.8": {"count": 1, "rows": 1}}
         assert {item["meta"]["id"] for item in web.command("list_projects")} == project_ids
         assert Path(first["meta"]["source_path"]).is_file()
         assert web.script("return document.querySelectorAll('[role=tablist] [role=tab][aria-selected=true]').length;") == 1
@@ -241,7 +241,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         web.applied(search="Value:8.8.8.8"); web.results(1)
         destination = root / "trivium-extract-ipv4-native.csv"
         exported = _export(web, destination)
-        expected = {value: {"Value": value, "Count": str(counts["count"]), "Rows": str(counts["rows"]), "Scope": counts["scope"]}
+        expected = {value: {"Value": value, "Count": str(counts["count"]), "Rows": str(counts["rows"])}
                     for value, counts in second["values"].items()}
         assert {row["Value"]: row for row in exported} == expected, exported
         web.screenshot(evidence / "extract-ipv4-csv-tab.png")
@@ -274,7 +274,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             "custom_pattern_save_and_edit": True, "applied_pattern_is_frozen": True,
             "filtered_and_all_row_scopes": True, "zero_columns_disabled": True,
             "all_columns_include_hidden": True, "selected_hidden_column_only": True,
-            "adjacent_values_and_cross_column_counts": True, "classification": ["Private", "Public", "Special"],
+            "adjacent_values_and_cross_column_counts": True, "output_columns": ["Value", "Count", "Rows"],
             "ordinary_csv_tabs": len(generated), "recent_unchanged": True,
             "ordinary_numeric_sort_and_search": True, "standard_gui_export_complete_csv": True,
             "closed_tab_source_copy_removed": True, "normal_exit_cleans_active_and_inactive_csvs": True,

@@ -1,6 +1,6 @@
 use regex::{Regex, RegexBuilder};
 
-use super::{catalog::validate_format_id, classifier::Classifier, FormatDefinition};
+use super::{catalog::validate_format_id, FormatDefinition};
 use crate::error::AppError;
 
 #[derive(Debug)]
@@ -8,7 +8,6 @@ pub struct CompiledFormat {
     definition: FormatDefinition,
     regex: Regex,
     capture: usize,
-    classifier: Option<Classifier>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,16 +64,10 @@ impl CompiledFormat {
         } else {
             0
         };
-        let classifier = definition
-            .classifier
-            .as_ref()
-            .map(Classifier::new)
-            .transpose()?;
         let compiled = Self {
             definition: definition.clone(),
             regex,
             capture,
-            classifier,
         };
         let examples = definition.examples.as_deref().unwrap_or(&[]);
         if examples.len() > 128 {
@@ -119,12 +112,6 @@ impl CompiledFormat {
     pub fn has_match(&self, text: &str, equals: Option<&str>) -> bool {
         self.occurrences(text)
             .any(|found| equals.is_none_or(|value| found.value == value))
-    }
-
-    pub fn classify(&self, value: &str) -> Option<&str> {
-        self.classifier
-            .as_ref()
-            .map(|classifier| classifier.classify(value))
     }
 }
 

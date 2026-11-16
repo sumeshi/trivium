@@ -19,8 +19,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         condition::Op,
         condition::GroupKind,
         condition::Condition,
-        formats::CidrRule,
-        formats::FormatClassifier,
         formats::FormatExample,
         formats::FormatValidation,
         formats::FormatDefinition,

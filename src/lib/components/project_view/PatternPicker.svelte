@@ -76,7 +76,7 @@
           definition.id = `user-${crypto.randomUUID()}`;
           definition.name += ' copy';
         }
-        // Inspect imported IDs, classification and examples before saving.
+        // Inspect imported IDs and examples before saving.
         json = JSON.stringify(definition, null, 2); editing = 'json';
       });
     } catch (reason) { if (!destroyed) error = errorMessage(reason, 'Could not read pattern file.'); }

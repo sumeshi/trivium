@@ -150,6 +150,18 @@ test("definition parsing validates structure while retaining literal expressions
   const parsed = parseFormatDefinition({ ...ipv4, pattern: expression });
   assert.equal(parsed.pattern, expression);
   assert.equal(formatDefinitionKey(parsed), formatDefinitionKey(JSON.parse(JSON.stringify(parsed))));
-  assert.throws(() => parseFormatDefinition({ ...ipv4, classifier: { kind: "run-script" } }), /Invalid pattern/);
+  assert.throws(() => parseFormatDefinition({ ...ipv4, valueGroup: 42 }), /Invalid pattern/);
   assert.throws(() => parseFormatDefinition({ ...ipv4, examples: [{ text: "test", values: [42] }] }), /Invalid pattern/);
+});
+
+test("older pattern metadata neither changes matching identity nor returns in a parsed definition", () => {
+  const previous = { ...ipv4, classifier: { kind: "ipv4-cidr", default: "Public",
+    rules: [{ cidr: "10.0.0.0/8", label: "Private" }] } };
+  const parsed = parseFormatDefinition(JSON.parse(JSON.stringify(previous)));
+  assert.deepEqual(parsed, ipv4);
+  assert.equal(formatDefinitionKey(previous), formatDefinitionKey(ipv4));
+  const { state } = fixture();
+  state.addPatternSnippet(previous);
+  state.addPatternSnippet(ipv4);
+  assert.equal(get(state.patternSnippets).length, 1);
 });

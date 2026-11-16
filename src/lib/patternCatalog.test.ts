@@ -54,12 +54,12 @@ test("catalog mutations serialize without changing frozen definitions already ap
 
 test("a failed reload reports its reason and retains the last valid definitions", async () => {
   let fail = false;
-  const service = backend({ listFormats: async () => { if (fail) throw new Error("Invalid classifier CIDR"); return [entry]; } });
+  const service = backend({ listFormats: async () => { if (fail) throw new Error("Invalid pattern regex"); return [entry]; } });
   await ensureFormatsLoaded(service);
   fail = true;
-  await assert.rejects(ensureFormatsLoaded(service, true), /Invalid classifier CIDR/);
+  await assert.rejects(ensureFormatsLoaded(service, true), /Invalid pattern regex/);
   assert.equal(get(formats)[0].definition.id, definition.id);
-  assert.equal(get(formatCatalogError), "Invalid classifier CIDR");
+  assert.equal(get(formatCatalogError), "Invalid pattern regex");
 });
 
 test("a reload started during a save cannot replace its committed catalog entry", async () => {

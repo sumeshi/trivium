@@ -75,7 +75,7 @@ impl Case {
         let mut csv = csv::Reader::from_path(path).unwrap();
         assert_eq!(
             csv.headers().unwrap().iter().collect::<Vec<_>>(),
-            vec!["Value", "Count", "Rows", "Scope"]
+            vec!["Value", "Count", "Rows"]
         );
         csv.records().collect::<Result<Vec<_>, _>>().unwrap()
     }
@@ -98,8 +98,8 @@ impl Drop for Case {
 fn ipv4() -> FormatDefinition {
     serde_json::from_str(include_str!("../../../../../definitions/formats/ipv4.json")).unwrap()
 }
-fn record(value: &str, count: &str, rows: &str, scope: &str) -> csv::StringRecord {
-    csv::StringRecord::from(vec![value, count, rows, scope])
+fn record(value: &str, count: &str, rows: &str) -> csv::StringRecord {
+    csv::StringRecord::from(vec![value, count, rows])
 }
 fn cancellable() -> jobs::JobGuard {
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -116,7 +116,7 @@ fn cancellable() -> jobs::JobGuard {
 }
 
 #[test]
-fn extracted_csv_is_an_ordinary_queryable_case_with_exact_counts_and_classification() {
+fn extracted_csv_is_an_ordinary_queryable_case_with_only_values_and_exact_counts() {
     let case = Case::csv();
     let original = fs::read(case.root.join("sample.csv")).unwrap();
     let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
@@ -124,9 +124,9 @@ fn extracted_csv_is_an_ordinary_queryable_case_with_exact_counts_and_classificat
     assert_eq!(
         case.values(&result),
         vec![
-            record("10.0.0.1", "3", "1", "Private"),
-            record("8.8.8.8", "2", "2", "Public"),
-            record("127.0.0.1", "1", "1", "Special")
+            record("10.0.0.1", "3", "1"),
+            record("8.8.8.8", "2", "2"),
+            record("127.0.0.1", "1", "1")
         ]
     );
     assert_eq!(
@@ -208,10 +208,7 @@ fn filtered_and_all_scopes_create_stable_independent_csvs() {
     let filtered = extract_values(&case.store, payload.clone(), &JobContext::none()).unwrap();
     assert_eq!(
         case.values(&filtered),
-        vec![
-            record("10.0.0.1", "3", "1", "Private"),
-            record("8.8.8.8", "1", "1", "Public")
-        ]
+        vec![record("10.0.0.1", "3", "1"), record("8.8.8.8", "1", "1")]
     );
     payload.scope = ExtractScope::All;
     let all = extract_values(&case.store, payload, &JobContext::none()).unwrap();
@@ -338,10 +335,7 @@ fn json_cells_are_not_duplicated_from_internal_original_records() {
         "{\"details\":{\"message\":\"IP=10.1.2.3\"},\"other\":\"10.1.2.3\"}\n{\"other\":null}\n",
     );
     let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
-    assert_eq!(
-        case.values(&result),
-        vec![record("10.1.2.3", "2", "1", "Private")]
-    );
+    assert_eq!(case.values(&result), vec![record("10.1.2.3", "2", "1")]);
     case.assert_no_generation_files();
 }
 
@@ -374,10 +368,7 @@ fn result_csv_remains_unchanged_when_source_annotations_change() {
     assert_eq!(case.values(&first), original);
     assert_eq!(
         case.values(&second),
-        vec![
-            record("127.0.0.1", "1", "1", "Special"),
-            record("8.8.8.8", "1", "1", "Public")
-        ]
+        vec![record("127.0.0.1", "1", "1"), record("8.8.8.8", "1", "1")]
     );
 }
 
@@ -408,7 +399,6 @@ fn byte_and_value_limits_fail_without_truncating_or_publishing_a_case() {
         pattern: "a+".into(),
         value_group: None,
         validation: None,
-        classifier: None,
         examples: None,
     };
     assert!(extract_values(&long.store, payload, &JobContext::none())
@@ -453,6 +443,24 @@ fn no_matches_opens_a_valid_header_only_csv() {
         .unwrap()
         .columns
         .len(),
-        4
+        3
     );
+}
+
+#[test]
+fn a_non_ip_format_uses_the_same_three_column_csv_and_distinct_row_counts() {
+    let case = Case::new(
+        "cve.csv",
+        "first,second\n\"CVE-2026-1234,CVE-2026-1234\",CVE-2026-1234\nCVE-2026-1234,\n",
+    );
+    let mut payload = case.payload();
+    payload.format =
+        serde_json::from_str(include_str!("../../../../../definitions/formats/cve.json")).unwrap();
+    let result = extract_values(&case.store, payload, &JobContext::none()).unwrap();
+    assert_eq!(
+        case.values(&result),
+        vec![record("CVE-2026-1234", "4", "2")]
+    );
+    assert_eq!(result.meta.columns.len(), 3);
+    case.assert_no_generation_files();
 }

@@ -1,6 +1,5 @@
 //! Declarative named formats shared by filters and extraction.
 pub mod catalog;
-mod classifier;
 mod matcher;
 mod model;
 mod validation;
@@ -10,7 +9,7 @@ pub use catalog::{
     SaveFormatPayload,
 };
 pub use matcher::{CompiledFormat, FormatOccurrence, FormatOccurrences};
-pub use model::{CidrRule, FormatClassifier, FormatDefinition, FormatExample, FormatValidation};
+pub use model::{FormatDefinition, FormatExample, FormatValidation};
 
 #[cfg(test)]
 mod tests;

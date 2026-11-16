@@ -238,7 +238,7 @@ fn saved_csv_and_jsonl_queries_match_any_source_cell_then_negate_the_aggregate()
         }).unwrap();
         assert_eq!(preview.count,2);
         let mut cross=def.clone(); cross.id="cross-cell".into(); cross.name="Cross cell".into();
-        cross.pattern="(?i)aa bb".into();cross.value_group=None;cross.examples=None;cross.classifier=None;
+        cross.pattern="(?i)aa bb".into();cross.value_group=None;cross.examples=None;
         assert!(f.query(format(columns,&cross,None,false)).is_empty(),"formats never search a joined or lowercased row blob");
     }
 }
@@ -274,6 +274,14 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
         },
     )
     .unwrap();
+    // Older saved views/presets can still carry removed classification metadata.
+    // Loading must retain their frozen matcher and columns without reviving it.
+    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    saved["condition"]["format"]["classifier"] = serde_json::json!({
+        "kind": "ipv4-cidr", "default": "Unclassified",
+        "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
+    });
+    fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
     let loaded = ops::preset::load_preset(
         &second.store,
         LoadPresetPayload {
@@ -291,6 +299,9 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
         condition.format, definition,
         "preset stores its applied definition rather than a mutable catalog lookup"
     );
+    assert!(serde_json::to_value(&node).unwrap()["format"]
+        .get("classifier")
+        .is_none());
     assert_eq!(
         condition.columns,
         vec![

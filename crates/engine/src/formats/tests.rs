@@ -96,39 +96,7 @@ fn invalid_definitions_and_examples_are_rejected_before_use() {
 }
 
 #[test]
-fn cidr_rules_choose_the_most_specific_prefix_and_never_classify_invalid_ip_as_public() {
-    let mut def = definition(".+", None);
-    def.classifier = Some(FormatClassifier {
-        kind: "ipv4-cidr".into(),
-        default: "Unclassified".into(),
-        rules: vec![
-            CidrRule {
-                cidr: "0.0.0.0/0".into(),
-                label: "Public".into(),
-            },
-            CidrRule {
-                cidr: "10.1.0.0/16".into(),
-                label: "Special".into(),
-            },
-            CidrRule {
-                cidr: "10.0.0.0/8".into(),
-                label: "Private".into(),
-            },
-        ],
-    });
-    let matcher = CompiledFormat::new(&def).unwrap();
-    assert_eq!(matcher.classify("10.1.2.3"), Some("Special"));
-    assert_eq!(matcher.classify("10.2.3.4"), Some("Private"));
-    assert_eq!(matcher.classify("8.8.8.8"), Some("Public"));
-    assert_eq!(matcher.classify("999.1.2.3"), Some("Unclassified"));
-    for cidr in ["10.0.0.1/8", "10.0.0.0/33", "::/0", "10.0.0.0/+8"] {
-        def.classifier.as_mut().unwrap().rules[1].cidr = cidr.into();
-        assert!(CompiledFormat::new(&def).is_err(), "{cidr}");
-    }
-}
-
-#[test]
-fn builtin_ipv4_handles_boundaries_and_special_ranges() {
+fn builtin_ipv4_preserves_all_addresses_and_rejects_invalid_boundaries() {
     let root = std::env::temp_dir().join(format!("trivium-format-test-{}", uuid::Uuid::new_v4()));
     let entries = list_formats(&root).unwrap();
     let ipv4 = CompiledFormat::new(
@@ -146,21 +114,21 @@ fn builtin_ipv4_handles_boundaries_and_special_ranges() {
         ["10.0.0.1", "8.8.8.8"]
     );
     assert!(!ipv4.has_match("256.1.2.3 1.2.3.4.5 001.2.3.4", None));
-    for (address, label) in [
-        ("10.1.2.3", "Private"),
-        ("172.31.255.255", "Private"),
-        ("172.32.0.1", "Public"),
-        ("127.0.0.1", "Special"),
-        ("100.64.0.1", "Special"),
-        ("169.254.1.1", "Special"),
-        ("192.0.2.1", "Special"),
-        ("198.18.0.1", "Special"),
-        ("224.0.0.1", "Special"),
-        ("240.0.0.1", "Special"),
-        ("192.0.0.9", "Public"),
-        ("192.0.0.8", "Special"),
+    for address in [
+        "10.1.2.3",
+        "172.31.255.255",
+        "172.32.0.1",
+        "127.0.0.1",
+        "100.64.0.1",
+        "169.254.1.1",
+        "192.0.2.1",
+        "198.18.0.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "192.0.0.9",
+        "192.0.0.8",
     ] {
-        assert_eq!(ipv4.classify(address), Some(label), "{address}");
+        assert_eq!(ipv4.occurrences(address).next().unwrap().value, address);
     }
     let _ = std::fs::remove_dir_all(root);
 }

@@ -39,7 +39,7 @@ pub(super) fn open_csv(
     let path = workspace.0.join(&table.filename);
     let file = File::create(&path).context("failed to create extracted CSV")?;
     let mut csv = csv::Writer::from_writer(file);
-    csv.write_record(["Value", "Count", "Rows", "Scope"])
+    csv.write_record(["Value", "Count", "Rows"])
         .map_err(|error| AppError::Other(error.into()))?;
     for (index, value) in table.values.iter().enumerate() {
         if index.is_multiple_of(256) {
@@ -54,7 +54,6 @@ pub(super) fn open_csv(
             value.value.as_str(),
             &value.count.to_string(),
             &value.rows.to_string(),
-            value.scope.as_deref().unwrap_or(""),
         ])
         .map_err(|error| AppError::Other(error.into()))?;
     }

@@ -1,16 +1,11 @@
 use std::{collections::HashMap, mem::size_of};
 
-use crate::{
-    error::AppError,
-    formats::{CompiledFormat, FormatOccurrence},
-    jobs::JobContext,
-};
+use crate::{error::AppError, formats::FormatOccurrence, jobs::JobContext};
 
 pub(super) struct ExtractValue {
     pub value: String,
     pub count: u64,
     pub rows: u64,
-    pub scope: Option<String>,
 }
 
 pub(super) const MAX_VALUE_BYTES: usize = 64 * 1024;
@@ -36,7 +31,6 @@ struct Count {
     occurrences: u64,
     rows: u64,
     last_row: usize,
-    scope: Option<String>,
 }
 
 /// Rows arrive once in source order, with every selected column of one row
@@ -81,7 +75,6 @@ impl Accumulator {
                 value,
                 count: count.occurrences,
                 rows: count.rows,
-                scope: count.scope,
             });
         }
         // Sorting is bounded by the distinct limit. Stable ties use raw values.
@@ -98,7 +91,6 @@ impl Accumulator {
         row: usize,
         found: FormatOccurrence<'_>,
         transient: usize,
-        matcher: &CompiledFormat,
     ) -> Result<(), AppError> {
         let value = found.value;
         if value.len() > MAX_VALUE_BYTES {
@@ -114,11 +106,7 @@ impl Accumulator {
             if self.counts.len() >= self.limits.distinct {
                 return Err(limit_error());
             }
-            let scope = matcher.classify(value);
-            let added = value
-                .len()
-                .saturating_add(scope.map_or(0, str::len))
-                .saturating_add(ALLOCATION_BYTES * (1 + usize::from(scope.is_some())));
+            let added = value.len().saturating_add(ALLOCATION_BYTES);
             let next_capacity = if self.counts.len() == self.counts.capacity() {
                 (self.counts.capacity().saturating_add(1) * 2).max(3)
             } else {
@@ -149,7 +137,6 @@ impl Accumulator {
                     occurrences: 1,
                     rows: 1,
                     last_row: row,
-                    scope: scope.map(str::to_owned),
                 },
             );
             if self.retained().saturating_add(transient) > self.limits.bytes {

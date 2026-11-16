@@ -189,7 +189,7 @@ fn walk(
                         job.check_cancelled()?;
                     }
                     checked = checked.wrapping_add(1);
-                    accumulator.observe(row, found, transient, matcher)?;
+                    accumulator.observe(row, found, transient)?;
                 }
             }
             read_rows += 1;

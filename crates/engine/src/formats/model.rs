@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// A portable snapshot. Saved investigations retain the definition they applied.
+/// Unused metadata from older definitions is ignored when loading a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct FormatDefinition {
     pub schema_version: u32,
     pub id: String,
@@ -14,9 +15,6 @@ pub struct FormatDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub validation: Option<FormatValidation>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub classifier: Option<FormatClassifier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub examples: Option<Vec<FormatExample>>,
@@ -56,19 +54,4 @@ pub enum FormatValidation {
 pub struct FormatExample {
     pub text: String,
     pub values: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(deny_unknown_fields)]
-pub struct FormatClassifier {
-    pub kind: String,
-    pub rules: Vec<CidrRule>,
-    pub default: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(deny_unknown_fields)]
-pub struct CidrRule {
-    pub cidr: String,
-    pub label: String,
 }
