@@ -1,4 +1,9 @@
-use crate::{error::AppError, formats::CompiledFormat, jobs::JobContext, store::ProjectsStore};
+use crate::{
+    error::AppError,
+    formats::{CompiledFormat, FormatOccurrence},
+    jobs::JobContext,
+    store::ProjectsStore,
+};
 
 use super::{
     cache,
@@ -21,12 +26,11 @@ impl Visitor for Sources<'_> {
         &mut self,
         row: usize,
         column: &str,
-        value: &str,
-        start: usize,
-        end: usize,
+        found: FormatOccurrence<'_>,
         _transient: usize,
         _matcher: &CompiledFormat,
     ) -> Result<bool, AppError> {
+        let FormatOccurrence { value, start, end } = found;
         if value != self.value {
             return Ok(true);
         }

@@ -9,6 +9,7 @@ import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 export { THEME_OPTIONS } from "./themeModel.ts";
 export type { Theme } from "./themeModel";
 const THEME_KEY = "trivium:theme";
+const MAX_USER_THEMES = 128;
 let themeRevision = 0;
 let catalogRevision = 0;
 let catalogLoad = 0;
@@ -53,7 +54,7 @@ export async function initTheme() {
     const directory = await themeDirectory();
     await mkdir(directory, { recursive: true });
     const files = (await readDir(directory)).filter(entry => entry.isFile && entry.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
-    if (files.length > 128) throw new Error("The theme folder contains more than 128 theme files.");
+    if (files.length > MAX_USER_THEMES) throw new Error(`The theme folder contains more than ${MAX_USER_THEMES} theme files.`);
     const invalid: string[] = [];
     for (const entry of files) {
       try {
@@ -102,7 +103,14 @@ export function importThemeFile(path: string, confirmReplace: (name: string) => 
     await queueWrite(async () => {
       const directory = await themeDirectory();
       await mkdir(directory, { recursive: true });
-      await writeTextFile(await join(directory, `${definition.id}.json`), JSON.stringify(definition, null, 2));
+      const filename = `${definition.id}.json`;
+      // Check admission in the write queue: concurrent imports must observe
+      // earlier accepted files, while replacing an existing ID needs no slot.
+      const files = (await readDir(directory)).filter(entry => entry.isFile && entry.name.endsWith(".json"));
+      if (!files.some(entry => entry.name === filename) && files.length >= MAX_USER_THEMES) {
+        throw new Error(`The theme folder already contains ${MAX_USER_THEMES} theme files. Replace an existing theme to import another.`);
+      }
+      await writeTextFile(await join(directory, filename), JSON.stringify(definition, null, 2));
     });
     const value = addCatalogTheme(definition);
     await setTheme(value);

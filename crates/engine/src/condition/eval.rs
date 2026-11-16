@@ -41,7 +41,7 @@ pub fn reset_regex_compile_count() {
 #[derive(Debug)]
 pub enum PreparedNode {
     Condition(PreparedCondition),
-    Format(PreparedFormat),
+    Format(Box<PreparedFormat>),
     Tag(PreparedTag),
     Group(PreparedGroup),
 }
@@ -164,7 +164,9 @@ impl PreparedNode {
                     negated: condition.negated,
                 }))
             }
-            Node::Format(condition) => PreparedFormat::new(condition).map(Self::Format),
+            Node::Format(condition) => PreparedFormat::new(condition)
+                .map(Box::new)
+                .map(Self::Format),
             Node::Group(group) => Ok(Self::Group(PreparedGroup {
                 kind: group.kind,
                 children: group

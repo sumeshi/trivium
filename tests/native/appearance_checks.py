@@ -238,6 +238,8 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
             _open(web)
             web.choose('[aria-label="Appearance theme"]', "light")
             wait_for(lambda: web.script("return document.documentElement.dataset.theme;"), lambda value: value == "light", "appearance cleanup returns to Light")
+            wait_for(lambda: web.script("return !document.querySelector('[aria-label=\"Appearance theme\"]').disabled;"),
+                     bool, "appearance cleanup waits for the theme save")
             if web.script("return [...document.querySelectorAll('.appearance-dialog button')].some(e=>e.textContent.trim()==='Remove'&&!e.disabled);"):
                 web.named("Remove", ".appearance-dialog")
             wait_for(lambda: web.script("return !document.querySelector('.wallpaper-layer')&&!document.documentElement.hasAttribute('data-wallpaper-table');"), bool, "appearance cleanup removes the wallpaper")

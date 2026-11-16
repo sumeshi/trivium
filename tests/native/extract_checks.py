@@ -37,19 +37,30 @@ def _pattern(web, name):
 
 def _custom_pattern(web, name):
     web.named("Choose search patterns")
-    web.named("New pattern", "#search-pattern-menu")
+    wait_for(lambda: web.script("""
+      const picker=document.querySelector('#search-pattern-menu .pattern-picker');
+      return !!picker&&!picker.textContent.includes('Loading patterns…');
+    """), bool, "pattern catalog finishes loading before pointer input")
+    web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
+    button = web.script("return [...document.querySelectorAll('#search-pattern-menu button')].find(e=>e.textContent.trim()==='New pattern');")
+    web.tap(button)
+    wait_for(lambda: web.script("return !!document.querySelector('#search-pattern-menu [aria-label=\"Pattern name\"]');"),
+             bool, "New pattern opens its editor without dismissing the picker")
     web.write('[aria-label="Pattern name"]', name)
     web.write('[aria-label="Pattern expression"]', "TOKEN-[0-9]{2}")
     checkpoint = len(web.trace())
     web.named("Save pattern", "#search-pattern-menu")
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:]) if item["name"] == "save_format"), None),
         lambda item: bool(item and "result" in item), "custom pattern saves through the actual Rust catalog")
-    definition = entry["result"]["definition"]
+    definition = entry["request"]["definition"]
     _pattern(web, name); web.results(1)
     assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [2]
     frozen = web.query()
     web.named("Choose search patterns")
-    web.named(f"Edit {name}", "#search-pattern-menu")
+    button = web.script("return [...document.querySelectorAll('#search-pattern-menu button')].find(e=>e.getAttribute('aria-label')===arguments[0]);", f"Edit {name}")
+    web.tap(button)
+    wait_for(lambda: web.script("return !!document.querySelector('#search-pattern-menu [aria-label=\"Pattern definition JSON\"]');"),
+             bool, "Edit keeps the selected pattern editor open")
     changed = {**definition, "pattern": "TOKEN-99"}
     web.write('[aria-label="Pattern definition JSON"]', json.dumps(changed))
     checkpoint = len(web.trace())

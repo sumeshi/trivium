@@ -82,6 +82,9 @@ impl Case {
         .unwrap()
         .rows
     }
+    pub fn output_path(&self, name: &str) -> PathBuf {
+        self.root.join(name)
+    }
 }
 impl Drop for Case {
     fn drop(&mut self) {

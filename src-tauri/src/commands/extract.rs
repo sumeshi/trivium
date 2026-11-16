@@ -60,8 +60,12 @@ pub async fn export_extract(
     request_id: Option<String>,
 ) -> Result<ExportResult, String> {
     let store = state.projects.clone();
-    run_job_with_request(app, JobKind::Export, None, request_id, move |job| {
-        extract::export_extract(&store, payload, &job)
+    // Pin synchronously before the first queue/admission await. A later tab
+    // close may release its result while this accepted export is waiting.
+    let prepared = extract::prepare_extract_export(&store, payload).map_err(String::from)?;
+    let project = Some(prepared.project_id());
+    run_job_with_request(app, JobKind::Export, project, request_id, move |job| {
+        extract::export_prepared_extract(&store, prepared, &job)
     })
     .await
 }

@@ -53,7 +53,7 @@ pub(super) struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn validate(&self, store: &ProjectsStore) -> Result<(), AppError> {
+    fn validate_owner(&self, store: &ProjectsStore) -> Result<(), AppError> {
         if store
             .project_dir(&self.summary.project_id)
             .join("data.parquet")
@@ -61,6 +61,11 @@ impl Snapshot {
         {
             return Err(unavailable());
         }
+        Ok(())
+    }
+
+    pub fn validate(&self, store: &ProjectsStore) -> Result<(), AppError> {
+        self.validate_owner(store)?;
         if Revision::read(&self.path)? != self.revision {
             return Err(AppError::Message(
                 "The source data changed. Run extraction again.".into(),
@@ -145,6 +150,15 @@ pub(super) fn insert(snapshot: Snapshot) -> Result<ExtractResult, AppError> {
 }
 
 pub(super) fn get(store: &ProjectsStore, id: Uuid) -> Result<Arc<Snapshot>, AppError> {
+    let snapshot = pin(store, id)?;
+    snapshot.validate(store)?;
+    Ok(snapshot)
+}
+
+/// Acquire accepted work's lifetime before it waits for worker admission.
+/// This only inspects the bounded cache and owner path; file validation stays
+/// in the blocking worker, after admission and again before output commit.
+pub(super) fn pin(store: &ProjectsStore, id: Uuid) -> Result<Arc<Snapshot>, AppError> {
     let snapshot = {
         let mut cache = cache().lock();
         cache.prune_released();
@@ -158,8 +172,12 @@ pub(super) fn get(store: &ProjectsStore, id: Uuid) -> Result<Arc<Snapshot>, AppE
         cache.entries.push_back(entry);
         snapshot
     };
-    snapshot.validate(store)?;
+    snapshot.validate_owner(store)?;
     Ok(snapshot)
+}
+
+pub(super) fn prune_released() {
+    cache().lock().prune_released();
 }
 
 pub fn release_extract_result(id: Uuid) -> bool {

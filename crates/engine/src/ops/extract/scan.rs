@@ -27,9 +27,7 @@ pub(super) trait Visitor {
         &mut self,
         row: usize,
         column: &str,
-        value: &str,
-        start: usize,
-        end: usize,
+        found: FormatOccurrence<'_>,
         transient: usize,
         matcher: &CompiledFormat,
     ) -> Result<bool, AppError>;
@@ -186,12 +184,12 @@ pub(super) fn walk(
                     std::borrow::Cow::Owned(value) => value.capacity(),
                     _ => 0,
                 };
-                for FormatOccurrence { value, start, end } in matcher.occurrences(&text) {
+                for found in matcher.occurrences(&text) {
                     if checked.is_multiple_of(256) {
                         job.check_cancelled()?;
                     }
                     checked = checked.wrapping_add(1);
-                    if !visitor.occurrence(row, column, value, start, end, transient, matcher)? {
+                    if !visitor.occurrence(row, column, found, transient, matcher)? {
                         return Ok(());
                     }
                 }

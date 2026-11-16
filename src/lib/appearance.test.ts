@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import { get } from "svelte/store";
 import { EDITABLE_THEME_COLORS, exportTheme, getUserTheme, isLightTheme, parseSavedTheme, parseUserTheme,
   registerUserTheme, THEME_OPTIONS, themeTokens } from "./themeModel.ts";
+import type { UserTheme } from "./themeModel.ts";
 import { initTheme, importThemeFile, setTheme, theme } from "./theme.ts";
 import { clearWallpaper, importWallpaper, initWallpaper, setWallpaperSettings, wallpaper } from "./appearance.ts";
 import { DEFAULT_WALLPAPER, parseWallpaperImage, parseWallpaperSettings, wallpaperVisible } from "./appearanceModel.ts";
@@ -14,7 +15,7 @@ function deferred() {
   const promise = new Promise<void>(yes => { resolve = yes; });
   return { promise, resolve };
 }
-const custom = (id = "custom-test") => ({ type: "trivium-theme", version: 1, id, name: "Custom test", base: "dark", colors: { accent: "#bbccee" } });
+const custom = (id = "custom-test"): UserTheme => ({ type: "trivium-theme", version: 1, id, name: "Custom test", base: "dark", colors: { accent: "#bbccee" } });
 const image = { dataUrl: "data:image/png;base64,AA==", width: 64, height: 32 };
 
 afterEach(async () => { reopenSaveAdmission(); await flushAllSaves().catch(() => {}); });
@@ -232,5 +233,52 @@ test("late catalog startup reads cannot replace a newly imported definition with
     gate.resolve(); await initial;
     assert.equal(get(theme), "user:catalog-race-theme");
     assert.equal(getUserTheme("user:catalog-race-theme")?.colors.accent, "#334455");
+  });
+});
+
+test("a full theme catalog rejects a new ID without changing the palette but permits confirmed replacement", async () => {
+  await environment(async f => {
+    for (let index = 0; index < 128; index += 1) {
+      f.files.set(`/managed/themes/catalog-slot-${index}.json`, JSON.stringify(custom(`catalog-slot-${index}`)));
+    }
+    await setTheme("dark");
+    const overflow = custom("catalog-overflow");
+    f.files.set("/source/overflow.json", JSON.stringify(overflow));
+    await assert.rejects(importThemeFile("/source/overflow.json"), /already contains 128/);
+    assert.equal(get(theme), "dark");
+    assert.equal(getUserTheme("user:catalog-overflow"), null);
+    assert.equal(f.files.has("/managed/themes/catalog-overflow.json"), false);
+    await assert.rejects(flushAllSaves(), /save or export failed/);
+    registerUserTheme(custom("catalog-slot-0"));
+    const replacement = { ...custom("catalog-slot-0"), name: "Replacement", colors: { accent: "#665544" } };
+    f.files.set("/source/replacement.json", JSON.stringify(replacement));
+    const writesBefore = f.writes.length;
+    assert.equal(await importThemeFile("/source/replacement.json", () => false), null);
+    assert.equal(f.writes.length, writesBefore, "cancelling replacement must not write the managed file");
+    assert.equal(await importThemeFile("/source/replacement.json", () => true), "user:catalog-slot-0");
+    assert.equal(getUserTheme("user:catalog-slot-0")?.colors.accent, "#665544");
+    assert.equal([...f.files.keys()].filter(path => path.startsWith("/managed/themes/")).length, 128);
+  });
+});
+
+test("concurrent unique theme imports cannot both take the last remaining catalog slot", async () => {
+  await environment(async f => {
+    for (let index = 0; index < 127; index += 1) {
+      f.files.set(`/managed/themes/concurrent-slot-${index}.json`, JSON.stringify(custom(`concurrent-slot-${index}`)));
+    }
+    f.files.set("/source/last-a.json", JSON.stringify(custom("last-slot-a")));
+    f.files.set("/source/last-b.json", JSON.stringify(custom("last-slot-b")));
+    const gate = deferred();
+    f.holdWrite(gate.promise);
+    const first = importThemeFile("/source/last-a.json");
+    const rejected = assert.rejects(importThemeFile("/source/last-b.json"), /already contains 128/);
+    await turn();
+    assert.deepEqual(f.writes.map(write => write.path), ["/managed/themes/last-slot-a.json"]);
+    gate.resolve(); await Promise.all([first, rejected]);
+    assert.equal(get(theme), "user:last-slot-a");
+    assert.equal(f.files.has("/managed/themes/last-slot-b.json"), false);
+    assert.equal(getUserTheme("user:last-slot-b"), null);
+    assert.equal([...f.files.keys()].filter(path => path.startsWith("/managed/themes/")).length, 128);
+    await assert.rejects(flushAllSaves(), /save or export failed/);
   });
 });

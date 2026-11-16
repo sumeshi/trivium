@@ -207,6 +207,8 @@ class WorkspaceView(WebView):
                   if(response.headers.get('Tauri-Response')==='ok'){
                     entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,revision:value?.revision,
                       rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
+                      resultId:value?.resultId,sourceRows:value?.sourceRows,matchedRows:value?.matchedRows,
+                      totalOccurrences:value?.totalOccurrences,uniqueValues:value?.uniqueValues,
                       total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
                   }else entry.error=String(value);
                   const hold=window.__workspaceHold;

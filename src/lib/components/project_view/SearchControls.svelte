@@ -33,7 +33,10 @@
     if (next) dispatch('open');
   };
   const outside = (event: MouseEvent) => {
-    if ((scopeOpen || helpOpen || patternsOpen) && !searchToolsEl?.contains(event.target as Node)) close();
+    // A picker action can replace its own button with an editor before this
+    // document listener runs. The dispatch path still identifies that click
+    // as internal even after its target has been detached by Svelte.
+    if ((scopeOpen || helpOpen || patternsOpen) && searchToolsEl && !event.composedPath().includes(searchToolsEl)) close();
   };
   const escape = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || (!scopeOpen && !helpOpen && !patternsOpen)) return;

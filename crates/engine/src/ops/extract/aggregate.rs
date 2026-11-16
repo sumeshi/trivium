@@ -1,6 +1,10 @@
 use std::{collections::HashMap, mem::size_of};
 
-use crate::{error::AppError, formats::CompiledFormat, jobs::JobContext};
+use crate::{
+    error::AppError,
+    formats::{CompiledFormat, FormatOccurrence},
+    jobs::JobContext,
+};
 
 use super::{scan::Visitor, ExtractValue};
 
@@ -97,12 +101,11 @@ impl Visitor for Accumulator {
         &mut self,
         row: usize,
         _column: &str,
-        value: &str,
-        _start: usize,
-        _end: usize,
+        found: FormatOccurrence<'_>,
         transient: usize,
         matcher: &CompiledFormat,
     ) -> Result<bool, AppError> {
+        let value = found.value;
         if value.len() > MAX_VALUE_BYTES {
             return Err(AppError::Message("An extracted value exceeds 64 KiB. Choose a narrower pattern; no complete result was produced.".into()));
         }

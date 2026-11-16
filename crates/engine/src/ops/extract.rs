@@ -9,11 +9,15 @@ mod sources;
 #[cfg(test)]
 mod cache_tests;
 #[cfg(test)]
+mod output_tests;
+#[cfg(test)]
 mod tests;
 
 pub use cache::release_extract_result;
 pub use model::*;
-pub use output::export_extract;
+pub use output::{
+    export_extract, export_prepared_extract, prepare_extract_export, PreparedExtractExport,
+};
 pub use sources::extract_value_sources;
 
 use crate::{error::AppError, jobs::JobContext, store::ProjectsStore};

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use crate::{
     error::AppError,
@@ -8,15 +8,64 @@ use crate::{
     store::ProjectsStore,
 };
 
-use super::{cache, ExportExtractPayload};
+use super::{
+    cache::{self, Snapshot},
+    ExportExtractPayload,
+};
+
+/// An accepted export retains one shared, byte-accounted result across queued
+/// worker admission. Closing its tab prevents new readers without cancelling
+/// this already accepted output or copying the result outside the cache budget.
+pub struct PreparedExtractExport {
+    snapshot: Option<Arc<Snapshot>>,
+    payload: ExportExtractPayload,
+}
+
+impl PreparedExtractExport {
+    pub fn project_id(&self) -> uuid::Uuid {
+        self.snapshot
+            .as_ref()
+            .expect("prepared export retains its result")
+            .summary
+            .project_id
+    }
+}
+
+impl Drop for PreparedExtractExport {
+    fn drop(&mut self) {
+        drop(self.snapshot.take());
+        cache::prune_released();
+    }
+}
+
+pub fn prepare_extract_export(
+    store: &ProjectsStore,
+    payload: ExportExtractPayload,
+) -> Result<PreparedExtractExport, AppError> {
+    Ok(PreparedExtractExport {
+        snapshot: Some(cache::pin(store, payload.result_id)?),
+        payload,
+    })
+}
 
 pub fn export_extract(
     store: &ProjectsStore,
     payload: ExportExtractPayload,
     job: &JobContext,
 ) -> Result<ExportResult, AppError> {
-    let snapshot = cache::get(store, payload.result_id)?;
-    let destination = Path::new(&payload.destination);
+    export_prepared_extract(store, prepare_extract_export(store, payload)?, job)
+}
+
+pub fn export_prepared_extract(
+    store: &ProjectsStore,
+    prepared: PreparedExtractExport,
+    job: &JobContext,
+) -> Result<ExportResult, AppError> {
+    let snapshot = prepared
+        .snapshot
+        .as_ref()
+        .expect("prepared export retains its result");
+    let destination = Path::new(&prepared.payload.destination);
     let headers = vec![
         "Value".to_string(),
         "Count".into(),
@@ -25,7 +74,7 @@ pub fn export_extract(
     ];
     let validate = || {
         snapshot.validate(store)?;
-        validate_destination(destination, store, payload.allow_overwrite)
+        validate_destination(destination, store, prepared.payload.allow_overwrite)
     };
     write_atomically(destination, job, validate, |_directory, writer| {
         let mut csv = csv::Writer::from_writer(writer);

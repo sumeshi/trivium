@@ -87,7 +87,7 @@
     blocked: () => !closeReady ? 'Wait for the app to be ready.'
       : close.isBlocked() ? 'Finish the close request before adding files.'
       : $projectState.creating ? 'An import is already running.'
-      : document.querySelector('.cell-dialog-backdrop,.appearance-backdrop,[aria-modal="true"]') ? 'Close the dialog before adding files.' : null,
+      : document.querySelector('.cell-dialog-backdrop,.appearance-backdrop') ? 'Close the dialog before adding files.' : null,
     select: (paths) => {
       projectController.setPendingFiles(paths);
       sidebarOpen = true;
@@ -206,7 +206,7 @@
 
   const handleRefreshRequest = async () => {
     if (editsBlocked()) return;
-    if (activeExtract) await handleSelectProject(activeExtract.request.projectId);
+    if (activeExtract && !await selectExtractionSource(activeExtract.request.projectId)) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
@@ -288,17 +288,22 @@
       } else showToast(`Extraction ready: ${tab.result.format.name} — ${tab.sourceName}`);
     } catch (error) { showToast(errorMessage(error, 'Could not start extraction.'), 'error'); }
   };
-  const navigateExtraction = async (target: ExtractNavigation) => {
-    await handleSelectProject(target.projectId);
+  const selectExtractionSource = async (projectId: string): Promise<boolean> => {
+    if (editsBlocked()) return false;
+    const selection = handleSelectProject(projectId);
+    const ticket = navigationVersion;
+    await selection;
     await tick();
-    if (!selectedExtractId && $projectState.selectedProjectId === target.projectId && target.rowIndex !== null) {
+    return ticket === navigationVersion && !editsBlocked() && !selectedExtractId &&
+      $projectState.selectedProjectId === projectId;
+  };
+  const navigateExtraction = async (target: ExtractNavigation) => {
+    if (await selectExtractionSource(target.projectId) && target.rowIndex !== null) {
       activeView?.jumpToOriginalRow(target.rowIndex);
     }
   };
   const filterExtraction = async (filter: ExtractFilter) => {
-    await handleSelectProject(filter.projectId);
-    await tick();
-    if (!selectedExtractId && $projectState.selectedProjectId === filter.projectId) activeView?.applyExtractFilter(filter);
+    if (await selectExtractionSource(filter.projectId)) activeView?.applyExtractFilter(filter);
   };
 
   const startCloseListener = async () => {
