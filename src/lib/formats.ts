@@ -4,10 +4,15 @@ import type * as Wire from "./generated/engine";
 export type FormatDefinition = Wire.FormatDefinition;
 export type FormatCatalogEntry = Wire.FormatCatalogEntry;
 export type FormatCondition = Wire.FormatCondition;
+export type FormatValidation = Wire.FormatValidation;
+
+const VALIDATIONS: readonly FormatValidation[] = ["ipv6", "ipv4-cidr", "ipv6-cidr", "ip-port", "http-url", "domain",
+  "email", "mac", "windows-sid", "uuid", "cve", "defanged-ipv4", "defanged-url", "defanged-domain",
+  "powershell-encoded", "jwt", "pem", "ssh-public-key", "bitlocker-recovery-key", "base64", "hex"];
 
 /** Field order can change during a persisted JSON round trip. */
 export function formatDefinitionKey(value: FormatDefinition): string {
-  return JSON.stringify([value.schemaVersion, value.id, value.name, value.pattern, value.valueGroup ?? null,
+  return JSON.stringify([value.schemaVersion, value.id, value.name, value.pattern, value.valueGroup ?? null, value.validation ?? null,
     value.classifier ? [value.classifier.kind, value.classifier.default,
       value.classifier.rules.map(rule => [rule.cidr, rule.label])] : null,
     value.examples?.map(example => [example.text, example.values]) ?? []]);
@@ -21,6 +26,7 @@ export function isFormatDefinition(value: unknown): value is FormatDefinition {
   if (!record(value) || value.schemaVersion !== 1 || typeof value.id !== "string" || !value.id.trim()
     || typeof value.name !== "string" || !value.name.trim() || typeof value.pattern !== "string") return false;
   if (value.valueGroup !== undefined && typeof value.valueGroup !== "string") return false;
+  if (value.validation !== undefined && !VALIDATIONS.includes(value.validation as FormatValidation)) return false;
   if (value.classifier !== undefined) {
     const classifier = value.classifier;
     if (!record(classifier) || classifier.kind !== "ipv4-cidr" || typeof classifier.default !== "string"

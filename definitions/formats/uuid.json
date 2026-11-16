@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "uuid",
+  "name": "UUID / GUID",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_-])(?P<value>[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12})(?:\\z|[^\\p{L}\\p{N}_-])",
+  "valueGroup": "value",
+  "validation": "uuid",
+  "examples": [
+    {
+      "text": "{123e4567-e89b-12d3-a456-426614174000},ABCDEF01-2345-6789-ABCD-EF0123456789",
+      "values": [
+        "123e4567-e89b-12d3-a456-426614174000",
+        "ABCDEF01-2345-6789-ABCD-EF0123456789"
+      ]
+    },
+    {
+      "text": "g123e4567-e89b-12d3-a456-426614174000 123e4567-e89b-12d3-a456-4266141740000",
+      "values": []
+    }
+  ]
+}

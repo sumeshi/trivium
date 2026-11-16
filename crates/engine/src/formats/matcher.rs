@@ -146,6 +146,14 @@ impl<'a> Iterator for FormatOccurrences<'a> {
                     // Reuse delimiter context, e.g. `IP,IP`, without duplicating
                     // or overlapping captured values. Anchors keep full-cell meaning.
                     self.offset = value.end();
+                    if self
+                        .matcher
+                        .definition
+                        .validation
+                        .is_some_and(|kind| !super::validation::accepts(kind, value.as_str()))
+                    {
+                        continue;
+                    }
                     return Some(FormatOccurrence {
                         value: value.as_str(),
                         start: value.start(),

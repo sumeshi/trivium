@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "registry-path",
+  "name": "Registry path candidate",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>(?i:HKLM|HKCU|HKCR|HKU|HKCC|HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKEY_USERS|HKEY_CURRENT_CONFIG)\\\\[^\"'\\r\\n/<>|]+)(?:\\z|[\"'])",
+  "valueGroup": "value",
+  "examples": [
+    {
+      "text": "key=\"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" value=x",
+      "values": [
+        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      ]
+    },
+    {
+      "text": "HKEY_CURRENT_USER\\Software\\Case Notes",
+      "values": [
+        "HKEY_CURRENT_USER\\Software\\Case Notes"
+      ]
+    },
+    {
+      "text": "key=\"HKCU\\Software\\One\",key=\"HKLM\\Software\\Two\"",
+      "values": [
+        "HKCU\\Software\\One",
+        "HKLM\\Software\\Two"
+      ]
+    },
+    {
+      "text": "HKLMrelative HKZZ\\Software\\Example",
+      "values": []
+    }
+  ]
+}

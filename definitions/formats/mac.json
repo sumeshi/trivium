@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "mac",
+  "name": "MAC address",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_.:\\-])(?P<value>(?:[0-9A-Fa-f]{2}(?:[:\\-][0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(?:\\.[0-9A-Fa-f]{4}){2}))(?:\\z|[^\\p{L}\\p{N}_.:\\-])",
+  "valueGroup": "value",
+  "validation": "mac",
+  "examples": [
+    {
+      "text": "src=00:1A:2b:3C:4d:5E,dst=00-1a-2b-3c-4d-5e",
+      "values": [
+        "00:1A:2b:3C:4d:5E",
+        "00-1a-2b-3c-4d-5e"
+      ]
+    },
+    {
+      "text": "switch=001a.2b3c.4d5e",
+      "values": [
+        "001a.2b3c.4d5e"
+      ]
+    },
+    {
+      "text": "00:11:22:33:44 00:11:22:33:44:55:66 00:11-22:33:44:55",
+      "values": []
+    }
+  ]
+}

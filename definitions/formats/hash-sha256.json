@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "hash-sha256",
+  "name": "Hash: SHA-256-length (64 hex)",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>[0-9A-Fa-f]{64})(?:\\z|[^\\p{L}\\p{N}_])",
+  "valueGroup": "value",
+  "examples": [
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01",
+      "values": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01ABCDEF01"
+      ]
+    },
+    {
+      "text": "xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0 gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+      "values": []
+    }
+  ]
+}

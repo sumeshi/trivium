@@ -3,13 +3,14 @@ pub mod catalog;
 mod classifier;
 mod matcher;
 mod model;
+mod validation;
 
 pub use catalog::{
     delete_format, list_formats, save_format, DeleteFormatPayload, FormatCatalogEntry,
     SaveFormatPayload,
 };
 pub use matcher::{CompiledFormat, FormatOccurrence, FormatOccurrences};
-pub use model::{CidrRule, FormatClassifier, FormatDefinition, FormatExample};
+pub use model::{CidrRule, FormatClassifier, FormatDefinition, FormatExample, FormatValidation};
 
 #[cfg(test)]
 mod tests;

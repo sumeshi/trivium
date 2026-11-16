@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "defanged-url",
+  "name": "Defanged URL",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>(?i:(?:https?|hxxps?))://(?:[^\\s<>\"'()\\[\\]{},;?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?,;?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])(?:\\?(?:[^\\s<>\"'()\\[\\]{}#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\]))?(?:#(?:[^\\s<>\"'()\\[\\]{}]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\]))?)(?:\\z|[\\s<>\"',;.!?()\\[\\]{}])",
+  "valueGroup": "value",
+  "validation": "defanged-url",
+  "examples": [
+    {
+      "text": "IOC=hxxps://bad[.]example/path. Next.",
+      "values": [
+        "hxxps://bad[.]example/path"
+      ]
+    },
+    {
+      "text": "http://bad[.]example/a,hxxp://other.example/b",
+      "values": [
+        "http://bad[.]example/a",
+        "hxxp://other.example/b"
+      ]
+    },
+    {
+      "text": "hxxps://host[.]example/path?ids=1,2&next=x",
+      "values": [
+        "hxxps://host[.]example/path?ids=1,2&next=x"
+      ]
+    },
+    {
+      "text": "https://normal.example https://bad[.]example:99999/a",
+      "values": []
+    },
+    {
+      "text": "hxxps://one(.)example/a,hxxp://two{.}example/b",
+      "values": [
+        "hxxps://one(.)example/a",
+        "hxxp://two{.}example/b"
+      ]
+    }
+  ]
+}

@@ -12,8 +12,25 @@ import { createWorkspaceController } from "./workspaceController.ts";
 import type { LoadProjectResponse } from "./types.ts";
 
 const ipv4: FormatDefinition = { schemaVersion: 1, id: "ipv4", name: "IPv4", pattern: "(?P<value>[0-9]+(?:\\.[0-9]+){3})", valueGroup: "value" };
-const phone: FormatDefinition = { schemaVersion: 1, id: "phone-jp", name: "Phone (JP)", pattern: "0[0-9-]+" };
+const email: FormatDefinition = { schemaVersion: 1, id: "email", name: "Email", pattern: "[a-z]+@[a-z]+" };
 const ordinary = { column: "host", op: "eq" as const, values: ["WS01"], negated: false };
+
+test("pattern identity and saved snapshots include their optional validation", () => {
+  const checked: FormatDefinition = { ...ipv4, validation: "ipv4-cidr" };
+  assert.notEqual(formatDefinitionKey(checked), formatDefinitionKey(ipv4));
+  assert.deepEqual(parseFormatDefinition(JSON.parse(JSON.stringify(checked))), checked);
+  assert.equal(formatDefinitionKey(checked), formatDefinitionKey({ validation: "ipv4-cidr", ...ipv4 }));
+  assert.throws(() => parseFormatDefinition({ ...ipv4, validation: "execute-code" }), /Invalid pattern/);
+  const { state } = fixture();
+  state.addPatternSnippet(ipv4);
+  state.addPatternSnippet(checked);
+  assert.equal(get(state.patternSnippets).length, 2);
+  const tree = get(state.conditionTree);
+  const saved = savedViewFromUnknown(JSON.parse(JSON.stringify({ condition: tree, search: "", searchColumns: [],
+    flagFilter: "all", sortKey: null, sortDirection: "asc", hiddenColumns: [], columnWidths: {}, offset: 0 })), ["host", "command", "hidden"]);
+  assert.ok(saved);
+  assert.deepEqual(saved.condition.snippets, tree.snippets);
+});
 
 function fixture() {
   const columns = writable<readonly string[]>(["host", "command", "hidden"]);
@@ -27,11 +44,11 @@ test("search patterns use one frozen cellwise format predicate per chip and foll
     { ...ordinary, column: "command", values: ["start"] }] })!;
   state.conditionTree.set(original);
   state.addPatternSnippet(ipv4);
-  state.addPatternSnippet(phone);
+  state.addPatternSnippet(email);
   assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [
     { kind: "or", children: [ordinary, { ...ordinary, column: "command", values: ["start"] }] },
     { columns: ["host", "command", "hidden"], format: ipv4, negated: false },
-    { columns: ["host", "command", "hidden"], format: phone, negated: false },
+    { columns: ["host", "command", "hidden"], format: email, negated: false },
   ] });
   selected.set(["command", "hidden"]);
   const result = get(state.conditionPayload)!;
@@ -56,10 +73,10 @@ test("snapshot mutation, duplicate selection and removing one pattern preserve t
     id: ipv4.id, schemaVersion: 1 });
   assert.equal(get(state.patternSnippets).length, 1, "JSON field order must not duplicate a restored chip");
   assert.equal(get(state.patternSnippets)[0].format.pattern, ipv4.pattern);
-  state.addPatternSnippet(phone);
+  state.addPatternSnippet(email);
   state.removePatternSnippet(get(state.patternSnippets)[0].id);
   assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [ordinary,
-    { columns: ["host", "command", "hidden"], format: phone, negated: false }] });
+    { columns: ["host", "command", "hidden"], format: email, negated: false }] });
   state.removePatternSnippet(get(state.patternSnippets)[0].id);
   assert.deepEqual(get(state.conditionPayload), ordinary);
 });

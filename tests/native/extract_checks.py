@@ -29,6 +29,7 @@ def _extract_panel(web):
 def _pattern(web, name):
     if not web.script("return !!document.querySelector('#search-pattern-menu');"):
         web.named("Choose search patterns")
+    web.write('#search-pattern-menu [aria-label="Find a pattern"]', name)
     button = wait_for(lambda: web.script("""
       return [...document.querySelectorAll('#search-pattern-menu .pattern-select')]
         .find(e=>e.querySelector('strong')?.textContent.trim()===arguments[0])??null;
@@ -58,6 +59,7 @@ def _custom_pattern(web, name):
     assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [2]
     frozen = web.query()
     web.named("Choose search patterns")
+    web.write('#search-pattern-menu [aria-label="Find a pattern"]', name)
     button = web.script("return [...document.querySelectorAll('#search-pattern-menu button')].find(e=>e.getAttribute('aria-label')===arguments[0]);", f"Edit {name}")
     web.tap(button)
     wait_for(lambda: web.script("return !!document.querySelector('#search-pattern-menu [aria-label=\"Pattern definition JSON\"]');"),
@@ -97,6 +99,7 @@ def _ranking(web, values, columns):
 
 def _scan(web, project_id, values):
     checkpoint = len(web.trace())
+    web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
     web.named("IPv4", ".extract-panel")
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
@@ -177,6 +180,12 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         open_project(web, case["meta"]["name"]); web.results(3)
         detail = web.command("load_project", {"projectId": project_id}, request=True)
         columns = {item["label"]: item["id"] for item in detail["columns_meta"]}
+        web.named("Choose search patterns")
+        bundled = wait_for(lambda: web.script("""
+          return [...document.querySelectorAll('#search-pattern-menu .pattern-row')]
+            .filter(e=>e.querySelector('[aria-label^="Copy "]')).map(e=>e.querySelector('strong').textContent.trim());
+        """), lambda names: len(names) >= 30, "expanded built-in pattern catalogue is available")
+        assert "IPv4" in bundled and not any("phone" in name.lower() for name in bundled), bundled
         _pattern(web, "IPv4"); web.results(2)
         assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [0, 1]
         assert web.script("return document.querySelector('[aria-label=\"Search rows\"]').value;") == ""

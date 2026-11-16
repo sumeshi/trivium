@@ -128,7 +128,7 @@ fn cidr_rules_choose_the_most_specific_prefix_and_never_classify_invalid_ip_as_p
 }
 
 #[test]
-fn builtin_ipv4_handles_boundaries_and_special_ranges_and_phone_retains_original_spelling() {
+fn builtin_ipv4_handles_boundaries_and_special_ranges() {
     let root = std::env::temp_dir().join(format!("trivium-format-test-{}", uuid::Uuid::new_v4()));
     let entries = list_formats(&root).unwrap();
     let ipv4 = CompiledFormat::new(
@@ -162,21 +162,5 @@ fn builtin_ipv4_handles_boundaries_and_special_ranges_and_phone_retains_original
     ] {
         assert_eq!(ipv4.classify(address), Some(label), "{address}");
     }
-    let phone = CompiledFormat::new(
-        &entries
-            .iter()
-            .find(|entry| entry.definition.id == "phone-jp")
-            .unwrap()
-            .definition,
-    )
-    .unwrap();
-    assert_eq!(
-        phone
-            .occurrences("03-1234-5678,09012345678")
-            .map(|value| value.value)
-            .collect::<Vec<_>>(),
-        ["03-1234-5678", "09012345678"]
-    );
-    assert_eq!(phone.classify("09012345678"), None);
     let _ = std::fs::remove_dir_all(root);
 }

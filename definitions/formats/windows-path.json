@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "windows-path",
+  "name": "Windows path candidate",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>[A-Za-z]:\\\\(?:(?:[^\\\\\\r\\n\"'<>|:]+\\\\)*?[^\\\\\\r\\n\"'<>|:]*?\\.[A-Za-z0-9]{1,16}|[^\\s\"'<>|:,;]+))(?:\\z|[\\s\"',;)\\]}])",
+  "valueGroup": "value",
+  "examples": [
+    {
+      "text": "file=\"C:\\Program Files\\Tools\\tool.exe\" -arg",
+      "values": [
+        "C:\\Program Files\\Tools\\tool.exe"
+      ]
+    },
+    {
+      "text": "C:\\Windows\\System32\\cmd.exe,C:\\Windows\\temp",
+      "values": [
+        "C:\\Windows\\System32\\cmd.exe",
+        "C:\\Windows\\temp"
+      ]
+    },
+    {
+      "text": "C:relative.txt /tmp/file relative\\file.exe",
+      "values": []
+    }
+  ]
+}

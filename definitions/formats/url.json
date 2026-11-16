@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "url",
+  "name": "HTTP / HTTPS URL",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>(?i:https?)://(?:[^\\s<>\"'()\\[\\]{},;?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?,;?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])(?:\\?(?:[^\\s<>\"'()\\[\\]{}#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?#]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\]))?(?:#(?:[^\\s<>\"'()\\[\\]{}]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\])*(?:[^\\s<>\"'()\\[\\]{}.,;:!?]|\\{\\.\\}|\\([^\\s<>\"'()]*\\)|\\[[^\\s<>\"'\\[\\]]*\\]))?)(?:\\z|[\\s<>\"',;.!?()\\[\\]{}])",
+  "valueGroup": "value",
+  "validation": "http-url",
+  "examples": [
+    {
+      "text": "see https://example.technology/a?x=1&y=2. Next.",
+      "values": [
+        "https://example.technology/a?x=1&y=2"
+      ]
+    },
+    {
+      "text": "(http://[2001:db8::1]:8080/a),https://example.org/wiki/Topic_(test)",
+      "values": [
+        "http://[2001:db8::1]:8080/a",
+        "https://example.org/wiki/Topic_(test)"
+      ]
+    },
+    {
+      "text": "https://localhost:8080/ HTTP://example.org/path#section",
+      "values": [
+        "https://localhost:8080/",
+        "HTTP://example.org/path#section"
+      ]
+    },
+    {
+      "text": "https://host.example/path?ids=1,2&next=x",
+      "values": [
+        "https://host.example/path?ids=1,2&next=x"
+      ]
+    },
+    {
+      "text": "https:// https://host.invalid:99999/a https://[2001:db8:::1]/",
+      "values": []
+    },
+    {
+      "text": "https://bad[.]example/a http://bad(.)example/a https://bad{.}example/a",
+      "values": []
+    }
+  ]
+}

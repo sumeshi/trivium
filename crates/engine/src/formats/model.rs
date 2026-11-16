@@ -13,10 +13,41 @@ pub struct FormatDefinition {
     pub value_group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub validation: Option<FormatValidation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub classifier: Option<FormatClassifier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub examples: Option<Vec<FormatExample>>,
+}
+
+/// Optional local structure checks, shared by search and extraction. These
+/// checks never normalize the captured spelling, access a network, or execute it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormatValidation {
+    Ipv6,
+    Ipv4Cidr,
+    Ipv6Cidr,
+    IpPort,
+    HttpUrl,
+    Domain,
+    Email,
+    Mac,
+    WindowsSid,
+    Uuid,
+    Cve,
+    DefangedIpv4,
+    DefangedUrl,
+    DefangedDomain,
+    PowershellEncoded,
+    Jwt,
+    Pem,
+    SshPublicKey,
+    BitlockerRecoveryKey,
+    Base64,
+    Hex,
 }
 
 /// Exact raw values expected from one source cell, including adjacent matches.

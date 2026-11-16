@@ -101,6 +101,109 @@ fn format(
 }
 
 #[test]
+fn validated_patterns_have_the_same_raw_values_in_persisted_search_and_extracted_csv() {
+    for (id, values, expected, occurrences, source_rows) in [
+        (
+            "ipv6",
+            vec!["2001:db8:::1", "src=2001:db8::1,2001:db8::1", "::1"],
+            "2001:db8::1",
+            "2",
+            "1",
+        ),
+        (
+            "email",
+            vec![
+                "bad..user@example.com",
+                "o'brien+review@example.technology",
+                "o'brien+review@example.technology",
+            ],
+            "o'brien+review@example.technology",
+            "2",
+            "2",
+        ),
+    ] {
+        let contents = values
+            .iter()
+            .map(|value| serde_json::json!({"value":value}).to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let fixture = Fixture::new("jsonl", &contents);
+        let column = fixture.columns["/value"].clone();
+        let definition = list_formats(&fixture.root.join("formats"))
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.definition.id == id)
+            .unwrap()
+            .definition;
+        assert!(definition.validation.is_some());
+        assert_eq!(
+            fixture.query(format(vec![column.clone()], &definition, None, false)),
+            [1, 2]
+        );
+        let result = ops::extract::extract_values(
+            &fixture.store,
+            ops::extract::ExtractPayload {
+                project_id: fixture.id,
+                columns: vec![column],
+                format: definition,
+                scope: ops::extract::ExtractScope::All,
+                spec: QuerySpec::default(),
+            },
+            &trivium_engine::jobs::JobContext::none(),
+        )
+        .unwrap();
+        let columns = common::column_ids(&fixture.store, result.meta.id);
+        let page = ops::rows::query_project_rows(
+            &fixture.store,
+            QueryRowsPayload {
+                project_id: result.meta.id,
+                spec: QuerySpec::default(),
+                offset: Some(0),
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        let row = page
+            .rows
+            .iter()
+            .find(|row| row.cells[&columns["Value"]].text.as_deref() == Some(expected))
+            .unwrap();
+        assert_eq!(
+            row.cells[&columns["Count"]].text.as_deref(),
+            Some(occurrences)
+        );
+        assert_eq!(
+            row.cells[&columns["Rows"]].text.as_deref(),
+            Some(source_rows)
+        );
+        assert_eq!(
+            ops::projects::list_projects(&fixture.store).unwrap().len(),
+            1
+        );
+        let exported = fixture.root.join("extracted.csv");
+        ops::export::export_project(
+            &fixture.store,
+            ExportProjectPayload {
+                project_id: result.meta.id,
+                destination: exported.to_string_lossy().into(),
+                scope: Some("all".into()),
+                spec: QuerySpec::default(),
+                columns: None,
+                row_indices: None,
+                include_annotations: Some(false),
+                allow_overwrite: false,
+            },
+        )
+        .unwrap();
+        let mut csv = csv::Reader::from_path(exported).unwrap();
+        assert!(csv
+            .records()
+            .map(Result::unwrap)
+            .any(|row| &row[0] == expected && &row[1] == occurrences && &row[2] == source_rows));
+    }
+}
+
+#[test]
 fn saved_csv_and_jsonl_queries_match_any_source_cell_then_negate_the_aggregate() {
     for (extension,contents,prefix) in [
         ("csv","source_id,alpha,beta\nr0,src=10.0.0.1,phone\nr1,none,\"8.8.8.8,8.8.4.4\"\nr2,none,256.1.2.3\nr3,10.0.0.1,09012345678\nr4,AA,BB\n",""),

@@ -407,6 +407,7 @@ fn byte_and_value_limits_fail_without_truncating_or_publishing_a_case() {
         name: "Long".into(),
         pattern: "a+".into(),
         value_group: None,
+        validation: None,
         classifier: None,
         examples: None,
     };

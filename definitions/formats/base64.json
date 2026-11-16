@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "base64",
+  "name": "Base64 candidate (32+ characters)",
+  "pattern": "(?:\\A|[^A-Za-z0-9+/=])(?:[A-Za-z_][A-Za-z0-9_]{0,63}=)?(?P<value>[A-Za-z0-9+/]{32,}={0,2})(?:\\z|[^A-Za-z0-9+/=])",
+  "valueGroup": "value",
+  "validation": "base64",
+  "examples": [
+    {
+      "text": "value=U2FtcGxlIGVuY29kZWQgZm9yZW5zaWMgdGV4dCBjb250ZW50Lg==",
+      "values": [
+        "U2FtcGxlIGVuY29kZWQgZm9yZW5zaWMgdGV4dCBjb250ZW50Lg=="
+      ]
+    },
+    {
+      "text": "U2FtcGxlIGVuY29kZWQgZm9yZW5zaWMgdGV4dCBjb250ZW50Lg==,QW5vdGhlciBlbmNvZGVkIGZvcmVuc2ljIHRleHQgc3RyaW5nLg==",
+      "values": [
+        "U2FtcGxlIGVuY29kZWQgZm9yZW5zaWMgdGV4dCBjb250ZW50Lg==",
+        "QW5vdGhlciBlbmNvZGVkIGZvcmVuc2ljIHRleHQgc3RyaW5nLg=="
+      ]
+    },
+    {
+      "text": "not-base64 !!! short Zm9v",
+      "values": []
+    }
+  ]
+}

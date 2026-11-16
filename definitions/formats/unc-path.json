@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "unc-path",
+  "name": "UNC path candidate",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?P<value>\\\\\\\\[^\\\\\\s\"\\'<>|]+\\\\(?:(?:[^\\\\\\r\\n\"'<>|:]+\\\\)*?[^\\\\\\r\\n\"'<>|:]*?\\.[A-Za-z0-9]{1,16}|[^\\s\"'<>|:,;]+))(?:\\z|[\\s\"',;)\\]}])",
+  "valueGroup": "value",
+  "examples": [
+    {
+      "text": "copy \"\\\\server\\case share\\report.txt\"",
+      "values": [
+        "\\\\server\\case share\\report.txt"
+      ]
+    },
+    {
+      "text": "\\\\host\\share\\file.log,\\\\other\\share\\folder",
+      "values": [
+        "\\\\host\\share\\file.log",
+        "\\\\other\\share\\folder"
+      ]
+    },
+    {
+      "text": "\\server\\share C:\\file.txt \\\\server",
+      "values": []
+    }
+  ]
+}

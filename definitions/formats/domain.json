@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "domain",
+  "name": "Domain / FQDN candidate",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_@.\\]\\)}-])(?P<value>(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+(?:[A-Za-z]{2,63}|[Xx][Nn]--[A-Za-z0-9-]{2,59})\\.?)(?:\\z|[^\\p{L}\\p{N}_@.-])",
+  "valueGroup": "value",
+  "validation": "domain",
+  "examples": [
+    {
+      "text": "hosts=one.example,other.technology",
+      "values": [
+        "one.example",
+        "other.technology"
+      ]
+    },
+    {
+      "text": "xn--bcher-kva.example sub.EXAMPLE.ORG",
+      "values": [
+        "xn--bcher-kva.example",
+        "sub.EXAMPLE.ORG"
+      ]
+    },
+    {
+      "text": "example.1 -bad.example bad_.example invalid..example",
+      "values": []
+    },
+    {
+      "text": "example.com.,other.example.",
+      "values": [
+        "example.com.",
+        "other.example."
+      ]
+    },
+    {
+      "text": "(example.com.) [sub.example.]",
+      "values": [
+        "example.com.",
+        "sub.example."
+      ]
+    },
+    {
+      "text": "bad[.]sub.example bad(.)sub.example bad{.}sub.example invalid..example",
+      "values": []
+    }
+  ]
+}

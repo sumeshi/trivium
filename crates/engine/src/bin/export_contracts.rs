@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         formats::CidrRule,
         formats::FormatClassifier,
         formats::FormatExample,
+        formats::FormatValidation,
         formats::FormatDefinition,
         formats::FormatCatalogEntry,
         condition::FormatCondition,

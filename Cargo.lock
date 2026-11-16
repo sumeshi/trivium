@@ -5505,6 +5505,7 @@ name = "trivium-engine"
 version = "0.2.5"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "csv",
  "fs2",

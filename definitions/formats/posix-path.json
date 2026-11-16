@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "posix-path",
+  "name": "POSIX path candidate",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_.:/\\\\\\-])(?P<value>/(?:[^\\s/\"'<>|]+/)*[^\\s/\"'<>|]+/?)(?:\\z|[\\s\"',;)\\]}])",
+  "valueGroup": "value",
+  "examples": [
+    {
+      "text": "open /etc/passwd and /var/log/auth.log",
+      "values": [
+        "/etc/passwd",
+        "/var/log/auth.log"
+      ]
+    },
+    {
+      "text": "file=\"/tmp/case_notes/report.txt\"",
+      "values": [
+        "/tmp/case_notes/report.txt"
+      ]
+    },
+    {
+      "text": "https://example.org/path http://host/a/b / relative/file.txt",
+      "values": []
+    }
+  ]
+}

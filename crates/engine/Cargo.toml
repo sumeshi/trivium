@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+base64 = "0.22"
 chrono.workspace = true
 csv = "1"
 parking_lot.workspace = true

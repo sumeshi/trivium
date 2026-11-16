@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "jwt",
+  "name": "JWT candidate",
+  "pattern": "(?:\\A|[^A-Za-z0-9_.-])(?P<value>[A-Za-z0-9_-]{2,}\\.[A-Za-z0-9_-]{2,}\\.[A-Za-z0-9_-]*)(?:\\z|[^A-Za-z0-9_.-])",
+  "valueGroup": "value",
+  "validation": "jwt",
+  "examples": [
+    {
+      "text": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "values": [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      ]
+    },
+    {
+      "text": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8,eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "values": [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      ]
+    },
+    {
+      "text": "eyJhbGciOiJIUzI1NiJ9.bm90IGpzb24.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8 eyJhbGciOiJIUzI1NiJ9.invalid",
+      "values": []
+    },
+    {
+      "text": "unsecured=eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.",
+      "values": [
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0."
+      ]
+    }
+  ]
+}
