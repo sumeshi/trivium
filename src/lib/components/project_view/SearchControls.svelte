@@ -66,14 +66,14 @@
         {/each}
       </div>
     {/if}
-    <button type="button" class="patterns-trigger" bind:this={patternsTrigger} aria-label="Choose search patterns" title="Patterns"
+    <button type="button" class="patterns-trigger" bind:this={patternsTrigger} aria-label="Choose search patterns" title="Choose regular expression patterns"
       aria-controls="search-pattern-menu" aria-expanded={patternsOpen} class:active={patternsOpen}
-      on:click={() => openSearchPopover('patterns')}><span aria-hidden="true">.*</span></button>
+      on:click={() => openSearchPopover('patterns')}>Patterns <span aria-hidden="true">▾</span></button>
     <button type="button" class="scope-chip scope-trigger" bind:this={scopeTrigger} aria-label="Choose search columns"
       aria-controls="search-column-menu" aria-expanded={scopeOpen} class:active={scopeOpen}
       title={scopeTitle}
       on:click={() => openSearchPopover('scope')}>
-      <span class="scope-current">Search in: {scopeLabel}</span>
+      <span class="scope-current">{scopeLabel}</span>
       <span aria-hidden="true">▾</span>
     </button>
     <button type="button" class="search-help-trigger" bind:this={helpTrigger} aria-label="Search syntax help" title="Search syntax and examples"
@@ -127,7 +127,7 @@
   .scope-trigger:hover, .scope-trigger.active { color: var(--fg); background: var(--surface-weak); }
   .search-help-trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 23px; width: 23px; height: 23px; border: 1px solid var(--border); border-radius: 50%; padding: 0; background: transparent; color: var(--muted); font-size: 11px; margin-right: 5px; }
   .search-help-trigger:hover { color: var(--fg); border-color: var(--accent-border); }
-  .patterns-trigger { flex: 0 0 25px; width: 25px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font: 600 13px var(--font-mono); }
+  .patterns-trigger { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; height: 25px; padding: 0 5px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; white-space: nowrap; }
   .patterns-trigger:hover, .patterns-trigger.active { color: var(--accent); background: var(--surface-weak); }
   .pattern-chips { display: flex; flex: 0 1 auto; align-items: center; gap: 3px; max-width: 40%; overflow-x: auto; scrollbar-width: thin; }
   .pattern-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; padding: 1px 3px 1px 5px; border: 1px solid var(--accent-border); border-radius: 4px; color: var(--fg); background: var(--accent-soft); font-size: 10px; }

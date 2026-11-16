@@ -48,13 +48,13 @@ Search for keywords, limit searches to specific columns, or build more complex c
 
 Save filter rules, column layouts, and sort order as presets to reuse them across files with matching columns.
 
-Use **.* → Patterns** beside the search box to select saved regular expressions or create your own. Text, selected patterns, and Rules are combined with AND. **Search in** applies to both text and patterns. Applied definitions are saved with the investigation; editing a pattern does not change an existing investigation silently.
+Use **Patterns ▾** beside the search box to select saved regular expressions or create your own. Text, selected patterns, and Rules are combined with AND. **All columns ▾** chooses columns for both text and patterns. Applied definitions are saved with the investigation; editing a pattern does not change an existing investigation silently.
 
 <img src="assets/screenshots/filter-rules.png" alt="Filter rules matching EventID 4624" width="720">
 
 ### Search Syntax
 
-Text search is intended for quickly narrowing down the data. It is case-insensitive and does not interpret parentheses or regular expressions directly. Choose **.* → Patterns** for regular expression snippets, or use **Filter → Rules** for grouped AND/OR and numeric or datetime comparisons.
+Text search is intended for quickly narrowing down the data. It is case-insensitive and does not interpret parentheses or regular expressions directly. Choose **Patterns ▾** for regular expression snippets, or use **Filter → Rules** for grouped AND/OR and numeric or datetime comparisons.
 
 | Example | Description |
 | --- | --- |
