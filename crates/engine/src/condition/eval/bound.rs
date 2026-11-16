@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{EvalError, GroupKind, PreparedCondition, PreparedNode, PreparedTag};
+use super::{EvalError, GroupKind, PreparedCondition, PreparedFormat, PreparedNode, PreparedTag};
 
 /// Prepared predicates reference column slots, not per-row maps. `None` is
 /// the already joined unscoped search text; values remain original strings.
@@ -8,6 +8,10 @@ pub enum BoundNode<'a> {
     Condition {
         condition: &'a PreparedCondition,
         slot: Option<usize>,
+    },
+    Format {
+        condition: &'a PreparedFormat,
+        slots: Vec<usize>,
     },
     Tag(&'a PreparedTag),
     Group {
@@ -21,6 +25,14 @@ impl PreparedNode {
         match self {
             Self::Condition(condition) => BoundNode::Condition {
                 slot: (!condition.column.is_empty()).then(|| resolve(&condition.column)),
+                condition,
+            },
+            Self::Format(condition) => BoundNode::Format {
+                slots: condition
+                    .columns
+                    .iter()
+                    .map(|column| resolve(column))
+                    .collect(),
                 condition,
             },
             Self::Tag(condition) => BoundNode::Tag(condition),
@@ -56,6 +68,11 @@ impl BoundNode<'_> {
                 Some(slot) => cells.get(*slot).and_then(Option::as_deref),
                 None => joined,
             }),
+            Self::Format { condition, slots } => Ok(condition.eval_cells(
+                slots
+                    .iter()
+                    .map(|slot| cells.get(*slot).and_then(Option::as_deref)),
+            )),
             Self::Tag(condition) => Ok(condition.eval(tags)),
             Self::Group {
                 kind: GroupKind::And,

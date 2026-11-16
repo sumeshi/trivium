@@ -14,16 +14,47 @@ use crate::{
 #[derive(Clone)]
 pub struct ProjectsStore {
     root_dir: PathBuf,
+    preferences_root: Option<PathBuf>,
 }
 
 impl ProjectsStore {
     pub fn new(root_dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(root_dir.join("projects"))?;
-        let store = Self { root_dir };
+        let store = Self {
+            root_dir,
+            preferences_root: None,
+        };
         store.migrate_legacy_registry()?;
         store.try_all()?;
         crate::ops::query::clear_result_cache();
         Ok(store)
+    }
+
+    /// Desktop preferences have a separate root. CLI stores do not infer one
+    /// from their parent, which can also be an ordinary user output directory.
+    pub fn with_preferences_root(mut self, root: PathBuf) -> Self {
+        self.preferences_root = Some(root);
+        self
+    }
+
+    /// Exact managed trees and files that every export must preserve.
+    pub(crate) fn managed_output_paths(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let mut directories = vec![
+            self.root_dir.join("projects"),
+            self.staging_root(),
+            self.trash_root(),
+            self.formats_dir(),
+        ];
+        let mut files = vec![self.root_dir.join("projects.json")];
+        if let Some(root) = &self.preferences_root {
+            directories.extend([root.join("themes"), root.join("appearance")]);
+            files.extend([
+                root.join("theme.json"),
+                root.join("appearance.json"),
+                root.join("table-text-size.json"),
+            ]);
+        }
+        (directories, files)
     }
 
     fn migrate_legacy_registry(&self) -> Result<()> {
@@ -169,6 +200,10 @@ impl ProjectsStore {
 
     pub fn project_dir(&self, id: &Uuid) -> PathBuf {
         self.root_dir.join("projects").join(id.to_string())
+    }
+    /// Global named pattern definitions owned by this application workspace.
+    pub fn formats_dir(&self) -> PathBuf {
+        self.root_dir.join("formats")
     }
     pub fn flags_path(&self, id: &Uuid) -> PathBuf {
         self.project_dir(id).join("flags.json")

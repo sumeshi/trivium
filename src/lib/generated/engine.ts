@@ -5,8 +5,14 @@ export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in
 export type Op = "eq" | "ne" | "gt" | "lt" | "ge" | "le" | "contains" | "startsWith" | "endsWith" | "regex" | "in";
 export type GroupKind = "and" | "or";
 export type Condition = { column: string, op: Op, values: Array<string>, negated: boolean, };
+export type CidrRule = { cidr: string, label: string, };
+export type FormatClassifier = { kind: string, rules: Array<CidrRule>, default: string, };
+export type FormatExample = { text: string, values: Array<string>, };
+export type FormatDefinition = { schemaVersion: number, id: string, name: string, pattern: string, valueGroup?: string, classifier?: FormatClassifier, examples?: Array<FormatExample>, };
+export type FormatCatalogEntry = { definition: FormatDefinition, builtin: boolean, };
+export type FormatCondition = { columns: Array<string>, format: FormatDefinition, equals?: string, negated: boolean, };
 export type Group = { kind: GroupKind, children: Array<Node>, };
-export type Node = Condition | Group;
+export type Node = Condition | FormatCondition | Group;
 export type AnnotationPatch = {
 /**
  * `None` keeps the stored flag; `Some("")` clears it.
@@ -187,6 +193,20 @@ export type LocateRowResponse = {
 position: number | null, total_rows: number, total_filtered_rows: number, };
 export type ValueCount = { value: string, count: number, };
 export type ColumnStats = { column: string, kind: string, missing: number, unique: number, top: Array<ValueCount>, rare: Array<ValueCount>, };
+export type ExtractScope = "all" | "filtered";
+export type ExtractPayload = { projectId: string, columns: Array<string>, format: FormatDefinition, scope: ExtractScope, search?: string | null, searchColumns?: Array<string> | null, condition?: Node | null, flagFilter?: string | null, bookmarkedOnly?: boolean | null, sortKey?: string | null, sortDirection?: string | null, };
+export type ExtractResult = { resultId: string, projectId: string, format: FormatDefinition, columns: Array<string>, scope: ExtractScope, sourceRows: number, totalOccurrences: number, matchedRows: number, uniqueValues: number, hasClassification: boolean, };
+export type ExtractValue = { value: string, count: number, rows: number, scope: string | null, };
+export type ExtractPagePayload = { resultId: string, offset: number, limit: number, };
+export type ExtractPage = { rows: Array<ExtractValue>, total: number, offset: number, };
+export type ExtractSourcesPayload = { resultId: string, value: string, offset: number, limit: number, };
+export type ExtractSource = { rowIndex: number, column: string,
+/**
+ * UTF-8 byte offsets into the original decoded cell, not file bytes.
+ */
+start: number, end: number, };
+export type ExtractSources = { rows: Array<ExtractSource>, offset: number, hasMore: boolean, };
+export type ExportExtractPayload = { resultId: string, destination: string, allowOverwrite: boolean, };
 export type HistogramBucket = { start: string, end: string, count: number, flags: HistogramFlags, end_inclusive: boolean, };
 export type HistogramFlags = { safe: number, suspicious: number, critical: number, unflagged: number, };
 export type HistogramRangeInfo = { min: string, max: string, };

@@ -75,38 +75,34 @@ pub(crate) fn validate_destination(
     }
 }
 
-/// The projects/staging trees are application storage, not user output
-/// directories. Blocking the whole tree also covers WAL files, legacy case
-/// copies, migrations and future managed files without a fragile name list.
+/// Managed case and configuration trees are not export directories. Desktop
+/// preference paths are configured explicitly; a CLI store's parent stays usable.
 pub(crate) fn ensure_destination_is_not_managed(
     destination: &Path,
     store: &ProjectsStore,
 ) -> Result<(), AppError> {
-    let project = store.project_dir(&uuid::Uuid::nil());
-    let projects = project.parent().expect("project directory has parent");
-    let staging = store.staging_root();
-    let registry = projects
-        .parent()
-        .expect("projects directory has parent")
-        .join("projects.json");
+    let (directories, files) = store.managed_output_paths();
     let destination_path = canonical_path(destination).context("failed to resolve output path")?;
-    for directory in [projects, staging.as_path()] {
-        let path = canonical_path(directory).context("failed to resolve case storage")?;
-        if destination_path.starts_with(path) {
+    for directory in &directories {
+        let path = canonical_path(directory).context("failed to resolve managed storage")?;
+        if matches_managed_path(&destination_path, &path, true) {
             return Err(managed_error());
         }
     }
-    if destination_path == canonical_path(&registry).context("failed to resolve case registry")? {
-        return Err(managed_error());
+    for file in &files {
+        let path = canonical_path(file).context("failed to resolve managed setting")?;
+        if matches_managed_path(&destination_path, &path, false) {
+            return Err(managed_error());
+        }
     }
     if !destination.exists() {
         return Ok(());
     }
     let destination =
         same_file::Handle::from_path(destination).context("failed to inspect output identity")?;
-    let mut pending = vec![projects.to_path_buf(), staging];
+    let mut pending = directories;
+    pending.extend(files);
     let mut visited = HashSet::new();
-    pending.push(registry);
     while let Some(path) = pending.pop() {
         let metadata = match fs::metadata(&path) {
             Ok(metadata) => metadata,
@@ -141,8 +137,34 @@ pub(crate) fn ensure_destination_is_not_managed(
     }
     Ok(())
 }
+fn matches_managed_path(destination: &Path, managed: &Path, directory: bool) -> bool {
+    #[cfg(windows)]
+    {
+        let destination: Vec<_> = destination.components().collect();
+        let managed: Vec<_> = managed.components().collect();
+        (directory || destination.len() == managed.len())
+            && destination.len() >= managed.len()
+            && destination.iter().zip(managed).all(|(left, right)| {
+                left.as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+            })
+    }
+    #[cfg(not(windows))]
+    {
+        if directory {
+            destination.starts_with(managed)
+        } else {
+            destination == managed
+        }
+    }
+}
+
 fn managed_error() -> AppError {
     AppError::Message(
         "Choose a different file name: the destination is managed case storage.".into(),
     )
 }
+
+#[cfg(test)]
+mod tests;

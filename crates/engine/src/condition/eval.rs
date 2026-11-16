@@ -13,8 +13,10 @@ use crate::search::{TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
 use super::model::{GroupKind, Node, Op};
 
 mod bound;
+mod formats;
 mod ordered;
 pub use bound::BoundNode;
+pub use formats::PreparedFormat;
 use ordered::{ordered_matches, OrderedBound};
 
 /// Test instrumentation: regex compilations in this process.
@@ -39,6 +41,7 @@ pub fn reset_regex_compile_count() {
 #[derive(Debug)]
 pub enum PreparedNode {
     Condition(PreparedCondition),
+    Format(PreparedFormat),
     Tag(PreparedTag),
     Group(PreparedGroup),
 }
@@ -161,6 +164,7 @@ impl PreparedNode {
                     negated: condition.negated,
                 }))
             }
+            Node::Format(condition) => PreparedFormat::new(condition).map(Self::Format),
             Node::Group(group) => Ok(Self::Group(PreparedGroup {
                 kind: group.kind,
                 children: group
@@ -177,6 +181,7 @@ impl PreparedNode {
         match self {
             Self::Condition(condition) => condition.eval(row),
             Self::Tag(condition) => Ok(condition.eval(&[])),
+            Self::Format(condition) => Ok(condition.eval(row)),
             Self::Group(group) => match group.kind {
                 GroupKind::And => {
                     for child in &group.children {
@@ -210,6 +215,7 @@ impl PreparedNode {
         match self {
             Self::Condition(condition) => columns.push(condition.column.as_str()),
             Self::Tag(_) => {}
+            Self::Format(condition) => columns.extend(condition.columns.iter().map(String::as_str)),
             Self::Group(group) => {
                 for child in &group.children {
                     child.collect_columns(columns);

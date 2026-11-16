@@ -84,6 +84,10 @@ fn negate(node: Node) -> Node {
             condition.negated = !condition.negated;
             Node::Condition(condition)
         }
+        Node::Format(mut condition) => {
+            condition.negated = !condition.negated;
+            Node::Format(condition)
+        }
         Node::Group(group) => {
             let kind = match group.kind {
                 GroupKind::And => GroupKind::Or,

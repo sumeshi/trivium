@@ -5,6 +5,7 @@ pub mod cross;
 pub mod diff;
 pub mod dupes;
 pub mod export;
+pub mod extract;
 pub mod flags;
 pub mod group;
 pub mod histogram;

@@ -8,6 +8,8 @@ use crate::analysis::{infer_column_kinds, ColumnKind};
 use crate::models::{Cell, ColumnMeta};
 use crate::project_io::INTERNAL_ORIGINAL;
 
+pub(crate) mod bounded_text;
+
 /// Test instrumentation: how many times each column was converted to text
 /// during condition/search evaluation.
 ///

@@ -36,6 +36,18 @@ pub struct Condition {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FormatCondition {
+    pub columns: Vec<String>,
+    pub format: crate::formats::FormatDefinition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub equals: Option<String>,
+    #[serde(default)]
+    pub negated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Group {
     pub kind: GroupKind,
     #[serde(default)]
@@ -48,6 +60,7 @@ pub struct Group {
 #[serde(untagged)]
 pub enum Node {
     Condition(Condition),
+    Format(FormatCondition),
     Group(Group),
 }
 
@@ -56,6 +69,7 @@ impl Node {
     pub fn visit_columns<'a>(&'a self, visit: &mut impl FnMut(&'a str)) {
         match self {
             Self::Condition(condition) => visit(condition.column.as_str()),
+            Self::Format(condition) => condition.columns.iter().for_each(|column| visit(column)),
             Self::Group(group) => {
                 for child in &group.children {
                     child.visit_columns(visit);

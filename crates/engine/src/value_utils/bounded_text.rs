@@ -5,7 +5,7 @@ use std::{
     fmt::{self, Write},
 };
 
-pub(super) fn present_text<'a>(
+pub(crate) fn present_text<'a>(
     value: &'a AnyValue<'_>,
     limit: usize,
 ) -> Result<Option<Cow<'a, str>>, ()> {

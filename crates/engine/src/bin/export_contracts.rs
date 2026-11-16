@@ -1,6 +1,6 @@
 //! Deterministic Rust -> TypeScript wire contract generation.
 use std::{env, fs, path::PathBuf};
-use trivium_engine::{analysis, annotation, condition, jobs, models, ops};
+use trivium_engine::{analysis, annotation, condition, formats, jobs, models, ops};
 use ts_rs::TS;
 
 fn add<T: TS>(out: &mut String) {
@@ -19,6 +19,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         condition::Op,
         condition::GroupKind,
         condition::Condition,
+        formats::CidrRule,
+        formats::FormatClassifier,
+        formats::FormatExample,
+        formats::FormatDefinition,
+        formats::FormatCatalogEntry,
+        condition::FormatCondition,
         condition::Group,
         condition::Node,
         annotation::AnnotationPatch,
@@ -43,6 +49,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ops::rows::LocateRowResponse,
         analysis::stats::ValueCount,
         analysis::stats::ColumnStats,
+        ops::extract::ExtractScope,
+        ops::extract::ExtractPayload,
+        ops::extract::ExtractResult,
+        ops::extract::ExtractValue,
+        ops::extract::ExtractPagePayload,
+        ops::extract::ExtractPage,
+        ops::extract::ExtractSourcesPayload,
+        ops::extract::ExtractSource,
+        ops::extract::ExtractSources,
+        ops::extract::ExportExtractPayload,
         analysis::histogram::HistogramBucket,
         analysis::histogram::HistogramFlags,
         analysis::histogram::HistogramRangeInfo,

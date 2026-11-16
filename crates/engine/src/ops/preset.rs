@@ -324,6 +324,7 @@ fn validate_layout(preset: &PresetFile) -> Result<(), AppError> {
 fn remap_condition(node: &mut Node, remap: &impl Fn(&mut String)) {
     match node {
         Node::Condition(condition) => remap(&mut condition.column),
+        Node::Format(condition) => condition.columns.iter_mut().for_each(remap),
         Node::Group(group) => {
             for child in &mut group.children {
                 remap_condition(child, remap);

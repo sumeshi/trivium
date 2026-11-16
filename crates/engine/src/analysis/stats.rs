@@ -8,7 +8,7 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 #[cfg(test)]
 mod tests;
-mod text;
+use crate::value_utils::bounded_text as text;
 
 const TOP_VALUES: usize = 20;
 /// The rare list is bounded too: the UI must never receive every unique value.
