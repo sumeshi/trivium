@@ -16,6 +16,9 @@ from feedback_checks import _horizontal_to, _settle
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS, NormalWindowClose
 from storage_responsiveness_checks import _windows_local_app_data
+from table_wallpaper_checks import verify_table_wallpaper
+from theme_editor_checks import verify_theme_editor
+from wallpaper_paint_checks import assert_planes
 
 
 def _png(path: Path) -> bytes:
@@ -24,8 +27,8 @@ def _png(path: Path) -> bytes:
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
     width, height = 256, 128
     pixels = b"".join(b"\0" + bytes(channel for x in range(width)
-        for channel in (x, y * 2, (x + y) % 256)) for y in range(height))
-    image = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        for channel in (x, y * 2, (x + y) % 256, 0 if x < 32 else 255)) for y in range(height))
+    image = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
              + chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b""))
     path.write_bytes(image)
     return image
@@ -114,25 +117,14 @@ def _strength(web, value: int) -> None:
              lambda actual: actual == value, "native range keys update background strength")
 
 
-def _paint(web) -> dict:
-    return web.script("""
-      const viewport=document.querySelector('.virtual-viewport'),v=viewport.getBoundingClientRect(),
-        row=[...document.querySelectorAll('.data-row:not(.loading)')].find(e=>{
-          const r=e.getBoundingClientRect();return r.top>=v.top&&r.bottom<=v.bottom;});
-      if(!row)return null;
-      const c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d'),
-        alpha=value=>{ctx.clearRect(0,0,1,1);ctx.fillStyle=value;ctx.fillRect(0,0,1,1);return ctx.getImageData(0,0,1,1).data[3];},
-        annotationEdge=Math.max(v.left,...[...row.querySelectorAll(':scope>.sticky:not([data-column-id])')].map(e=>e.getBoundingClientRect().right)),
-        check=e=>{const r=e.getBoundingClientRect(),left=Math.max(v.left,r.left,e.hasAttribute('data-column-id')?annotationEdge:v.left),
-          right=Math.min(v.right,r.right),visible=right-left>2,x=(left+right)/2,y=(r.top+r.bottom)/2;
-          return {alpha:alpha(getComputedStyle(e).backgroundColor),visible,topmost:!visible||e.contains(document.elementFromPoint(x,y))};};
-      return {rowAlpha:alpha(getComputedStyle(row).backgroundColor),
-        headerAlpha:alpha(getComputedStyle(document.querySelector('.table-header-scroll')).backgroundColor),
-        pinned:[...row.querySelectorAll(':scope>.sticky')].map(check),
-        headers:[...document.querySelectorAll('.data-header>.sticky')].map(check),
-        layer:document.querySelectorAll('.wallpaper-layer').length,
-        table:document.documentElement.hasAttribute('data-wallpaper-table')};
-    """)
+def _set_enabled(web, enabled: bool) -> None:
+    _open(web)
+    checkbox = web.node('.appearance-dialog input[type="checkbox"]')
+    if web.script("return arguments[0].checked;", checkbox) != enabled:
+        web.tap(checkbox)
+    _close(web)
+    wait_for(lambda: web.script("return !!document.querySelector('.table-body-surface.has-wallpaper');"),
+             lambda visible: visible == enabled, "wallpaper toggle affects only the table body")
 
 
 def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict) -> None:
@@ -150,6 +142,7 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
     image_bytes = _png(image_source)
     directory = _profile_directory(web, root)
     managed_theme = directory / "themes" / f"{theme_id}.json"
+    extra_themes: list[Path] = []
     _install_pickers(web)
     restored = False
     try:
@@ -168,68 +161,70 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
             base:document.documentElement.dataset.theme,accent:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()};
         """), lambda value: value == {"value": user_theme, "base": "dark", "accent": "#aabbdd"}, "imported theme applies actual root color overrides")
         wait_for(lambda: _saved(managed_theme), lambda value: value == definition, "custom theme reaches the owned native catalog")
+        saved_theme = verify_theme_editor(web, definition, managed_theme, directory, extra_themes, report)
         _pick(web, "Export theme…", exported, save=True)
-        wait_for(lambda: _saved(exported), lambda value: value == definition, "exported theme preserves its stable ID and palette")
+        wait_for(lambda: _saved(exported), lambda value: value == saved_theme, "exported theme preserves its stable ID and edited palette")
         _pick(web, "Choose image…", image_source)
         wait_for(lambda: web.script("return !!document.querySelector('.wallpaper-layer');"), bool, "managed native wallpaper becomes visible")
         wait_for(lambda: web.script("return document.querySelector('.appearance-dialog .actions button').disabled;"), lambda disabled: disabled is False, "native image operation finishes")
         decoded = web.async_script("""
-          const done=arguments[arguments.length-1],layer=document.querySelector('.wallpaper-layer'),
-            raw=getComputedStyle(layer).backgroundImage.slice(4,-1),url=raw.replace(/^['"]|['"]$/g,''),image=new Image();
+          const done=arguments[arguments.length-1],layer=document.querySelector('.wallpaper-base'),
+            raw=getComputedStyle(layer,'::before').backgroundImage.slice(4,-1),url=raw.replace(/^['"]|['"]$/g,''),image=new Image();
           image.onload=()=>done({width:image.naturalWidth,height:image.naturalHeight});image.onerror=()=>done({error:true});image.src=url;
         """)
         assert decoded == {"width": 256, "height": 128}, decoded
-        assert web.script("return getComputedStyle(document.querySelector('.wallpaper-layer')).backgroundSize;") == "cover"
-        web.choose('#wallpaper-fit', "contain")
-        wait_for(lambda: web.script("return getComputedStyle(document.querySelector('.wallpaper-layer')).backgroundSize;"), lambda value: value == "contain", "contain fit updates the fixed background")
+        assert not web.script("return !!document.querySelector('#wallpaper-fit')||document.querySelectorAll('.appearance-dialog input[type=checkbox]').length!==1;")
+        assert web.script("return getComputedStyle(document.querySelector('.wallpaper-base'),'::before').backgroundSize;") == "cover"
         web.script("""
-          const style=CSSStyleDeclaration.prototype.setProperty,layer=document.querySelector('.wallpaper-layer');
-          window.__appearanceStyle={writes:0,layer,restore:()=>{CSSStyleDeclaration.prototype.setProperty=style;}};
+          const style=CSSStyleDeclaration.prototype.setProperty,surface=document.querySelector('.table-body-surface');
+          window.__appearanceStyle={writes:0,surface,layers:[...surface.querySelectorAll('.wallpaper-layer')],restore:()=>{CSSStyleDeclaration.prototype.setProperty=style;}};
           CSSStyleDeclaration.prototype.setProperty=function(name,...args){
-            if(this===layer.style&&name==='background-image')window.__appearanceStyle.writes++;
+            if(this===surface.style&&name==='--wallpaper-image')window.__appearanceStyle.writes++;
             return style.call(this,name,...args);
           };
         """)
         _strength(web, 64)
-        wait_for(lambda: web.script("return Number(getComputedStyle(document.querySelector('.wallpaper-layer')).opacity);"),
+        wait_for(lambda: web.script("return Number(getComputedStyle(document.querySelector('.wallpaper-base'),'::before').opacity);"),
                  lambda opacity: abs(opacity - .64) < .001, "fixed wallpaper opacity follows native range input")
-        assert web.script("return window.__appearanceStyle.layer===document.querySelector('.wallpaper-layer')&&window.__appearanceStyle.writes===0;"), "Strength changes must not remount or reassign the image data URL"
+        assert web.script("return window.__appearanceStyle.surface===document.querySelector('.table-body-surface')&&window.__appearanceStyle.layers.every((layer,index)=>layer===document.querySelectorAll('.wallpaper-layer')[index])&&window.__appearanceStyle.writes===0;"), "Strength changes must not remount or reassign the image data URL"
         web.script("window.__appearanceStyle.restore();delete window.__appearanceStyle;")
-        web.click(web.node('.appearance-dialog input[type="checkbox"]', 1))
-        wait_for(lambda: web.script("return document.documentElement.hasAttribute('data-wallpaper-table');"), bool, "table wallpaper opt-in applies")
         _close(web)
+        verify_table_wallpaper(web, data, root, evidence, report, lambda enabled: _set_enabled(web, enabled))
         _horizontal_to(web, 700)
-        paint = wait_for(lambda: _paint(web), lambda value: value and value["layer"] == 1 and value["table"], "rows paint against one fixed wallpaper")
-        assert 202 <= paint["rowAlpha"] <= 205 and paint["headerAlpha"] == 255, paint
-        assert paint["pinned"] and paint["headers"], paint
-        assert all(item["alpha"] == 255 and item["topmost"] for item in paint["pinned"] + paint["headers"]), paint
+        paint = assert_planes(web)
         web.screenshot(evidence / "appearance-wallpaper-pinned.png")
         assert theme_source.read_bytes() == theme_bytes and image_source.read_bytes() == image_bytes
         image_source.unlink()
-        wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value and value["enabled"] and value["fit"] == "contain" and value["strength"] == 64 and value["behindTable"], "background settings reach native storage")
+        wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value == {"version": 2, "enabled": True, "strength": 64}, "simplified background settings reach native storage")
+        # Reopen a real v1 preference with contain/off-table settings. The image
+        # copy remains owned by the app; only its old layout choices are retired.
+        web.script("localStorage.removeItem('trivium:wallpaper');")
+        (directory / "appearance.json").write_text(json.dumps({"version": 1, "enabled": True,
+            "fit": "contain", "strength": 64, "behindTable": False}), encoding="utf-8")
         diagnostic = web.diagnostics()
         target = NormalWindowClose(app.application)
         target.request()
         wait_for(target.exited, bool, "normal OS close drains appearance saves before exiting")
         app.end_session(captured_diagnostics=diagnostic)
         web = app.start()
-        wait_for(lambda: web.script("return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();"), lambda value: value == "#aabbdd", "custom theme survives native restart")
-        wait_for(lambda: web.script("return !!document.querySelector('.wallpaper-layer')&&document.documentElement.hasAttribute('data-wallpaper-table');"), bool, "managed wallpaper survives without the source image")
+        wait_for(lambda: web.script("return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();"), lambda value: value == saved_theme["colors"]["accent"], "edited custom theme survives native restart")
+        assert not web.script("return !!document.querySelector('.wallpaper-layer');"), "No open table means no wallpaper on the application chrome"
+        open_project(web, data["name"]); web.applied(projectId=data["id"]); web.results(data["total"])
+        wait_for(lambda: web.script("return !!document.querySelector('.table-body-surface.has-wallpaper');"), bool, "managed wallpaper survives without the source image")
+        assert_planes(web)
         _open(web)
         state = web.script("""
           return {theme:document.querySelector('[aria-label="Appearance theme"]').value,
-            fit:document.querySelector('#wallpaper-fit').value,strength:Number(document.querySelector('#wallpaper-strength').value),
-            enabled:document.querySelectorAll('.appearance-dialog input[type="checkbox"]')[0].checked,
-            behind:document.querySelectorAll('.appearance-dialog input[type="checkbox"]')[1].checked};
+            strength:Number(document.querySelector('#wallpaper-strength').value),
+            enabled:document.querySelector('.appearance-dialog input[type="checkbox"]').checked};
         """)
-        assert state == {"theme": user_theme, "fit": "contain", "strength": 64, "enabled": True, "behind": True}, state
+        assert state == {"theme": user_theme, "strength": 64, "enabled": True}, state
         restored = True
         report["appearance"] = {"custom_theme_import_export": True, "stable_theme_id": True,
             "actual_css_override": True, "managed_image_dimensions": decoded, "original_source_removed_before_restart": True,
             "normal_close_and_restart": True, "native_settings_restored": True,
-            "single_fixed_background_layer": True, "slider_image_style_reassignments": 0,
-            "nonsticky_row_alpha": paint["rowAlpha"], "opaque_pinned_header_and_controls": True,
-            "horizontal_pin_topmost": True, "source_files_unchanged": True,
+            "shared_table_background_layers": paint["layers"], "slider_image_style_reassignments": 0,
+            "legacy_preferences_migrate_to_body_cover": True, "source_files_unchanged": True,
             "unverified": "Native OS picker interaction; only selected-path responses are substituted"}
     finally:
         # Only the isolated profile's uniquely named custom theme is removed.
@@ -242,12 +237,14 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
                      bool, "appearance cleanup waits for the theme save")
             if web.script("return [...document.querySelectorAll('.appearance-dialog button')].some(e=>e.textContent.trim()==='Remove'&&!e.disabled);"):
                 web.named("Remove", ".appearance-dialog")
-            wait_for(lambda: web.script("return !document.querySelector('.wallpaper-layer')&&!document.documentElement.hasAttribute('data-wallpaper-table');"), bool, "appearance cleanup removes the wallpaper")
+            wait_for(lambda: web.script("return !document.querySelector('.wallpaper-layer');"), bool, "appearance cleanup removes the wallpaper")
             if (directory / "appearance.json").is_file():
                 wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value and value.get("enabled") is False, "cleanup saves the disabled background")
             wait_for(lambda: _saved(directory / "theme.json"), lambda value: value and value.get("theme") == "light", "cleanup Light selection is durable")
             _close(web)
             managed_theme.unlink(missing_ok=True)
+            for path in extra_themes:
+                path.unlink(missing_ok=True)
             open_project(web, data["name"])
             web.applied(projectId=data["id"])
             web.results(data["total"])

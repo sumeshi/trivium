@@ -21,6 +21,11 @@ export interface UserTheme {
   base: BuiltinTheme;
   colors: Partial<Record<ThemeColor, string>>;
 }
+export function normalizeThemeHex(value: string): string | null {
+  if (!/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)) return null;
+  const hex = value.slice(1).toLowerCase();
+  return "#" + (hex.length === 3 ? [...hex].map(character => character + character).join("") : hex);
+}
 const userThemes = new Map<string, UserTheme>();
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 

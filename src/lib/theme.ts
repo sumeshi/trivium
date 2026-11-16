@@ -1,6 +1,6 @@
 import { mkdir, readDir, readTextFile, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { createThemePreference, DEFAULT_THEME, EDITABLE_THEME_COLORS, getUserTheme, parseSavedTheme,
   parseTheme, parseUserTheme, registerUserTheme, THEME_OPTIONS, themeBase } from "./themeModel.ts";
 import type { Theme, UserTheme } from "./themeModel";
@@ -11,6 +11,9 @@ export type { Theme } from "./themeModel";
 const THEME_KEY = "trivium:theme";
 const MAX_USER_THEMES = 128;
 let themeRevision = 0;
+let explicitSelectionRevision = 0;
+let writeIntent = 0;
+let lastSelectedWrite = 0;
 let catalogRevision = 0;
 let catalogLoad = 0;
 const modifiedThemes = new Map<string, number>();
@@ -20,10 +23,13 @@ export const themeOptions = writable<Array<{ value: Theme; label: string }>>([..
 export const themeCatalogWarning = writable("");
 
 function applyThemeAttr(next: Theme) {
+  applyDefinition(themeBase(next), getUserTheme(next)?.colors ?? {});
+}
+function applyDefinition(base: UserTheme["base"], colors: UserTheme["colors"]) {
   const root = document.documentElement;
   for (const key of EDITABLE_THEME_COLORS) root.style.removeProperty(`--${key}`);
-  root.setAttribute("data-theme", themeBase(next));
-  for (const [key, value] of Object.entries(getUserTheme(next)?.colors ?? {})) root.style.setProperty(`--${key}`, value);
+  root.setAttribute("data-theme", base);
+  for (const [key, value] of Object.entries(colors)) root.style.setProperty(`--${key}`, value);
 }
 function addCatalogTheme(definition: UserTheme, readAt?: number) {
   const value = `user:${definition.id}` as Theme;
@@ -49,6 +55,7 @@ async function readThemeFile(path: string) {
 }
 export async function initTheme() {
   const revision = ++themeRevision;
+  explicitSelectionRevision += 1;
   const load = ++catalogLoad, readAt = catalogRevision;
   try {
     const directory = await themeDirectory();
@@ -91,29 +98,80 @@ export function setTheme(next: Theme): Promise<void> {
   const selected = parseTheme(next);
   if (!selected) return Promise.resolve();
   return acceptSave(() => {
-    themeRevision += 1; applyThemeAttr(selected); theme.set(selected);
+    themeRevision += 1; explicitSelectionRevision += 1;
+    applyThemeAttr(selected); theme.set(selected);
     return persistTheme(selected);
   });
 }
 export function importThemeFile(path: string, confirmReplace: (name: string) => boolean = () => false): Promise<Theme | null> {
   return acceptSave(async () => {
+    const selectionRevision = explicitSelectionRevision, intent = ++writeIntent;
     const definition = await readThemeFile(path);
     const selected = `user:${definition.id}` as Theme;
     if (parseTheme(selected) && !confirmReplace(definition.name)) return null;
-    await queueWrite(async () => {
-      const directory = await themeDirectory();
-      await mkdir(directory, { recursive: true });
-      const filename = `${definition.id}.json`;
-      // Check admission in the write queue: concurrent imports must observe
-      // earlier accepted files, while replacing an existing ID needs no slot.
-      const files = (await readDir(directory)).filter(entry => entry.isFile && entry.name.endsWith(".json"));
-      if (!files.some(entry => entry.name === filename) && files.length >= MAX_USER_THEMES) {
-        throw new Error(`The theme folder already contains ${MAX_USER_THEMES} theme files. Replace an existing theme to import another.`);
-      }
-      await writeTextFile(await join(directory, filename), JSON.stringify(definition, null, 2));
-    });
-    const value = addCatalogTheme(definition);
-    await setTheme(value);
-    return value;
+    return storeUserTheme(definition, selectionRevision, intent);
   });
+}
+
+/** Serialize file admission and selection with the existing preference writer. */
+async function storeUserTheme(definition: UserTheme, selectionRevision: number, intent: number): Promise<Theme> {
+  const value = `user:${definition.id}` as Theme;
+  const preference = JSON.stringify(createThemePreference(value), null, 2);
+  let selected = false;
+  const maySelect = () => selectionRevision === explicitSelectionRevision && intent >= lastSelectedWrite;
+  await queueWrite(async () => {
+    const directory = await themeDirectory();
+    await mkdir(directory, { recursive: true });
+    const filename = `${definition.id}.json`;
+    const files = (await readDir(directory)).filter(entry => entry.isFile && entry.name.endsWith(".json"));
+    if (!files.some(entry => entry.name === filename) && files.length >= MAX_USER_THEMES) {
+      throw new Error(`The theme folder already contains ${MAX_USER_THEMES} theme files. Replace an existing theme to import another.`);
+    }
+    await writeTextFile(await join(directory, filename), JSON.stringify(definition, null, 2));
+    // A different theme chosen during the write owns the selection, even if
+    // this accepted save/import still completes its catalog entry.
+    if (maySelect()) {
+      await writeTextFile(await join(await appLocalDataDir(), "theme.json"), preference);
+      selected = maySelect();
+    }
+  });
+  addCatalogTheme(definition);
+  if (selected && maySelect()) {
+    themeRevision += 1;
+    lastSelectedWrite = intent;
+    applyThemeAttr(value); theme.set(value);
+    try { localStorage.setItem(THEME_KEY, preference); } catch {}
+  }
+  return value;
+}
+
+/** A preview changes paint only. Its owner can neither cancel nor save over a
+ * later explicit theme choice, startup restore, or another editor preview. */
+export function beginThemePreview() {
+  const owner = ++themeRevision;
+  const selectionRevision = ++explicitSelectionRevision;
+  let ended = false;
+  let saving = false;
+  applyThemeAttr(get(theme));
+  const current = () => !ended && owner === themeRevision;
+  return {
+    apply(input: UserTheme): boolean {
+      if (!current() || saving) return false;
+      const definition = parseUserTheme(input);
+      applyDefinition(definition.base, definition.colors);
+      return true;
+    },
+    cancel(): void {
+      if (current()) { themeRevision += 1; explicitSelectionRevision += 1; applyThemeAttr(get(theme)); }
+      ended = true;
+    },
+    save(input: UserTheme): Promise<Theme> {
+      if (!current()) return Promise.reject(new Error("The selected theme changed. Reopen the color editor."));
+      if (saving) return Promise.reject(new Error("The theme is already being saved."));
+      const definition = parseUserTheme(input);
+      saving = true;
+      return acceptSave(() => storeUserTheme(definition, selectionRevision, ++writeIntent))
+        .then(value => { ended = true; return value; }).finally(() => { saving = false; });
+    },
+  };
 }

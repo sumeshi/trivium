@@ -14,7 +14,6 @@
   import Toast from './lib/components/app/Toast.svelte';
   import CloseDialog from './lib/components/app/CloseDialog.svelte';
   import FileDropOverlay from './lib/components/app/FileDropOverlay.svelte';
-  import WallpaperLayer from './lib/components/app/WallpaperLayer.svelte';
   import { initWallpaper } from './lib/appearance';
   import { createExtractScan } from './lib/extractScan';
   import type { ExtractIntent } from './lib/extractTypes';
@@ -318,7 +317,6 @@
 <svelte:window on:blur={() => fileDrop.clear()} on:keydown={(event) => { if (event.key === 'Escape') fileDrop.clear(); }} />
 
 <div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle'}>
-  <WallpaperLayer />
   <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId}
     temporaryProjectIds={$projectState.temporaryProjectIds}

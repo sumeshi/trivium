@@ -1,19 +1,22 @@
 export interface WallpaperSettings {
-  version: 1;
+  version: 2;
   enabled: boolean;
-  fit: "cover" | "contain";
   strength: number;
-  behindTable: boolean;
 }
 export interface WallpaperImage { dataUrl: string; width: number; height: number; }
-export const DEFAULT_WALLPAPER: WallpaperSettings = { version: 1, enabled: false, fit: "cover", strength: 30, behindTable: false };
+export const DEFAULT_WALLPAPER: WallpaperSettings = { version: 2, enabled: false, strength: 30 };
 export function parseWallpaperSettings(value: unknown): WallpaperSettings | null {
   if (typeof value === "string") { try { value = JSON.parse(value); } catch { return null; } }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const saved = value as WallpaperSettings;
-  if (saved.version !== 1 || typeof saved.enabled !== "boolean" || typeof saved.behindTable !== "boolean"
-    || !["cover", "contain"].includes(saved.fit) || !Number.isInteger(saved.strength) || saved.strength < 0 || saved.strength > 100) return null;
-  return { version: 1, enabled: saved.enabled, fit: saved.fit, strength: saved.strength, behindTable: saved.behindTable };
+  const saved = value as Record<string, unknown>;
+  if (typeof saved.enabled !== "boolean" || typeof saved.strength !== "number"
+    || !Number.isInteger(saved.strength) || saved.strength < 0 || saved.strength > 100) return null;
+  if (saved.version === 1) {
+    if (typeof saved.behindTable !== "boolean" || typeof saved.fit !== "string" || !["cover", "contain"].includes(saved.fit)) return null;
+  } else if (saved.version !== 2) return null;
+  // Version 2 scopes wallpaper to the table body and always covers it. Old
+  // placement/fit options no longer affect the retained image or visibility.
+  return { version: 2, enabled: saved.enabled, strength: saved.strength };
 }
 export function parseWallpaperImage(value: unknown): WallpaperImage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid background image.");

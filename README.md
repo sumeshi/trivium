@@ -20,7 +20,7 @@ The separate `trivium-cli` executable provides an automation interface for scrip
 
 Choose from a variety of color themes to suit your preferences.
 
-Use **⋮ → Appearance** to export a theme JSON, edit its colors, and import your own copy. You can also choose a local PNG, JPEG, or WebP background. **Show behind table** is optional; fixed columns stay opaque.
+Use **⋮ → Appearance → Edit colors** to enter hex colors, preview them, and save a custom theme. Theme JSON import and export are also available. Choose a local PNG, JPEG, or WebP wallpaper for the table body, including fixed columns; its size always follows the table with cover scaling.
 
 <img src="assets/screenshots/themes-light-dark.png" alt="Light and Dark themes" width="720">
 
@@ -49,6 +49,8 @@ Search for keywords, limit searches to specific columns, or build more complex c
 Save filter rules, column layouts, and sort order as presets to reuse them across files with matching columns.
 
 Use **Patterns ▾** beside the search box to select saved regular expressions or create your own. Text, selected patterns, and Rules are combined with AND. **All columns ▾** chooses columns for both text and patterns. Applied definitions are saved with the investigation; editing a pattern does not change an existing investigation silently.
+
+Built-in patterns cover network addresses, CIDRs, URLs, email, hashes, paths, Windows identifiers, defanged IOCs, and encoded or structured values. Hash names describe hexadecimal candidates of the corresponding length; they do not identify the algorithm. Structured checks do not verify signatures, ownership, or reachability.
 
 <img src="assets/screenshots/filter-rules.png" alt="Filter rules matching EventID 4624" width="720">
 

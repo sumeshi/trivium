@@ -1103,11 +1103,26 @@ button.primary:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* Wallpaper affects only row paint. Frozen cells keep their opaque --row-bg. */
-html[data-wallpaper-table] .table-scroll { background: transparent; }
-html[data-wallpaper-table] .data-row {
-  background: color-mix(in srgb, var(--row-bg) 80%, transparent);
+/* Body wallpaper is below normal cells and an opaque pinned-area mask. Only
+   row backgrounds mix with the image; text and controls retain full opacity. */
+.table-body-surface.has-wallpaper .data-row,
+.table-body-surface.has-wallpaper .data-row > .sticky {
+  background: color-mix(in srgb, var(--row-bg) 35%, transparent);
 }
+
+.table-body-surface.has-wallpaper .data-row > .sticky:hover {
+  background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--row-bg) 35%, transparent));
+}
+
+/* Oversized frozen prefixes pan under the annotation strip. Clip their paint
+   at its boundary so translucent annotations cannot reveal another cell's text.
+   Reuse the sticky offsets already computed for scrolling and column resize. */
+.table-body-surface.has-wallpaper .data-row > .stickyData {
+  clip-path: inset(0 0 0 clamp(0px, calc(var(--sticky-data) - var(--sticky-data-left)), 100%));
+}
+
+.table-body-surface.has-wallpaper .empty-rows { background: transparent; }
+.table-body-surface.has-wallpaper .large-page-notice { position: relative; z-index: 2; }
 
 .large-page-notice {
   grid-column: 3 / -1;

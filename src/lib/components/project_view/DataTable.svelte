@@ -22,6 +22,7 @@
   import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
   import ColumnContextMenu from './ColumnContextMenu.svelte';
+  import WallpaperLayer from '../app/WallpaperLayer.svelte';
 
   import {
     logicalRowAt,
@@ -691,6 +692,7 @@
     </div>
   {/if}
   {#if $queryCountKnown && !$queryError && effectiveTotalRows === 0 && $pendingPages.size === 0}
+    <WallpaperLayer>
     <div class="empty-rows">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
         <circle cx="11" cy="11" r="7" />
@@ -699,6 +701,7 @@
       <p>No rows match your filters.</p>
       <span>Adjust the search or clear a filter to see more rows.</span>
     </div>
+    </WallpaperLayer>
   {:else}
     <div class="table-scroll" style={`--table-text-scale: ${$tableTextSize / 100}; --row-height: ${$rowHeight}px;`}>
       <div
@@ -787,6 +790,7 @@
           {/if}
         </div>
       {/if}
+      <WallpaperLayer pinnedWidth={Math.max(stickyWidth, frozenViewport.edge)}>
       <div
         class="virtual-viewport"
         id="project-table-viewport"
@@ -813,6 +817,7 @@
           </div>
         </div>
       </div>
+      </WallpaperLayer>
       {#if $tableWidth > 0 && horizontalMaximum > 1}
         <div
           class="table-horizontal-scroll"
