@@ -283,7 +283,10 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
                     _close_generated(web, item)
             # The restarted app has no open tabs. Reopen the original saved
             # fixture before removing only this test's ordinary source case.
-            open_project(web, data["name"]); web.results(data["total"])
+            open_project(web, data["name"])
+            # Earlier scenarios intentionally save nonempty filters. Restoring
+            # the original case must preserve them, including a valid 0 rows.
+            web.applied(projectId=data["id"])
             if web.script("return !!document.getElementById(arguments[0]);", f"project-tab-{project_id}"):
                 web.named(f"Close {source.name}")
             delete_fixture_project(web, project_id)
