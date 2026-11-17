@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "base64",
   "name": "Base64 candidate (32+ characters)",
-  "pattern": "(?:\\A|[^A-Za-z0-9+/=])(?:[A-Za-z_][A-Za-z0-9_]{0,63}=)?(?P<value>[A-Za-z0-9+/]{32,}={0,2})(?:\\z|[^A-Za-z0-9+/=])",
+  "pattern": "(?:\\A|[^A-Za-z0-9+/=])(?:[A-Za-z_][A-Za-z0-9_]{0,63}=)?(?P<value>(?:[A-Za-z0-9+/]{30}==|[A-Za-z0-9+/]{31}=|[A-Za-z0-9+/]{32,}={0,2}))(?:\\z|[^A-Za-z0-9+/=])",
   "valueGroup": "value",
   "validation": "base64",
   "examples": [
@@ -21,6 +21,26 @@
     },
     {
       "text": "not-base64 !!! short Zm9v",
+      "values": []
+    },
+    {
+      "text": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4",
+      "values": [
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==",
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+      ]
+    },
+    {
+      "text": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA=,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg,eHh4eHh4eHh4eHh4eHh4eHh4eHh4",
+      "values": []
+    },
+    {
+      "text": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA===,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==A,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "values": []
+    },
+    {
+      "text": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eB==,eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh=",
       "values": []
     }
   ]
