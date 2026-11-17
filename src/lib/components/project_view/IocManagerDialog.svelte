@@ -5,7 +5,6 @@
   import { errorMessage } from '../../errors';
   import { createLatestRequest } from '../../latestRequest';
   import { isTabKey } from '../../keyboard';
-  import { applyBulkAnnotation } from '../../bulkAnnotation';
   import { iocBulkArgs, iocQueryError, isIocFlag, requireIocFlag, requireIocQuery } from '../../iocRules';
   import { SEARCH_SYNTAX_HELP } from '../../searchHelp';
   import { acceptSave } from '../../saveDrain';
@@ -139,9 +138,7 @@
     const active = begin(); if (!active) return;
     try {
       const args = iocBulkArgs(active.owner, structuredClone(entry));
-      const result = await applyBulkAnnotation(active.api, args, {
-        isCurrent: () => !alive || active.isCurrent(),
-      });
+      const result = await active.api.bulkApply(args, () => !alive || active.isCurrent());
       if (!result || !active.isCurrent()) return;
       notice = `${result.updated.toLocaleString()} rows annotated.`;
       dispatch('annotationsChanged');

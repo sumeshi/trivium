@@ -3,7 +3,8 @@ import { afterEach, test } from "node:test";
 import { queueAfterAnnotationWrites, queueAnnotationWrite } from "./annotationWrites.ts";
 import { queueHiddenColumnWrite } from "./hiddenColumnWrites.ts";
 import { saveWorkspaceView, waitForWorkspaceSave } from "./workspaceSession.ts";
-import { applyBulkAnnotation } from "./bulkAnnotation.ts";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { createBackend } from "./backend.ts";
 import { acceptSave, flushAllSaves, reopenSaveAdmission, sealSaveAdmission, trackAcceptedSave } from "./saveDrain.ts";
 import type { ViewState } from "./types.ts";
 
@@ -93,21 +94,30 @@ test("a failed draining save is never silently skipped by a later successful one
 test("the whole accepted bulk flow survives a close while its preview is pending", async () => {
   const preview = deferred(), update = deferred();
   const calls: string[] = [];
-  const operation = applyBulkAnnotation({
-    bulkPreview: async () => { calls.push("preview"); await preview.promise; return { count: 1, previewToken: "checked" }; },
-    bulkUpdate: () => queueAnnotationWrite("close-bulk-parent", async () => {
-      calls.push("update"); await update.promise; return { updated: 1 };
-    }),
-  }, { projectId: "close-bulk-parent", target: "all", flag: "critical" }, { isCurrent: () => true });
-  let ready = false;
-  const closing = flushAllSaves().then(() => { ready = true; });
-  await turn(); assert.equal(ready, false);
-  preview.resolve(); await turn();
-  assert.deepEqual(calls, ["preview", "update"]);
-  assert.equal(ready, false, "the nested write created after close started must be drained too");
-  update.resolve();
-  assert.deepEqual(await operation, { updated: 1 });
-  await closing; sealSaveAdmission();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { value: {}, configurable: true });
+  mockIPC(async command => {
+    if (command === "bulk_preview") { calls.push("preview"); await preview.promise; return { count: 1, previewToken: "checked" }; }
+    assert.equal(command, "bulk_update");
+    calls.push("update"); await update.promise; return { updated: 1 };
+  });
+  const operation = createBackend().bulkApply({ projectId: "close-bulk-parent", target: "all", flag: "critical" }, () => true);
+  try {
+    let ready = false;
+    const closing = flushAllSaves().then(() => { ready = true; });
+    await turn(); assert.equal(ready, false);
+    preview.resolve(); await turn();
+    assert.deepEqual(calls, ["preview", "update"]);
+    assert.equal(ready, false, "the whole queued transaction remains pending through its write");
+    update.resolve();
+    assert.deepEqual(await operation, { updated: 1 });
+    await closing; sealSaveAdmission();
+  } finally {
+    preview.resolve(); update.resolve(); await operation.catch(() => {});
+    clearMocks();
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
 });
 
 test("accepted direct callbacks can finish after sealing and their failures remain visible", async () => {

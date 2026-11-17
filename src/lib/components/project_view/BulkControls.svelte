@@ -2,7 +2,7 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { errorMessage } from "../../errors";
-  import { applyBulkAnnotation, buildBulkAnnotateArgs, buildBulkPatch } from "../../bulkAnnotation";
+  import { buildBulkAnnotateArgs, buildBulkPatch } from "../../bulkAnnotation";
   import type { BulkFlag, BulkTagOperation, BulkTarget } from "../../bulkAnnotation";
   import { FLAG_OPTIONS } from './state';
   import { useWorkspace } from "../../workspaceContext";
@@ -82,11 +82,11 @@
         count = result.updated; resultKind = "restored";
         dispatch("refresh");
       } else {
-        const result = await applyBulkAnnotation(api, captureArgs(), {
+        const result = await api.bulkApply(captureArgs(),
           // A requested mutation survives closing its panel. While mounted,
           // changed form/query inputs cancel the pre-commit preview instead.
-          isCurrent: () => generation === ticket && (!alive || current()),
-        });
+          () => generation === ticket && (!alive || current()),
+        );
         if (!result) { if (owned()) error = "Target changed. Apply again."; return; }
         if (!owned()) return;
         count = result.updated; resultKind = "applied";

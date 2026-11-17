@@ -9,6 +9,7 @@ import type { ExtractBackend, ExtractPayload } from "./extractTypes";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 import { waitForWorkspaceSave } from "./workspaceSession.ts";
+import { applyBulkAnnotation } from "./bulkAnnotation.ts";
 import type {
   CellKind,
   ColorRule,
@@ -297,6 +298,7 @@ export interface Backend extends ExtractBackend {
   getCell(args: GetCellArgs): Promise<GetCellResult>;
   groupTree(args: GroupTreeArgs): Promise<GroupTreeResponse>;
   bulkPreview(args: BulkAnnotateArgs): Promise<BulkCount>;
+  bulkApply(args: BulkAnnotateArgs, isCurrent: () => boolean): Promise<BulkApplied | null>;
   bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied>;
   bulkUndo(args: BulkUndoArgs): Promise<BulkApplied>;
   saveIocs(args: SaveIocsArgs): Promise<void>;
@@ -554,37 +556,52 @@ class NativeBackend implements Backend {
     }, args);
   }
 
-  async bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
-    return queueAnnotationWrite(args.projectId, async () => {
-      const result = await invokeOwned<BulkApplied>("bulk_update", {
-        payload: {
-          projectId: args.projectId,
-          target: args.target,
-          rowIndices: args.rowIndices ?? null,
-          search: args.search ?? null,
-          searchColumns: args.searchColumns ?? null,
-          flagFilter: args.flagFilter ?? null,
-          bookmarkedOnly: args.bookmarkedOnly ?? null,
-          sortKey: args.sortKey ?? null,
-          sortDirection: args.sortDirection ?? null,
-          condition: args.condition ?? null,
-          previewToken: args.previewToken ?? null,
-          ...annotationFields(args),
-        },
-      }, args);
-      markBulkAnnotationsChanged(args.projectId);
-      return result;
-    });
+  bulkApply(args: BulkAnnotateArgs, isCurrent: () => boolean): Promise<BulkApplied | null> {
+    if (!isCurrent()) return Promise.resolve(null);
+    const snapshot = structuredClone(args);
+    // Reserve the whole Apply before its internal preview: an export or later
+    // edit must not overtake the user's accepted operation while it counts rows.
+    return queueAnnotationWrite(snapshot.projectId, () => applyBulkAnnotation({
+      bulkPreview: payload => this.bulkPreview(payload),
+      bulkUpdate: payload => this.performBulkUpdate(payload),
+    }, snapshot, { isCurrent }));
+  }
+
+  bulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
+    const snapshot = structuredClone(args);
+    return queueAnnotationWrite(snapshot.projectId, () => this.performBulkUpdate(snapshot));
+  }
+
+  private async performBulkUpdate(args: BulkAnnotateArgs): Promise<BulkApplied> {
+    const result = await invokeOwned<BulkApplied>("bulk_update", {
+      payload: {
+        projectId: args.projectId,
+        target: args.target,
+        rowIndices: args.rowIndices ?? null,
+        search: args.search ?? null,
+        searchColumns: args.searchColumns ?? null,
+        flagFilter: args.flagFilter ?? null,
+        bookmarkedOnly: args.bookmarkedOnly ?? null,
+        sortKey: args.sortKey ?? null,
+        sortDirection: args.sortDirection ?? null,
+        condition: args.condition ?? null,
+        previewToken: args.previewToken ?? null,
+        ...annotationFields(args),
+      },
+    }, args);
+    markBulkAnnotationsChanged(args.projectId);
+    return result;
   }
 
   async bulkUndo(args: BulkUndoArgs): Promise<BulkApplied> {
-    return queueAnnotationWrite(args.projectId, async () => {
+    const snapshot = structuredClone(args);
+    return queueAnnotationWrite(snapshot.projectId, async () => {
       const result = await invokeOwned<BulkApplied>("bulk_undo", {
         payload: {
-          projectId: args.projectId,
+          projectId: snapshot.projectId,
         },
-      }, args);
-      markBulkAnnotationsChanged(args.projectId);
+      }, snapshot);
+      markBulkAnnotationsChanged(snapshot.projectId);
       return result;
     });
   }
@@ -662,15 +679,16 @@ class NativeBackend implements Backend {
   }
 
   async updateFlag(args: UpdateFlagArgs): Promise<UpdateFlagResult> {
-    return queueAnnotationWrite(args.projectId, async () => {
+    const snapshot = structuredClone(args);
+    return queueAnnotationWrite(snapshot.projectId, async () => {
       const result = await invoke<UpdateFlagResult>("update_flag", {
         payload: {
-          projectId: args.projectId,
-          row_index: args.rowIndex,
-          ...annotationFields(args),
+          projectId: snapshot.projectId,
+          row_index: snapshot.rowIndex,
+          ...annotationFields(snapshot),
         },
       });
-      markAnnotationsChanged(args.projectId);
+      markAnnotationsChanged(snapshot.projectId);
       return result;
     });
   }

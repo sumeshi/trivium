@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
   import { createCompositionGuard } from '../../keyboard';
+  import { buildMemoPatch } from '../../memoAnnotation';
   import { useWorkspace } from "../../workspaceContext";
   const {
     memoEditor, backend, saveAnnotation, currentProjectId,
@@ -22,8 +23,9 @@
   export function hasUnsavedChanges(): boolean {
     const editor = get(memoEditor);
     if (!editor || memoSaving) return false;
-    return memoDraft !== (editor.row.memo ?? '') || bookmarkDraft !== (editor.row.bookmarked ?? false)
-      || tagDraft.trim().length > 0 || JSON.stringify(tagList) !== JSON.stringify(editor.row.tags ?? []);
+    return tagDraft.trim().length > 0 || Object.keys(buildMemoPatch(editor.row, {
+      memo: memoDraft, tags: tagList, bookmarked: bookmarkDraft,
+    })).length > 0;
   }
 
   export function focusDraft(): void {
@@ -68,26 +70,23 @@
   const saveMemo = async () => {
     const editor = get(memoEditor);
     if (!editor || memoSaving) return;
+    addTags();
+    const patch = buildMemoPatch(editor.row, { memo: memoDraft, tags: tagList, bookmarked: bookmarkDraft });
+    if (Object.keys(patch).length === 0) {
+      closeMemoEditor();
+      return;
+    }
     const backendInstance = get(backend);
     if (!backendInstance) {
       memoError = 'Backend is not available.';
       return;
     }
 
-    addTags();
-    // Notes are plain text, including XML, angle-bracket addresses and whitespace.
-    const memo = memoDraft;
-    const tags = [...tagList];
-    const bookmarked = bookmarkDraft;
     memoSaving = true;
     memoError = null;
 
     try {
-      const saved = await saveAnnotation(editor.projectId, editor.row, {
-        memo: memo.length ? memo : null,
-        tags,
-        bookmarked,
-      });
+      const saved = await saveAnnotation(editor.projectId, editor.row, patch);
       if (!saved || get(currentProjectId) !== editor.projectId) return;
 
       dispatch('notify', { message: 'Note updated.', tone: 'success' });

@@ -2,7 +2,6 @@ import type { AnnotationPatch, Backend, BulkAnnotateArgs } from "./backend";
 import type { BulkApplied } from "./types";
 import type { AppliedFilters } from "./components/project_view/state";
 import { errorMessage } from "./errors.ts";
-import { acceptSave } from "./saveDrain.ts";
 
 export type BulkTarget = "selection" | "filtered" | "all";
 export type BulkFlag = "keep" | NonNullable<AnnotationPatch["flag"]>;
@@ -52,28 +51,26 @@ export function buildBulkAnnotateArgs(input: {
   };
 }
 
-/** One Apply freezes its arguments, checks the target and commits with its token. */
-export function applyBulkAnnotation(
+/** One checked transaction; the backend reserves its per-case queue before calling. */
+export async function applyBulkAnnotation(
   api: Pick<Backend, "bulkPreview" | "bulkUpdate">,
   args: BulkAnnotateArgs,
   options: {
     isCurrent: () => boolean;
   },
 ): Promise<BulkApplied | null> {
-  if (!options.isCurrent()) return Promise.resolve(null);
-  return acceptSave(async () => {
-    const snapshot = structuredClone(args);
-    try {
-      const preview = await api.bulkPreview(snapshot);
-      if (!options.isCurrent()) return null;
-      // An empty operation must not replace the last useful undo record.
-      if (preview.count === 0) return { updated: 0 };
-      return await api.bulkUpdate({ ...snapshot, previewToken: preview.previewToken });
-    } catch (error) {
-      if (["Target changed; preview again.", "Annotations changed; preview again."].includes(errorMessage(error))) {
-        throw new Error("Target changed. Apply again.");
-      }
-      throw error;
+  if (!options.isCurrent()) return null;
+  const snapshot = structuredClone(args);
+  try {
+    const preview = await api.bulkPreview(snapshot);
+    if (!options.isCurrent()) return null;
+    // An empty operation must not replace the last useful undo record.
+    if (preview.count === 0) return { updated: 0 };
+    return await api.bulkUpdate({ ...snapshot, previewToken: preview.previewToken });
+  } catch (error) {
+    if (["Target changed; preview again.", "Annotations changed; preview again."].includes(errorMessage(error))) {
+      throw new Error("Target changed. Apply again.");
     }
-  });
+    throw error;
+  }
 }
