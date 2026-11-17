@@ -5480,7 +5480,7 @@ dependencies = [
 
 [[package]]
 name = "trivium-desktop"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5502,7 +5502,7 @@ dependencies = [
 
 [[package]]
 name = "trivium-engine"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
