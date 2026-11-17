@@ -23,6 +23,7 @@ pub struct FormatOccurrences<'a> {
     text: &'a str,
     offset: usize,
     finished: bool,
+    attempts: usize,
 }
 
 impl CompiledFormat {
@@ -105,6 +106,7 @@ impl CompiledFormat {
             text,
             offset: 0,
             finished: false,
+            attempts: 0,
         }
     }
 
@@ -113,16 +115,47 @@ impl CompiledFormat {
         self.occurrences(text)
             .any(|found| equals.is_none_or(|value| found.value == value))
     }
+
+    pub fn has_match_with_check(
+        &self,
+        text: &str,
+        equals: Option<&str>,
+        check: &mut impl FnMut() -> Result<(), AppError>,
+    ) -> Result<bool, AppError> {
+        let mut values = self.occurrences(text);
+        while let Some(found) = values.next_with_check(check)? {
+            if equals.is_none_or(|value| found.value == value) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 impl<'a> Iterator for FormatOccurrences<'a> {
     type Item = FormatOccurrence<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        self.next_with_check(&mut || Ok(()))
+            .expect("unchecked format traversal cannot fail")
+    }
+}
+
+impl<'a> FormatOccurrences<'a> {
+    /// Check work by regex attempts, including rejected and empty captures.
+    /// Counting only returned values leaves an invalid-only cell uncancellable.
+    pub fn next_with_check(
+        &mut self,
+        check: &mut impl FnMut() -> Result<(), AppError>,
+    ) -> Result<Option<FormatOccurrence<'a>>, AppError> {
         while !self.finished {
+            if self.attempts.is_multiple_of(256) {
+                check()?;
+            }
+            self.attempts = self.attempts.wrapping_add(1);
             let Some(captures) = self.matcher.regex.captures_at(self.text, self.offset) else {
                 self.finished = true;
-                return None;
+                return Ok(None);
             };
             let whole = captures.get(0).expect("a regex capture has a full match");
             if let Some(value) = captures
@@ -141,11 +174,11 @@ impl<'a> Iterator for FormatOccurrences<'a> {
                     {
                         continue;
                     }
-                    return Some(FormatOccurrence {
+                    return Ok(Some(FormatOccurrence {
                         value: value.as_str(),
                         start: value.start(),
                         end: value.end(),
-                    });
+                    }));
                 }
             }
             let end = whole.end().max(self.offset);
@@ -162,6 +195,6 @@ impl<'a> Iterator for FormatOccurrences<'a> {
                         .len_utf8();
             }
         }
-        None
+        Ok(None)
     }
 }

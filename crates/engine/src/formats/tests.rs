@@ -63,6 +63,60 @@ fn absent_and_zero_length_captures_do_not_count_or_skip_the_next_value() {
 }
 
 #[test]
+fn checked_traversal_can_cancel_inside_one_cell_without_any_returned_match() {
+    use crate::error::AppError;
+
+    for (pattern, validation, equals, text) in [
+        (
+            "(?P<value>x)",
+            Some(FormatValidation::Ipv4Like),
+            None,
+            "x".repeat(4096),
+        ),
+        ("x|(?P<value>z)", None, None, "x".repeat(4096)),
+        ("(?P<value>)", None, None, "日本".repeat(2048)),
+        ("(?P<value>x)", None, Some("not-x"), "x".repeat(4096)),
+    ] {
+        let mut definition = definition(pattern, Some("value"));
+        definition.validation = validation;
+        let matcher = CompiledFormat::new(&definition).unwrap();
+        let mut checks = 0;
+        let error = matcher
+            .has_match_with_check(&text, equals, &mut || {
+                checks += 1;
+                if checks == 2 {
+                    Err(AppError::Message("Cancelled.".into()))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Cancelled.", "{pattern}");
+        assert_eq!(
+            checks, 2,
+            "a rejected/empty capture must still reach checkpoints"
+        );
+    }
+}
+
+#[test]
+fn checked_traversal_preserves_unchecked_values_and_utf8_offsets() {
+    let matcher = CompiledFormat::new(&definition(
+        r"(?:\A|[ ,])(?P<value>[A-Z]+)(?:[ ,]|\z)",
+        Some("value"),
+    ))
+    .unwrap();
+    let text = "日本 AA,BB,AA 日本";
+    let expected = matcher.occurrences(text).collect::<Vec<_>>();
+    let mut checked = matcher.occurrences(text);
+    let mut actual = Vec::new();
+    while let Some(value) = checked.next_with_check(&mut || Ok(())).unwrap() {
+        actual.push(value);
+    }
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn anchors_keep_full_cell_meaning_after_each_occurrence() {
     let anchored = CompiledFormat::new(&definition(r"\A(?P<value>[A-Z])", Some("value"))).unwrap();
     assert_eq!(

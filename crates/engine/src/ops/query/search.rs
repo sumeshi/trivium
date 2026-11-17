@@ -204,10 +204,11 @@ impl PreparedQuery {
                     } else {
                         &[]
                     };
-                    mask[row_idx] = bound.eval_with_tags(
+                    mask[row_idx] = bound.eval_with_tags_and_check(
                         &cells,
                         self.needs_joined_text.then_some(joined.as_str()),
                         tags,
+                        &mut || job.check_cancelled(),
                     )?;
                 }
                 batch_start = batch_end;

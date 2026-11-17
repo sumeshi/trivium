@@ -150,7 +150,6 @@ fn walk(
     let selected = ids.map(|ids| SelectedRows::new(total_rows, ids));
     let expected = ids.map_or(total_rows, <[usize]>::len);
     let mut read_rows = 0;
-    let mut checked = 0usize;
     job.report_progress(0, Some(expected as u64), Some("Extracting values".into()));
     while let Some(batch) = reader.next_with_job(job) {
         let batch = batch.map_err(AppError::from)?;
@@ -184,11 +183,10 @@ fn walk(
                     std::borrow::Cow::Owned(value) => value.capacity(),
                     _ => 0,
                 };
-                for found in matcher.occurrences(&text) {
-                    if checked.is_multiple_of(256) {
-                        job.check_cancelled()?;
-                    }
-                    checked = checked.wrapping_add(1);
+                let mut occurrences = matcher.occurrences(&text);
+                while let Some(found) =
+                    occurrences.next_with_check(&mut || job.check_cancelled())?
+                {
                     accumulator.observe(row, found, transient)?;
                 }
             }

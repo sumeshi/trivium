@@ -2,7 +2,7 @@ use serde_json::Value;
 use std::{borrow::Cow, collections::HashMap};
 
 use super::{lookup, EvalError};
-use crate::{condition::model::FormatCondition, formats::CompiledFormat};
+use crate::{condition::model::FormatCondition, error::AppError, formats::CompiledFormat};
 
 #[derive(Debug)]
 pub struct PreparedFormat {
@@ -55,5 +55,21 @@ impl PreparedFormat {
             .flatten()
             .any(|cell| self.matcher.has_match(cell, self.equals.as_deref()));
         matched ^ self.negated
+    }
+
+    pub(super) fn eval_cells_with_check<'a>(
+        &self,
+        cells: impl Iterator<Item = Option<&'a str>>,
+        check: &mut impl FnMut() -> Result<(), AppError>,
+    ) -> Result<bool, AppError> {
+        for cell in cells.flatten() {
+            if self
+                .matcher
+                .has_match_with_check(cell, self.equals.as_deref(), check)?
+            {
+                return Ok(!self.negated);
+            }
+        }
+        Ok(self.negated)
     }
 }
