@@ -190,8 +190,10 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         bundled = wait_for(lambda: web.script("""
           return [...document.querySelectorAll('#search-pattern-menu .pattern-row')]
             .filter(e=>e.querySelector('[aria-label^="Copy "]')).map(e=>e.querySelector('strong').textContent.trim());
-        """), lambda names: len(names) >= 30, "expanded built-in pattern catalogue is available")
+        """), lambda names: "IPv4" in names, "built-in pattern catalogue is available")
         assert "IPv4" in bundled and not any("phone" in name.lower() for name in bundled), bundled
+        assert "Base64 candidate (32+ characters)" in bundled, bundled
+        assert not any(name.startswith("Hex data candidate") for name in bundled), bundled
         presentation = web.script("""
           const button=[...document.querySelectorAll('#search-pattern-menu .pattern-select')]
             .find(e=>e.querySelector('strong')?.textContent.trim()==='IPv4'),

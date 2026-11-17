@@ -32,10 +32,11 @@ fn embedded_definitions_are_available_without_any_user_directory() {
     assert!(entries
         .iter()
         .any(|entry| entry.definition.id == "ipv4" && entry.builtin));
-    assert!(
-        entries.len() >= 30,
-        "the standard catalogue covers the investigation formats"
-    );
+    assert_eq!(entries.len(), BUILTIN_FORMAT_JSON.len());
+    assert!(entries
+        .iter()
+        .any(|entry| entry.definition.id == "base64" && entry.builtin));
+    assert!(!entries.iter().any(|entry| entry.definition.id == "hex"));
     assert!(!entries
         .iter()
         .any(|entry| entry.definition.id.starts_with("phone")));
