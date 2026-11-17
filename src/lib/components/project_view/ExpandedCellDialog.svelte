@@ -3,6 +3,7 @@
   import { errorMessage } from '../../errors';
   import { isTabKey } from '../../keyboard';
   import { displayText } from '../../ipcValues';
+  import { writeClipboard } from '../../clipboard';
   import { createRowDetails, detailCopyValue, detailFilterValue } from '../../rowDetails';
   import { createRowDetailsNavigation } from '../../rowDetailsNavigation';
   import type { DetailNavigationState, DetailResultScope } from '../../rowDetailsNavigation';
@@ -208,28 +209,6 @@
     if (!value) return 'Wait for the full field value.';
     if (value.kind === 'missing') return 'This field is missing; there is no value to copy.';
     return value.kind === 'null' ? 'Copy null as the text null.' : 'Copy the full field value.';
-  };
-
-  const writeClipboard = async (text: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-    } catch { /* The user-initiated fallback also works when the API is denied. */ }
-    const textarea = document.createElement('textarea');
-    const focused = document.activeElement;
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.append(textarea);
-    try {
-      textarea.select();
-      if (!document.execCommand('copy')) throw new Error('Clipboard access was denied.');
-    } finally {
-      textarea.remove();
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
-    }
   };
 
   const copyField = async (column: string) => {

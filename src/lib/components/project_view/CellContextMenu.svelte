@@ -4,6 +4,7 @@
   import type { CachedRow } from './state';
 
   import { copyText } from '../../ipcValues';
+  import { writeClipboard } from '../../clipboard';
   import { useWorkspace } from "../../workspaceContext";
   const { backend, openCell, projectDetail, addFilterCondition, createReadScope } = useWorkspace();
 
@@ -114,21 +115,6 @@
     }
     addFilterCondition(columnId, op, value);
     close();
-  };
-
-  const writeClipboard = async (text: string) => {
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
   };
 
   const copyValue = async () => {

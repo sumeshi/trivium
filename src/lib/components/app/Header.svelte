@@ -5,6 +5,7 @@
   import AppearanceDialog from './AppearanceDialog.svelte';
   import { parseTheme } from '../../themeModel';
   import { BUILD_LABEL } from '../../buildInfo';
+  import { writeClipboard } from '../../clipboard';
   import { tableTextSize, TABLE_TEXT_SIZES, DEFAULT_TABLE_TEXT_SIZE, adjustTableTextSize, setTableTextSize } from '../../tableTextSize';
 
   export let projectDetail: LoadProjectResponse | null;
@@ -24,31 +25,9 @@
   const copyText = async (value: string, label: string) => {
     let copied = false;
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-        copied = true;
-      }
-    } catch {
-      // Some webviews expose the API while denying its permission. Try the
-      // user-initiated document copy path in that case too.
-    }
-    if (!copied) {
-      const input = document.createElement('textarea');
-      const focused = document.activeElement;
-      input.value = value;
-      input.style.position = 'fixed';
-      input.style.opacity = '0';
-      document.body.append(input);
-      try {
-        input.select();
-        copied = document.execCommand('copy');
-      } catch {
-        copied = false;
-      } finally {
-        input.remove();
-        if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
-      }
-    }
+      await writeClipboard(value);
+      copied = true;
+    } catch { /* The status below reports denied access. */ }
     copyMessage = copied ? `${label} copied` : `Could not copy ${label}`;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copyMessage = ''; }, 2400);
