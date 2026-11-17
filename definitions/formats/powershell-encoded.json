@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "powershell-encoded",
   "name": "PowerShell encoded-command payload",
-  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?i:(?:powershell|pwsh)(?:\\.exe)?)(?:[ \\t]+|[\"'][ \\t]+)[^;\\r\\n&|]*?(?i:-(?:e|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand))[ \\t]+(?P<value>[A-Za-z0-9+/]{16,}={0,2})(?:\\z|[^A-Za-z0-9+/=])",
+  "pattern": "(?:\\A|[^\\p{L}\\p{N}_])(?i:(?:powershell|pwsh)(?:\\.exe)?)(?:[ \\t]+|[\"'][ \\t]+)[^;\\r\\n&|]*?(?i:-(?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand))[ \\t]+(?P<value>[A-Za-z0-9+/]{16,}={0,2})(?:\\z|[^A-Za-z0-9+/=])",
   "valueGroup": "value",
   "validation": "powershell-encoded",
   "examples": [
@@ -10,6 +10,12 @@
       "text": "powershell.exe -NoProfile -EncodedCommand VwByAGkAdABlAC0ASABvAHMAdAAgACcAaABlAGwAbABvACcA",
       "values": [
         "VwByAGkAdABlAC0ASABvAHMAdAAgACcAaABlAGwAbABvACcA"
+      ]
+    },
+    {
+      "text": "powershell.exe -ec dwBoAG8AYQBtAGkA",
+      "values": [
+        "dwBoAG8AYQBtAGkA"
       ]
     },
     {
