@@ -2,13 +2,14 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { open, save } from '@tauri-apps/plugin-dialog';
-  import { readTextFile, writeTextFile, stat } from '@tauri-apps/plugin-fs';
+  import { writeTextFile } from '@tauri-apps/plugin-fs';
   import { useWorkspace } from '../../workspaceContext';
   import { formats, formatCatalogError, ensureFormatsLoaded, saveCustomFormat, deleteCustomFormat } from '../../patternCatalog';
   import { formatFileName, parseFormatDefinition } from '../../formats';
   import type { FormatCatalogEntry, FormatDefinition } from '../../formats';
   import { acceptSave } from '../../saveDrain';
   import { errorMessage } from '../../errors';
+  import { readImportText } from '../../boundedText';
   import PatternLabel from './PatternLabel.svelte';
 
   const { backend } = useWorkspace();
@@ -67,10 +68,7 @@
         const source = await open({ multiple: false, filters: [{ name: 'Trivium pattern', extensions: ['json'] }] });
         if (!source || destroyed) return;
         const path = Array.isArray(source) ? source[0] : source;
-        const info = await stat(path);
-        if (!info.isFile || info.size > 1024 * 1024) throw new Error('Choose a pattern JSON file smaller than 1 MiB.');
-        const text = await readTextFile(path);
-        if (text.length > 1024 * 1024) throw new Error('Pattern JSON must be smaller than 1 MiB.');
+        const text = await readImportText(path, 'pattern');
         const definition = parseFormatDefinition(JSON.parse(text));
         if (destroyed) return;
         if ($formats.some(entry => entry.builtin && entry.definition.id === definition.id)) {

@@ -55,6 +55,7 @@ fn main() {
             import_wallpaper,
             load_wallpaper,
             clear_wallpaper,
+            read_import_text,
             create_project,
             delete_project,
             load_project,

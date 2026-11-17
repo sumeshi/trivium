@@ -38,10 +38,10 @@ async function environment(run: (f: {
       if (command === "plugin:fs|read_dir") return [...files.keys()].filter(path => path.startsWith("/managed/themes/"))
         .map(path => ({ name: path.split("/").at(-1), isFile: true }));
       const path = (args as { path: string })?.path;
-      if (command === "plugin:fs|stat") return { size: files.get(path)?.length ?? 0 };
-      if (command === "plugin:fs|read_text_file") {
+      if (command === "plugin:fs|read_text_file" || command === "read_import_text") {
         await reads.get(path);
-        return [...new TextEncoder().encode(files.get(path) ?? "")];
+        const text = files.get(path) ?? "";
+        return command === "read_import_text" ? text : [...new TextEncoder().encode(text)];
       }
       if (command === "plugin:fs|write_text_file") {
         const destination = decodeURIComponent(options?.headers?.path ?? "");

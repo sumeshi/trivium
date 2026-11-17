@@ -130,8 +130,8 @@ fn copy_source_and_hash(
     job: &JobContext,
 ) -> Result<CopiedSource, AppError> {
     job.check_cancelled()?;
-    let mut input =
-        File::open(source).map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
+    let mut input = crate::source_file::open_regular(source)
+        .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
     let before = input
         .metadata()
         .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;

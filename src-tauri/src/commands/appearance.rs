@@ -1,7 +1,7 @@
 //! A wallpaper is a bounded, normalized copy in this application's data directory.
 //! No original file path or arbitrary URL is retained in appearance settings.
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Cursor, Read, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -95,25 +95,7 @@ pub async fn clear_wallpaper(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let file =
-        File::open(path).map_err(|error| format!("Could not open background image: {error}"))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| format!("Could not inspect background image: {error}"))?;
-    if !metadata.is_file() {
-        return Err("Choose a regular PNG, JPEG or WebP image file.".into());
-    }
-    if metadata.len() > MAX_BYTES as u64 {
-        return Err("Background image must be 16 MiB or smaller.".into());
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take((MAX_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("Could not read background image: {error}"))?;
-    if bytes.len() > MAX_BYTES {
-        return Err("Background image must be 16 MiB or smaller.".into());
-    }
-    Ok(bytes)
+    super::bounded_file::read_bounded(path, MAX_BYTES)
 }
 
 fn decoder_limits() -> Limits {
@@ -158,6 +140,83 @@ fn decode<D: ImageDecoder>(mut decoder: D, pixels: u64, edge: u32) -> Result<Dyn
     Ok(image)
 }
 
+fn validate_webp_container(bytes: &[u8], pixels: u64, edge: u32) -> Result<(), String> {
+    let invalid = || "Background WebP contains a truncated or invalid RIFF chunk.".to_string();
+    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WEBP" {
+        return Err(invalid());
+    }
+    let declared = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    if declared.checked_add(8) != Some(bytes.len()) {
+        return Err(invalid());
+    }
+    let mut position = 12usize;
+    let mut canvas = None;
+    let mut frame = None;
+    let animated =
+        || "Animated WebP backgrounds are not supported. Choose a static image.".to_string();
+    while position < bytes.len() {
+        let header_end = position.checked_add(8).ok_or_else(invalid)?;
+        if header_end > bytes.len() {
+            return Err(invalid());
+        }
+        let length =
+            u32::from_le_bytes(bytes[position + 4..header_end].try_into().unwrap()) as usize;
+        let payload_end = header_end.checked_add(length).ok_or_else(invalid)?;
+        let padded_end = payload_end.checked_add(length & 1).ok_or_else(invalid)?;
+        if padded_end > bytes.len() {
+            return Err(invalid());
+        }
+        let payload = &bytes[header_end..payload_end];
+        let dimensions = match &bytes[position..position + 4] {
+            b"VP8X" => {
+                if payload.len() != 10 {
+                    return Err(invalid());
+                }
+                if payload[0] & 2 != 0 {
+                    return Err(animated());
+                }
+                let width = u32::from_le_bytes([payload[4], payload[5], payload[6], 0]) + 1;
+                let height = u32::from_le_bytes([payload[7], payload[8], payload[9], 0]) + 1;
+                canvas = Some((width, height));
+                Some((width, height))
+            }
+            b"VP8 " => {
+                if payload.len() < 10 || payload[0] & 1 != 0 || payload[3..6] != [0x9d, 1, 0x2a] {
+                    return Err(invalid());
+                }
+                let width = u32::from(u16::from_le_bytes([payload[6], payload[7]]) & 0x3fff);
+                let height = u32::from(u16::from_le_bytes([payload[8], payload[9]]) & 0x3fff);
+                frame = Some((width, height));
+                Some((width, height))
+            }
+            b"VP8L" => {
+                if payload.len() < 5 || payload[0] != 0x2f {
+                    return Err(invalid());
+                }
+                let header = u32::from_le_bytes(payload[1..5].try_into().unwrap());
+                let dimensions = ((header & 0x3fff) + 1, ((header >> 14) & 0x3fff) + 1);
+                frame = Some(dimensions);
+                Some(dimensions)
+            }
+            // The codec inspects ANMF subchunks even without the animation
+            // flag. Reject animation containers before their nested metadata
+            // can bypass these top-level bounds and static-frame checks.
+            b"ANIM" | b"ANMF" => return Err(animated()),
+            _ => None,
+        };
+        if let Some((width, height)) = dimensions {
+            check_dimensions(width, height, pixels, edge)?;
+        }
+        if let (Some(canvas), Some(frame)) = (canvas, frame) {
+            if canvas != frame {
+                return Err("Background WebP frame dimensions do not match its canvas.".into());
+            }
+        }
+        position = padded_end;
+    }
+    Ok(())
+}
+
 fn decode_static(bytes: &[u8], pixels: u64, edge: u32) -> Result<DynamicImage, String> {
     let format = image::guess_format(bytes)
         .map_err(|_| "Choose a PNG, JPEG or WebP image file.".to_string())?;
@@ -179,6 +238,12 @@ fn decode_static(bytes: &[u8], pixels: u64, edge: u32) -> Result<DynamicImage, S
             edge,
         ),
         ImageFormat::WebP => {
+            // The WebP decoder allocates metadata using declared RIFF lengths.
+            // Validate every chunk against the bounded source before it can read
+            // EXIF orientation; its generic ImageDecoder limits do not cover it.
+            // VP8X canvas dimensions can differ from the embedded VP8 header.
+            // Check both before the codec allocates its internal frame buffers.
+            validate_webp_container(bytes, pixels, edge)?;
             let decoder = WebPDecoder::new(Cursor::new(bytes)).map_err(error)?;
             if decoder.has_animation() {
                 return Err(

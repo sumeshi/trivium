@@ -1,10 +1,11 @@
-import { mkdir, readDir, readTextFile, stat, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { get, writable } from "svelte/store";
 import { createThemePreference, DEFAULT_THEME, EDITABLE_THEME_COLORS, getUserTheme, parseSavedTheme,
   parseTheme, parseUserTheme, registerUserTheme, THEME_OPTIONS, themeBase } from "./themeModel.ts";
 import type { Theme, UserTheme } from "./themeModel";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
+import { readImportText } from "./boundedText.ts";
 
 export { THEME_OPTIONS } from "./themeModel.ts";
 export type { Theme } from "./themeModel";
@@ -49,9 +50,7 @@ async function themeDirectory() {
   return join(await appLocalDataDir(), "themes");
 }
 async function readThemeFile(path: string) {
-  const info = await stat(path);
-  if (info.size > 65_536) throw new Error("Theme JSON must be 64 KiB or smaller.");
-  return parseUserTheme(await readTextFile(path));
+  return parseUserTheme(await readImportText(path, "theme"));
 }
 export async function initTheme() {
   const revision = ++themeRevision;

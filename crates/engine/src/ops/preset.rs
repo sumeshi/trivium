@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::Context as _;
@@ -143,7 +142,9 @@ pub fn load_preset(
     payload: LoadPresetPayload,
 ) -> Result<PresetData, AppError> {
     let path = PathBuf::from(&payload.source);
-    let data = fs::read(&path)
+    let mut data = Vec::new();
+    crate::source_file::open_regular(&path)
+        .and_then(|mut file| file.read_to_end(&mut data))
         .with_context(|| format!("failed to read preset {}", payload.source))
         .map_err(AppError::from)?;
     let mut preset: PresetFile = serde_json::from_slice(&data)

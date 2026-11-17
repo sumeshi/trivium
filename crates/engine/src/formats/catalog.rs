@@ -1,7 +1,7 @@
 //! Built-in and managed user definitions share the same validated format schema.
 use std::{
     collections::HashSet,
-    fs::{self, File},
+    fs,
     io::Read,
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -139,7 +139,7 @@ fn ordinary_file(path: &Path) -> Result<(), AppError> {
 
 fn custom_definition(path: &Path) -> Result<FormatDefinition, AppError> {
     let mut bytes = Vec::new();
-    File::open(path)
+    crate::source_file::open_regular(path)
         .map_err(|error| AppError::Other(error.into()))?
         .take(MAX_FORMAT_BYTES + 1)
         .read_to_end(&mut bytes)

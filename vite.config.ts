@@ -18,7 +18,19 @@ export default defineConfig({
     __TRIVIUM_VERSION__: JSON.stringify(version),
     __TRIVIUM_COMMIT__: JSON.stringify(commit.slice(0, 7)),
   },
-  plugins: [svelte()],
+  plugins: [
+    {
+      name: 'disable-editor-launch',
+      configureServer(server) {
+        // This desktop app has no browser inspector that needs to launch a
+        // host editor. Register before Vite's built-in editor middleware.
+        server.middlewares.use('/__open-in-editor', (_request, response) => {
+          response.writeHead(404).end();
+        });
+      },
+    },
+    svelte(),
+  ],
   server: {
     port: 5173,
     strictPort: true

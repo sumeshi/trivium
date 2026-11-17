@@ -70,10 +70,9 @@ pub fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> 
 }
 
 pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
-    let mut reader = ReaderBuilder::new()
-        .has_headers(true)
-        .from_path(path)
+    let source = crate::source_file::open_regular(path)
         .with_context(|| format!("failed to open IOC CSV {:?}", path))?;
+    let mut reader = ReaderBuilder::new().has_headers(true).from_reader(source);
     let mut entries = Vec::new();
     for (index, record) in reader.records().enumerate() {
         let record = record.with_context(|| "failed to read IOC CSV record")?;

@@ -14,6 +14,7 @@ mod number;
 pub mod ops;
 pub mod project_io;
 pub mod search;
+pub mod source_file;
 pub mod storage;
 pub mod store;
 pub mod value_utils;

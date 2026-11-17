@@ -102,10 +102,10 @@ async function environment(run: (f: { files: Map<string, string>; cache: Map<str
       if (command === "plugin:fs|mkdir") return;
       if (command === "plugin:fs|read_dir") return [...files.keys()].filter(path => path.startsWith("/managed/themes/"))
         .map(path => ({ name: path.split("/").at(-1), isFile: true }));
-      if (command === "plugin:fs|stat") return { size: files.get((args as { path: string }).path)?.length ?? 0 };
-      if (command === "plugin:fs|read_text_file") {
+      if (command === "plugin:fs|read_text_file" || command === "read_import_text") {
         const path = (args as { path: string }).path;
-        return handleRead(path, [...new TextEncoder().encode(files.get(path) ?? "")]);
+        const bytes = await handleRead(path, [...new TextEncoder().encode(files.get(path) ?? "")]);
+        return command === "read_import_text" ? new TextDecoder().decode(Uint8Array.from(bytes)) : bytes;
       }
       if (command === "plugin:fs|write_text_file") {
         const path = decodeURIComponent(options?.headers?.path ?? "");
@@ -158,6 +158,20 @@ test("failed custom theme writes never replace the active palette or register un
     await assert.rejects(importThemeFile("/source/fail.json"), /Appearance disk failure/);
     assert.equal(get(theme), "dark");
     assert.equal(getUserTheme("user:failed-import-theme"), null);
+    await assert.rejects(flushAllSaves(), /save or export failed/);
+  });
+});
+
+test("theme imports use the bounded native reader and a rejected source leaves the palette and catalog unchanged", async () => {
+  await environment(async f => {
+    await setTheme("dark");
+    const source = "/source/rejected.json", before = f.writes.length;
+    f.readHandler(async path => { assert.equal(path, source); throw new Error("Choose a regular file."); });
+    await assert.rejects(importThemeFile(source), /regular file/);
+    assert.equal(get(theme), "dark");
+    assert.equal(f.writes.length, before);
+    assert.ok(f.calls.includes("read_import_text"));
+    assert.ok(!f.calls.includes("plugin:fs|stat") && !f.calls.includes("plugin:fs|read_text_file"));
     await assert.rejects(flushAllSaves(), /save or export failed/);
   });
 });

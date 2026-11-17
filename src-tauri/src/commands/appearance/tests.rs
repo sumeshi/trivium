@@ -25,6 +25,24 @@ fn fixture(format: ImageFormat) -> Vec<u8> {
     bytes.into_inner()
 }
 
+fn webp_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut chunk = kind.to_vec();
+    chunk.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    chunk.extend_from_slice(data);
+    if data.len() % 2 != 0 {
+        chunk.push(0);
+    }
+    chunk
+}
+
+fn webp_container(chunks: &[u8]) -> Vec<u8> {
+    let mut bytes = b"RIFF".to_vec();
+    bytes.extend_from_slice(&((chunks.len() + 4) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WEBP");
+    bytes.extend_from_slice(chunks);
+    bytes
+}
+
 #[test]
 fn png_jpeg_and_webp_are_normalized_to_static_managed_images() {
     for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::WebP] {
@@ -121,15 +139,6 @@ fn oversized_header_and_animated_png_are_rejected_before_pixel_decode() {
 
 #[test]
 fn animated_webp_is_rejected_without_decoding_frames() {
-    fn webp_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
-        let mut chunk = kind.to_vec();
-        chunk.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        chunk.extend_from_slice(data);
-        if data.len() % 2 != 0 {
-            chunk.push(0);
-        }
-        chunk
-    }
     let still = fixture(ImageFormat::WebP);
     let mut body = b"WEBP".to_vec();
     body.extend_from_slice(&webp_chunk(b"VP8X", &[2, 0, 0, 0, 23, 0, 0, 11, 0, 0]));
@@ -142,6 +151,114 @@ fn animated_webp_is_rejected_without_decoding_frames() {
     animated.extend_from_slice(&body);
     let error = prepare(&animated).err().unwrap();
     assert!(error.contains("Animated WebP"), "{error}");
+}
+
+#[test]
+fn webp_metadata_lengths_are_checked_before_the_codec_reads_them() {
+    for kind in [b"EXIF", b"ICCP", b"XMP "] {
+        let mut chunks = webp_chunk(b"VP8X", &[8, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        chunks.extend_from_slice(&webp_chunk(b"VP8L", &[0x2f, 0, 0, 0, 0]));
+        chunks.extend_from_slice(kind);
+        chunks.extend_from_slice(&0xffff_ff00u32.to_le_bytes());
+        let bytes = webp_container(&chunks);
+        assert_eq!(bytes.len(), 52);
+        // Check the allocation-free preflight first. If it regresses, fail here
+        // without letting the codec request the forged multi-gigabyte buffer.
+        let error = validate_webp_container(&bytes, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).unwrap_err();
+        assert!(error.contains("RIFF"), "{error}");
+        assert!(prepare(&bytes).err().unwrap().contains("RIFF"));
+    }
+}
+
+#[test]
+fn unflagged_webp_animation_chunks_cannot_import_unbounded_nested_metadata() {
+    let mut nested = vec![0; 16];
+    nested.extend_from_slice(b"EXIF");
+    nested.extend_from_slice(&0xffff_ff00u32.to_le_bytes());
+    for kind in [b"ANMF", b"ANIM"] {
+        let mut chunks = webp_chunk(b"VP8X", &[0; 10]);
+        chunks.extend_from_slice(&webp_chunk(b"VP8L", &[0x2f, 0, 0, 0, 0]));
+        chunks.extend_from_slice(&webp_chunk(kind, &nested));
+        let bytes = webp_container(&chunks);
+        assert_eq!(bytes.len(), 76);
+        // ANMF subchunks are inspected by the codec even when VP8X says the
+        // image is static. Fail here before a regression could allocate EXIF.
+        let error = validate_webp_container(&bytes, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).unwrap_err();
+        assert!(error.contains("Animated WebP"), "{error}");
+        assert!(prepare(&bytes).err().unwrap().contains("Animated WebP"));
+    }
+}
+
+#[test]
+fn webp_rejects_truncated_headers_padding_and_unvalidated_trailing_chunks() {
+    let valid = fixture(ImageFormat::WebP);
+    let mut wrong_length = valid.clone();
+    wrong_length[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(validate_webp_container(&wrong_length, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).is_err());
+
+    let incomplete_header = webp_container(b"EXIF");
+    assert!(validate_webp_container(&incomplete_header, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).is_err());
+
+    let mut missing_padding = webp_chunk(b"XMP ", b"x");
+    missing_padding.pop();
+    let missing_padding = webp_container(&missing_padding);
+    assert!(validate_webp_container(&missing_padding, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).is_err());
+
+    let mut trailing = valid;
+    trailing.extend_from_slice(b"EXIF\0\xff\xff\xff");
+    assert!(validate_webp_container(&trailing, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).is_err());
+}
+
+#[test]
+fn webp_checks_embedded_frame_geometry_before_allocating_decoder_buffers() {
+    for lossless in [false, true] {
+        let mut chunks = webp_chunk(b"VP8X", &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let frame = if lossless {
+            let header = (16_383u32 - 1) | ((16_383u32 - 1) << 14);
+            let mut data = vec![0x2f];
+            data.extend_from_slice(&header.to_le_bytes());
+            webp_chunk(b"VP8L", &data)
+        } else {
+            let mut data = vec![0, 0, 0, 0x9d, 1, 0x2a];
+            data.extend_from_slice(&16_383u16.to_le_bytes());
+            data.extend_from_slice(&16_383u16.to_le_bytes());
+            webp_chunk(b"VP8 ", &data)
+        };
+        chunks.extend_from_slice(&frame);
+        let bytes = webp_container(&chunks);
+        // As above, fail before entering the codec if the guard ever regresses.
+        let error = validate_webp_container(&bytes, MAX_INPUT_PIXELS, MAX_INPUT_EDGE).unwrap_err();
+        assert!(error.contains("32 million"), "{error}");
+        assert!(prepare(&bytes).err().unwrap().contains("32 million"));
+    }
+
+    let still = fixture(ImageFormat::WebP);
+    let mut chunks = webp_chunk(b"VP8X", &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    chunks.extend_from_slice(&still[12..]);
+    let bytes = webp_container(&chunks);
+    assert!(prepare(&bytes)
+        .err()
+        .unwrap()
+        .contains("do not match its canvas"));
+}
+
+#[test]
+fn lossy_lossless_and_extended_webp_still_accept_bounded_metadata() {
+    // A 24x12 opaque lossy WebP, generated independently of image's lossless encoder.
+    let lossy = STANDARD.decode("UklGRkAAAABXRUJQVlA4IDQAAADwAgCdASoYAAwAPm0skkWkIqGYBABABsSgC1FoAAgbAAD+4uC/amCSMwt/dBlnDPtHAAAA").unwrap();
+    for still in [lossy, fixture(ImageFormat::WebP)] {
+        let plain = prepare(&still).unwrap();
+        assert_eq!((plain.width, plain.height), (24, 12));
+        let mut chunks = webp_chunk(b"VP8X", &[44, 0, 0, 0, 23, 0, 0, 11, 0, 0]);
+        chunks.extend_from_slice(&webp_chunk(b"ICCP", b"icc"));
+        chunks.extend_from_slice(&still[12..]);
+        chunks.extend_from_slice(&webp_chunk(b"EXIF", b"Exif\0\0"));
+        chunks.extend_from_slice(&webp_chunk(b"XMP ", b"xmp"));
+        let extended = webp_container(&chunks);
+        let prepared = prepare(&extended).unwrap();
+        assert_eq!((prepared.width, prepared.height), (24, 12));
+        assert_eq!(prepared.mime, "image/jpeg");
+    }
 }
 
 #[test]
@@ -172,7 +289,7 @@ fn failed_import_keeps_the_previous_copy_and_never_changes_the_source() {
 fn oversized_files_are_refused_without_reading_them_into_memory() {
     let directory = Directory::new();
     let source = directory.0.join("oversized.png");
-    File::create(&source)
+    fs::File::create(&source)
         .unwrap()
         .set_len(MAX_BYTES as u64 + 1)
         .unwrap();

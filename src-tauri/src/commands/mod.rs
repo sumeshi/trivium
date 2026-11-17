@@ -1,4 +1,5 @@
 mod appearance;
+mod bounded_file;
 mod bulk;
 mod cell;
 mod close;
@@ -32,6 +33,7 @@ mod view;
 // path-based re-exports of macro-expanded `#[macro_export]` macros are
 // rejected by rustc (rust-lang/rust#52234).
 pub use appearance::{clear_wallpaper, import_wallpaper, load_wallpaper};
+pub use bounded_file::read_import_text;
 pub use bulk::{bulk_preview, bulk_undo, bulk_update};
 pub use cell::get_cell;
 pub use close::{app_close_requested, cancel_app_close, finish_app_close};
