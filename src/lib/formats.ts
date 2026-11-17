@@ -6,7 +6,8 @@ export type FormatCatalogEntry = Wire.FormatCatalogEntry;
 export type FormatCondition = Wire.FormatCondition;
 export type FormatValidation = Wire.FormatValidation;
 
-const VALIDATIONS: readonly FormatValidation[] = ["ipv6", "ipv4-cidr", "ipv6-cidr", "ip-port", "http-url", "domain",
+const VALIDATIONS: readonly FormatValidation[] = ["ipv4-like", "ipv6-like", "domain-like", "http-url-like",
+  "ipv6", "ipv4-cidr", "ipv6-cidr", "ip-port", "http-url", "domain",
   "email", "mac", "windows-sid", "uuid", "cve", "defanged-ipv4", "defanged-url", "defanged-domain",
   "powershell-encoded", "jwt", "pem", "ssh-public-key", "bitlocker-recovery-key", "base64", "hex"];
 

@@ -111,7 +111,7 @@ fn builtin_ipv4_preserves_all_addresses_and_rejects_invalid_boundaries() {
         ipv4.occurrences("src:10.0.0.1,8.8.8.8:443")
             .map(|value| value.value)
             .collect::<Vec<_>>(),
-        ["10.0.0.1", "8.8.8.8"]
+        ["10.0.0.1", "8.8.8.8:443"]
     );
     assert!(!ipv4.has_match("256.1.2.3 1.2.3.4.5 001.2.3.4", None));
     for address in [

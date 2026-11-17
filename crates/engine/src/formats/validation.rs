@@ -19,6 +19,10 @@ pub(super) fn accepts(kind: FormatValidation, value: &str) -> bool {
         return false;
     }
     match kind {
+        Ipv4Like => network::ipv4_like(value),
+        Ipv6Like => network::ipv6_like(value),
+        DomainLike => network::domain_like(value),
+        HttpUrlLike => network::http_url_like(value),
         Ipv6 => network::ipv6(value),
         Ipv4Cidr => network::cidr(value, false),
         Ipv6Cidr => network::cidr(value, true),

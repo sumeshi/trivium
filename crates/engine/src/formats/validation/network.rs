@@ -1,4 +1,46 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    borrow::Cow,
+    net::{Ipv4Addr, Ipv6Addr},
+};
+
+/// Refanging belongs only to validation. Matchers still return the raw capture.
+fn plain_value(value: &str) -> Cow<'_, str> {
+    if is_defanged(value) {
+        Cow::Owned(refang(value))
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+pub(super) fn ipv4_like(value: &str) -> bool {
+    let value = plain_value(value);
+    if value.contains('/') {
+        cidr(&value, false)
+    } else if value.contains(':') {
+        ipv4_endpoint(&value)
+    } else {
+        value.parse::<Ipv4Addr>().is_ok()
+    }
+}
+
+pub(super) fn ipv6_like(value: &str) -> bool {
+    if let Some(inner) = value.strip_prefix('[') {
+        inner.strip_suffix(']').is_some_and(ipv6) || ipv6_endpoint(value)
+    } else if value.contains('/') {
+        cidr(value, true)
+    } else {
+        // A final hexadecimal segment is an address component, not a port.
+        ipv6(value)
+    }
+}
+
+pub(super) fn domain_like(value: &str) -> bool {
+    domain(&plain_value(value))
+}
+
+pub(super) fn http_url_like(value: &str) -> bool {
+    http_url(&plain_value(value))
+}
 
 pub(super) fn ipv6(value: &str) -> bool {
     let address = if let Some((address, zone)) = value.split_once('%') {
@@ -39,11 +81,18 @@ fn port(value: &str) -> bool {
 }
 
 pub(super) fn endpoint(value: &str) -> bool {
-    if let Some(value) = value.strip_prefix('[') {
-        return value
+    ipv4_endpoint(value) || ipv6_endpoint(value)
+}
+
+fn ipv6_endpoint(value: &str) -> bool {
+    value.strip_prefix('[').is_some_and(|value| {
+        value
             .split_once("]:")
-            .is_some_and(|(host, service)| ipv6(host) && port(service));
-    }
+            .is_some_and(|(host, service)| ipv6(host) && port(service))
+    })
+}
+
+fn ipv4_endpoint(value: &str) -> bool {
     value
         .rsplit_once(':')
         .is_some_and(|(host, service)| host.parse::<Ipv4Addr>().is_ok() && port(service))

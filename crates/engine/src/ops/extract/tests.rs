@@ -450,17 +450,38 @@ fn no_matches_opens_a_valid_header_only_csv() {
 #[test]
 fn a_non_ip_format_uses_the_same_three_column_csv_and_distinct_row_counts() {
     let case = Case::new(
-        "cve.csv",
-        "first,second\n\"CVE-2026-1234,CVE-2026-1234\",CVE-2026-1234\nCVE-2026-1234,\n",
+        "email.csv",
+        "first,second\n\"a@example.com,a@example.com\",a@example.com\na@example.com,\n",
     );
     let mut payload = case.payload();
-    payload.format =
-        serde_json::from_str(include_str!("../../../../../definitions/formats/cve.json")).unwrap();
+    payload.format = serde_json::from_str(include_str!(
+        "../../../../../definitions/formats/email.json"
+    ))
+    .unwrap();
     let result = extract_values(&case.store, payload, &JobContext::none()).unwrap();
     assert_eq!(
         case.values(&result),
-        vec![record("CVE-2026-1234", "4", "2")]
+        vec![record("a@example.com", "4", "2")]
     );
     assert_eq!(result.meta.columns.len(), 3);
+    case.assert_no_generation_files();
+}
+
+#[test]
+fn merged_network_csv_keeps_ports_prefixes_and_defanged_spelling_as_distinct_values() {
+    let case = Case::new(
+        "network.csv",
+        "first,second\n\"10.0.0.1,10.0.0.1:443,10.0.0.1/24,10[.]0[.]0[.]1\",10.0.0.1:443\n10.0.0.1/24,10[.]0[.]0[.]1\n",
+    );
+    let result = extract_values(&case.store, case.payload(), &JobContext::none()).unwrap();
+    assert_eq!(
+        case.values(&result),
+        vec![
+            record("10.0.0.1/24", "2", "2"),
+            record("10.0.0.1:443", "2", "1"),
+            record("10[.]0[.]0[.]1", "2", "2"),
+            record("10.0.0.1", "1", "1"),
+        ]
+    );
     case.assert_no_generation_files();
 }

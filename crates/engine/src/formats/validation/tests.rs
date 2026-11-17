@@ -5,6 +5,103 @@ use super::{accepts, network, structured};
 use crate::formats::{CompiledFormat, FormatDefinition, FormatValidation as V};
 
 #[test]
+fn combined_network_validation_checks_the_whole_token_without_normalizing_it() {
+    for (kind, valid, invalid) in [
+        (V::Ipv4Like, "192.0.2.1", "192.0.2.999"),
+        (V::Ipv4Like, "192[.]0(.)2{.}1:443", "192.0.2.1:65536"),
+        (V::Ipv4Like, "192.0.2.5/24", "192.0.2.1/33"),
+        (V::Ipv4Like, "192.0.2.1:0", "192.0.2.1:bad"),
+        (V::Ipv4Like, "192.0.2.1/32", "192.0.2.1/24:80"),
+        (V::Ipv4Like, "192.0.2.1/0", "192.0.2.1/bad"),
+        (V::Ipv6Like, "2001:db8::1", "2001:db8:::1"),
+        (V::Ipv6Like, "[::1]:443", "[::1]:65536"),
+        (V::Ipv6Like, "[::1]", "[::1]/128"),
+        (V::Ipv6Like, "[fe80::1%eth0]:80", "[::1]:bad"),
+        (V::Ipv6Like, "::/0", "::/129"),
+        (V::Ipv6Like, "2001:db8::1:443", "2001:db8::/bad"),
+        (V::DomainLike, "one[.]example.", "one[.][.]example"),
+        (V::DomainLike, "one.example", "-one.example"),
+        (
+            V::HttpUrlLike,
+            "hxxps://one[.]example/a",
+            "hxxps://one[.]example:99999/a",
+        ),
+        (
+            V::HttpUrlLike,
+            "https://one.example/a",
+            "https://one.example/%zz",
+        ),
+    ] {
+        assert!(accepts(kind, valid), "{kind:?}: {valid}");
+        assert!(!accepts(kind, invalid), "{kind:?}: {invalid}");
+    }
+    assert!(!accepts(V::Ipv4Like, "[::1]:443"));
+    assert!(!accepts(V::Ipv6Like, "192.0.2.1:443"));
+}
+
+#[test]
+fn frozen_validation_kinds_keep_their_previous_meaning_after_catalog_merges() {
+    for (strict, combined, value) in [
+        (V::Domain, V::DomainLike, "one[.]example"),
+        (V::HttpUrl, V::HttpUrlLike, "hxxps://one[.]example/a"),
+        (V::Ipv6, V::Ipv6Like, "[::1]:443"),
+        (V::Ipv4Cidr, V::Ipv4Like, "192.0.2.1"),
+        (V::IpPort, V::Ipv4Like, "192.0.2.1/24"),
+        (V::DefangedIpv4, V::Ipv4Like, "192.0.2.1"),
+    ] {
+        let mut definition: FormatDefinition = serde_json::from_value(json!({
+            "schemaVersion": 1, "id": "frozen", "name": "Saved pattern",
+            "pattern": "(?P<value>[^\\s]+)", "valueGroup": "value", "validation": strict
+        }))
+        .unwrap();
+        let snapshot = serde_json::to_vec(&definition).unwrap();
+        let restored = serde_json::from_slice(&snapshot).unwrap();
+        assert!(!CompiledFormat::new(&restored)
+            .unwrap()
+            .has_match(value, None));
+        definition.validation = Some(combined);
+        let matched = CompiledFormat::new(&definition).unwrap();
+        assert_eq!(matched.occurrences(value).next().unwrap().value, value);
+        assert_eq!(serde_json::to_vec(&restored).unwrap(), snapshot);
+    }
+}
+
+#[test]
+fn merged_patterns_keep_full_raw_tokens_without_salvaging_bad_suffixes() {
+    for (source, text, expected) in [
+        (
+            include_str!("../../../../../definitions/formats/ipv4.json"),
+            "日本 src:192.0.2.1:bad 192.0.2.1:65536 192.0.2.1/33,192.0.2.1/24,192[.]0[.]2[.]1:443,192.0.2.1",
+            vec!["192.0.2.1/24", "192[.]0[.]2[.]1:443", "192.0.2.1"],
+        ),
+        (
+            include_str!("../../../../../definitions/formats/ipv6.json"),
+            "日本 [::1]:bad,[::1]:65536,::1/129,[::1]:443,::1/128,::1:443,[::1]",
+            vec!["[::1]:443", "::1/128", "::1:443", "[::1]"],
+        ),
+        (
+            include_str!("../../../../../definitions/formats/domain.json"),
+            "日本 one[.]example,one.example.,one(.)example",
+            vec!["one[.]example", "one.example.", "one(.)example"],
+        ),
+        (
+            include_str!("../../../../../definitions/formats/url.json"),
+            "日本 hxxps://one[.]example/a,https://one.example/a",
+            vec!["hxxps://one[.]example/a", "https://one.example/a"],
+        ),
+    ] {
+        let definition: FormatDefinition = serde_json::from_str(source).unwrap();
+        let matcher = CompiledFormat::new(&definition).unwrap();
+        let found = matcher.occurrences(text).collect::<Vec<_>>();
+        assert_eq!(found.iter().map(|hit| hit.value).collect::<Vec<_>>(), expected, "{}", definition.id);
+        for hit in found {
+            assert_eq!(&text[hit.start..hit.end], hit.value);
+            assert!(matcher.has_match(text, Some(hit.value)));
+        }
+    }
+}
+
+#[test]
 fn network_structures_reject_impossible_values_without_rewriting_valid_spelling() {
     for value in ["::1", "2001:db8::1", "fe80::1%eth0", "::ffff:192.0.2.1"] {
         assert!(accepts(V::Ipv6, value), "{value}");

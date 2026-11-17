@@ -106,7 +106,7 @@ def _ranking(web, values, columns):
 def _scan(web, project_id, values):
     checkpoint = len(web.trace())
     web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
-    web.named("IPv4", ".extract-panel")
+    web.named("IPv4-like", ".extract-panel")
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
         lambda value: bool(value and ("result" in value or "error" in value)), "real extraction creates a CSV")
@@ -170,11 +170,12 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
     source = root / f"extract-{uuid.uuid4().hex[:8]}.csv"
     with source.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["first", "second", "cohort"])
+        writer.writerow(["first", "second", "cohort", "network variants"])
         writer.writerows([
-            ["10.0.0.1,10.0.0.1,192.0.2.1", "10.0.0.1 8.8.8.8", "keep"],
-            ["10.0.0.10", "", "drop"],
-            ["no address TOKEN-42", "", "keep"],
+            ["10.0.0.1,10.0.0.1,192.0.2.1", "10.0.0.1 8.8.8.8", "keep",
+             "10[.]0[.]0[.]1,192.0.2.1:443,192.0.2.0/24"],
+            ["10.0.0.10", "", "drop", ""],
+            ["no address TOKEN-42", "", "keep", ""],
         ])
     original = source.read_bytes()
     case = web.command("create_project", {"path": str(source)})
@@ -190,13 +191,16 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         bundled = wait_for(lambda: web.script("""
           return [...document.querySelectorAll('#search-pattern-menu .pattern-row')]
             .filter(e=>e.querySelector('[aria-label^="Copy "]')).map(e=>e.querySelector('strong').textContent.trim());
-        """), lambda names: "IPv4" in names, "built-in pattern catalogue is available")
-        assert "IPv4" in bundled and not any("phone" in name.lower() for name in bundled), bundled
+        """), lambda names: "IPv4-like" in names, "built-in pattern catalogue is available")
+        assert "IPv4-like" in bundled and "IPv6-like" in bundled, bundled
+        assert not any("phone" in name.lower() or name.startswith('Defanged ') for name in bundled), bundled
         assert "Base64 candidate (32+ characters)" in bundled, bundled
         assert not any(name.startswith("Hex data candidate") for name in bundled), bundled
+        assert not set(bundled).intersection({"BitLocker recovery-key candidate", "CVE ID", "JWT candidate",
+            "PEM block candidate", "SSH public key", "IP endpoint", "IPv4 CIDR", "IPv6 CIDR"}), bundled
         presentation = web.script("""
           const button=[...document.querySelectorAll('#search-pattern-menu .pattern-select')]
-            .find(e=>e.querySelector('strong')?.textContent.trim()==='IPv4'),
+            .find(e=>e.querySelector('strong')?.textContent.trim()==='IPv4-like'),
             expression=button.querySelector('.pattern-expression');
           return {custom:button.textContent.includes('Custom'),
             weight:Number(getComputedStyle(expression).fontWeight),
@@ -205,7 +209,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         """)
         assert not presentation["custom"] and presentation["weight"] <= 400, presentation
         assert presentation["regexSize"] < presentation["nameSize"], presentation
-        _pattern(web, "IPv4"); web.results(2)
+        _pattern(web, "IPv4-like"); web.results(2)
         assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));") == [0, 1]
         assert web.script("return document.querySelector('[aria-label=\"Search rows\"]').value;") == ""
         web.named("Choose search columns")
@@ -213,7 +217,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         web.tap(checkbox); web.results(0)
         web.named("All data columns", "#search-column-menu"); web.results(2)
         web.named("Done", "#search-column-menu")
-        web.named("Remove pattern IPv4"); web.results(3)
+        web.named("Remove pattern IPv4-like"); web.results(3)
         custom_id = _custom_pattern(web, f"Native token {project_id[:8]}")
         _action(web, columns["second"], "Hide this column")
         assert not web.script("return !!document.querySelector(arguments[0]);", f'.data-header [data-column-id="{columns["second"]}"]')
@@ -226,7 +230,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "filtered"
         assert web.script("""
           const buttons=[...document.querySelectorAll('.extract-panel .pattern-button')],
-            ipv4=buttons.find(e=>e.getAttribute('aria-label')==='IPv4'),
+            ipv4=buttons.find(e=>e.getAttribute('aria-label')==='IPv4-like'),
             custom=buttons.find(e=>e.getAttribute('aria-label')===arguments[0]);
           return ipv4?.textContent.includes('10.0.0.1')&&!ipv4.textContent.includes('Custom')&&
             custom?.textContent.includes('Custom')&&custom.textContent.includes('TOKEN-99');
@@ -244,12 +248,14 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
                  lambda count: count > 0, "extraction pattern buttons are loaded")
         assert web.script("return [...document.querySelectorAll('.extract-panel .pattern-button')].every(e=>e.disabled);")
         web.named("Select all", ".extract-panel")
-        first = _scan(web, project_id, ["10.0.0.1", "192.0.2.1", "8.8.8.8"])
+        variants = {"10[.]0[.]0[.]1": {"count": 1, "rows": 1},
+            "192.0.2.1:443": {"count": 1, "rows": 1}, "192.0.2.0/24": {"count": 1, "rows": 1}}
+        first = _scan(web, project_id, ["10.0.0.1", "192.0.2.1", "8.8.8.8", *variants])
         generated.append(first)
         assert set(first["request"]["columns"]) == set(columns.values())
         assert first["request"]["search"] == "cohort:keep" and first["request"]["scope"] == "filtered"
         assert first["values"] == {"10.0.0.1": {"count": 3, "rows": 1},
-            "192.0.2.1": {"count": 1, "rows": 1}, "8.8.8.8": {"count": 1, "rows": 1}}
+            "192.0.2.1": {"count": 1, "rows": 1}, "8.8.8.8": {"count": 1, "rows": 1}, **variants}
         assert {item["meta"]["id"] for item in web.command("list_projects")} == project_ids
         assert Path(first["meta"]["source_path"]).is_file()
         assert web.script("return document.querySelectorAll('[role=tablist] [role=tab][aria-selected=true]').length;") == 1
@@ -258,13 +264,13 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
 
         _extract_panel(web)
         web.choose('[aria-label="Extraction rows"]', "all")
-        second = _scan(web, project_id, ["10.0.0.1", "10.0.0.10", "192.0.2.1", "8.8.8.8"])
+        second = _scan(web, project_id, ["10.0.0.1", "10.0.0.10", "192.0.2.1", "8.8.8.8", *variants])
         generated.append(second)
-        assert sum(value["count"] for value in second["values"].values()) == 6
+        assert sum(value["count"] for value in second["values"].values()) == 9
         web.tap(web.node(f'.data-header [data-column-id="{second["columns"]["Count"]}"] .column-sort'))
-        web.applied(sortKey=second["columns"]["Count"], sortDirection="asc"); web.results(4)
+        web.applied(sortKey=second["columns"]["Count"], sortDirection="asc"); web.results(7)
         web.tap(web.node(f'.data-header [data-column-id="{second["columns"]["Count"]}"] .column-sort'))
-        web.applied(sortKey=second["columns"]["Count"], sortDirection="desc"); web.results(4)
+        web.applied(sortKey=second["columns"]["Count"], sortDirection="desc"); web.results(7)
         # Virtual row slots are recycled; DOM insertion order is not the
         # current visual/result order. Check the actual first result position.
         wait_for(lambda: web.script("""
@@ -307,6 +313,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             "subtle_search_expression": True, "example_values_and_custom_markers": True,
             "custom_pattern_save_and_edit": True, "applied_pattern_is_frozen": True,
             "filtered_and_all_row_scopes": True, "zero_columns_disabled": True,
+            "combined_network_formats_keep_distinct_raw_values": True,
             "all_columns_include_hidden": True, "selected_hidden_column_only": True,
             "adjacent_values_and_cross_column_counts": True, "output_columns": ["Value", "Count", "Rows"],
             "ordinary_csv_tabs": len(generated), "recent_unchanged": True,

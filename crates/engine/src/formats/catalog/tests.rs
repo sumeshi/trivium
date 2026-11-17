@@ -36,7 +36,25 @@ fn embedded_definitions_are_available_without_any_user_directory() {
     assert!(entries
         .iter()
         .any(|entry| entry.definition.id == "base64" && entry.builtin));
-    assert!(!entries.iter().any(|entry| entry.definition.id == "hex"));
+    for retired in [
+        "hex",
+        "bitlocker-recovery-key",
+        "cve",
+        "jwt",
+        "pem",
+        "ssh-public-key",
+        "ipv4-cidr",
+        "ipv6-cidr",
+        "ip-port",
+        "defanged-ipv4",
+        "defanged-domain",
+        "defanged-url",
+    ] {
+        assert!(
+            !entries.iter().any(|entry| entry.definition.id == retired),
+            "{retired}"
+        );
+    }
     assert!(!entries
         .iter()
         .any(|entry| entry.definition.id.starts_with("phone")));

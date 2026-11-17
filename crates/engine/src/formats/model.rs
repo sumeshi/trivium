@@ -25,6 +25,10 @@ pub struct FormatDefinition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum FormatValidation {
+    Ipv4Like,
+    Ipv6Like,
+    DomainLike,
+    HttpUrlLike,
     Ipv6,
     Ipv4Cidr,
     Ipv6Cidr,

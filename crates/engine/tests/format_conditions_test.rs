@@ -104,9 +104,24 @@ fn format(
 fn validated_patterns_have_the_same_raw_values_in_persisted_search_and_extracted_csv() {
     for (id, values, expected, occurrences, source_rows) in [
         (
+            "ipv4",
+            vec![
+                "192.0.2.1:bad",
+                "src=192[.]0[.]2[.]1:443,192[.]0[.]2[.]1:443",
+                "192.0.2.1/24",
+            ],
+            "192[.]0[.]2[.]1:443",
+            "2",
+            "1",
+        ),
+        (
             "ipv6",
-            vec!["2001:db8:::1", "src=2001:db8::1,2001:db8::1", "::1"],
-            "2001:db8::1",
+            vec![
+                "2001:db8:::1",
+                "src=[2001:db8::1]:443,[2001:db8::1]:443",
+                "::1/128",
+            ],
+            "[2001:db8::1]:443",
             "2",
             "1",
         ),
@@ -238,7 +253,7 @@ fn saved_csv_and_jsonl_queries_match_any_source_cell_then_negate_the_aggregate()
         }).unwrap();
         assert_eq!(preview.count,2);
         let mut cross=def.clone(); cross.id="cross-cell".into(); cross.name="Cross cell".into();
-        cross.pattern="(?i)aa bb".into();cross.value_group=None;cross.examples=None;
+        cross.pattern="(?i)aa bb".into();cross.value_group=None;cross.examples=None;cross.validation=None;
         assert!(f.query(format(columns,&cross,None,false)).is_empty(),"formats never search a joined or lowercased row blob");
     }
 }

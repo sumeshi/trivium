@@ -52,6 +52,8 @@ Use **Patterns ▾** beside the search box to select saved regular expressions o
 
 Built-in patterns cover network addresses, CIDRs, URLs, email, hashes, paths, Windows identifiers, defanged IOCs, and encoded or structured values. Hash names describe hexadecimal candidates of the corresponding length; they do not identify the algorithm. Structured checks do not verify signatures, ownership, or reachability.
 
+IPv4-like and IPv6-like match complete address, CIDR, or endpoint tokens. Use URL for complete URLs; IP-like patterns do not extract just the host from a URL containing a path. Network patterns accept defanged spellings where supported and preserve the original text in extracted results. Base64 finds encoding candidates; ordinary identifiers and hashes can also match its syntax.
+
 <img src="assets/screenshots/filter-rules.png" alt="Filter rules matching EventID 4624" width="720">
 
 ### Search Syntax
