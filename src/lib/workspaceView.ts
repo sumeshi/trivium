@@ -141,7 +141,10 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
         notify("Saved view settings could not be restored. The file is kept; changes in this session will not overwrite it.");
       } else {
         const warnings = viewStateWarnings(state, detail.columns);
-        if (warnings.length > 0) notify(`Saved view settings used unknown values: ${warnings.join(", ")}. Showing defaults for those fields.`);
+        if (warnings.length > 0) {
+          writable = false;
+          notify(`Unsupported saved view settings: ${warnings.join(", ")}. Showing defaults without overwriting the saved view. Annotations are saved normally.`);
+        }
       }
     }
     if (loadFailed || status === "unreadable" || status === "newer") {

@@ -34,7 +34,7 @@ function setup(api: Partial<Backend> = {}, id = "view-test") {
   const view = createWorkspaceView(workspace, { backend, isReady: () => true,
     columnWidths: () => new Map([["c1", 155]]), logicalRow: () => 2999, scrollLeft: () => 200,
     signature: () => "applied scope", notify: (message) => notices.push(message) });
-  return { workspace, view, writes, notices };
+  return { workspace, view, writes, notices, backend };
 }
 
 test("workspace snapshots capture owned controls/history/IDs and flush a stable state before disposal", async () => {
@@ -99,6 +99,71 @@ test("unreadable, invalid or newer saved views are never replaced by default set
     assert.match(notices.join(" "), /kept/);
     workspace.dispose();
   }
+});
+
+test("unsupported saved settings survive idle saves, close flushes and tab restoration", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const unsupported: Partial<ViewState>[] = [
+    { searchColumns: ["removed"] },
+    { flagFilter: "future-value" as never },
+    { sortKey: "removed" },
+    { sortDirection: "natural" as never },
+    { frozenThrough: "removed" },
+    { hiddenColumns: ["removed"] },
+    { columnOrder: ["removed", "c1"] },
+    { columnFormats: { c1: "future-format" } },
+    { columnWidths: { removed: 200 } },
+    { columnWidths: { c1: -10 } },
+    { noteColumnWidth: -10 },
+  ];
+  for (const [index, fields] of unsupported.entries()) {
+    const id = `unsupported-view-${index}`, stored = { ...saved(), ...fields };
+    const original = JSON.stringify(stored);
+    const state = setup({ loadViewState: async () => ({ state: stored, status: "ok" }) }, id);
+    state.view.watch();
+    const restored = await state.view.loadSavedView(detail(id), null, () => true);
+    assert.ok(restored, "safe fields can still be used to open the investigation");
+    state.workspace.search.set("a temporary session query");
+    state.view.schedulePersist();
+    t.mock.timers.tick(1000);
+    await Promise.resolve(); await Promise.resolve();
+    await state.view.flushPersist(id, false, true);
+    assert.deepEqual(state.writes, [], "neither autosave nor the final close flush may replace unsupported data");
+    assert.equal(JSON.stringify(stored), original);
+    assert.match(state.notices.join(" "), /without overwriting the saved view/);
+    const snapshot = state.view.snapshotSession()!;
+    assert.equal(snapshot.writable, false);
+    state.workspace.dispose();
+
+    const next = setup({ loadViewState: async () => assert.fail("a retained tab uses its session") }, id);
+    await next.view.loadSavedView(detail(id), snapshot, () => true);
+    await next.view.flushPersist(id);
+    assert.equal(next.view.snapshotSession()?.writable, false, "a sanitized tab snapshot must retain the original file's protection");
+    assert.deepEqual(next.writes, []);
+    next.workspace.dispose();
+  }
+});
+
+test("protecting unsupported view settings still allows annotations to be saved", async () => {
+  const annotations: string[] = [];
+  const id = "unsupported-view-with-annotations";
+  const state = setup({
+    loadViewState: async () => ({ state: { ...saved(), flagFilter: "future-value" as never }, status: "ok" }),
+    updateFlag: async args => {
+      annotations.push(String(args.memo));
+      return { entry: { flag: "", memo: args.memo, tags: [], bookmarked: false }, revision: 1, flaggedRecords: 0 };
+    },
+  }, id);
+  state.workspace.backend.set(state.backend);
+  await state.view.loadSavedView(detail(id), null, () => true);
+  const row = normalizeRow({ row_index: 2, cells: { c1: { kind: "string", text: "evidence" } },
+    flag: "", memo: "", tags: [], bookmarked: false });
+  state.workspace.registerLoadedPage(0, 0, [row]);
+  assert.equal(await state.workspace.saveAnnotation(id, row, { memo: "finding" }), true);
+  await state.view.flushPersist(id);
+  assert.deepEqual(annotations, ["finding"]);
+  assert.deepEqual(state.writes, []);
+  state.workspace.dispose();
 });
 
 test("a late view restore cannot revive a disposed case or publish warnings into its replacement", async () => {

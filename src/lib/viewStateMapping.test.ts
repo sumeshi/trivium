@@ -116,6 +116,13 @@ test("unknown saved fields are reported instead of silently reset", () => {
   ]);
 });
 
+test("unsupported sorting and widths are reported before their defaults can replace saved settings", () => {
+  const state = { ...savedViewToViewState(saved()), sortDirection: "natural" as never,
+    columnWidths: { c000001: -10, removed: 200 }, noteColumnWidth: -10 };
+  assert.deepEqual(viewStateWarnings(state, columns), ['sort direction', 'column widths', 'note column width']);
+  assert.deepEqual(viewStateWarnings(savedViewToViewState(saved()), columns), []);
+});
+
 test("a legacy save without the new fields restores safe defaults", () => {
   const parsed = savedViewFromUnknown(
     {

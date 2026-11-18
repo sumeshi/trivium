@@ -196,6 +196,7 @@ export function viewStateWarnings(
   if (state.sortKey !== null && !known.has(state.sortKey)) {
     warnings.push(`sort column ${state.sortKey}`);
   }
+  if (state.sortDirection !== "asc" && state.sortDirection !== "desc") warnings.push("sort direction");
   if (state.frozenThrough !== undefined && state.frozenThrough !== "" && !known.has(state.frozenThrough)) {
     warnings.push(`frozen column ${state.frozenThrough}`);
   }
@@ -205,6 +206,8 @@ export function viewStateWarnings(
   }
   if (state.columnOrder?.some((id) => !known.has(id))) warnings.push('column order');
   if (Object.entries(state.columnFormats ?? {}).some(([id, format]) => !known.has(id) || format !== 'iso')) warnings.push('column formats');
+  if (Object.entries(state.columnWidths).some(([id, width]) => !known.has(id) || !Number.isFinite(width) || width <= 0)) warnings.push('column widths');
+  if (state.noteColumnWidth !== undefined && (!Number.isFinite(state.noteColumnWidth) || state.noteColumnWidth <= 0)) warnings.push('note column width');
   return warnings;
 }
 

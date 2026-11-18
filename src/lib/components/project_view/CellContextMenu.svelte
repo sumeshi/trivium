@@ -124,9 +124,11 @@
     if (value === null) return;
     try {
       await writeClipboard(value);
+      if (!alive) return;
       dispatch('notify', { message: 'Copied cell value.', tone: 'success' });
     } catch (error) {
       console.error(error);
+      if (!alive) return;
       dispatch('notify', { message: 'Failed to copy cell value.', tone: 'error' });
     }
     close();
