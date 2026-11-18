@@ -160,7 +160,6 @@ export function applyAnnotationEntry(
     memo,
     tags: entry?.tags ?? [],
     bookmarked: entry?.bookmarked ?? false,
-    displayCache: { ...row.displayCache, memo },
   };
 }
 

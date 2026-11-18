@@ -462,6 +462,70 @@ test("a late page cannot erase a successful annotation after its old cache page 
   forgetAnnotationVersion(projectId);
 });
 
+for (const scenario of ["failed", "queued-small", "later-small"] as const) {
+  test(`oversized optimistic notes recover the visible page after ${scenario}`, async () => {
+    const mutations: Array<ReturnType<typeof deferred<UpdateFlagResult>>> = [];
+    const reads: Array<ReturnType<typeof deferred<QueryProjectRowsResponse>>> = [];
+    const { workspace, queries } = setup({
+      updateFlag: () => { const gate = deferred<UpdateFlagResult>(); mutations.push(gate); return gate.promise; },
+      queryProjectRows: () => { const gate = deferred<QueryProjectRowsResponse>(); reads.push(gate); return gate.promise; },
+    }, `oversized-note-${scenario}`, 1);
+    workspace.totalFilteredRows.set(1);
+    const baseline = normalizeRow(row(0));
+    workspace.registerLoadedPage(0, 0, [baseline]);
+    const largeNote = "n".repeat(16 * 1024 * 1024 + 1);
+    const largeEntry = { flag: "", memo: largeNote, tags: [], bookmarked: false };
+    const smallEntry = { ...largeEntry, memo: "small saved note" };
+    const first = workspace.saveAnnotation(get(workspace.currentProjectId)!, baseline, { memo: largeNote })
+      .then(() => true, () => false);
+    assert.deepEqual([...get(workspace.largePages)], [0]);
+    queries.ensureRangeLoaded(0, 1);
+    await settle();
+    assert.equal(reads.length, 0, "pending oversized edits must not cause reload loops");
+    let smaller: Promise<boolean> | undefined;
+    const saveSmaller = () => workspace.saveAnnotation(get(workspace.currentProjectId)!, baseline, { memo: smallEntry.memo });
+    if (scenario === "queued-small") smaller = saveSmaller();
+    if (scenario === "failed") mutations[0].reject(new Error("disk full"));
+    else mutations[0].resolve({ entry: largeEntry, revision: 1, flaggedRecords: 0 });
+    await first;
+    await settle();
+    if (scenario === "queued-small") {
+      assert.equal(reads.length, 0, "the recovery read waits for every pending save");
+      mutations[1].resolve({ entry: smallEntry, revision: 2, flaggedRecords: 0 });
+      await smaller;
+      await settle();
+    }
+    assert.equal(reads.length, 1);
+    const stillLarge = scenario === "later-small";
+    reads[0].resolve({ ...response(0, [{ ...row(0), ...(stillLarge ? largeEntry : scenario === "failed" ? {} : smallEntry) }], 1),
+      annotation_revision: scenario === "failed" ? 0 : stillLarge ? 1 : 2 });
+    await settle();
+    if (stillLarge) {
+      assert.deepEqual([...get(workspace.largePages)], [0]);
+      queries.ensureRangeLoaded(0, 1);
+      await settle();
+      assert.equal(reads.length, 1, "a stored oversized note stays blocked without repeated reads");
+      smaller = saveSmaller();
+      await settle();
+      assert.equal(reads.length, 1, "the smaller retry must finish saving before recovery");
+      mutations[1].resolve({ entry: smallEntry, revision: 2, flaggedRecords: 0 });
+      await smaller;
+      await settle();
+      assert.equal(reads.length, 2);
+      reads[1].resolve({ ...response(0, [{ ...row(0), ...smallEntry }], 1), annotation_revision: 2 });
+      await settle();
+    }
+    assert.equal(get(workspace.rowsCache).get(0)?.memo, scenario === "failed" ? "" : smallEntry.memo);
+    assert.deepEqual([...get(workspace.loadedPages)], [0]);
+    assert.equal(get(workspace.largePages).size, 0);
+    const completedReads = reads.length;
+    queries.ensureRangeLoaded(0, 1);
+    await settle();
+    assert.equal(reads.length, completedReads);
+    workspace.dispose();
+  });
+}
+
 test("annotation changes during viewport restoration retry before row and flag publication", async () => {
   const projectId = "annotation-restore-race", restoring = deferred<void>();
   let calls = 0, restores = 0;

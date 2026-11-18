@@ -33,11 +33,20 @@ test("annotation responses update notes losslessly without changing source cells
     const entry: FlagEntry = { flag: "critical", memo, tags: [], bookmarked: false };
     const updated = applyAnnotationEntry(row, JSON.parse(JSON.stringify(entry)));
     assert.equal(updated.memo, memo);
-    assert.equal(updated.displayCache.memo, memo);
+    assert.equal(updated.displayCache, row.displayCache);
     assert.equal(updated.cells, row.cells);
     assert.equal(updated.previewCache, row.previewCache);
     assert.equal(applyAnnotationEntry(updated, entry).memo, memo, "read/edit responses must not strip again");
   }
   const cleared = applyAnnotationEntry(row, null);
   assert.equal(cleared.memo, "");
+});
+
+test("notes never replace a source column whose id is memo", () => {
+  const row = normalizeRow({ ...source, cells: { memo: { kind: "string", text: "source field" } } });
+  const updated = applyAnnotationEntry(row, { flag: "safe", memo: "investigation note", tags: [], bookmarked: false });
+  assert.equal(updated.memo, "investigation note");
+  assert.equal(updated.displayCache.memo, "source field");
+  assert.equal(updated.previewCache.memo, "source field");
+  assert.equal(updated.displayCache, row.displayCache);
 });

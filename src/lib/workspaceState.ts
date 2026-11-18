@@ -240,6 +240,12 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     const delta = Number(Boolean(flag)) - Number(Boolean(state.displayedFlag));
     state.displayedFlag = flag;
     updateCachedRow(rowIndex, (cached) => applyAnnotationEntry(cached, entry));
+    // An optimistic note/tag can exceed the cache bound and remove this page.
+    // Retry once after pending saves settle, when a rollback or smaller retry
+    // can fit again. Do not repeatedly reload the oversized pending value.
+    if (!get(rowsCache).has(rowIndex) && get(largePages).has(currentVisiblePage())) {
+      needsAnnotationRefresh = true;
+    }
     if (delta !== 0) {
       flaggedCount.update((value) => Math.max(0, value + delta));
       if (state.scopeKey === annotationScopeKey()) {

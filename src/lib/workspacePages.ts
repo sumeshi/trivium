@@ -1,7 +1,7 @@
 import { get, writable } from "svelte/store";
 import type { CachedRow } from "./components/project_view/state";
 import { PAGE_SIZE } from "./components/project_view/state.ts";
-import { estimatePageBytes, selectEvictions } from "./pageCache.ts";
+import { estimateAnnotationBytes, estimatePageBytes, selectEvictions } from "./pageCache.ts";
 
 const PAGE_CACHE_MAX_PAGES = 5;
 const PAGE_CACHE_MAX_BYTES = 16 * 1024 * 1024;
@@ -28,11 +28,28 @@ export function createWorkspacePages(currentVisiblePage: () => number) {
     const existing = get(rowsCache).get(rowIndex);
     if (!existing) return null;
     const updated = updater(existing);
+    // Annotation updates preserve source caches, so even very wide rows only
+    // need a note/tag delta. Keep the general updater correct if cells change.
+    const byteDelta = updated.displayCache === existing.displayCache
+      && updated.previewCache === existing.previewCache
+      ? estimateAnnotationBytes(updated) - estimateAnnotationBytes(existing)
+      : estimatePageBytes([updated]) - estimatePageBytes([existing]);
     rowsCache.update((cache) => {
       const nextCache = new Map(cache);
       nextCache.set(rowIndex, updated);
       return nextCache;
     });
+    if (byteDelta !== 0) {
+      const owningPages = new Set<number>();
+      for (const [position, cachedIndex] of get(positionToRowIndex)) {
+        if (cachedIndex === rowIndex) owningPages.add(Math.floor(position / PAGE_SIZE));
+      }
+      for (const page of owningPages) {
+        const entry = pageCacheMeta.get(page);
+        if (entry) pageCacheMeta.set(page, { ...entry, bytes: entry.bytes + byteDelta });
+      }
+      evictPages();
+    }
     return updated;
   }
 

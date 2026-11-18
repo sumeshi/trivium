@@ -1,8 +1,8 @@
 import type { CachedRow } from "./components/project_view/state";
 
 /**
- * Approximate per-row bookkeeping cost (row object, maps, annotations).
- * The limit is about retained cell text, so this is deliberately a rough
+ * Approximate per-row bookkeeping cost (row object, maps, annotation fields).
+ * The limit is about retained text, so this is deliberately a rough
  * constant rather than a measurement.
  */
 const ROW_OVERHEAD_BYTES = 512;
@@ -10,20 +10,30 @@ const ROW_OVERHEAD_BYTES = 512;
 export type PageCacheEntry = {
   /** Monotonic access counter; a larger value means a more recent access. */
   at: number;
-  /** Approximate retained cell bytes for this page. */
+  /** Approximate retained text bytes for this page. */
   bytes: number;
 };
 
 /**
- * Approximate the bytes retained for one page. Only the cell strings the table
- * renders (`displayCache` and `previewCache`) are counted; raw `data` and
- * `cells` values are not added on top. Character count is used as a proxy for
- * bytes, which is close enough for an eviction bound.
+ * Annotation text is independent of the source-cell caches and can grow after
+ * a page is loaded. Kept separate so normal flag updates never scan the cells.
+ */
+export function estimateAnnotationBytes(row: Pick<CachedRow, "memo" | "tags">): number {
+  let bytes = row.memo.length;
+  for (const tag of row.tags) bytes += tag.length;
+  return bytes;
+}
+
+/**
+ * Approximate the bytes retained for one page. The rendered cell strings
+ * (`displayCache` and `previewCache`) and note/tag text are counted; raw `data`
+ * and `cells` values are not added on top. Character count is used as a proxy
+ * for bytes, which is close enough for an eviction bound.
  */
 export function estimatePageBytes(rows: readonly CachedRow[]): number {
   let bytes = 0;
   for (const row of rows) {
-    bytes += ROW_OVERHEAD_BYTES;
+    bytes += ROW_OVERHEAD_BYTES + estimateAnnotationBytes(row);
     for (const value of Object.values(row.displayCache)) {
       bytes += value.length;
     }
