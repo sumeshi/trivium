@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) use super::destination::validate_destination;
+pub(crate) use super::destination::{validate_destination, PublishMode};
 
 struct Workspace(PathBuf);
 impl Drop for Workspace {
@@ -21,7 +21,7 @@ impl Drop for Workspace {
 pub(crate) fn write_atomically<T>(
     destination: &Path,
     job: &JobContext,
-    validate: impl Fn() -> Result<(), AppError>,
+    validate: impl Fn() -> Result<PublishMode, AppError>,
     write: impl FnOnce(&Path, &mut BufWriter<File>) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
     job.check_cancelled()?;
@@ -49,17 +49,115 @@ pub(crate) fn write_atomically<T>(
         .context("failed to sync output")?;
     drop(writer);
     job.check_cancelled()?;
-    // Revalidate aliases after a potentially long write. External concurrent
-    // filesystem renames can still race this final check and the rename.
-    validate()?;
+    // Revalidate aliases after a potentially long write, then enforce consent
+    // in the publication itself. A newly created output must never overwrite
+    // another writer that arrived after the final existence check.
+    let mode = validate()?;
     job.check_cancelled()?;
-    fs::rename(&pending, destination).context("failed to finalize output")?;
+    match mode {
+        PublishMode::Replace => {
+            fs::rename(&pending, destination).context("failed to finalize output")?
+        }
+        PublishMode::CreateNew => {
+            tempfile::TempPath::try_from_path(&pending)
+                .context("failed to prepare output publication")?
+                .persist_noclobber(destination)
+                .map_err(|failure| {
+                    if failure.error.kind() == std::io::ErrorKind::AlreadyExists {
+                        AppError::Message(format!(
+                            "Overwrite confirmation required: {}",
+                            destination.display()
+                        ))
+                    } else {
+                        AppError::from(
+                            anyhow::Error::new(failure.error).context("failed to finalize output"),
+                        )
+                    }
+                })?;
+        }
+    }
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn competing_unapproved_writers_publish_once_and_never_replace_each_other() {
+        use std::{
+            cell::Cell,
+            sync::{Arc, Barrier},
+            thread,
+        };
+        let root =
+            std::env::temp_dir().join(format!("trivium-publish-race-{}", uuid::Uuid::new_v4()));
+        let store = crate::store::ProjectsStore::new(root.clone()).unwrap();
+        let destination = root.join("shared.csv");
+        let barrier = Arc::new(Barrier::new(2));
+        let writers = (0..2)
+            .map(|index| {
+                let store = store.clone();
+                let destination = destination.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let checks = Cell::new(0);
+                    write_atomically(
+                        &destination,
+                        &JobContext::none(),
+                        || {
+                            let mode = validate_destination(&destination, &store, false)?;
+                            checks.set(checks.get() + 1);
+                            // Both writers have checked the absent destination. The
+                            // publication itself must still reject the second one.
+                            if checks.get() == 2 {
+                                barrier.wait();
+                            }
+                            Ok(mode)
+                        },
+                        |_, writer| {
+                            writer
+                                .write_all(&[b'A' + index])
+                                .context("write candidate")?;
+                            Ok(())
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = writers
+            .into_iter()
+            .map(|writer| writer.join().unwrap())
+            .collect::<Vec<_>>();
+        let published = fs::read(&destination).unwrap();
+        let workspaces = fs::read_dir(&root)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".trivium-export-")
+            })
+            .count();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "exactly one writer may claim a new output name"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| result.as_ref().is_err_and(|error| error
+                    .to_string()
+                    .starts_with("Overwrite confirmation required:")))
+                .count(),
+            1
+        );
+        assert!(published == b"A" || published == b"B");
+        assert_eq!(workspaces, 0);
+    }
     #[test]
     fn destination_created_during_write_requires_confirmation_before_replacement() {
         let directory =
@@ -101,7 +199,7 @@ mod tests {
         let result = write_atomically(
             &destination,
             &job,
-            || Ok(()),
+            || Ok(PublishMode::Replace),
             |workspace, writer| {
                 fs::write(workspace.join("intermediate-run"), b"temporary").context("run")?;
                 writer.write_all(b"replacement").context("output")?;

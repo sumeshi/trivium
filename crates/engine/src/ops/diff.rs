@@ -8,7 +8,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::export::atomic::{validate_destination, write_atomically};
+use crate::export::atomic::{validate_destination, write_atomically, PublishMode};
 use crate::jobs::JobContext;
 use crate::models::ProjectMeta;
 use crate::project_io::{read_project_schema_columns, ProjectBatchReader};
@@ -256,7 +256,7 @@ fn write_diff_csv(
     key_names: &[String],
     destination: &Path,
     job: &JobContext,
-    validate: impl Fn() -> Result<(), AppError>,
+    validate: impl Fn() -> Result<PublishMode, AppError>,
 ) -> Result<(), AppError> {
     write_atomically(destination, job, validate, |_, output| {
         let mut writer = csv::WriterBuilder::new()

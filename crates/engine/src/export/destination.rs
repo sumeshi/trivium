@@ -7,6 +7,14 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+/// The validator is the single source of overwrite authorization for the
+/// final filesystem operation; a preceding existence check is not a lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PublishMode {
+    CreateNew,
+    Replace,
+}
+
 fn normalize(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
     for component in path.components() {
@@ -60,15 +68,20 @@ pub(crate) fn validate_destination(
     destination: &Path,
     store: &ProjectsStore,
     allow_overwrite: bool,
-) -> Result<(), AppError> {
+) -> Result<PublishMode, AppError> {
     ensure_destination_is_not_managed(destination, store)?;
+    let mode = if allow_overwrite {
+        PublishMode::Replace
+    } else {
+        PublishMode::CreateNew
+    };
     match fs::symlink_metadata(destination) {
         Ok(_) if !allow_overwrite => Err(AppError::Message(format!(
             "Overwrite confirmation required: {}",
             destination.display()
         ))),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Ok(mode),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(mode),
         Err(error) => Err(anyhow::Error::new(error)
             .context("failed to inspect output destination")
             .into()),

@@ -102,9 +102,17 @@ pub fn export_project_with_job(
     let columns = match &payload.columns {
         Some(requested) => requested
             .iter()
-            .filter(|name| source.target.columns.contains(name))
-            .cloned()
-            .collect::<Vec<_>>(),
+            .map(|name| {
+                if source.target.columns.contains(name) {
+                    Ok(name.clone())
+                } else {
+                    Err(AppError::Message(format!(
+                        "Unknown export column '{}'. Choose columns from the current project.",
+                        name
+                    )))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?,
         None => source.target.columns.clone(),
     };
     let include_annotations = payload.include_annotations.unwrap_or(true);

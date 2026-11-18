@@ -255,7 +255,10 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
     );
     let mut csv = csv::Reader::from_reader(exported.as_bytes());
     let headers = csv.headers().expect("export headers").clone();
-    let records = csv.records().collect::<Result<Vec<_>, _>>().expect("export records");
+    let records = csv
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("export records");
     assert_eq!(
         headers.iter().collect::<Vec<_>>(),
         vec![
@@ -291,7 +294,10 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
 
     let second: Vec<&str> = records[1].iter().collect();
     assert_eq!(second[6], "review", "unannotated input flag must be kept");
-    assert_eq!(second[7], "original memo two", "unannotated input memo must be kept");
+    assert_eq!(
+        second[7], "original memo two",
+        "unannotated input memo must be kept"
+    );
     assert_eq!(second[8], "second message");
 
     let third: Vec<&str> = records[2].iter().collect();
@@ -310,7 +316,7 @@ fn sort_options_reflect_exported_row_order() {
     let ids = common::column_ids(&store, id);
     let event_id = common::id(&ids, "eventid");
 
-    let build_payload = |direction: &str|     ExportProjectPayload {
+    let build_payload = |direction: &str| ExportProjectPayload {
         allow_overwrite: false,
         project_id: id,
         destination: String::new(),
@@ -342,4 +348,57 @@ fn sort_options_reflect_exported_row_order() {
     );
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn unknown_output_columns_never_silently_drop_requested_data_or_replace_a_destination() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).unwrap();
+    let id = create(&store, &root);
+    let ids = common::column_ids(&store, id);
+    let valid = common::id(&ids, "msg");
+    let existing = root.join("existing.csv");
+    fs::write(&existing, b"keep existing output").unwrap();
+    let fresh = root.join("not-created").join("new.csv");
+    for columns in [
+        vec!["unknown-column".to_string()],
+        vec![valid.clone(), "unknown-column".to_string()],
+    ] {
+        for include_annotations in [true, false] {
+            for destination in [&existing, &fresh] {
+                let error = export_project(
+                    &store,
+                    ExportProjectPayload {
+                        project_id: id,
+                        destination: destination.to_string_lossy().into(),
+                        allow_overwrite: true,
+                        scope: Some("all".into()),
+                        spec: QuerySpec::default(),
+                        columns: Some(columns.clone()),
+                        row_indices: None,
+                        include_annotations: Some(include_annotations),
+                    },
+                )
+                .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains("Unknown export column 'unknown-column'"),
+                    "{error}"
+                );
+                assert_eq!(fs::read(&existing).unwrap(), b"keep existing output");
+                assert!(
+                    !fresh.parent().unwrap().exists(),
+                    "reject before creating output directories"
+                );
+                assert!(fs::read_dir(&root).unwrap().all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".trivium-export-")));
+            }
+        }
+    }
+    drop(store);
+    fs::remove_dir_all(root).unwrap();
 }
