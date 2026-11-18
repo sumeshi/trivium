@@ -14,6 +14,9 @@ use crate::models::{ColumnMeta, FlagEntry, ImportedData};
 use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
 use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
+mod annotations;
+use annotations::flag_entry;
+
 /// Maximum number of records in one import batch. The byte limit can stop a
 /// batch earlier; the row limit keeps narrow tables from growing the batch
 /// bookkeeping without bound.
@@ -143,62 +146,6 @@ impl FlagColumns {
             || self.tags_json.is_some()
             || self.bookmarked.is_some()
     }
-}
-
-fn flag_value(record: &csv::StringRecord, index: Option<usize>) -> Option<String> {
-    index
-        .and_then(|column| record.get(column))
-        .map(str::to_string)
-        .filter(|text| !text.is_empty() && text != "0")
-}
-
-fn flag_entry(
-    columns: FlagColumns,
-    record: &csv::StringRecord,
-) -> Result<Option<FlagEntry>, AppError> {
-    let flag = flag_value(record, columns.critical)
-        .map(|_| "critical".to_string())
-        .or_else(|| flag_value(record, columns.suspicious).map(|_| "suspicious".to_string()))
-        .or_else(|| flag_value(record, columns.safe).map(|_| "safe".to_string()))
-        .unwrap_or_default();
-    let memo_value = columns
-        .memo
-        .and_then(|column| record.get(column))
-        .filter(|text| !text.is_empty())
-        .map(str::to_string);
-    // The explicit JSON column wins, including [] (which clears legacy tags).
-    // Never guess JSON syntax inside an old semicolon-separated tag cell.
-    let tags = if let Some(column) = columns.tags_json {
-        serde_json::from_str::<Vec<String>>(record.get(column).unwrap_or_default()).map_err(
-            |e| AppError::Message(format!("Invalid trivium-tags-json annotation: {}", e)),
-        )?
-    } else {
-        columns
-            .tags
-            .and_then(|column| record.get(column))
-            .map(|text| {
-                text.split(';')
-                    .map(str::trim)
-                    .filter(|tag| !tag.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let bookmarked = columns
-        .bookmarked
-        .and_then(|column| record.get(column))
-        .map(|text| text.trim() == "1")
-        .unwrap_or(false);
-    if flag.is_empty() && memo_value.is_none() && tags.is_empty() && !bookmarked {
-        return Ok(None);
-    }
-    Ok(Some(FlagEntry {
-        flag,
-        memo: memo_value,
-        tags,
-        bookmarked,
-    }))
 }
 
 /// Summary of a completed streaming import.
