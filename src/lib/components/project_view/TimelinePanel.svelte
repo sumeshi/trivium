@@ -262,6 +262,15 @@
     }, 120);
   };
 
+  const cancelHistogram = () => {
+    requests.invalidate();
+    reads.cancelAll();
+    if (requestTimer !== null) clearTimeout(requestTimer);
+    requestTimer = null;
+    queued = null;
+    loading = false;
+  };
+
   $: timeColumns = $projectDetail?.columns ?? [];
   $: projectId = $projectDetail?.project.meta.id ?? "";
   $: filtersKey = `${$appliedFilters.search}::${$appliedFilters.flag}::${$appliedFilters.searchColumns.join("|")}::${$appliedFilters.bookmarkedOnly}::${JSON.stringify($appliedFilters.condition)}`;
@@ -272,22 +281,18 @@
     histogram = null;
     inspectedIndex = null;
     autoFocus = true;
-    requests.invalidate();
-    reads.cancelAll();
+    cancelHistogram();
     error = "";
     dragStart = null;
     dragEnd = null;
     dragging = false;
   }
 
-  $: if (!open) {
+  $: if (!open || !$backend || !projectId || !column) {
     // Ignore any response that was already in flight.
-    requests.invalidate();
-    reads.cancelAll();
-    if (requestTimer !== null) clearTimeout(requestTimer);
-    requestTimer = null;
-    queued = null;
-    loading = false;
+    cancelHistogram();
+    histogram = null;
+    inspectedIndex = null;
     lastRequestKey = "";
   }
 

@@ -580,6 +580,14 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     assert web.script("return document.querySelector('select[aria-label=\"Sort gaps\"]').value;") == "duration"
     titles = web.script("return [...document.querySelectorAll('.span-row')].map(e=>e.title);")
     assert titles and any(".123456" in title for title in titles), titles
+    time_reads = sum(entry["name"] == "time_analysis" for entry in web.trace())
+    web.choose('select[aria-label="Time column"]', "")
+    wait_for(lambda: web.script("return !document.querySelector('.time-panel .time-section,.time-panel [role=status]');"),
+             bool, "clearing the time column removes its previous results and loading state")
+    assert time_reads == sum(entry["name"] == "time_analysis" for entry in web.trace()), "Clearing the column must not scan another one"
+    web.choose('select[aria-label="Time column"]', data["columns"]["timestamp"])
+    wait_for(lambda: web.script("return !!document.querySelector('.time-panel .time-section');"), bool, "reselecting the same time column loads its analysis again")
+    assert time_reads < sum(entry["name"] == "time_analysis" for entry in web.trace())
     web.drawer("Timeline")
     web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
     focused = wait_for(lambda: web.script("const e=document.querySelector('.timeline-summary');return e?{inside:Number(e.dataset.inWindow),outside:Number(e.dataset.outside),text:e.textContent}:null;"), lambda value: bool(value and 0 < value["outside"] < data["total"] / 4), "dense timeline initial focus")
@@ -587,6 +595,16 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     web.screenshot(evidence / "timeline-focused.png")
     web.named("Show all events", "#analysis-drawer")
     wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda value: value == 0, "show all includes old outliers")
+    histogram_reads = sum(entry["name"] == "histogram" for entry in web.trace())
+    web.choose('select[aria-label="Timeline column"]', "")
+    wait_for(lambda: web.script("return !document.querySelector('.timeline-svg,.timeline-summary');"),
+             bool, "clearing the timeline column removes its previous chart")
+    assert histogram_reads == sum(entry["name"] == "histogram" for entry in web.trace())
+    web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
+    wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "reselecting the same timeline column loads a fresh chart")
+    assert histogram_reads < sum(entry["name"] == "histogram" for entry in web.trace())
+    web.named("Show all events", "#analysis-drawer")
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda value: value == 0, "reselected timeline shows all events before editing flags")
     buckets = web.script("return [...document.querySelectorAll('.timeline-bucket')].map(e=>({count:Number(e.dataset.count),safe:Number(e.dataset.safe),suspicious:Number(e.dataset.suspicious),critical:Number(e.dataset.critical),unflagged:Number(e.dataset.unflagged),title:e.querySelector('title').textContent}));")
     assert buckets and sum(bucket["count"] for bucket in buckets) == data["total"]
     assert all(bucket["count"] == sum(bucket[flag] for flag in ["safe", "suspicious", "critical", "unflagged"]) for bucket in buckets)
@@ -632,7 +650,8 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     web.results(data["total"])
     report["analysis"] = {"top_values": values, "only_active_drawer": True, "height_preserved": True,
                           "focused": focused, "all_event_count": sum(bucket["count"] for bucket in buckets), "flag_counts": {flag: sum(bucket[flag] for bucket in buckets) for flag in ["safe", "suspicious", "critical", "unflagged"]}, "raw_nanoseconds_preserved": True, "closed_heavy_requests": 0,
-                          "same_flagged_count_edit_refresh": True, "filtered_flag_counts": expected_flags}
+                          "same_flagged_count_edit_refresh": True, "filtered_flag_counts": expected_flags,
+                          "cleared_datetime_columns_retire_results_and_reselect_fresh": True}
 
 
 def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str, Any]) -> None:

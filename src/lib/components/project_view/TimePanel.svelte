@@ -91,10 +91,12 @@
     }
   };
 
-  $: if (!open) {
+  $: if (!open || !$backend || !projectId || !column) {
     reads.cancelAll();
     // Ignore any response that was already in flight.
     requests.invalidate();
+    analysis = null;
+    error = "";
     loading = false;
     lastAnalysisKey = "";
   }
