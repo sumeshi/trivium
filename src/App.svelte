@@ -151,7 +151,7 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        const result = await projectController.createProjects();
+        const result = await projectController.createProjects(() => !activeView?.unsavedDraftMessage());
         if (result.failures.length) {
           const failure = result.failures[0];
           showToast(`${failure.fileName}: ${failure.message}`, 'error');

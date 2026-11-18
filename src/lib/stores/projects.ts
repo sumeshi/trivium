@@ -192,7 +192,7 @@ export function createProjectController(backend: Backend) {
     await loadProjects(true);
   }
 
-  async function createProjects(): Promise<ProjectImportResult> {
+  async function createProjects(canActivate: () => boolean = () => true): Promise<ProjectImportResult> {
     const current = get(state);
     if (!current.pendingFilePaths.length) throw new Error("Select a CSV, JSON, JSONL, or NDJSON file first.");
     if (current.creating) throw new Error("Files are already being imported.");
@@ -237,11 +237,11 @@ export function createProjectController(backend: Backend) {
           pendingRestoreAnnotations: current.pendingRestoreAnnotations && pendingFilePaths.some(isCsv),
         }));
       } else resetPending();
-      // A user may switch or close tabs while importing. Add the new tabs, but
-      // never let the batch's late response replace that newer choice.
+      // A user may navigate or start a note while importing. Keep the new tabs
+      // available without replacing a newer choice or a view with an unsaved draft.
       const last = result.imported.at(-1);
       if (last) {
-        if (navigationAtStart === detailGeneration) {
+        if (navigationAtStart === detailGeneration && canActivate()) {
           try { await loadProjectDetail(last.meta.id); }
           catch (error) { result.openError = errorMessage(error, "Could not open the imported project."); }
         }

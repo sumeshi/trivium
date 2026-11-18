@@ -153,6 +153,48 @@ def _drop(web, source: GtkFileSource, pointer: NativePointer, title: str = "Drop
     wait_for(lambda: _overlay(web), lambda value: value is None, "dropping files clears the overlay", timeout=8)
 
 
+def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Path, created: list[dict]) -> dict:
+    active = web.state()["active"]
+    source = GtkFileSource([path], evidence, f"{path.stem}-note")
+    try:
+        _drop(web, source, pointer)
+    finally:
+        source.close()
+    # The shared observer delays only the decoded response of a real import.
+    web.script("window.__workspaceHold={name:'create_project',ready:false,release:null};")
+    try:
+        web.tap(web.node(".workspace-drawer .button.primary"))
+        wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "real import finishes while its UI response is held")
+        meta = next(item["meta"] for item in web.command("list_projects") if item["meta"].get("source_file_name") == path.name)
+        created.append(meta)
+        web.named("Close workspace menu", ".workspace-drawer")
+        wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "close the import drawer while the response is pending")
+        web.named("Add note for row 1", ".data-row")
+        draft = "Unsaved evidence entered while another file was importing"
+        web.write('.memo-dialog textarea[aria-label="Note"]', draft)
+        web.script("window.__importDraftEditor=document.querySelector('.memo-dialog textarea');")
+        start = len(web.trace())
+        web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
+        wait_for(lambda: any(entry["name"] == "list_projects" and "result" in entry for entry in web.trace()[start:]),
+                 bool, "the import batch completes its real project-list refresh")
+        assert web.state()["active"] == active, "Import completion must preserve the case containing the unsaved note"
+        assert web.script("return window.__importDraftEditor===document.querySelector('.memo-dialog textarea')&&window.__importDraftEditor.value===arguments[0];", draft), "Keep the original note editor and its unsaved text"
+        assert web.script("return !!document.querySelector(arguments[0]);", f'#project-tab-{meta["id"]}'), "The imported case remains available in a background tab"
+        web.screenshot(evidence / "native-import-preserves-note.png")
+        web.named("Cancel", ".memo-dialog")
+        wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "explicitly discard only the test note draft")
+        web.tab(meta["id"])
+        web.results(2)
+        web.tab(active.removeprefix("project-tab-"))
+        web.results(2)
+        return {"real_import_response_delayed": True, "same_note_dom_and_text_retained": True,
+                "imported_background_tab_usable": True, "draft_explicitly_discarded": True}
+    finally:
+        web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;delete window.__importDraftEditor;")
+        if web.script("return !!document.querySelector('.memo-dialog');"):
+            web.named("Cancel", ".memo-dialog")
+
+
 def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> None:
     if os.name == "nt":
         report["file_drop"] = {"skipped": "The external source uses Linux GTK/XTest"}
@@ -161,11 +203,13 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
     token = uuid.uuid4().hex[:8]
     csv = root / f"drop space {token}.csv"
     jsonl = root / f"ドロップ調査 {token}.jsonl"
+    note_import = root / f"drop-note-{token}.csv"
     unsupported = root / f"drop unsupported {token}.txt"
     csv.write_text("host\tmessage\nalpha\tone\nbeta\ttwo\n", encoding="utf-8")
     jsonl.write_text('{"host":"gamma","message":"three"}\n{"host":"delta","message":"four"}\n', encoding="utf-8")
+    note_import.write_text("host,message\nnew,one\nnew,two\n", encoding="utf-8")
     unsupported.write_text("Not a supported data file", encoding="utf-8")
-    originals = {path: path.read_bytes() for path in [csv, jsonl, unsupported]}
+    originals = {path: path.read_bytes() for path in [csv, jsonl, note_import, unsupported]}
     created: list[dict] = []
     pointer = source = None
     web.close_drawer()
@@ -224,6 +268,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
         requests = [entry for entry in web.trace()[start:] if entry["name"] == "create_project"]
         assert [entry["request"]["path"] for entry in requests] == expected, requests
         assert [entry["request"]["delimiter"] for entry in requests] == ["\t", ""], requests
+        note_guard = _import_preserves_note(web, note_import, pointer, evidence, created)
         unsupported_start = len(web.trace())
         source = GtkFileSource([unsupported], evidence, f"{token}-unsupported")
         _drop(web, source, pointer, "Unsupported file type")
@@ -240,6 +285,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
             "csv_tab_and_jsonl_rows_verified": True, "source_bytes_unchanged": True,
             "unsupported_file_rejected": True, "native_picker_calls": 0}
         report["file_drop"]["overlay_screenshot"] = "native-file-drop-overlay.png"
+        report["file_drop"]["import_preserves_note"] = note_guard
     finally:
         try:
             if pointer:
