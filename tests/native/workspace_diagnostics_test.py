@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -115,6 +117,15 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
             with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), redirect_stdout(output):
                 emit_navigation_failure({}, error)
             self.assertEqual(output.getvalue(), "")
+
+    def test_incompatible_check_selections_fail_before_startup(self):
+        command = [sys.executable, str(Path(__file__).with_name("workspace_ui.py")),
+                   "--binary", "unused", "--memo-ime-only", "--table-presentation-only"]
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(command, cwd=directory, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("not allowed with argument", result.stderr)
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_startup_constructor_failure_is_annotated_and_keeps_its_private_report(self):
         with tempfile.TemporaryDirectory() as directory:

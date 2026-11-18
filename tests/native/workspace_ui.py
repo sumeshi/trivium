@@ -947,14 +947,15 @@ def main() -> None:
     parser.add_argument("--driver", default=shutil.which("tauri-driver") or "/workspace/.trivium-tools/bin/tauri-driver")
     parser.add_argument("--native-driver", default=native_driver_default())
     parser.add_argument("--output", type=Path, default=Path("target/native-workspace-ui"))
-    parser.add_argument("--table-presentation-only", action="store_true")
-    parser.add_argument("--memo-ime-only", action="store_true")
-    parser.add_argument("--integrity-only", action="store_true")
-    parser.add_argument("--boundary-only", action="store_true")
-    parser.add_argument("--close-only", action="store_true")
-    parser.add_argument("--review-fixes-only", action="store_true")
-    parser.add_argument("--file-drop-only", action="store_true")
-    parser.add_argument("--extensions-only", action="store_true")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--table-presentation-only", action="store_true")
+    selection.add_argument("--memo-ime-only", action="store_true")
+    selection.add_argument("--integrity-only", action="store_true")
+    selection.add_argument("--boundary-only", action="store_true")
+    selection.add_argument("--close-only", action="store_true")
+    selection.add_argument("--review-fixes-only", action="store_true")
+    selection.add_argument("--file-drop-only", action="store_true")
+    selection.add_argument("--extensions-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -1037,6 +1038,7 @@ def main() -> None:
                 report["stages"].append(stage)
                 print(f"PASS: {stage}", flush=True)
             stage = "final validation"
+            assert report["stages"], "No native checks were selected."
             assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
             errors = [entry for session in app.sessions + [app.web.diagnostics()] for entry in session["ipc"] if "error" in entry]
             cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows", "load_project", "locate_project_row", "get_cell", "surrounding_rows", "group_tree", "bulk_preview"}]
