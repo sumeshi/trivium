@@ -1,6 +1,6 @@
 use super::{
-    analysis_data::AnalysisSource,
-    query::{materialize_page_rows, QuerySpec},
+    analysis_data::{AnalysisSource, SelectedRows},
+    query::QuerySpec,
 };
 use crate::{
     analysis::stats::StatsAccumulator,
@@ -11,13 +11,12 @@ use crate::{
         sorted_runs::ExternalSorter,
     },
     jobs::JobContext,
-    project_io::{ProjectBatchReader, ProjectColumns, INTERNAL_ROW_ID},
+    project_io::INTERNAL_ROW_ID,
     store::ProjectsStore,
 };
 use anyhow::Context;
-use polars::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{io::Write, path::PathBuf};
 use uuid::Uuid;
 mod render;
 
@@ -98,7 +97,8 @@ pub fn build_report_with_job(
     };
     let mut unique = std::collections::HashSet::new();
     projection.retain(|column| unique.insert(column.clone()));
-    let mut reader = ProjectBatchReader::open(&source.path, &projection).map_err(AppError::from)?;
+    let mut reader = source.selected_reader(&projection)?;
+    let selected = SelectedRows::new(source.target.total_rows, &source.target.ids);
     let empty = reader.empty_frame().map_err(AppError::from)?;
     let mut stats = display
         .iter()
@@ -124,13 +124,6 @@ pub fn build_report_with_job(
                 .get(id)
                 .is_some_and(|entry| entry.is_annotated())
         })
-        .collect::<Vec<_>>();
-    let project_columns = ProjectColumns::from_meta_and_names(&source.meta, &source.target.columns);
-    let display_meta = project_columns
-        .columns()
-        .iter()
-        .filter(|column| display.contains(&column.id))
-        .cloned()
         .collect::<Vec<_>>();
     let destination = PathBuf::from(&payload.destination);
     let validate = || validate_destination(&destination, store, payload.allow_overwrite);
@@ -178,14 +171,14 @@ pub fn build_report_with_job(
             for (column, acc) in display.iter().zip(&mut stats) {
                 acc.observe(
                     batch.frame.column(column).expect("projected report column"),
-                    0..batch.frame.height(),
+                    (0..batch.frame.height()).filter(|&row| selected.contains(batch.offset + row)),
                     job,
                 )?;
             }
-            let mut local = Vec::new();
-            let mut ids = Vec::new();
-            let mut positions = Vec::new();
             for row in 0..batch.frame.height() {
+                if row.is_multiple_of(1024) {
+                    job.check_cancelled()?;
+                }
                 let id = batch.offset + row;
                 let rank = if let Some(ranks) = &mut ranks {
                     ranks.get(id, job)?
@@ -197,36 +190,22 @@ pub fn build_report_with_job(
                     None
                 };
                 if let Some(rank) = rank {
-                    local.push(row as IdxSize);
-                    ids.push(batch.offset + row);
-                    positions.push(rank);
+                    let html = render::row(
+                        &display,
+                        &batch.frame,
+                        row,
+                        id,
+                        source.target.flags.get(&id),
+                    )?;
+                    if let Some(sorter) = &mut sorter {
+                        sorter.push(rank as u64, html.as_bytes(), job)?;
+                    } else {
+                        writer
+                            .write_all(html.as_bytes())
+                            .context("failed to write report row")?;
+                    }
+                    written += 1;
                 }
-            }
-            if ids.is_empty() {
-                continue;
-            }
-            let frame = batch
-                .frame
-                .take(&IdxCa::from_vec("", local))
-                .context("failed to select report rows")?;
-            let rows = materialize_page_rows(
-                &frame,
-                &ids,
-                &display_meta,
-                &source.target.flags,
-                &HashMap::new(),
-                false,
-            )?;
-            for (row, rank) in rows.iter().zip(positions) {
-                let html = render::row(&display, row);
-                if let Some(sorter) = &mut sorter {
-                    sorter.push(rank as u64, html.as_bytes(), job)?;
-                } else {
-                    writer
-                        .write_all(html.as_bytes())
-                        .context("failed to write report row")?;
-                }
-                written += 1;
             }
         }
         if written != annotated.len() {

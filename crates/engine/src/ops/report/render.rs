@@ -1,7 +1,11 @@
 use crate::{
     analysis::stats::ColumnStats,
-    models::{ProjectMeta, ProjectRow},
+    error::AppError,
+    flags::normalize_flag_value,
+    models::{FlagEntry, ProjectMeta},
+    value_utils::anyvalue_to_search_string,
 };
+use polars::prelude::DataFrame;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prefix(
     meta: &ProjectMeta,
@@ -101,23 +105,38 @@ pub(super) fn rows_header(columns: &[String]) -> String {
     html
 }
 
-pub(super) fn row(columns: &[String], row: &ProjectRow) -> String {
+/// A report is a complete output, so render source cells rather than page DTO
+/// previews. Only one row's HTML is retained before writing/spooling it.
+pub(super) fn row(
+    columns: &[String],
+    frame: &DataFrame,
+    position: usize,
+    row_id: usize,
+    annotation: Option<&FlagEntry>,
+) -> Result<String, AppError> {
     let mut html = String::new();
-    html.push_str(&format!("<tr><td>{}</td>", row.row_index));
+    html.push_str(&format!("<tr><td>{row_id}</td>"));
     for column in columns {
-        let text = row
-            .cells
-            .get(column)
-            .and_then(|cell| cell.text.as_deref())
-            .unwrap_or_default();
-        html.push_str(&format!("<td>{}</td>", html_escape(text)));
+        let value = frame
+            .column(column)
+            .and_then(|series| series.get(position))
+            .map_err(|error| AppError::Other(error.into()))?;
+        let text = anyvalue_to_search_string(&value).unwrap_or_default();
+        html.push_str(&format!("<td>{}</td>", html_escape(&text)));
     }
+    let flag = annotation
+        .map(|entry| normalize_flag_value(&entry.flag))
+        .unwrap_or_default();
     html.push_str(&format!(
         "<td class=\"flag\">{}</td><td class=\"memo\">{}</td></tr>\n",
-        html_escape(&row.flag),
-        html_escape(row.memo.as_deref().unwrap_or(""))
+        html_escape(&flag),
+        html_escape(
+            annotation
+                .and_then(|entry| entry.memo.as_deref())
+                .unwrap_or("")
+        )
     ));
-    html
+    Ok(html)
 }
 
 fn render_stats_table(html: &mut String, stats: &[ColumnStats]) {
