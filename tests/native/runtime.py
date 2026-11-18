@@ -1,6 +1,7 @@
 """Isolated profiles and process cleanup shared by Linux and Windows GUI checks."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import json
 import re
@@ -9,6 +10,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import build_opener, ProxyHandler
@@ -243,6 +245,31 @@ def isolated_environment(root: Path) -> dict[str, str]:
                 XDG_RUNTIME_DIR=str(root), APPDATA=str(directories["config"]),
                 LOCALAPPDATA=str(directories["data"]),
                 GSETTINGS_BACKEND="memory", NO_AT_BRIDGE="1")
+
+
+def _cleanup_workspace(directory, *, platform: str | None = None, timeout: float = 10) -> None:
+    """WebView2 can release its profile handles shortly after the app exits."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            directory.cleanup()
+            return
+        except PermissionError as error:
+            if (platform or os.name) != "nt" or getattr(error, "winerror", None) not in (32, 33):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(.1, remaining))
+
+
+@contextmanager
+def native_workspace(*, prefix: str):
+    directory = tempfile.TemporaryDirectory(prefix=prefix)
+    try:
+        yield directory.name
+    finally:
+        _cleanup_workspace(directory)
 
 
 def context_click(web, point: dict[str, int]) -> str:

@@ -22,7 +22,6 @@ from pathlib import Path
 import re
 import shutil
 import socket
-import tempfile
 import time
 import traceback
 from typing import Any, Callable
@@ -31,7 +30,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 
-from runtime import ApplicationSession, IPC_COMMAND_JS, emit_failure_annotation, isolated_environment, native_driver_default, start_driver, stop_driver
+from runtime import ApplicationSession, IPC_COMMAND_JS, emit_failure_annotation, isolated_environment, native_driver_default, native_workspace, start_driver, stop_driver
 
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
@@ -500,8 +499,8 @@ def main() -> None:
     binary = args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
     evidence.mkdir(parents=True)
-    report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "binary": str(binary), "results": []}
-    with tempfile.TemporaryDirectory(prefix="trivium-native-navigation-") as temporary:
+    report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "binary": str(binary), "results": [], "passed": False}
+    with native_workspace(prefix="trivium-native-navigation-") as temporary:
         root = Path(temporary)
         environment = isolated_environment(root)
         port = free_port()
@@ -542,7 +541,6 @@ def main() -> None:
                     report["results"].append(result)
                     scenario(web, root, rows, result, evidence)
                     print(f"PASS: real native Tauri {rows:,} rows; source-number Go, First/Last, filtered descending scope and geometry", flush=True)
-                report["passed"] = True
             except Exception as error:
                 emit_navigation_failure(report["results"][-1] if report["results"] else {}, error)
                 emit_failure_annotation(error)
@@ -573,6 +571,8 @@ def main() -> None:
                         application.close()
                 finally:
                     stop_driver(driver)
+    report["passed"] = True
+    (evidence / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Evidence: {evidence / 'report.json'}", flush=True)
 
 

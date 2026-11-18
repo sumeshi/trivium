@@ -6,7 +6,6 @@ import csv
 import hashlib
 import json
 import shutil
-import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -15,7 +14,7 @@ from pathlib import Path
 from workspace_ui import NativeApp
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
-from runtime import IPC_COMMAND_JS, native_driver_default
+from runtime import IPC_COMMAND_JS, native_driver_default, native_workspace
 
 
 INSTRUMENT = r"""
@@ -211,7 +210,7 @@ def main():
         "binary_sha256": digest(args.binary), "build": args.profile,
         "method": "Isolated embedded native app, same synthetic fixtures per comparison. In-place fetch/JSON observation never clones or parses a response twice. Vertical rAF-driven scrollTop offsets and horizontal synthetic WheelEvent through the app handler measure frame cadence, not trusted-wheel latency. Both input trajectories and zero native page requests are checked. Two-rAF completion is a presentation proxy, not a GPU fence. The 8Mpx spacer cap maps a32px physical step to about8 logical rows at2M rows; compare identical input within each fixture, not between row counts.",
         "cases": [], "passed": False}
-    with tempfile.TemporaryDirectory(prefix="trivium-render-benchmark-") as tmp:
+    with native_workspace(prefix="trivium-render-benchmark-") as tmp:
         root = Path(tmp)
         fixtures = args.fixtures.resolve() if args.fixtures else root / "fixtures"
         app = NativeApp(args, root, evidence)
@@ -234,15 +233,20 @@ def main():
                 web.named(f"Close {source.name}")
                 delete_fixture_project(web, case["meta"]["id"])
             assert not web.diagnostics()["js_errors"], web.diagnostics()["js_errors"]
-            report["passed"] = True
         except Exception as error:
             report["error"] = str(error)
             raise
         finally:
-            if app.web.session:
-                report["diagnostics"] = app.web.diagnostics()
-            app.close()
-            (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+            try:
+                if app.web.session:
+                    report["diagnostics"] = app.web.diagnostics()
+            finally:
+                try:
+                    app.close()
+                finally:
+                    (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    report["passed"] = True
+    (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"REPORT {evidence/'report.json'}", flush=True)
 
 

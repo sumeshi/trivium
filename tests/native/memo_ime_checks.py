@@ -10,14 +10,13 @@ import csv
 import json
 from pathlib import Path
 import shutil
-import tempfile
 import uuid
 
 from column_pin_checks import _key
 from feedback_checks import _settle
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
-from runtime import IPC_COMMAND_JS, native_driver_default
+from runtime import IPC_COMMAND_JS, native_driver_default, native_workspace
 
 
 def _draft(web, selector: str, value: str) -> None:
@@ -230,7 +229,7 @@ def main() -> None:
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
     evidence.mkdir(parents=True)
     report = {"passed": False, "unverified": ["Actual Linux and Windows Japanese IME operation", "Native export destination picker"]}
-    with tempfile.TemporaryDirectory(prefix="trivium-native-memo-") as temporary:
+    with native_workspace(prefix="trivium-native-memo-") as temporary:
         root = Path(temporary)
         app = NativeApp(args, root, evidence)
         try:
@@ -238,10 +237,13 @@ def main() -> None:
             data = fixture(web, root, total=12)
             verify_memo_ime(app, data, root, evidence, report)
             assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
-            report["passed"] = True
         finally:
-            app.close()
-            (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+            try:
+                app.close()
+            finally:
+                (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    report["passed"] = True
+    (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

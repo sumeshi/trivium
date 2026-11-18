@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import tempfile
 import time
 import traceback
 from typing import Any
@@ -53,7 +52,7 @@ from review_fixes_checks import verify_review_fixes
 from file_drop_checks import verify_file_drop
 from extract_checks import verify_extract
 from appearance_checks import verify_appearance
-from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, start_driver, stop_driver
+from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, native_workspace, start_driver, stop_driver
 
 
 FLAGS = [("Safe", "safe"), ("Suspicious", "suspicious"), ("Critical", "critical"), ("Unflagged", "none")]
@@ -962,7 +961,7 @@ def main() -> None:
     evidence.mkdir(parents=True)
     report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "passed": False,
                               "unverified": ["Native GTK export destination picker", "Native OS import picker (only its selected-path response is substituted)"], "stages": []}
-    with tempfile.TemporaryDirectory(prefix="trivium-native-workspace-") as temporary:
+    with native_workspace(prefix="trivium-native-workspace-") as temporary:
         root = Path(temporary)
         app = None
         stage = "startup"
@@ -1066,7 +1065,6 @@ def main() -> None:
             report["expected_invalid_timestamp_queries"] = len(expected_invalid)
             report["expected_invalid_ioc_imports"] = len(expected_invalid_ioc)
             report["cancelled_superseded_queries"] = len(cancelled)
-            report["passed"] = True
         except Exception as error:
             emit_workspace_failure(stage, error)
             report["error"] = str(error)
@@ -1085,6 +1083,8 @@ def main() -> None:
                 report["sessions"] = app.sessions if app is not None else []
                 report["transport_retries"] = app.web.transport_retries if app is not None else []
                 (evidence / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    report["passed"] = True
+    (evidence / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Evidence: {evidence / 'report.json'}", flush=True)
 
 

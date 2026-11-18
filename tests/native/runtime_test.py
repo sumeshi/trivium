@@ -6,12 +6,12 @@ from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import tempfile
-from threading import Thread
+from threading import Thread, Timer
 from urllib.error import URLError
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from runtime import ApplicationSession, isolated_environment, debuggable_webview, emit_failure_annotation, _select_windows_main_window
+from runtime import ApplicationSession, isolated_environment, debuggable_webview, emit_failure_annotation, _select_windows_main_window, _cleanup_workspace, native_workspace
 
 
 class Process:
@@ -20,6 +20,72 @@ class Process:
 
     def poll(self):
         return self.code
+
+
+class WorkspaceCleanupTests(unittest.TestCase):
+    @staticmethod
+    def locked(code):
+        error = PermissionError("The owned WebView2 profile is still in use")
+        error.winerror = code
+        return error
+
+    def test_windows_retries_only_transient_profile_sharing_violations(self):
+        for code in (32, 33):
+            with self.subTest(winerror=code):
+                directory = Mock()
+                directory.cleanup.side_effect = [self.locked(code), None]
+                with patch('runtime.time.monotonic', side_effect=[0, .05]), patch('runtime.time.sleep') as sleep:
+                    _cleanup_workspace(directory, platform='nt')
+                self.assertEqual(directory.cleanup.call_count, 2)
+                sleep.assert_called_once_with(.1)
+
+    def test_persistent_lock_fails_at_the_deadline_instead_of_being_ignored(self):
+        directory = Mock()
+        error = self.locked(32)
+        directory.cleanup.side_effect = error
+        with patch('runtime.time.monotonic', side_effect=[0, .05, .2]), patch('runtime.time.sleep') as sleep:
+            with self.assertRaises(PermissionError) as failure:
+                _cleanup_workspace(directory, platform='nt', timeout=.1)
+        self.assertIs(failure.exception, error)
+        self.assertEqual(directory.cleanup.call_count, 2)
+        sleep.assert_called_once_with(.05)
+
+    def test_other_errors_and_non_windows_locks_fail_without_retry(self):
+        for platform, error in [('nt', self.locked(5)), ('posix', self.locked(32)), ('nt', OSError('unrelated IO failure'))]:
+            with self.subTest(platform=platform, error=type(error).__name__):
+                directory = Mock()
+                directory.cleanup.side_effect = error
+                with patch('runtime.time.sleep') as sleep, self.assertRaises(type(error)) as failure:
+                    _cleanup_workspace(directory, platform=platform)
+                self.assertIs(failure.exception, error)
+                directory.cleanup.assert_called_once_with()
+                sleep.assert_not_called()
+
+    def test_workspace_cleans_real_files_and_preserves_a_body_failure(self):
+        with self.assertRaisesRegex(ValueError, 'scenario failed'):
+            with native_workspace(prefix='trivium-cleanup-test-') as name:
+                root = Path(name)
+                (root / 'profile.log').write_text('fixture', encoding='utf-8')
+                raise ValueError('scenario failed')
+        self.assertFalse(root.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows enforces delete sharing on an open profile file')
+    def test_real_windows_profile_handle_can_close_after_cleanup_starts(self):
+        with tempfile.TemporaryDirectory() as outer:
+            directory = tempfile.TemporaryDirectory(dir=outer)
+            root = Path(directory.name)
+            path = root / 'profile.log'
+            path.write_text('fixture', encoding='utf-8')
+            stream = path.open('rb')
+            released = Timer(.2, stream.close)
+            released.start()
+            try:
+                _cleanup_workspace(directory)
+                self.assertFalse(root.exists())
+            finally:
+                stream.close()
+                released.join(timeout=2)
+                directory.cleanup()
 
 
 class RuntimeTests(unittest.TestCase):
