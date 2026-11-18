@@ -135,7 +135,8 @@ pub fn load_preset(
 ) -> Result<PresetData, AppError> {
     let path = PathBuf::from(&payload.source);
     let data = file::read(&path)?;
-    let mut preset: PresetFile = serde_json::from_slice(&data)
+    let json = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&data);
+    let mut preset: PresetFile = serde_json::from_slice(json)
         .with_context(|| format!("failed to parse preset {}", payload.source))
         .map_err(AppError::from)?;
     if !matches!(preset.version, 1 | 2) {

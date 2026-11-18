@@ -39,6 +39,30 @@ fn load(store: &ProjectsStore, path: &Path) -> Result<String, String> {
 }
 
 #[test]
+fn unicode_v1_v2_presets_accept_only_one_file_prefix_utf8_bom() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
+    let path = root.path().join("windows-editor.json");
+    for version in [1, 2] {
+        let text = format!("\u{feff}\n{{\"version\":{version},\"name\":\"調査\u{feff}保存\"}}");
+        fs::write(&path, &text).unwrap();
+        assert_eq!(load(&store, &path).unwrap(), "調査\u{feff}保存");
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+    for text in [
+        "\u{feff}\u{feff}{\"version\":1,\"name\":\"Double prefix\"}",
+        " \u{feff}{\"version\":1,\"name\":\"After whitespace\"}",
+        "{\"version\":1,\"name\":\"Trailing\"}\u{feff}",
+    ] {
+        fs::write(&path, text).unwrap();
+        assert!(load(&store, &path)
+            .unwrap_err()
+            .contains("failed to parse preset"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+}
+
+#[test]
 fn exact_limit_legacy_presets_load_but_larger_valid_json_is_rejected_and_left_unchanged() {
     let root = tempfile::tempdir().unwrap();
     let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
