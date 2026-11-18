@@ -106,6 +106,29 @@ test('exact clicked and visible cells reuse their original text without any read
   loader.dispose();
 });
 
+test('legacy column names retain exact full details, copy and filter values without reads', () => {
+  let fields: ReadonlyMap<string, DetailField> = new Map();
+  const loader = createRowDetails({
+    cancel() {}, changed(next) { fields = next; },
+    read() { throw new Error('Complete legacy cells must not be fetched again.'); },
+  });
+  const cells = JSON.parse(`{
+    "__proto__":{"text":"18446744073709551615","kind":"int","truncated":false},
+    "constructor":{"text":"2026-11-18T00:00:00.123456789Z","kind":"string","truncated":false},
+    "toString":{"text":"","kind":"string","truncated":false}
+  }`);
+  const columns = Object.keys(cells);
+  loader.load({ ...target, columnId: columns[0] }, columns, cells);
+  loader.setVisible(columns);
+  for (const column of columns) {
+    const value = loaded(fields, column);
+    assert.equal(value.text, cells[column].text);
+    assert.equal(detailCopyValue(value), cells[column].text);
+    assert.equal(detailFilterValue(value), cells[column].text);
+  }
+  loader.dispose();
+});
+
 test('switching or closing a row cancels reads, clears full values, and rejects late replies', async () => {
   let fields: ReadonlyMap<string, DetailField> = new Map();
   let cancelled = 0;

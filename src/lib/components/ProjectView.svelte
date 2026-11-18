@@ -40,6 +40,7 @@
   import { createWorkspaceView } from "../workspaceView";
   import { createWorkspaceAnnotationObserver } from "../workspaceAnnotations";
   import { formatIsoCell } from "../dateDisplay";
+  import type { ColumnDisplayFormat } from "../dateDisplay";
   import { acceptSave } from '../saveDrain';
 
   export let projectDetail: LoadProjectResponse;
@@ -213,9 +214,9 @@
         }
       }
     }
-    const next = { ...get(columnFormats) };
-    if (format === 'iso') next[columnId] = 'iso';
-    else delete next[columnId];
+    const next: Record<string, ColumnDisplayFormat> = format === 'iso'
+      ? { ...get(columnFormats), [columnId]: 'iso' } : { ...get(columnFormats) };
+    if (format === 'original') delete next[columnId];
     columnFormats.set(next);
   };
 

@@ -94,21 +94,10 @@ function columnWidths(
   value: unknown,
   known: Set<string>
 ): Record<string, number> {
-  const widths: Record<string, number> = {};
-  if (!isRecord(value)) {
-    return widths;
-  }
-  for (const [column, width] of Object.entries(value)) {
-    if (
-      known.has(column) &&
-      typeof width === "number" &&
-      Number.isFinite(width) &&
-      width > 0
-    ) {
-      widths[column] = width;
-    }
-  }
-  return widths;
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([column, width]) =>
+    known.has(column) && typeof width === "number" && Number.isFinite(width) && width > 0
+  )) as Record<string, number>;
 }
 
 function columnFormats(value: unknown, known: Set<string>): Record<string, ColumnDisplayFormat> {

@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage } from "./grouping.ts";
+import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities } from "./grouping.ts";
 import type { GroupTreeNode } from "./types";
 import type { EditorGroup } from "./stores/condition";
 
 const node = (label: string, children: GroupTreeNode[] = [], value: unknown = label): GroupTreeNode =>
   ({ label, children, value, count: 1 });
+
+test("legacy group columns use exact defaults and retain explicit time granularity choices", () => {
+  const columns = ["__proto__", "constructor", "toString", "timestamp"];
+  assert.deepEqual(selectedGroupGranularities(columns, {}), ["exact", "exact", "exact", "exact"]);
+  const settings = JSON.parse('{"__proto__":"day","constructor":"hour","toString":"minute"}');
+  assert.deepEqual(selectedGroupGranularities(columns, settings), ["day", "hour", "minute", "exact"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(selectedGroupGranularities(columns, settings))), ["day", "hour", "minute", "exact"]);
+  assert.deepEqual(selectedGroupGranularities([...columns].reverse(), settings), ["exact", "minute", "hour", "day"]);
+});
 
 test("group keys preserve null, empty, whitespace and embedded separators", () => {
   const paths = [[node("", [], null)], [node("")], [node(" ")],

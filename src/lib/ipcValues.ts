@@ -43,8 +43,8 @@ export type CellCaches = {
 export function buildCellCaches(
   cells: Record<string, Cell> | null | undefined
 ): CellCaches {
-  const displayCache: Record<string, string> = {};
-  const previewCache: Record<string, string> = {};
+  const displayCache: Record<string, string> = Object.create(null);
+  const previewCache: Record<string, string> = Object.create(null);
   for (const [column, cell] of Object.entries(cells ?? {})) {
     const text = displayText(cell);
     displayCache[column] = cell.truncated ? `${text}…` : text;

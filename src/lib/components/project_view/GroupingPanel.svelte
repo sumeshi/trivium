@@ -2,7 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
-  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS } from "../../grouping";
+  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities } from "../../grouping";
   import type { GroupGranularity } from "../../grouping";
   import type { Backend } from "../../backend";
   import type { GroupTreeNode, GroupTreeResponse } from "../../types";
@@ -36,7 +36,8 @@
     $appliedFilters.search.trim(), $appliedFilters.search.trim() ? $appliedFilters.searchColumns : [],
     $appliedFilters.flag, $appliedFilters.bookmarkedOnly, $appliedFilters.condition,
   ]);
-  $: requestKey = JSON.stringify([projectId, groupColumns, groupColumns.map((name) => granularities[name] ?? "exact"), annotationRevision, filterKey, refreshRevision]);
+  $: selectedGranularities = selectedGroupGranularities(groupColumns, granularities);
+  $: requestKey = JSON.stringify([projectId, groupColumns, selectedGranularities, annotationRevision, filterKey, refreshRevision]);
   $: if (!open || !$backend || !projectId || groupColumns.length === 0) {
     reads.cancelAll();
     requests.invalidate();
@@ -46,7 +47,7 @@
   }
   $: if (open && $backend && projectId && groupColumns.length > 0 && requestKey !== lastKey) {
     lastKey = requestKey;
-    void loadTree($backend, projectId, [...groupColumns], groupColumns.map((name) => granularities[name] ?? "exact"), $appliedFilters);
+    void loadTree($backend, projectId, [...groupColumns], [...selectedGranularities], $appliedFilters);
   }
   $: presentation = groupRowsPage(tree?.nodes ?? [], expanded, page);
 
@@ -132,7 +133,7 @@
         <li data-group-column={name}>
           <span class="level-number">{index + 1}</span><span class="level-name" title={$columnLabels.get(name) ?? name}>{$columnLabels.get(name) ?? name}</span>
           <select class="group-granularity" aria-label={`Group ${$columnLabels.get(name) ?? name} by`} title="Datetime groups use UTC"
-            value={granularities[name] ?? "exact"} on:change={(event) => changeGranularity(name, event)}>
+            value={selectedGranularities[index]} on:change={(event) => changeGranularity(name, event)}>
             {#each GROUP_GRANULARITIES as [value, label]}<option {value}>{label}</option>{/each}
           </select>
           <button type="button" class="icon-button" on:click={() => moveColumn(index, -1)} disabled={index === 0}

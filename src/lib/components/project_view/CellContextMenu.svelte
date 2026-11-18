@@ -118,7 +118,7 @@
   };
 
   const copyValue = async () => {
-    if (busy) return;
+    if (busy || kind === 'missing') return;
     busy = true;
     const value = await resolveValue();
     if (value === null) return;
@@ -173,7 +173,8 @@
   >
     Filter out
   </button>
-  <button type="button" role="menuitem" disabled={busy} on:click={copyValue}>
+  <button type="button" role="menuitem" disabled={busy || kind === 'missing'}
+    title={kind === 'missing' ? 'This field is missing; there is no value to copy.' : ''} on:click={copyValue}>
     Copy value
   </button>
   <button type="button" role="menuitem" disabled={busy} on:click={viewDetails}>

@@ -55,6 +55,20 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   assert.deepEqual(restored, saved());
 });
 
+test("legacy column widths survive saved JSON restoration with reserved object names", () => {
+  const legacy = ["__proto__", "constructor", "toString"];
+  const widths = Object.fromEntries(legacy.map((column, index) => [column, 200 + index]));
+  const view = saved({ columnWidths: widths, searchColumns: [legacy[0]], hiddenColumns: [legacy[1]], sortKey: legacy[2] });
+  const wire = JSON.parse(JSON.stringify(savedViewToViewState(view)));
+  const restored = viewStateToSavedView(wire, legacy);
+  assert.ok(restored);
+  assert.deepEqual(Object.entries(restored.columnWidths), Object.entries(widths));
+  assert.deepEqual(viewStateWarnings(wire, legacy), []);
+  const savedAgain = JSON.parse(JSON.stringify(savedViewToViewState(restored)));
+  assert.deepEqual(savedAgain.columnWidths, widths);
+  assert.equal(Object.getOwnPropertyDescriptor(savedAgain.columnWidths, "__proto__")?.value, 200);
+});
+
 test('note width survives view round trips separately from source column widths', () => {
   const view = saved({ noteColumnWidth: 154 });
   const wire = JSON.parse(JSON.stringify(savedViewToViewState(view)));

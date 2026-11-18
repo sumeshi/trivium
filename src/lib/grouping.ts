@@ -11,6 +11,13 @@ export const GROUP_GRANULARITIES = [
   ["day", "Day (UTC)"], ["hour", "Hour (UTC)"], ["minute", "Minute (UTC)"],
 ] as const satisfies readonly (readonly [GroupGranularity, string])[];
 
+/** Legacy column ids may match object properties; only explicit choices apply. */
+export function selectedGroupGranularities(
+  columns: readonly string[], settings: Readonly<Record<string, GroupGranularity>>,
+): GroupGranularity[] {
+  return columns.map((column) => Object.hasOwn(settings, column) ? settings[column] : "exact");
+}
+
 export type GroupRow = {
   node: GroupTreeNode;
   depth: number;

@@ -51,7 +51,22 @@ for(const destroyed of [false,true])for(const failed of [false,true]){
  assert.deepEqual(notifications,destroyed?[]:[failed?'Failed to copy cell value.':'Copied cell value.']);
  if(!destroyed)menu.$destroy();
 }
-assert.equal(copies,4);console.log('COPY_LIFECYCLE_COMPLETE');
+assert.equal(copies,4);
+for(const [kind,preview,expected] of [['missing','',null],['string','',''],['null','null','null']]){
+ const written=[];
+ Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async text=>written.push(text)}}});
+ set_current_component({$$:{root:{},context:new Map()}});
+ const menu=new Menu({$$inline:true,props:{...props,kind,preview}});
+ set_current_component(null);menu.$$.fragment={d(){},p(){}};
+ let closed=false;const notifications=[];
+ menu.$on('close',()=>{closed=true;});menu.$on('notify',event=>notifications.push(event.detail.message));
+ await menu.$capture_state().copyValue();
+ assert.deepEqual(written,expected===null?[]:[expected]);
+ assert.equal(closed,expected!==null);
+ assert.deepEqual(notifications,expected===null?[]:['Copied cell value.']);
+ menu.$destroy();
+}
+console.log('COPY_LIFECYCLE_COMPLETE');
 `;
   const result = spawnSync(process.execPath, ['--conditions=browser', '--experimental-strip-types', '--input-type=module'], {
     cwd: fileURLToPath(new URL('../../', import.meta.url)), input: script, encoding: 'utf8', timeout: 10_000, maxBuffer: 1_000_000,
