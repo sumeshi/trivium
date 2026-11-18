@@ -6,15 +6,20 @@ use std::{
 
 use polars::prelude::*;
 use trivium_engine::{
+    annotation::AnnotationPatch,
     condition::{Condition, Node, Op},
     jobs::JobContext,
     ops::{
         self,
+        bulk::{bulk_preview, bulk_update, BulkAnnotatePayload},
         flags::{update_flag, UpdateFlagPayload},
         projects::CreateProjectPayload,
         rows::{resolve_project_target, QuerySpec},
     },
-    project_io::{last_column_read_projection, project_read_stats, reset_project_read_counters},
+    project_io::{
+        last_column_read_projection, project_data_reads, project_read_stats,
+        reset_project_read_counters,
+    },
     store::ProjectsStore,
 };
 use trivium_engine::{models::ProjectMeta, project_io::write_project_dataframe};
@@ -174,4 +179,93 @@ fn csv_and_jsonl_preserve_raw_values_and_share_cached_ids_without_mixing_annotat
         assert_eq!(target.flags.get(&1).unwrap().flag, "critical");
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[test]
+fn single_and_selected_bulk_annotations_never_decode_source_cells() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("annotations.csv");
+    fs::write(&source, "id,value\n0,zero\n1,one\n2,two\n3,three\n").unwrap();
+    let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: source.to_string_lossy().into(),
+            description: None,
+            delimiter: None,
+            restore_annotations: None,
+        },
+    )
+    .unwrap()
+    .meta
+    .id;
+    for (row_index, flag, memo, bookmarked) in [
+        (0, Some("safe"), None, None),
+        (1, None, Some("note"), None),
+        (2, None, None, Some(true)),
+    ] {
+        reset_project_read_counters();
+        let result = update_flag(
+            &store,
+            UpdateFlagPayload {
+                project_id: id,
+                row_index,
+                flag: flag.map(str::to_string),
+                memo: memo.map(|value| Some(value.to_string())),
+                tags: None,
+                bookmarked,
+            },
+        )
+        .unwrap();
+        let entry = result.entry.unwrap();
+        assert_eq!(entry.flag, flag.unwrap_or_default());
+        assert_eq!(entry.memo.as_deref(), memo);
+        assert_eq!(entry.bookmarked, bookmarked.unwrap_or(false));
+        assert_eq!(result.flagged_records, 1);
+        assert_eq!(
+            project_read_stats().decoded_rows,
+            0,
+            "single annotation decoded source cells"
+        );
+        assert_eq!(project_data_reads(), 0);
+    }
+    let mut request = BulkAnnotatePayload {
+        project_id: id,
+        target: "selection".into(),
+        row_indices: Some(vec![1, 3]),
+        preview_token: None,
+        spec: QuerySpec::default(),
+        patch: AnnotationPatch {
+            flag: Some("suspicious".into()),
+            ..Default::default()
+        },
+    };
+    reset_project_read_counters();
+    let preview = bulk_preview(&store, request.clone()).unwrap();
+    assert_eq!(preview.count, 2);
+    assert_eq!(
+        project_read_stats().decoded_rows,
+        0,
+        "selection preview decoded source cells"
+    );
+    assert_eq!(project_data_reads(), 0);
+    request.preview_token = Some(preview.preview_token);
+    reset_project_read_counters();
+    assert_eq!(bulk_update(&store, request).unwrap().updated, 2);
+    assert_eq!(
+        project_read_stats().decoded_rows,
+        0,
+        "selection apply decoded source cells"
+    );
+    assert_eq!(project_data_reads(), 0);
+    let saved = trivium_engine::storage::load_flags(&store.flags_path(&id)).unwrap();
+    assert_eq!(saved.len(), 4);
+    assert_eq!(saved[&0].flag, "safe");
+    assert_eq!(saved[&1].flag, "suspicious");
+    assert_eq!(saved[&1].memo.as_deref(), Some("note"));
+    assert_eq!(saved[&2].flag, "");
+    assert!(saved[&2].bookmarked);
+    assert_eq!(saved[&3].flag, "suspicious");
+    assert_eq!(saved[&3].memo, None);
 }

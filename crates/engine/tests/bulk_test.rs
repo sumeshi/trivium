@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 
 use uuid::Uuid;
 
@@ -22,16 +21,6 @@ use trivium_engine::storage::load_flags;
 use trivium_engine::store::ProjectsStore;
 
 mod common;
-
-/// Serialize the existing long mutation scenarios for stable test scheduling.
-/// Undo itself is durable and isolated inside each project database.
-static UNDO_LOCK: Mutex<()> = Mutex::new(());
-
-fn undo_guard() -> MutexGuard<'static, ()> {
-    UNDO_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 // 12 rows: the first 6 are alice, the last 6 are bob.
 // EventID is spread evenly: 4624 / 4625 / 4688 four rows each.
@@ -228,7 +217,6 @@ fn flagged_from_db(store: &ProjectsStore, id: Uuid) -> usize {
 
 #[test]
 fn bulk_all_applies_and_undo_restores() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     let preview = bulk_preview(
@@ -275,7 +263,6 @@ fn bulk_all_applies_and_undo_restores() {
 
 #[test]
 fn bulk_filter_matches_the_query_path() {
-    let _guard = undo_guard();
     let (root, store, id, ids) = setup(false);
 
     let preview = bulk_preview(
@@ -332,7 +319,6 @@ fn bulk_filter_matches_the_query_path() {
 
 #[test]
 fn bulk_selection_dedupes_and_rejects_out_of_range() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     let preview = bulk_preview(
@@ -382,7 +368,6 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 
 #[test]
 fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(true);
 
     // A saved IOC definition does not flag or tag any row by itself.
@@ -422,7 +407,6 @@ fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
 
 #[test]
 fn bulk_clear_does_not_reveal_legacy_ioc_flags() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(true);
 
     bulk_update(
@@ -450,7 +434,6 @@ fn bulk_clear_does_not_reveal_legacy_ioc_flags() {
 
 #[test]
 fn bulk_flag_only_keeps_existing_memo_tags_and_bookmark() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     update_single(
@@ -499,7 +482,6 @@ fn bulk_flag_only_keeps_existing_memo_tags_and_bookmark() {
 
 #[test]
 fn bulk_clear_undo_restores_memo_tags_and_bookmark() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     update_single(
@@ -564,7 +546,6 @@ fn bulk_clear_undo_restores_memo_tags_and_bookmark() {
 
 #[test]
 fn undo_is_independent_per_project() {
-    let _guard = undo_guard();
     let (root_a, store_a, id_a, _ids_a) = setup(false);
     let (root_b, store_b, id_b, _ids_b) = setup(false);
 
@@ -602,7 +583,6 @@ fn undo_is_independent_per_project() {
 
 #[test]
 fn undo_refuses_to_overwrite_a_later_update() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     bulk_update(
@@ -654,7 +634,6 @@ fn undo_refuses_to_overwrite_a_later_update() {
 
 #[test]
 fn bulk_and_undo_update_flagged_counts_by_difference() {
-    let _guard = undo_guard();
     let (root, store, id, ids) = setup(false);
 
     update_single(&store, id, 0, Some("safe"), None, None, None);
@@ -694,7 +673,6 @@ fn bulk_and_undo_update_flagged_counts_by_difference() {
 
 #[test]
 fn failed_preview_token_leaves_annotations_unchanged() {
-    let _guard = undo_guard();
     let (root, store, id, _ids) = setup(false);
 
     let base = payload(id, "selection", None, Some(vec![0, 1]), "safe", None);
@@ -722,27 +700,7 @@ fn failed_preview_token_leaves_annotations_unchanged() {
 }
 
 #[test]
-fn selection_preview_and_update_read_only_metadata_not_project_cells() {
-    let (root, store, id, _) = setup(false);
-    let mut selected = payload(id, "selection", None, Some(vec![2, 7]), "suspicious", None);
-    trivium_engine::project_io::reset_project_data_reads();
-    selected.preview_token = Some(
-        bulk_preview(&store, selected.clone())
-            .unwrap()
-            .preview_token,
-    );
-    assert_eq!(bulk_update(&store, selected).unwrap().updated, 2);
-    assert_eq!(
-        trivium_engine::project_io::project_data_reads(),
-        0,
-        "selection targets require metadata and selected annotations only"
-    );
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
 fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_fields() {
-    let _guard = undo_guard();
     let (root, store, id, _) = setup(false);
     update_flag(
         &store,

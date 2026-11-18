@@ -25,7 +25,6 @@ use std::{collections::HashMap, fs, path::Path};
 
 use anyhow::{Context, Result};
 use polars::prelude::DataFrame;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     models::ColorRule,
@@ -37,17 +36,6 @@ use crate::{
 /// query and counter. Memo/tag/bookmark-only entries are independent.
 pub(crate) fn is_recognized_flag(entry: &crate::models::FlagEntry) -> bool {
     !crate::flags::normalize_flag_value(&entry.flag).is_empty()
-}
-
-/// SQLite connections are scoped to operations, so there is no cached handle
-/// to release before a project directory is moved or deleted.
-pub fn close_flags_db(_project_dir: &Path) {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IocCacheEntry {
-    pub signature: String,
-    pub entries: Vec<(String, String, String)>,
-    pub(crate) rows: Vec<crate::ioc::evaluate::InternalOutcome>,
 }
 
 pub fn load_color_rules(project_dir: &Path) -> Result<Option<Vec<ColorRule>>> {
@@ -119,35 +107,6 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
         }
     }
     widths
-}
-
-pub fn load_ioc_flag_cache(project_dir: &Path) -> Result<Option<IocCacheEntry>> {
-    // The old sled cache is derived data. It is left untouched and rebuilt
-    // into SQLite when explicitly requested, instead of opening another DB.
-    load_setting_bytes(project_dir, "ioc_flag_cache")?
-        .map(|bytes| serde_json::from_slice(&bytes).context("invalid IOC cache"))
-        .transpose()
-}
-
-pub(crate) fn save_ioc_flag_cache(
-    project_dir: &Path,
-    signature: &str,
-    entries: &[(String, String, String)],
-    rows: &[crate::ioc::evaluate::InternalOutcome],
-) -> Result<()> {
-    save_setting_bytes(
-        project_dir,
-        "ioc_flag_cache",
-        &serde_json::to_vec(&IocCacheEntry {
-            signature: signature.to_owned(),
-            entries: entries.to_vec(),
-            rows: rows.to_vec(),
-        })?,
-    )
-}
-
-pub fn clear_ioc_flag_cache(project_dir: &Path) -> Result<()> {
-    remove_setting(project_dir, "ioc_flag_cache")
 }
 
 #[cfg(test)]

@@ -26,12 +26,3 @@ fn recognized_flag_value(flag: &str) -> Option<&'static str> {
         None
     }
 }
-
-pub fn severity_rank(value: &str) -> u8 {
-    match value {
-        "critical" => 3,
-        "suspicious" => 2,
-        "safe" => 1,
-        _ => 0,
-    }
-}

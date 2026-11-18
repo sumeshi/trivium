@@ -1,4 +1,4 @@
-use trivium_engine::flags::{normalize_flag_value, severity_rank};
+use trivium_engine::flags::normalize_flag_value;
 
 #[test]
 fn normalize_flag_value_accepts_all_canonical_forms() {
@@ -24,28 +24,6 @@ fn normalize_flag_value_accepts_all_canonical_forms() {
     ];
 
     for (input, expected) in cases {
-        assert_eq!(
-            normalize_flag_value(input),
-            expected,
-            "input: {input:?}"
-        );
-    }
-}
-
-#[test]
-fn severity_rank_orders_critical_suspicious_safe() {
-    let cases: Vec<(&str, u8)> = vec![
-        ("critical", 3),
-        ("suspicious", 2),
-        ("safe", 1),
-        ("", 0),
-        ("unknown", 0),
-        // Case-sensitive: normalization must happen before ranking
-        ("Critical", 0),
-        ("SAFE", 0),
-    ];
-
-    for (input, expected) in cases {
-        assert_eq!(severity_rank(input), expected, "input: {input:?}");
+        assert_eq!(normalize_flag_value(input), expected, "input: {input:?}");
     }
 }

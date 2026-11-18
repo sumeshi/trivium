@@ -1,45 +1,11 @@
-use std::fs;
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use csv::{ReaderBuilder, WriterBuilder};
 
-use crate::flags::{normalize_flag_value, severity_rank};
-use crate::models::{IocEntry, ProjectRow};
-use crate::project_io::read_project_dataframe;
-use crate::storage::load_flags;
-
-pub mod evaluate;
-pub use evaluate::{
-    cached_ioc_outcomes, cached_ioc_outcomes_without_frame, cached_ioc_page_outcomes,
-    evaluate_iocs, IocRowOutcome,
-};
-
-/// Applies frame-level IOC outcomes to materialized page rows.
-///
-/// Precedence: a non-empty user flag wins over the IOC flag; matched tags are
-/// appended to the memo for every matching row.
-pub fn apply_ioc_outcomes_to_rows(rows: &mut [ProjectRow], outcomes: &[IocRowOutcome]) {
-    for row in rows.iter_mut() {
-        let Some(outcome) = outcomes.get(row.row_index) else {
-            continue;
-        };
-        if severity_rank(&normalize_flag_value(&row.flag)) == 0 && !outcome.flag.is_empty() {
-            row.flag = outcome.flag.clone();
-        }
-        let mut memo = row.memo.clone().unwrap_or_default();
-        for tag in &outcome.tags {
-            if !memo.contains(tag) {
-                if !memo.is_empty() && !memo.ends_with(' ') {
-                    memo.push(' ');
-                }
-                memo.push_str(tag);
-            }
-        }
-        row.memo = if memo.is_empty() { None } else { Some(memo) };
-    }
-}
+use crate::flags::normalize_flag_value;
+use crate::models::IocEntry;
 
 pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
     let Some(data) = crate::storage::load_setting_bytes(project_dir, "iocs")? else {
@@ -93,16 +59,6 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
     Ok(entries)
 }
 
-pub fn write_ioc_csv(entries: &[IocEntry], path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create export dir {:?}", parent))?;
-    }
-    let writer =
-        fs::File::create(path).with_context(|| format!("failed to create IOC CSV {:?}", path))?;
-    write_ioc_csv_to_writer(entries, writer)
-}
-
 pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) -> Result<()> {
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(writer);
     writer
@@ -118,32 +74,6 @@ pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) 
             .context("failed to write IOC CSV row")?;
     }
     writer.flush().context("failed to flush IOC CSV writer")
-}
-
-pub fn calculate_ioc_applied_records(project_dir: &Path) -> Result<usize> {
-    let parquet_path = project_dir.join("data.parquet");
-    let df = read_project_dataframe(&parquet_path)?;
-    let flags_path = project_dir.join("flags.json");
-    let flags = load_flags(&flags_path)?;
-    let iocs = load_ioc_entries(project_dir)?;
-    if iocs.is_empty() {
-        return Ok(0);
-    }
-
-    // An IOC flag applies only where the user has not set one. Use the cached
-    // path so an appended IOC set only evaluates the appended entries.
-    let outcomes = cached_ioc_outcomes(project_dir, &df, &iocs);
-    let mut count = 0;
-    for (row_idx, outcome) in outcomes.iter().enumerate() {
-        let user_flag = flags
-            .get(&row_idx)
-            .map(|entry| normalize_flag_value(&entry.flag))
-            .unwrap_or_default();
-        if severity_rank(&user_flag) == 0 && !outcome.flag.is_empty() {
-            count += 1;
-        }
-    }
-    Ok(count)
 }
 
 fn validate_ioc_flag(value: &str, location: &str) -> Result<String> {

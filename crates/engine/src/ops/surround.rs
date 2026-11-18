@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::analysis::infer::{dtype_kind, parse_datetime_nanos, ColumnKind, KindFlags};
@@ -164,8 +163,6 @@ pub fn surrounding_rows_with_job(
             ids,
             project_columns.columns(),
             &flags,
-            &HashMap::new(),
-            false,
         )?);
     }
     job.check_cancelled()?;

@@ -1,7 +1,4 @@
-//! T26: one cross-layer manual review loop on the T00 fixtures.
-//!
-//! The native Tauri app cannot be built in this environment, so this suite
-//! pins the engine/IPC contract the real-app checklist depends on: exact
+//! Engine regression for a manual investigation loop: exact
 //! display text, hidden-column conditions, sorting and paging, selection bulk
 //! annotation, selected export order, restart persistence, the empty
 //! bookmark-only result, and the long-integer IPC shape.
@@ -24,7 +21,6 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{
     query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec,
 };
-use trivium_engine::storage::close_flags_db;
 use trivium_engine::store::ProjectsStore;
 
 mod common;
@@ -474,8 +470,6 @@ fn annotations_survive_reopen_and_bookmark_only_is_empty_at_zero() {
     )
     .expect("annotation failed");
 
-    let project_dir = store.project_dir(&id);
-    close_flags_db(&project_dir);
     drop(store);
 
     let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");

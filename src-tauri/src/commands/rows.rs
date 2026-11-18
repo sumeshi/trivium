@@ -8,7 +8,7 @@ use trivium_engine::ops::rows::{
     LocateRowPayload, LocateRowResponse, QueryRowsPayload, QueryRowsResponse,
 };
 
-/// Streams project rows with filtering, sorting, IOC application, and pagination.
+/// Streams project rows with filtering, sorting, annotations, and pagination.
 ///
 /// Search and sort run on the blocking pool so the window stays responsive.
 #[tauri::command]

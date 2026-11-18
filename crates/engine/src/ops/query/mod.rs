@@ -1,4 +1,3 @@
-mod ioc;
 mod labels;
 mod locate;
 mod page;
@@ -10,8 +9,6 @@ mod singleflight;
 mod sort;
 mod stream;
 mod target;
-
-use std::collections::HashMap;
 
 pub use locate::{
     locate_project_row, locate_project_row_with_job, LocateRowPayload, LocateRowResponse,
@@ -185,14 +182,8 @@ pub fn query_project_rows_with_job(
 
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
-        let mut rows = page::materialize_page_rows(
-            &page_df,
-            &row_ids,
-            &visible_columns,
-            &page_flags,
-            &HashMap::new(),
-            false,
-        )?;
+        let mut rows =
+            page::materialize_page_rows(&page_df, &row_ids, &visible_columns, &page_flags)?;
         apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
         job.report_progress(3, Some(3), Some("Rows ready".into()));
@@ -246,14 +237,8 @@ pub fn query_project_rows_with_job(
                     .map_err(AppError::from)?;
             job.check_cancelled()?;
             job.report_progress(2, Some(3), Some("Building page".into()));
-            let mut rows = page::materialize_page_rows(
-                &page_df,
-                &row_ids,
-                &visible_columns,
-                &page_flags,
-                &HashMap::new(),
-                false,
-            )?;
+            let mut rows =
+                page::materialize_page_rows(&page_df, &row_ids, &visible_columns, &page_flags)?;
             apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
             let annotated_filtered = if cached.ids.len() == total_rows {
@@ -290,14 +275,8 @@ pub fn query_project_rows_with_job(
     job.report_progress(2, Some(3), Some("Building page".into()));
     let page_df = read_page_rows_dataframe_with_job(&parquet_path, &page_projection, &row_ids, job)
         .map_err(AppError::from)?;
-    let mut rows = page::materialize_page_rows(
-        &page_df,
-        &row_ids,
-        &visible_columns,
-        &target.flags,
-        &HashMap::new(),
-        false,
-    )?;
+    let mut rows =
+        page::materialize_page_rows(&page_df, &row_ids, &visible_columns, &target.flags)?;
     apply_page_colors(&mut rows, &page_df, &color_rules)?;
 
     job.report_progress(3, Some(3), Some("Rows ready".into()));

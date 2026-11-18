@@ -187,24 +187,3 @@ fn invalid_legacy_rules_remain_visible_without_blocking_the_case_or_becoming_saf
     );
     fs::remove_dir_all(root).unwrap();
 }
-
-#[test]
-fn legacy_ioc_overlay_preserves_existing_memo_whitespace_and_markup() {
-    use trivium_engine::{
-        ioc::{apply_ioc_outcomes_to_rows, IocRowOutcome},
-        models::ProjectRow,
-    };
-    for memo in ["  Sender: <alice@example.org>\n", "\n\t "] {
-        let mut rows = vec![ProjectRow {
-            row_index: 0,
-            cells: Default::default(),
-            flag: String::new(),
-            memo: Some(memo.into()),
-            tags: Vec::new(),
-            bookmarked: false,
-            color: None,
-        }];
-        apply_ioc_outcomes_to_rows(&mut rows, &[IocRowOutcome::default()]);
-        assert_eq!(rows[0].memo.as_deref(), Some(memo));
-    }
-}

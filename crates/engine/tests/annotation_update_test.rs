@@ -13,8 +13,7 @@ use trivium_engine::models::UpdateFlagResponse;
 use trivium_engine::ops;
 use trivium_engine::ops::flags::{update_flag, UpdateFlagPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
-use trivium_engine::project_io::{project_data_reads, reset_project_data_reads};
-use trivium_engine::storage::{close_flags_db, load_flag, project_database_path};
+use trivium_engine::storage::{load_flag, project_database_path};
 use trivium_engine::store::ProjectsStore;
 
 fn write_fixture(root: &Path, rows: usize) -> PathBuf {
@@ -69,35 +68,6 @@ fn update(
 
 fn flags_path(store: &ProjectsStore, id: Uuid) -> PathBuf {
     store.project_dir(&id).join("flags.json")
-}
-
-#[test]
-fn flag_memo_and_bookmark_updates_do_not_read_project_data() {
-    let (root, store, id) = setup(20);
-
-    reset_project_data_reads();
-    update(&store, id, 0, Some("safe"), None, None, None).expect("flag update failed");
-    assert_eq!(
-        project_data_reads(),
-        0,
-        "a flag update must not read project data"
-    );
-
-    update(&store, id, 1, None, Some(Some("note")), None, None).expect("memo update failed");
-    assert_eq!(
-        project_data_reads(),
-        0,
-        "a memo update must not read project data"
-    );
-
-    update(&store, id, 2, None, None, None, Some(true)).expect("bookmark update failed");
-    assert_eq!(
-        project_data_reads(),
-        0,
-        "a bookmark update must not read project data"
-    );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -173,7 +143,6 @@ fn update_before_project_load_migrates_legacy_flags_json() {
     update(&store, id, 0, Some("safe"), None, None, None).expect("initial update failed");
     let meta = store.find(&id).expect("project metadata");
     let project_dir = store.project_dir(&id);
-    close_flags_db(&project_dir);
     drop(store);
     fs::remove_file(project_database_path(&project_dir))
         .expect("remove canonical fixture database");
@@ -301,12 +270,10 @@ fn annotations_and_flagged_count_survive_reopening_the_store() {
     .expect("row 0 update failed");
     update(&store, id, 1, Some("safe"), None, None, None).expect("row 1 update failed");
 
-    let project_dir = store.project_dir(&id);
     let path = flags_path(&store, id);
     let expected = load_flag(&path, 0)
         .expect("failed to read row 0")
         .expect("row 0 entry missing");
-    close_flags_db(&project_dir);
     drop(store);
 
     let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");

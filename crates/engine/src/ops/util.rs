@@ -7,34 +7,9 @@ use crate::condition::eval;
 use crate::error::AppError;
 use crate::flags::normalize_flag_value;
 use crate::models::{ColorRule, ColumnMeta, FlagEntry, ProjectRow};
-use crate::value_utils::{
-    anyvalue_to_json, anyvalue_to_search_string, build_row_cells, CellColumns,
-};
+use crate::value_utils::{anyvalue_to_json, build_row_cells, CellColumns};
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
-
-/// Maps requested column names (case-insensitive) to the frame's actual names.
-pub fn resolve_columns(
-    df: &DataFrame,
-    requested: &[String],
-    label: &str,
-) -> Result<Vec<String>, AppError> {
-    let mut lookup: HashMap<String, String> = HashMap::new();
-    for name in df.get_column_names() {
-        lookup.insert(name.to_lowercase(), name.to_string());
-    }
-    let mut resolved = Vec::with_capacity(requested.len());
-    for name in requested {
-        let actual = lookup.get(&name.to_lowercase()).ok_or_else(|| {
-            AppError::Message(format!(
-                "Column '{}' not found in project {}.",
-                name, label
-            ))
-        })?;
-        resolved.push(actual.clone());
-    }
-    Ok(resolved)
-}
 
 /// Collects a row's indexed values using a precomputed series map.
 ///
@@ -54,35 +29,6 @@ pub fn collect_row_record_from_series(
         }
     }
     record
-}
-
-/// Ensures lowercase string caches exist for a column, returning the cached vector.
-pub fn ensure_column_text_cache<'a>(
-    column: &str,
-    column_series_lower: &HashMap<String, &Series>,
-    cache: &'a mut HashMap<String, Vec<String>>,
-    row_count: usize,
-) -> &'a Vec<String> {
-    let key = column.to_lowercase();
-    if !cache.contains_key(&key) {
-        let mut col_vec: Vec<String> = vec![String::new(); row_count];
-        if let Some(series) = column_series_lower.get(&key) {
-            // The index writes into one vector while reading a parallel series.
-            #[allow(clippy::needless_range_loop)]
-            for row_idx in 0..row_count {
-                if let Ok(value) = series.get(row_idx) {
-                    if let Some(text) = anyvalue_to_search_string(&value) {
-                        let lower = text.to_lowercase();
-                        if !lower.is_empty() {
-                            col_vec[row_idx] = lower;
-                        }
-                    }
-                }
-            }
-        }
-        cache.insert(key.clone(), col_vec);
-    }
-    cache.get(&key).expect("column cache must exist")
 }
 
 /// Returns the color of the first matching rule, or `None` when nothing matches.
@@ -119,7 +65,9 @@ pub fn materialize_rows(
                 .map(|entry| normalize_flag_value(&entry.flag))
                 .unwrap_or_default(),
             memo: flag_entry.and_then(|entry| entry.memo.clone()),
-            tags: flag_entry.map(|entry| entry.tags.clone()).unwrap_or_default(),
+            tags: flag_entry
+                .map(|entry| entry.tags.clone())
+                .unwrap_or_default(),
             bookmarked: flag_entry.is_some_and(|entry| entry.bookmarked),
             color: None,
         });

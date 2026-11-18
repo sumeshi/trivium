@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::analysis::dupes::DuplicateIndex;
@@ -116,8 +115,6 @@ pub fn duplicate_rows_with_job(
                 selected,
                 project_columns.columns(),
                 &flags,
-                &HashMap::new(),
-                false,
             )?);
         }
         if indices[end..]

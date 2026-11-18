@@ -4,11 +4,8 @@ use polars::prelude::*;
 
 use crate::error::AppError;
 use crate::flags::normalize_flag_value;
-use crate::ioc::IocRowOutcome;
 use crate::models::{ColumnMeta, FlagEntry, ProjectRow};
 use crate::value_utils::{build_row_cells, CellColumns};
-
-use super::ioc::append_ioc_tags;
 
 /// Parse once per query population, rather than splitting a combination for
 /// every row. Unknown options must never expand a filtered operation to all rows.
@@ -66,41 +63,16 @@ pub(super) fn is_unrestricted_flag_filter(filter: Option<&str>) -> bool {
     FlagFilterMask::parse(filter).is_ok_and(|filter| matches!(filter.0, 15 | u8::MAX))
 }
 
-/// Final flag for one row: a non-empty user flag wins, otherwise the IOC flag.
-///
-/// Computing this from the page's own annotations keeps a cache hit from
-/// rebuilding a project-wide flag vector.
-fn final_flag_for(
-    row_idx: usize,
-    page_flags: &HashMap<usize, FlagEntry>,
-    ioc_outcomes: &HashMap<usize, IocRowOutcome>,
-) -> String {
-    let user_flag = page_flags
-        .get(&row_idx)
-        .map(|entry| normalize_flag_value(&entry.flag))
-        .unwrap_or_default();
-    if !user_flag.is_empty() {
-        return user_flag;
-    }
-    ioc_outcomes
-        .get(&row_idx)
-        .map(|outcome| outcome.flag.clone())
-        .unwrap_or_default()
-}
-
 /// Materializes a page from an already page-sized frame in display order.
 ///
 /// `row_ids[position]` is the original row id for `df`'s row `position`.
-/// `ioc_outcomes` only needs the page's rows, so a page read never converts
-/// the project-wide IOC outcome vector. The frame may contain extra columns
-/// (for color evaluation); only `columns` become row data and cells.
+/// The frame may contain extra columns (for color evaluation); only `columns`
+/// become row data and cells. Annotations come from the captured saved snapshot.
 pub fn materialize_page_rows(
     df: &DataFrame,
     row_ids: &[usize],
     columns: &[ColumnMeta],
     flags: &HashMap<usize, FlagEntry>,
-    ioc_outcomes: &HashMap<usize, IocRowOutcome>,
-    apply_ioc_tags: bool,
 ) -> Result<Vec<ProjectRow>, AppError> {
     if df.height() != row_ids.len() {
         return Err(AppError::Message(
@@ -108,40 +80,21 @@ pub fn materialize_page_rows(
         ));
     }
     let cell_columns = CellColumns::new(df, columns);
-    let page_flags: HashMap<usize, FlagEntry> = row_ids
-        .iter()
-        .filter_map(|idx| flags.get(idx).cloned().map(|entry| (*idx, entry)))
-        .collect();
-
     let mut rows = Vec::with_capacity(row_ids.len());
     for (position, &row_idx) in row_ids.iter().enumerate() {
         let cells = build_row_cells(df, position, columns, &cell_columns);
-        let user_memo = page_flags
-            .get(&row_idx)
-            .and_then(|e| e.memo.clone())
-            .unwrap_or_default();
-        let mut final_memo = user_memo;
-        if apply_ioc_tags {
-            if let Some(outcome) = ioc_outcomes.get(&row_idx) {
-                append_ioc_tags(&mut final_memo, &outcome.tags);
-            }
-        }
-        let tags = page_flags
-            .get(&row_idx)
-            .map(|e| e.tags.clone())
-            .unwrap_or_default();
-        let bookmarked = page_flags.get(&row_idx).is_some_and(|e| e.bookmarked);
+        let entry = flags.get(&row_idx);
         rows.push(ProjectRow {
             row_index: row_idx,
             cells,
-            flag: final_flag_for(row_idx, &page_flags, ioc_outcomes),
-            memo: if final_memo.is_empty() {
-                None
-            } else {
-                Some(final_memo)
-            },
-            tags,
-            bookmarked,
+            flag: entry
+                .map(|entry| normalize_flag_value(&entry.flag))
+                .unwrap_or_default(),
+            memo: entry
+                .and_then(|entry| entry.memo.clone())
+                .filter(|memo| !memo.is_empty()),
+            tags: entry.map(|entry| entry.tags.clone()).unwrap_or_default(),
+            bookmarked: entry.is_some_and(|entry| entry.bookmarked),
             color: None,
         });
     }
