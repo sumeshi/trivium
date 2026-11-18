@@ -1,4 +1,4 @@
-import type { ConditionNode, FlagEntry, FlagFilterValue, FlagFilterSelection, FlagSymbol, IocEntry, ProjectRow } from "../../types";
+import type { ConditionNode, FlagEntry, FlagFilterValue, FlagFilterSelection, FlagSymbol, ProjectRow } from "../../types";
 import { buildCellCaches } from "../../ipcValues.ts";
 import { FLAG_HINTS } from "../../skin.ts";
 import { ROW_HEIGHT } from "../../virtualScroll.ts";
@@ -162,14 +162,3 @@ export function applyAnnotationEntry(
     bookmarked: entry?.bookmarked ?? false,
   };
 }
-
-export const escapeCsvValue = (value: string): string =>
-  /[\",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-
-export const buildIocCsv = (entries: IocEntry[]) => {
-  const header = "flag,tag,query";
-  const rows = entries.map((entry) =>
-    [entry.flag, entry.tag, entry.query].map(escapeCsvValue).join(",")
-  );
-  return [header, ...rows].join("\n");
-};

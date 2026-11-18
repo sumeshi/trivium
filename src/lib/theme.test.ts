@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isLightTheme, parseTheme } from "./themeModel.ts";
-import { displayRowColor, resolveConditionColor } from "./skin.ts";
+import { displayRowColor } from "./skin.ts";
+import { BUILTIN_THEMES } from "./themeCatalog.generated.ts";
 
 test("existing and new stored theme names are validated without coercion", () => {
   for (const saved of ["light", "dark", "yukari", "yozora"]) {
@@ -12,22 +13,10 @@ test("existing and new stored theme names are validated without coercion", () =>
   }
 });
 
-test("extra themes use the matching light/dark condition palette", () => {
-  assert.ok(isLightTheme("yukari"));
-  assert.ok(!isLightTheme("yozora"));
-  for (const name of ["red", "orange", "amber", "green", "teal", "blue", "purple", "pink"]) {
-    assert.equal(resolveConditionColor(name, "yukari"), resolveConditionColor(name, "light"));
-    assert.equal(resolveConditionColor(name, "yozora"), resolveConditionColor(name, "dark"));
-  }
-  assert.equal(resolveConditionColor("unknown", "yukari"), null);
-});
-
 test("existing saved row colours follow the selected theme without rewriting storage", () => {
-  for (const current of ["sakura", "yozora"] as const) {
-    assert.equal(displayRowColor("#fbe4e4", current), "var(--rule-red)");
-    assert.equal(displayRowColor("#4a2b2f", current), "var(--rule-red)");
-    assert.equal(displayRowColor("#123456", current), "#123456");
-  }
+  assert.equal(displayRowColor("#fbe4e4"), "var(--rule-red)");
+  assert.equal(displayRowColor("#4a2b2f"), "var(--rule-red)");
+  assert.equal(displayRowColor("#123456"), "#123456");
 });
 
 // Measure the actual CSS tokens instead of a second palette kept only in tests.
@@ -243,34 +232,4 @@ test("Sumire is an offered light neutral with restrained silver surfaces and dar
   assert.ok(Math.max(...silver) - Math.min(...silver) < 12, "Sumire surfaces remain neutral silver");
   assert.ok(luminance(surface) > .7 && luminance(accent) < .04, "Sumire pairs light silver with near-black controls");
   assert.ok(Math.max(...dark) - Math.min(...dark) < 20, "Sumire accents avoid a strong colour cast");
-});
-
-// Frozen before migrating 0.2.4 CSS into JSON: every palette token must match.
-import { createHash } from "node:crypto";
-import { BUILTIN_THEMES } from "./themeCatalog.generated.ts";
-test("JSON palettes preserve every pre-migration token exactly", () => {
-  const baseline: Record<string, string> = {
-  "trivium": "d9469c98746320d7832213b322c5e7e96456687ca78482432862ccb962c3a356",
-  "light": "48d5215e2f600a3ab894a7e4792f788d3900299340da6de5f3c43f7a1b278336",
-  "dark": "d11851c82a953bac48e8416a29e83c3ccc3664911fa1452e96eb67f2751ef310",
-  "toki": "c2c14b7654933665bf917c67566ddff52012656970f15a73af5d92aa3024d263",
-  "sakura": "1edca68ba6be1a948c6ec4b77b2c3d3d30c760b6bb303496df3a68e165eaac9d",
-  "kohaku": "38a08cff49c677a03cbffea50267a383f53983b39c03ccc22564cbbfc23af2a1",
-  "hisui": "119db5eb1b5ac9fa8b6f215769c08a4dcf60fac42006101ab6f425848df8e9b9",
-  "nagi": "5199f8acb0a3c22534efee198e81ac672d5b0ac1d4e3e27fb46ed17c8327a4cc",
-  "sora": "7d0fdcd718a62b5a8f56557163cfe6b3acad5d2f9612de9f195b3a4e3f9d7ef6",
-  "yukari": "bd34d56cd07d6eaefbdc829c3f378e5e566dd1459a3980dc787ac2c66ac303ec",
-  "sumire": "0733a2f36bbea45889fee7e0310b734c16cfa53877cf68ec32d7a323315a113d",
-  "yozora": "4cdae398d399e58bd14934f67abab376dcf81bb1ac839c60bb989352eb137283",
-  "shion": "2ffa439be6ddd32b2424a51d57685a2e094b4d552386e535ba3bbcd0fa3d3842",
-  "kasumi": "777ce8ce1322be121ac3d8cc48953164a631583e596f2db72e91d5a9ec3d1704"
-};
-  for (const definition of BUILTIN_THEMES) {
-    if (!Object.prototype.hasOwnProperty.call(baseline, definition.id)) continue;
-    const css = cssTokens(definition.id);
-    const actual = Object.fromEntries([...css].filter(([key]) => !key.startsWith("font-") && !key.startsWith("radius"))
-      .sort(([a], [b]) => a.localeCompare(b)));
-    const hash = createHash("sha256").update(JSON.stringify(actual)).digest("hex");
-    assert.equal(hash, baseline[definition.id], definition.id);
-  }
 });

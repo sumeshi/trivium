@@ -10,7 +10,6 @@
   import { formatIsoCell } from '../../dateDisplay';
   import { tagSearch } from '../../tagSearch';
   import RowTagsMenu from './RowTagsMenu.svelte';
-  import { theme } from '../../theme';
   import { displayRowColor } from '../../skin';
   import { useWorkspace } from '../../workspaceContext';
 
@@ -91,7 +90,7 @@
   class:bookmarked={row?.bookmarked === true}
   style={`grid-template-columns: ${gridTemplate};${
     row?.color
-      ? ` --row-color: ${displayRowColor(row.color, $theme)};`
+      ? ` --row-color: ${displayRowColor(row.color)};`
       : ''
   }`}
 >

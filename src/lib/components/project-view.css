@@ -143,9 +143,7 @@
   font-size: 11px;
 }
 
-.filter-label,
-.columns-label,
-.export-label {
+.filter-label {
   color: var(--muted);
   font-size: 10px;
   font-weight: 600;
@@ -1301,11 +1299,6 @@ button.primary:disabled {
   color: var(--fg);
 }
 
-.filter-bookmark .bookmark-toggle.active {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 .memo-error {
   margin: 0;
   color: var(--danger);
@@ -1516,10 +1509,6 @@ button.primary:disabled {
   gap: 12px;
 }
 
-.hidden-input {
-  display: none;
-}
-
 .ghost.danger {
   border-color: color-mix(in srgb, var(--danger) 48%, transparent);
   color: var(--danger);
@@ -1528,21 +1517,6 @@ button.primary:disabled {
 .ghost.danger:hover {
   border-color: var(--danger);
   color: color-mix(in srgb, var(--danger) 90%, #fff 10%);
-}
-
-.cell-dialog-body {
-  margin: 0;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface-weak);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 0.95rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-y: auto;
-  max-height: 60vh;
 }
 
 .row-detail-dialog {

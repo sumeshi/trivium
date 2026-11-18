@@ -1,5 +1,3 @@
-import type { Theme } from "./theme";
-import { isLightTheme } from "./themeModel.ts";
 import type { FlagSymbol } from "./types";
 
 // フラグ記号（記号の単一ソース）
@@ -12,13 +10,13 @@ export const FLAG_HINTS: Record<FlagSymbol, string> = {
 // 条件色パレット。name は colors.json に保存しない識別子で、
 // definitions/themes の CSS 変数 --rule-<name> と対応する。
 // 両テーマの hex は保存済み色の識別にも使うため維持する。
-export interface ConditionColorEntry {
+interface ConditionColorEntry {
   name: string;
   dark: string;
   light: string;
 }
 
-export const CONDITION_COLORS: ReadonlyArray<ConditionColorEntry> = [
+const CONDITION_COLORS: ReadonlyArray<ConditionColorEntry> = [
   { name: "red", dark: "#4a2b2f", light: "#fbe4e4" },
   { name: "orange", dark: "#4a3323", light: "#fbe9db" },
   { name: "amber", dark: "#463d20", light: "#faf1d5" },
@@ -29,22 +27,10 @@ export const CONDITION_COLORS: ReadonlyArray<ConditionColorEntry> = [
   { name: "pink", dark: "#472a3b", light: "#fbe4ef" },
 ];
 
-// テーマに応じた条件色 hex を返す。未知の name は null。
-export function resolveConditionColor(
-  name: string,
-  current: Theme
-): string | null {
-  const entry = CONDITION_COLORS.find((item) => item.name === name);
-  if (!entry) {
-    return null;
-  }
-  return isLightTheme(current) ? entry.light : entry.dark;
-}
-
 // 保存済み hex（dark/light のどちらで保存されたか不明）を UI 表示用の
 // CSS 変数参照に変換する。パレット外の hex はそのまま返す。
 // colors.json には hex のまま保存し、var(...) は保存しない。
-export function displayRowColor(color: string, _current: Theme): string {
+export function displayRowColor(color: string): string {
   const normalized = color.trim().toLowerCase();
   const entry = CONDITION_COLORS.find(
     (item) =>

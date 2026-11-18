@@ -27,11 +27,6 @@
     }
   };
 
-  const closeMenu = () => {
-    expanded = false;
-    detachGlobalPositionListeners();
-  };
-
   const selectValue = (next: FlagSymbol) => {
     if (next !== value) {
       dispatch('change', next);

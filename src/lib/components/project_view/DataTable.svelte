@@ -42,8 +42,6 @@
     appliedResultLoading, appliedFilters, viewGeneration, queryCountKnown, queryError,
   } = useWorkspace();
 
-  const _toggleSort = toggleSort;
-
   export let columnWidths: Map<string, number> = new Map();
   export let noteColumnWidth = MEMO_COL_WIDTH;
   export let ensureRangeLoaded: (start: number, end: number) => void = () => {};
@@ -127,34 +125,22 @@
 
   const resolveColumnWidth = (column: string, widths: ReadonlyMap<string, number>) => {
     const width = widths.get(column) ?? MIN_DATA_WIDTH;
-    if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
-    if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-    return width;
+    return Math.round(Math.min(MAX_DATA_WIDTH, Math.max(MIN_DATA_WIDTH, width)));
   };
 
-  const expandColumnWidths = (baseWidths: number[], _availableWidth: number) => {
-    return baseWidths.map((width) => {
-      if (width < MIN_DATA_WIDTH) return MIN_DATA_WIDTH;
-      if (width > MAX_DATA_WIDTH) return MAX_DATA_WIDTH;
-      return Math.round(width);
-    });
-  };
-
-  $: baseDataWidths = $visibleColumns.map((column) => resolveColumnWidth(column, columnWidths));
+  $: dataWidths = $visibleColumns.map((column) => resolveColumnWidth(column, columnWidths));
   $: stickyWidth = STICKY_COLUMNS_WIDTH - MEMO_COL_WIDTH + noteColumnWidth;
-  $: availableDataWidth = Math.max(0, $tableWidth - stickyWidth);
-  $: distributedDataWidths = expandColumnWidths(baseDataWidths, availableDataWidth);
-  $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, distributedDataWidths, $frozenThrough, stickyWidth);
+  $: frozenLayout = frozenColumnLayout($orderedColumns, $visibleColumns, dataWidths, $frozenThrough, stickyWidth);
   $: focusedScrollingWidth = focusedColumnId && !frozenLayout.offsets.has(focusedColumnId)
-    ? distributedDataWidths[$visibleColumns.indexOf(focusedColumnId)] : undefined;
+    ? dataWidths[$visibleColumns.indexOf(focusedColumnId)] : undefined;
   $: frozenViewport = frozenColumnViewport(frozenLayout, $visibleColumns.length, stickyWidth,
     $tableWidth, $scrollLeft, focusedScrollingWidth);
-  $: columnLayout = tableColumnLayout($visibleColumns, distributedDataWidths, frozenLayout.offsets, stickyWidth);
+  $: columnLayout = tableColumnLayout($visibleColumns, dataWidths, frozenLayout.offsets, stickyWidth);
   $: {
     const next = visibleTableColumns(columnLayout, $scrollLeft, $tableWidth, frozenViewport.edge, renderedColumns, 2, draggedColumnId ?? focusedColumnId);
     if (next !== renderedColumns) renderedColumns = next;
   }
-  $: totalDataWidth = distributedDataWidths.reduce((sum, width) => sum + width, 0);
+  $: totalDataWidth = dataWidths.reduce((sum, width) => sum + width, 0);
   $: totalTableWidth = stickyWidth + totalDataWidth;
   $: effectiveTableWidth = Math.max(totalTableWidth, $tableWidth);
   $: horizontalMaximum = Math.max(0, effectiveTableWidth - $tableWidth);
@@ -169,7 +155,7 @@
     `${INDEX_COL_WIDTH}px`,
     `${FLAG_COL_WIDTH}px`,
     `${noteColumnWidth}px`,
-    ...distributedDataWidths.map((width) => `${width}px`)
+    ...dataWidths.map((width) => `${width}px`)
   ].join(' ');
 
   // Set CSS variables to specify sticky column positions
@@ -437,30 +423,20 @@
       suppressSortClick = false;
       event.preventDefault(); event.stopPropagation(); return;
     }
-    _toggleSort(columnId);
+    toggleSort(columnId);
   };
 
   const buildVirtualRows = (
     start: number,
     end: number,
     cache: Map<number, CachedRow>,
-    posMap: Map<number, number>,
-    pendingPages: Set<string>
+    posMap: Map<number, number>
   ): VirtualRow[] => {
     if (end <= start) {
       return [];
     }
     const result: VirtualRow[] = [];
-    // Use backend-provided ordering via positionToRowIndex map
-    
-    // If posMap is empty and we have pending pages, return loading state rows
-    // This handles project switching where we've reset posMap but first page is still loading
-    if (posMap.size === 0 && pendingPages.size > 0) {
-      for (let position = start; position < end; position += 1) {
-        result.push({ position, row: null });
-      }
-      return result;
-    }
+    // Backend result positions identify the original rows, including after sorting.
     for (let position = start; position < end; position += 1) {
       const rowIndex = posMap.get(position) ?? null;
       const row = rowIndex !== null ? cache.get(rowIndex) ?? null : null;
@@ -469,7 +445,7 @@
     return result;
   };
 
-  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex, $pendingPages);
+  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex);
   $: {
     const next = recycleSlots(virtualRows, (row) => row.position, rowSlots);
     if (next !== rowSlots) rowSlots = next;
@@ -548,7 +524,7 @@
   const focusColumn = (index: number) => {
     if (!$bodyScrollEl) return;
     focusedColumnId = $visibleColumns[index] ?? null;
-    $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, distributedDataWidths,
+    $bodyScrollEl.scrollLeft = horizontalScrollForColumn(index, $visibleColumns, dataWidths,
       frozenLayout, stickyWidth, $bodyScrollEl.scrollLeft, $bodyScrollEl.clientWidth);
     syncHeader($bodyScrollEl.scrollLeft);
   };

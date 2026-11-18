@@ -325,7 +325,7 @@
     }
   }
 
-  const applyProjectDetail = async (detail: LoadProjectResponse, _resetScroll: boolean) => {
+  const applyProjectDetail = async (detail: LoadProjectResponse) => {
     // Any response from the previous project or screen must be ignored from here on.
     annotationObserver.suspend();
     if (annotationRefreshTimer) clearTimeout(annotationRefreshTimer);
@@ -334,12 +334,6 @@
     const generation = get(viewGeneration);
     const projectId = detail.project.meta.id;
     view.cancelScheduled();
-    if (generation !== get(viewGeneration)) {
-      if (applyingProjectId === projectId) {
-        applyingProjectId = null;
-      }
-      return;
-    }
 
     // Requests from the previous project or screen must not keep the job
     // slots while this project loads.
@@ -478,7 +472,7 @@
       // would reset the values that load is about to apply.
       if (applyingProjectId !== projectId) {
         applyingProjectId = projectId;
-        void applyProjectDetail(projectDetail, true);
+        void applyProjectDetail(projectDetail);
       }
     } else if (hiddenChanged) {
       // Visibility is presentation only: the search scope (and therefore the
