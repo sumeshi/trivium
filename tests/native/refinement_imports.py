@@ -73,7 +73,10 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
             assert controls == (extension == "csv"), (extension, controls)
             if controls:
                 web.choose('select[aria-label="CSV delimiter"]', "\t")
-                web.click(web.node('[aria-label="Restore Trivium annotations"]'))
+                # The drawer can still be moving; target its full checkbox label.
+                web.tap(web.node('.restore-annotations'))
+                wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
+                         bool, "annotation restoration is selected before cancelling the picker")
                 trace_start = len(web.trace())
                 before_count = web.script("return window.__refinementDialog.count;")
                 _pick(web, None)
@@ -120,7 +123,9 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
         wait_for(lambda: web.script("return [...document.querySelectorAll('.pending-files li')].map(e=>e.textContent.trim());"),
                  lambda names: names == expected_names, "multiple native picker paths populate the import form in order")
         web.choose('select[aria-label="CSV delimiter"]', "\t")
-        web.click(web.node('[aria-label="Restore Trivium annotations"]'))
+        web.tap(web.node('.restore-annotations'))
+        wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
+                 bool, "annotation restoration is selected before importing the batch")
         start = len(web.trace())
         web.named("Import and open", ".workspace-drawer")
         settled = wait_for(lambda: web.script("""

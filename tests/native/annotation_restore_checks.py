@@ -72,13 +72,17 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
             _pick(web, exported)
             assert not web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"), "CSV restore defaults off for every selected file"
             if restore:
-                web.click(web.node('[aria-label="Restore Trivium annotations"]'))
+                web.tap(web.node('.restore-annotations'))
+                wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
+                         bool, "annotation restoration is selected before choosing another file")
                 # Opt-in must not leak to another selected file or JSON input.
                 _pick(web, selected_json)
                 assert not web.script("return !!document.querySelector('[aria-label=\"Restore Trivium annotations\"]');")
                 _pick(web, exported)
                 assert not web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;")
-                web.click(web.node('[aria-label="Restore Trivium annotations"]'))
+                web.tap(web.node('.restore-annotations'))
+                wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
+                         bool, "annotation restoration is selected before importing the annotated CSV")
                 web.screenshot(evidence / "csv-annotation-restore-option.png")
             start = len(web.trace())
             web.named("Import and open", ".workspace-drawer")
