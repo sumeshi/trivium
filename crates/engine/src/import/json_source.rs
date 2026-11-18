@@ -45,6 +45,23 @@ where
     }
 }
 
+/// Visits object fields, including nonempty parent objects, without expanding
+/// arrays. Pass 2 uses this to fill an existing parent column when the same
+/// path has scalar/container values in different records. Schema discovery
+/// continues to use `visit_leaves`, so ordinary nested objects add no columns.
+pub(crate) fn visit_fields<'a, F>(value: &'a Value, prefix: &str, visit: &mut F)
+where
+    F: FnMut(&str, &'a Value),
+{
+    if let Value::Object(map) = value {
+        for (key, child) in map {
+            let path = format!("{}/{}", prefix, escape_pointer_token(key));
+            visit(&path, child);
+            visit_fields(child, &path, visit);
+        }
+    }
+}
+
 /// Converts a present JSON value into its display cell text. Null is kept as
 /// a Polars null, not an empty string.
 pub(crate) fn value_to_cell(value: &Value) -> Option<String> {
@@ -123,7 +140,9 @@ where
         RecordFormat::JsonLines => {
             let file = File::open(path)
                 .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-            for (line_no, line) in BufReader::new(file).lines().enumerate() {
+            let mut reader = BufReader::new(file);
+            strip_utf8_bom(&mut reader)?;
+            for (line_no, line) in reader.lines().enumerate() {
                 let line =
                     line.map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
                 let trimmed = line.trim();
@@ -203,7 +222,7 @@ fn starts_with_array(reader: &mut BufReader<File>) -> Result<bool, AppError> {
     Ok(is_array)
 }
 
-/// Drops a leading UTF-8 BOM from a JSON document. JSONL does not use this.
+/// Drops only a file-prefix UTF-8 BOM. Physical JSONL lines keep their numbering.
 fn strip_utf8_bom(reader: &mut BufReader<File>) -> Result<(), AppError> {
     let buffer = reader
         .fill_buf()

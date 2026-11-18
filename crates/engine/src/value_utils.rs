@@ -203,18 +203,36 @@ pub fn build_full_cell(
 
 /// Returns the JSON type for a key present in a JSON source record.
 fn original_json_kind(original: Option<&Value>, source: &str) -> Option<&'static str> {
-    let Some(Value::Object(_)) = original else {
-        return None;
-    };
-    match original?.pointer(source)? {
+    match original_json_field(original, source)? {
         Value::Null => Some("null"),
         Value::Bool(_) => Some("bool"),
-        Value::Number(number) if number.is_i64() || number.is_u64() => Some("int"),
-        Value::Number(_) => Some("float"),
+        // is_i64/is_u64 test the machine-sized range, not whether an
+        // arbitrary-precision JSON number was written as an integer.
+        Value::Number(number) => Some(if number.to_string().contains(['.', 'e', 'E']) {
+            "float"
+        } else {
+            "int"
+        }),
         Value::String(_) => Some("string"),
         Value::Array(_) => Some("array"),
         Value::Object(_) => Some("object"),
     }
+}
+
+/// Resolves a flattened object path without descending into arrays, which
+/// remain whole leaf cells. A numeric object key and an array index must not
+/// become the same field when records have different shapes.
+fn original_json_field<'a>(original: Option<&'a Value>, source: &str) -> Option<&'a Value> {
+    let mut value = original?;
+    let path = source.strip_prefix('/')?;
+    for token in path.split('/') {
+        let Value::Object(object) = value else {
+            return None;
+        };
+        let token = token.replace("~1", "/").replace("~0", "~");
+        value = object.get(&token)?;
+    }
+    Some(value)
 }
 
 /// Maps a Polars value to a cell kind when no JSON source type is available.
@@ -259,9 +277,7 @@ fn preview_cell(cell: Cell) -> Cell {
 /// no `__original`, so those cells are null only.
 fn null_cell_kind(original: Option<&Value>, source: &str) -> &'static str {
     match original {
-        Some(Value::Object(_)) if original.and_then(|value| value.pointer(source)).is_none() => {
-            "missing"
-        }
+        Some(Value::Object(_)) if original_json_field(original, source).is_none() => "missing",
         _ => "null",
     }
 }
@@ -272,10 +288,8 @@ pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
     let series = df.column(INTERNAL_ORIGINAL).ok()?;
     match series.get(row_idx).ok()? {
         AnyValue::Null => None,
-        other => {
-            anyvalue_to_search_string(&other)
-                .and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok())
-        }
+        other => anyvalue_to_search_string(&other)
+            .and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok()),
     }
 }
 

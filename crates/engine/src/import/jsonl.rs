@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use polars::prelude::*;
 
 use crate::error::AppError;
-use crate::import::json_source::{for_each_record, value_to_cell, visit_leaves};
+use crate::import::json_source::{for_each_record, value_to_cell, visit_fields, visit_leaves};
 use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
@@ -13,7 +13,9 @@ use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 pub use crate::import::json_source::RecordFormat;
 mod batch;
+mod parent_cells;
 use batch::{Batch, Record};
+use parent_cells::ParentCells;
 
 /// Maximum number of records in one import batch.
 pub const DEFAULT_BATCH_ROWS: usize = 50_000;
@@ -206,11 +208,34 @@ impl JsonImporter {
         for_each_record(&path, format, |record_no, value| {
             job.check_cancelled()?;
             let mut cells = Vec::new();
-            visit_leaves(&value, "", &mut |pointer, leaf| {
-                if let Some(index) = column_index.get(pointer.as_str()) {
-                    cells.push((*index, value_to_cell(leaf)));
+            let mut parents = ParentCells::new(DEFAULT_BATCH_BYTES);
+            let mut cell_error = None;
+            visit_fields(&value, "", &mut |pointer, field| {
+                if cell_error.is_some() {
+                    return;
+                }
+                if let Some(index) = column_index.get(pointer) {
+                    // These object values were formerly absent from the leaf
+                    // batch. Bound only this additional duplicated text; the
+                    // existing oversized scalar/array record contract stays.
+                    let cell = if matches!(field, serde_json::Value::Object(map) if !map.is_empty())
+                    {
+                        match parents.serialize(field, record_no) {
+                            Ok(text) => Some(text),
+                            Err(error) => {
+                                cell_error = Some(error);
+                                return;
+                            }
+                        }
+                    } else {
+                        value_to_cell(field)
+                    };
+                    cells.push((*index, cell));
                 }
             });
+            if let Some(error) = cell_error {
+                return Err(error);
+            }
             let record = Record {
                 cells,
                 original: value.to_string(),
