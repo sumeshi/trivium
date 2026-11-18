@@ -245,6 +245,10 @@
     return memoDialog?.hasUnsavedChanges() ? 'Save or cancel your note before closing.' : null;
   }
 
+  export function canAutoNavigate(): boolean {
+    return !memoDialog?.hasUncommittedChanges();
+  }
+
   export function focusUnsavedDraft(): void {
     memoDialog?.focusDraft();
   }

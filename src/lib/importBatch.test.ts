@@ -117,7 +117,7 @@ test("a user tab selection during a batch wins over every later imported file", 
   f.controller.dispose();
 });
 
-test("a note draft created during import keeps the active case while new tabs open in the background", async () => {
+for (const saving of [false, true]) test(`a ${saving ? "saving" : "draft"} note keeps its case when an import finishes`, async () => {
   const held = deferred();
   const f = fixture(async () => held.promise);
   f.projects.push(summary("existing"));
@@ -125,9 +125,11 @@ test("a note draft created during import keeps the active case while new tabs op
   await f.controller.selectProject("existing");
   const activeDetail = get(f.controller.state).projectDetail;
   let unsavedNote = "";
+  let pendingSave = false;
   f.controller.setPendingFiles(["new.csv"]);
-  const importing = f.controller.createProjects(() => !unsavedNote);
-  unsavedNote = "Evidence entered while the source was importing";
+  const importing = f.controller.createProjects(() => !pendingSave && !unsavedNote);
+  pendingSave = saving;
+  unsavedNote = saving ? "" : "Evidence entered while the source was importing";
   held.resolve();
   const result = await importing;
   assert.equal(result.imported.length, 1);
@@ -137,6 +139,7 @@ test("a note draft created during import keeps the active case while new tabs op
   assert.deepEqual(get(f.controller.state).openProjectIds, ["existing", "new.csv"]);
   assert.deepEqual(f.loaded, ["existing"], "do not replace the ProjectView that owns the note draft");
   unsavedNote = "";
+  pendingSave = false;
   await f.controller.selectProject("new.csv");
   assert.equal(get(f.controller.state).selectedProjectId, "new.csv");
   f.controller.dispose();

@@ -153,7 +153,7 @@ def _drop(web, source: GtkFileSource, pointer: NativePointer, title: str = "Drop
     wait_for(lambda: _overlay(web), lambda value: value is None, "dropping files clears the overlay", timeout=8)
 
 
-def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Path, created: list[dict]) -> dict:
+def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Path, created: list[dict], *, saving: bool = False) -> dict:
     active = web.state()["active"]
     source = GtkFileSource([path], evidence, f"{path.stem}-note")
     try:
@@ -173,6 +173,10 @@ def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Pa
         draft = "Unsaved evidence entered while another file was importing"
         web.write('.memo-dialog textarea[aria-label="Note"]', draft)
         web.script("window.__importDraftEditor=document.querySelector('.memo-dialog textarea');")
+        if saving:
+            web.script("window.__workspaceBeforeCommit={name:'update_flag',projectId:arguments[0],rowIndex:0,ready:false,release:null};", active.removeprefix("project-tab-"))
+            web.named("Save", ".memo-dialog")
+            wait_for(lambda: web.script("return !!window.__workspaceBeforeCommit?.ready;"), bool, "note save waits before its real native dispatch")
         start = len(web.trace())
         web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
         wait_for(lambda: any(entry["name"] == "list_projects" and "result" in entry for entry in web.trace()[start:]),
@@ -181,16 +185,24 @@ def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Pa
         assert web.script("return window.__importDraftEditor===document.querySelector('.memo-dialog textarea')&&window.__importDraftEditor.value===arguments[0];", draft), "Keep the original note editor and its unsaved text"
         assert web.script("return !!document.querySelector(arguments[0]);", f'#project-tab-{meta["id"]}'), "The imported case remains available in a background tab"
         web.screenshot(evidence / "native-import-preserves-note.png")
-        web.named("Cancel", ".memo-dialog")
-        wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "explicitly discard only the test note draft")
+        if saving:
+            assert web.script("return window.__importDraftEditor.disabled;"), "Import completion must preserve the pending editor"
+            web.script("window.__workspaceBeforeCommit.release();delete window.__workspaceBeforeCommit;")
+            wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "the retained editor closes after a real successful note save")
+            saved = web.command("query_project_rows", {"projectId": active.removeprefix("project-tab-"), "offset": 0, "limit": 1})
+            assert saved["rows"][0]["memo"] == draft
+        else:
+            web.named("Cancel", ".memo-dialog")
+            wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "explicitly discard only the test note draft")
         web.tab(meta["id"])
         web.results(2)
         web.tab(active.removeprefix("project-tab-"))
         web.results(2)
         return {"real_import_response_delayed": True, "same_note_dom_and_text_retained": True,
-                "imported_background_tab_usable": True, "draft_explicitly_discarded": True}
+                "imported_background_tab_usable": True, "pending_native_save_completed": saving,
+                "draft_explicitly_discarded": not saving}
     finally:
-        web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;delete window.__importDraftEditor;")
+        web.script("window.__workspaceHold?.release?.();window.__workspaceBeforeCommit?.release?.();delete window.__workspaceHold;delete window.__workspaceBeforeCommit;delete window.__importDraftEditor;")
         if web.script("return !!document.querySelector('.memo-dialog');"):
             web.named("Cancel", ".memo-dialog")
 
@@ -204,12 +216,14 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
     csv = root / f"drop space {token}.csv"
     jsonl = root / f"ドロップ調査 {token}.jsonl"
     note_import = root / f"drop-note-{token}.csv"
+    saving_import = root / f"drop-saving-note-{token}.csv"
     unsupported = root / f"drop unsupported {token}.txt"
     csv.write_text("host\tmessage\nalpha\tone\nbeta\ttwo\n", encoding="utf-8")
     jsonl.write_text('{"host":"gamma","message":"three"}\n{"host":"delta","message":"four"}\n', encoding="utf-8")
     note_import.write_text("host,message\nnew,one\nnew,two\n", encoding="utf-8")
+    saving_import.write_bytes(note_import.read_bytes())
     unsupported.write_text("Not a supported data file", encoding="utf-8")
-    originals = {path: path.read_bytes() for path in [csv, jsonl, note_import, unsupported]}
+    originals = {path: path.read_bytes() for path in [csv, jsonl, note_import, saving_import, unsupported]}
     created: list[dict] = []
     pointer = source = None
     web.close_drawer()
@@ -269,6 +283,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert [entry["request"]["path"] for entry in requests] == expected, requests
         assert [entry["request"]["delimiter"] for entry in requests] == ["\t", ""], requests
         note_guard = _import_preserves_note(web, note_import, pointer, evidence, created)
+        saving_guard = _import_preserves_note(web, saving_import, pointer, evidence, created, saving=True)
         unsupported_start = len(web.trace())
         source = GtkFileSource([unsupported], evidence, f"{token}-unsupported")
         _drop(web, source, pointer, "Unsupported file type")
@@ -286,6 +301,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
             "unsupported_file_rejected": True, "native_picker_calls": 0}
         report["file_drop"]["overlay_screenshot"] = "native-file-drop-overlay.png"
         report["file_drop"]["import_preserves_note"] = note_guard
+        report["file_drop"]["import_preserves_pending_note"] = saving_guard
     finally:
         try:
             if pointer:

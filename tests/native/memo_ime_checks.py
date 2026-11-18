@@ -17,7 +17,7 @@ from column_pin_checks import _key
 from feedback_checks import _settle
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
-from runtime import native_driver_default
+from runtime import IPC_COMMAND_JS, native_driver_default
 
 
 def _draft(web, selector: str, value: str) -> None:
@@ -36,6 +36,50 @@ def _editor(web, row: int = 0) -> None:
 
 def _saved(web) -> None:
     wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "note save completes")
+
+
+def _verify_note_focus(web, owner: str) -> dict:
+    _editor(web)
+    _draft(web, '.memo-dialog textarea', "Retain this note if saving fails")
+    web.script("document.querySelector('.memo-dialog .primary').focus();")
+    _key(web, "\ue004")
+    assert web.script("return document.activeElement===document.querySelector('.memo-dialog [aria-label=\"Close note editor\"]');"), "Tab must wrap inside the note editor"
+    web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "note-reverse-tab", "actions": [
+        {"type": "keyDown", "value": "\ue008"}, {"type": "keyDown", "value": "\ue004"},
+        {"type": "keyUp", "value": "\ue004"}, {"type": "keyUp", "value": "\ue008"},
+    ]}]})
+    assert web.script("return document.activeElement===document.querySelector('.memo-dialog .primary');"), "Shift+Tab must wrap to Save"
+    # Reject one delayed IPC write; retries still use the real engine. This
+    # exercises the dialog's failure path without changing the case database.
+    web.script("""
+      const previous=window.fetch,owner=arguments[0];
+      window.__noteFocus={previous,release:null};
+      window.fetch=(input,options,...rest)=>{
+    """ + IPC_COMMAND_JS + """
+        let args={};try{args=JSON.parse(typeof options?.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
+        if(name==='update_flag'&&args.payload?.projectId===owner){
+          return new Promise(resolve=>window.__noteFocus.release=()=>resolve(new Response(JSON.stringify('Synthetic note save failure'),
+            {headers:{'Content-Type':'application/json','Tauri-Response':'error'}})));
+        }
+        return previous.call(window,input,options,...rest);
+      };
+    """, owner)
+    try:
+        web.named("Save", ".memo-dialog")
+        wait_for(lambda: web.script("return !!window.__noteFocus.release;"), bool, "note write waits before its injected failure")
+        for _ in range(3):
+            _key(web, "\ue004")
+            assert web.script("return document.activeElement===document.querySelector('.memo-dialog').parentElement;"), "All-disabled note controls must not let Tab reach the table"
+        web.script("window.__noteFocus.release();")
+        wait_for(lambda: web.script("return !!document.querySelector('.memo-error')&&document.activeElement===document.querySelector('.memo-dialog textarea');"), bool, "failed save restores focus to the retained draft")
+        assert web.script("return document.querySelector('.memo-dialog textarea').value;") == "Retain this note if saving fails"
+    finally:
+        web.script("window.__noteFocus?.release?.();window.fetch=window.__noteFocus.previous;delete window.__noteFocus;")
+    web.named("Save", ".memo-dialog")
+    _saved(web)
+    assert _stored(web, owner)["memo"] == "Retain this note if saving fails"
+    return {"trusted_tab_and_shift_tab_wrap": True, "pending_save_focus_retained": True,
+            "failed_save_refocuses_draft": True, "real_retry_persisted": True}
 
 
 def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -> None:
@@ -65,6 +109,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
     try:
         open_project(web, case["meta"]["name"])
         web.results(3)
+        focus = _verify_note_focus(web, owner)
         for note in samples:
             _editor(web)
             _draft(web, '.memo-dialog textarea', note)
@@ -158,6 +203,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
         assert rows[0]["trivium-memo"] == final and rows[1]["trivium-memo"] == crlf
         assert source.read_bytes() == original
         report["memo_ime"] = {"plain_text_cases": len(samples), "markup_not_executed": True,
+            "keyboard_focus": focus,
             "native_restart": True, "remote_crlf_noop_edit": True, "csv_exact": True,
             "synthetic_composition_orders": ["isComposing", "keyCode229", "compositionstart", "compositionend-before-keydown"],
             "normal_enter_and_shift_enter": True, "real_os_japanese_ime": "unverified"}

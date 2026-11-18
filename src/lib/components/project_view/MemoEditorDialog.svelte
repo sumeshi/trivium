@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
-  import { createCompositionGuard } from '../../keyboard';
+  import { createCompositionGuard, isTabKey } from '../../keyboard';
   import { buildMemoPatch } from '../../memoAnnotation';
   import { useWorkspace } from "../../workspaceContext";
   const {
@@ -14,6 +14,7 @@
   let memoSaving = false;
   let memoError: string | null = null;
   let textareaEl: HTMLTextAreaElement | null = null;
+  let backdropEl: HTMLDivElement | null = null;
   let tagDraft = '';
   let tagList: string[] = [];
   let bookmarkDraft = false;
@@ -26,6 +27,12 @@
     return tagDraft.trim().length > 0 || Object.keys(buildMemoPatch(editor.row, {
       memo: memoDraft, tags: tagList, bookmarked: bookmarkDraft,
     })).length > 0;
+  }
+
+  // Automatic tab changes must retain the editor until a pending save has
+  // succeeded; on failure this component still owns the draft for retry.
+  export function hasUncommittedChanges(): boolean {
+    return !!get(memoEditor) && (memoSaving || hasUnsavedChanges());
   }
 
   export function focusDraft(): void {
@@ -84,6 +91,9 @@
 
     memoSaving = true;
     memoError = null;
+    // Disabled controls leave the tab order. Keep keyboard events in the
+    // dialog while the accepted save is pending instead of focusing the table.
+    backdropEl?.focus();
 
     try {
       const saved = await saveAnnotation(editor.projectId, editor.row, patch);
@@ -101,6 +111,10 @@
       dispatch('notify', { message: 'Failed to update note.', tone: 'error' });
     } finally {
       memoSaving = false;
+      if (get(memoEditor) === editor && memoError) {
+        await tick();
+        if (get(memoEditor) === editor) textareaEl?.focus();
+      }
     }
   };
 
@@ -111,6 +125,18 @@
   };
 
   const handleMemoBackdropKey = (event: KeyboardEvent) => {
+    if (isTabKey(event) && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      const controls = [...(backdropEl?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled)') ?? [])]
+        .filter(control => control.tabIndex >= 0 && control.getClientRects().length);
+      if (!controls.length) { backdropEl?.focus(); return; }
+      const index = controls.indexOf(document.activeElement as HTMLElement);
+      const next = event.shiftKey ? (index <= 0 ? controls.length - 1 : index - 1)
+        : (index + 1) % controls.length;
+      (controls[next] ?? backdropEl)?.focus();
+      return;
+    }
     if (event.key !== 'Escape') return;
     // Escape may cancel the IME candidate window without closing the editor.
     event.stopPropagation();
@@ -152,6 +178,7 @@
   <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <div
     class="cell-dialog-backdrop"
+    bind:this={backdropEl}
     role="dialog"
     aria-modal="true"
     aria-label={`Edit note for row ${$memoEditor.rowIndex + 1}`}

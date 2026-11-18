@@ -151,7 +151,7 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        const result = await projectController.createProjects(() => !activeView?.unsavedDraftMessage());
+        const result = await projectController.createProjects(() => activeView?.canAutoNavigate() ?? true);
         if (result.failures.length) {
           const failure = result.failures[0];
           showToast(`${failure.fileName}: ${failure.message}`, 'error');
@@ -263,7 +263,7 @@
         if (!result) return;
         if (editsBlocked()) { await backend.deleteProject(result.meta.id); return; }
         const activate = ticket === navigationVersion && previousProject === $projectState.selectedProjectId &&
-          !activeView?.unsavedDraftMessage() && !$projectState.creating;
+          (activeView?.canAutoNavigate() ?? true) && !$projectState.creating;
         if (activate) { captureActive(); navigationVersion += 1; sidebarOpen = false; }
         await projectController.adoptTemporaryProject(result, activate);
         if (!activate) showToast(`Extracted CSV ready: ${result.meta.source_file_name || result.meta.name}`);
