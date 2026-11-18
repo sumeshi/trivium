@@ -5,8 +5,8 @@ use polars::prelude::Series;
 use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 use crate::models::FlagEntry;
 
-use super::integer::IntegerBins;
 use super::values::{datetime_point, float_point, format_nanos, int_point};
+use super::{float::FloatBins, integer::IntegerBins};
 use super::{Histogram, HistogramBucket, HistogramFlags, HistogramRangeInfo};
 
 /// Shared histogram with manual flag counts. Initial timeline focus uses a
@@ -83,11 +83,12 @@ pub(crate) fn histogram_series_annotated_with_job(
             } else {
                 None
             };
-            let float_bounds = if int_bins.is_none() {
-                Some((
+            let float_bins = if int_bins.is_none() {
+                Some(FloatBins::new(
                     min.parse::<f64>().map_err(|error| error.to_string())?,
                     max.parse::<f64>().map_err(|error| error.to_string())?,
-                ))
+                    result.buckets.len(),
+                )?)
             } else {
                 None
             };
@@ -98,18 +99,8 @@ pub(crate) fn histogram_series_annotated_with_job(
                 let index = if let Some(bins) = &int_bins {
                     int_point(series, *row).and_then(|point| bins.index(point))
                 } else {
-                    let (low, high) = float_bounds.expect("numeric bounds");
-                    float_point(series, *row).and_then(|point| {
-                        (point >= low && point <= high).then(|| {
-                            if low == high {
-                                0
-                            } else {
-                                (((point - low) / (high - low) * result.buckets.len() as f64)
-                                    as usize)
-                                    .min(result.buckets.len() - 1)
-                            }
-                        })
-                    })
+                    float_point(series, *row)
+                        .and_then(|point| float_bins.as_ref().expect("numeric bounds").index(point))
                 };
                 if let Some(index) = index {
                     add_flag(&mut result.buckets[index].flags, flags.get(row));

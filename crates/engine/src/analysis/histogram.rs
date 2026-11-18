@@ -2,11 +2,13 @@ use polars::prelude::Series;
 
 use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 mod annotated;
+mod float;
 mod integer;
 mod values;
 
 pub use annotated::histogram_series_annotated;
 pub(crate) use annotated::histogram_series_annotated_with_job;
+use float::FloatBins;
 use integer::IntegerBins;
 use values::{datetime_point, finite, float_point, format_nanos, int_point};
 
@@ -322,13 +324,7 @@ fn histogram_f64_range(
     min: f64,
     max: f64,
 ) -> Result<Histogram, String> {
-    if min > max {
-        return Err("Invalid range: min is greater than max.".into());
-    }
-    let span = max - min;
-    if !span.is_finite() {
-        return Err("Invalid range: span is too wide.".into());
-    }
+    let bins = FloatBins::new(min, max, buckets)?;
     let mut counts = vec![0u64; buckets];
     let mut missing = 0u64;
     let mut outside = 0u64;
@@ -337,44 +333,22 @@ fn histogram_f64_range(
             missing += 1;
             continue;
         };
-        if *value < min || *value > max {
-            outside += 1;
-            continue;
-        }
-        let index = if span == 0.0 {
-            0
+        if let Some(index) = bins.index(*value) {
+            counts[index] += 1;
         } else {
-            let mut index = ((value - min) / span * buckets as f64) as usize;
-            if index >= buckets {
-                index = buckets - 1;
-            }
-            index
-        };
-        counts[index] += 1;
+            outside += 1;
+        }
     }
     let buckets_out = bucket_labels(
         &counts,
         buckets,
         |index| {
-            let start = if span == 0.0 {
-                min
-            } else {
-                min + span * (index as f64 / buckets as f64)
-            };
-            let end = if span == 0.0 || index + 1 == buckets {
-                max
-            } else {
-                min + span * ((index + 1) as f64 / buckets as f64)
-            };
-            (start.to_string(), end.to_string())
+            (
+                bins.edge(index).to_string(),
+                bins.edge(index + 1).to_string(),
+            )
         },
-        |index| {
-            if span == 0.0 {
-                index == 0
-            } else {
-                index + 1 == buckets
-            }
-        },
+        |index| bins.end_inclusive(index),
     );
     Ok(Histogram {
         column: column.to_string(),

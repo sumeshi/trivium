@@ -137,6 +137,45 @@ fn integer_bucket_counts_match_query_bounds_without_overflow() {
 }
 
 #[test]
+fn decimal_bucket_counts_match_their_advertised_query_bounds() {
+    assert_histogram_intervals(Series::new("v", ["0", "0.58", "1"]), 50, None);
+    for values in [
+        ["-1.5", "-0.92", "-0.5", "0.5"],
+        ["0.1", "0.2", "0.3", "0.4"],
+        ["0.58", "0.58", "0.58", "0.58"],
+    ] {
+        assert_histogram_intervals(Series::new("v", values), 50, None);
+        assert_histogram_intervals(Series::new("v", values), 50, Some(("0.1", "0.9")));
+    }
+    let flags = HashMap::from([(
+        1,
+        FlagEntry {
+            flag: "critical".into(),
+            memo: None,
+            tags: vec![],
+            bookmarked: false,
+        },
+    )]);
+    let histogram = histogram_series_annotated(
+        "v",
+        &Series::new("v", [0.0, 0.58, 1.0]),
+        &[0, 1, 2],
+        50,
+        None,
+        &flags,
+        false,
+    )
+    .unwrap();
+    let marked = &histogram.buckets[29];
+    assert_eq!(
+        (&marked.start[..], &marked.end[..], marked.count),
+        ("0.58", "0.6", 1)
+    );
+    assert_eq!(marked.flags.critical, 1);
+    assert_eq!(histogram.buckets[28].count, 0);
+}
+
+#[test]
 fn datetime_bucket_bounds_preserve_nanoseconds_and_empty_bins() {
     let values = [
         "2026-11-14T00:00:00.000000001Z",
