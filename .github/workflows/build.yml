@@ -3,7 +3,7 @@ name: Windows build
 on:
   push:
     branches: [ develop ]
-    paths-ignore: ['**/*.md', 'screenshot.jpeg']
+    paths-ignore: ['**/*.md', 'assets/**']
   workflow_dispatch:
   workflow_call:
 

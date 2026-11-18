@@ -1,3 +1,4 @@
+FROM node:24.22.1-bookworm-slim AS node
 FROM rust:1-slim-bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -8,6 +9,7 @@ RUN apt-get update -y \
         build-essential \
         curl \
         git \
+        python3 \
         fish \
         patchelf \
         pkg-config \
@@ -22,18 +24,17 @@ RUN apt-get update -y \
         libxcb-shape0-dev \
         libxcb-xfixes0-dev \
         libwebkit2gtk-4.1-dev \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g corepack \
-    && corepack enable \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:${PATH}
-
-RUN rustup target add wasm32-unknown-unknown
 
 ARG USERNAME=dev
 ARG USER_UID=1000
