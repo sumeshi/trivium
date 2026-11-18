@@ -70,21 +70,26 @@ impl DuplicateIndex {
 fn row_key(columns: &[&Series], idx: usize) -> String {
     let mut key = String::new();
     for series in columns {
-        let text = cell_text(series, idx);
-        key.push_str(&text.len().to_string());
-        key.push(':');
-        key.push_str(&text);
+        if let Some(text) = cell_text(series, idx) {
+            key.push_str(&text.len().to_string());
+            key.push(':');
+            key.push_str(&text);
+        } else {
+            // Non-null keys start with their decimal text length. A separate
+            // marker keeps null/missing distinct from a literal empty string.
+            key.push('n');
+        }
         key.push('\u{1e}');
     }
     key
 }
 
-fn cell_text(series: &Series, idx: usize) -> String {
+fn cell_text(series: &Series, idx: usize) -> Option<String> {
     let Ok(value) = series.get(idx) else {
-        return String::new();
+        return Some(String::new());
     };
     if matches!(value, AnyValue::Null) {
-        return String::new();
+        return None;
     }
-    anyvalue_to_search_string(&value).unwrap_or_default()
+    Some(anyvalue_to_search_string(&value).unwrap_or_default())
 }
