@@ -55,7 +55,7 @@ impl BatchLimits {
     }
 }
 
-/// Maps a delimiter option string to a single-byte polars separator.
+/// Maps a delimiter option string to a single-byte CSV separator.
 ///
 /// The plan fixes an empty or omitted option to a comma; automatic detection
 /// is not offered because it is not implemented as a user-visible choice.
@@ -66,19 +66,22 @@ pub fn build_delimiter(delimiter: Option<&str>) -> Result<Option<u8>, AppError> 
     if text.is_empty() {
         return Ok(Some(b','));
     }
-    match text {
-        "\t" => return Ok(Some(b'\t')),
-        "," => return Ok(Some(b',')),
-        ";" => return Ok(Some(b';')),
-        "|" => return Ok(Some(b'|')),
-        _ => {}
-    }
     let bytes = text.as_bytes();
-    if bytes.len() == 1 && bytes[0].is_ascii() {
+    if bytes.len() == 1 && valid_delimiter(bytes[0]) {
         Ok(Some(bytes[0]))
     } else {
-        Err(AppError::Message(format!("Invalid delimiter: {}.", text)))
+        Err(invalid_delimiter())
     }
+}
+
+fn valid_delimiter(byte: u8) -> bool {
+    byte.is_ascii() && !matches!(byte, b'\r' | b'\n' | b'"')
+}
+
+fn invalid_delimiter() -> AppError {
+    AppError::Message(
+        "Invalid delimiter. Use one ASCII character other than CR, LF, or a double quote.".into(),
+    )
 }
 
 /// Internal column id assigned to a source column by its position.
@@ -228,6 +231,10 @@ pub struct CsvImporter {
 impl CsvImporter {
     pub fn open(path: &Path, delimiter: Option<u8>, limits: BatchLimits) -> Result<Self, AppError> {
         let limits = limits.normalized();
+        let separator = delimiter.unwrap_or(b',');
+        if !valid_delimiter(separator) {
+            return Err(invalid_delimiter());
+        }
         let mut file = File::open(path)
             .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
         let (encoding, skip) = detect_bom(&mut file)
@@ -238,7 +245,6 @@ impl CsvImporter {
         // `None` keeps the existing comma default for the parser. The polars
         // reader previously performed automatic detection; the raw cell reader
         // needs a concrete separator, so the same default is applied here.
-        let separator = delimiter.unwrap_or(b',');
         let input: Box<dyn Read> = match encoding {
             Encoding::Utf8 => Box::new(file),
             Encoding::Utf16Le => Box::new(Utf16Reader::new(

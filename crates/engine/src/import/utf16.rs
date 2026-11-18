@@ -10,7 +10,7 @@ pub(crate) enum Encoding {
 /// Reads the leading BOM bytes and returns the encoding plus the byte offset
 /// where the payload starts.
 pub(crate) fn detect_bom<R: Read>(reader: &mut R) -> io::Result<(Encoding, u64)> {
-    let mut prefix = [0u8; 3];
+    let mut prefix = [0u8; 4];
     let mut length = 0;
     while length < prefix.len() {
         match reader.read(&mut prefix[length..]) {
@@ -20,13 +20,19 @@ pub(crate) fn detect_bom<R: Read>(reader: &mut R) -> io::Result<(Encoding, u64)>
             Err(err) => return Err(err),
         }
     }
+    if length == 4 && (prefix == [0xFF, 0xFE, 0, 0] || prefix == [0, 0, 0xFE, 0xFF]) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "UTF-32 CSV is not supported. Convert the file to UTF-8 or UTF-16 with a BOM.",
+        ));
+    }
     if length >= 2 && prefix[0] == 0xFF && prefix[1] == 0xFE {
         return Ok((Encoding::Utf16Le, 2));
     }
     if length >= 2 && prefix[0] == 0xFE && prefix[1] == 0xFF {
         return Ok((Encoding::Utf16Be, 2));
     }
-    if length >= 3 && prefix == [0xEF, 0xBB, 0xBF] {
+    if length >= 3 && prefix[..3] == [0xEF, 0xBB, 0xBF] {
         return Ok((Encoding::Utf8, 3));
     }
     Ok((Encoding::Utf8, 0))
@@ -139,10 +145,9 @@ impl<R: Read> Read for Utf16Reader<R> {
         }
         let mut written = 0;
         while written < out.len() {
-            if self.output_pos >= self.output.len()
-                && !self.decode_next_char()? {
-                    break;
-                }
+            if self.output_pos >= self.output.len() && !self.decode_next_char()? {
+                break;
+            }
             let available = self.output.len() - self.output_pos;
             let amount = available.min(out.len() - written);
             out[written..written + amount]
