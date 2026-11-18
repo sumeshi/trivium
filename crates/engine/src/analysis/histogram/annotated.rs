@@ -45,6 +45,7 @@ pub(crate) fn histogram_series_annotated_with_job(
     as_datetime: bool,
     job: &crate::jobs::JobContext,
 ) -> Result<Histogram, String> {
+    super::validate_bucket_count(buckets)?;
     let kind = if as_datetime {
         ColumnKind::Datetime
     } else {

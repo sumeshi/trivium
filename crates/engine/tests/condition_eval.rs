@@ -170,7 +170,9 @@ fn contains_and_or_not_match_search_mask() {
             .map(|cells| eval(&node, cells).expect("eval"))
             .collect();
         assert_eq!(evaluated, mask, "parity failed for {query}");
-        let converted = search_to_node(query).unwrap_or_else(|| panic!("no node for {query}"));
+        let converted = search_to_node(query)
+            .unwrap()
+            .unwrap_or_else(|| panic!("no node for {query}"));
         let from_syntax: Vec<bool> = rows
             .iter()
             .map(|cells| eval(&converted, cells).expect("eval"))

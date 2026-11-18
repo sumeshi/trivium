@@ -393,3 +393,57 @@ fn invalid_annotation_flags_and_filters_fail_without_changing_the_saved_investig
     cli.finish();
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn excessive_histogram_buckets_fail_without_interrupting_following_cli_requests() {
+    use trivium_engine::analysis::histogram::{DEFAULT_BUCKETS, MAX_HISTOGRAM_BUCKETS};
+
+    let root = std::env::temp_dir().join(format!("trivium-cli-histogram-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.csv");
+    fs::write(
+        &source,
+        "number,time\n1,2026-11-18T00:00:00Z\n2,2026-11-18T00:00:01Z\n",
+    )
+    .unwrap();
+    let mut cli = Session::start(&root.join("workspace"));
+    let id = cli.call("import", json!({"path": source}))["meta"]["id"].clone();
+    let loaded = cli.call("load", json!({"projectId": id}));
+    for source_column in ["number", "time"] {
+        let column = column(&loaded, source_column);
+        let mut request = serde_json::to_vec(&json!({
+            "id": "too-many-buckets", "method": "histogram",
+            "params": {"projectId": id, "column": column, "buckets": MAX_HISTOGRAM_BUCKETS + 1},
+        }))
+        .unwrap();
+        request.push(b'\n');
+        let rejected = cli.raw(&request);
+        assert_eq!(rejected["id"], "too-many-buckets");
+        assert_eq!(rejected["ok"], false);
+        assert_eq!(rejected["error"]["code"], "operation_failed");
+        assert!(rejected["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&MAX_HISTOGRAM_BUCKETS.to_string()));
+
+        let valid = cli.call(
+            "histogram",
+            json!({"projectId": id, "column": column, "buckets": 0}),
+        );
+        let buckets = valid["buckets"].as_array().unwrap();
+        assert_eq!(buckets.len(), DEFAULT_BUCKETS);
+        assert_eq!(
+            buckets
+                .iter()
+                .map(|bucket| bucket["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            2
+        );
+    }
+    assert_eq!(
+        cli.call("query", json!({"projectId": id}))["total_filtered_rows"],
+        2
+    );
+    cli.finish();
+    fs::remove_dir_all(root).unwrap();
+}

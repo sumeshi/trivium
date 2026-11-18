@@ -129,7 +129,10 @@ fn csv_scopes_preserve_quoted_literals_negation_case_and_or_carry() {
     assert_eq!(fixture.search("-cohort:drop"), [0, 2, 3, 5]);
     assert_eq!(fixture.search("message:\"alpha beta\""), [2]);
     assert_eq!(fixture.search("-message:\"alpha beta\""), [0, 1, 3, 4, 5]);
-    assert_eq!(fixture.search("message:\"alpha beta\"|\"alpha gamma\""), [2, 4]);
+    assert_eq!(
+        fixture.search("message:\"alpha beta\"|\"alpha gamma\""),
+        [2, 4]
+    );
     assert!(fixture.search("\"-cohort:drop\"").is_empty());
     assert_eq!(fixture.search("\"cohort:keep\""), [3]);
     assert_eq!(fixture.search("COHORT:keep -message:deny"), [0, 2]);
@@ -186,7 +189,9 @@ fn negated_phrases_filter_imported_rows_and_preserve_literal_minus_and_scopes() 
                     let scoped = query
                         .replace("command:", &format!("{}:", fixture.columns["command"]))
                         .replace("detail:", &format!("{}:", fixture.columns["detail"]));
-                    trivium_engine::condition::search_to_node(&scoped).expect("condition tree")
+                    trivium_engine::condition::search_to_node(&scoped)
+                        .unwrap()
+                        .expect("condition tree")
                 }),
                 ..Default::default()
             };

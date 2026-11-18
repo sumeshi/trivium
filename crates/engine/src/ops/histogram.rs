@@ -1,7 +1,9 @@
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::analysis::histogram::{histogram_series_annotated_with_job, Histogram, DEFAULT_BUCKETS};
+use crate::analysis::histogram::{
+    histogram_series_annotated_with_job, validate_bucket_count, Histogram, DEFAULT_BUCKETS,
+};
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::jobs::JobContext;
@@ -60,6 +62,12 @@ pub fn histogram_with_job(
     payload: HistogramPayload,
     job: &JobContext,
 ) -> Result<Histogram, AppError> {
+    let bucket_count = if payload.buckets == 0 {
+        DEFAULT_BUCKETS
+    } else {
+        payload.buckets as usize
+    };
+    validate_bucket_count(bucket_count).map_err(AppError::Message)?;
     let spec = QuerySpec {
         search: payload.search.clone(),
         search_columns: payload
@@ -78,11 +86,6 @@ pub fn histogram_with_job(
     let series = frame
         .column(&projection[0])
         .map_err(|error| AppError::Other(error.into()))?;
-    let bucket_count = if payload.buckets == 0 {
-        DEFAULT_BUCKETS
-    } else {
-        payload.buckets as usize
-    };
     let range = payload
         .range
         .as_ref()

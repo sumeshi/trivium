@@ -125,7 +125,7 @@ fn mixed_or_scopes_find_expected_rows_in_search_and_converted_conditions() {
                 ..Default::default()
             },
             QuerySpec {
-                condition: Some(search_to_node(query).expect("condition tree")),
+                condition: Some(search_to_node(query).unwrap().expect("condition tree")),
                 ..Default::default()
             },
         ] {
@@ -164,7 +164,8 @@ fn unscoped_conditions_use_the_selected_search_columns() {
             let spec = QuerySpec {
                 search: (!converted).then(|| query.into()),
                 search_columns: scope.clone(),
-                condition: converted.then(|| search_to_node(query).expect("condition tree")),
+                condition: converted
+                    .then(|| search_to_node(query).unwrap().expect("condition tree")),
                 ..Default::default()
             };
             let actual = resolve_target(
@@ -184,7 +185,7 @@ fn unscoped_conditions_use_the_selected_search_columns() {
     let spec = QuerySpec {
         search: Some("user:bob".into()),
         search_columns: Some(vec!["command".into()]),
-        condition: search_to_node("powershell"),
+        condition: search_to_node("powershell").unwrap(),
         ..Default::default()
     };
     let actual = resolve_target(

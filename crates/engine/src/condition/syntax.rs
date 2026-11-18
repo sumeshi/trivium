@@ -1,13 +1,18 @@
-use crate::search::{to_rpn, tokenize_search_query, SearchToken};
+use crate::search::{
+    prepare_tag_tokens, to_rpn, tokenize_search_query, validate_search_query,
+    validate_search_tokens, SearchToken,
+};
 
 use super::model::{Condition, Group, GroupKind, Node, Op};
 
 /// Converts the existing search-bar syntax into a condition tree.
-/// Empty input and queries with no terms yield `None` (no filter).
-pub fn search_to_node(input: &str) -> Option<Node> {
+/// Empty input yields `None` (no filter). Invalid or oversized queries return
+/// an error before constructing a condition tree.
+pub fn search_to_node(input: &str) -> Result<Option<Node>, String> {
+    validate_search_query(input)?;
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return None;
+        return Ok(None);
     }
     search_tokens_to_node(&tokenize_search_query(trimmed))
 }
@@ -16,15 +21,15 @@ pub fn search_to_node(input: &str) -> Option<Node> {
 ///
 /// Query preparation tokenizes the search string once and uses this entry point
 /// so the same tokens feed the prepared condition tree.
-pub fn search_tokens_to_node(tokens: &[SearchToken]) -> Option<Node> {
-    let has_term = tokens.iter().any(|token| match token {
-        SearchToken::Term { text, .. } | SearchToken::QuotedTerm { text, .. } => !text.is_empty(),
-        _ => false,
-    });
-    if !has_term {
-        return None;
+pub fn search_tokens_to_node(tokens: &[SearchToken]) -> Result<Option<Node>, String> {
+    if tokens.is_empty() {
+        return Ok(None);
     }
-    rpn_to_node(&to_rpn(tokens))
+    validate_search_tokens(tokens)?;
+    // The public token helper also rejects malformed tag escapes. Query
+    // preparation has already decoded these into internal metadata scopes.
+    prepare_tag_tokens(tokens)?;
+    Ok(rpn_to_node(&to_rpn(tokens)))
 }
 
 pub fn and_nodes(left: Node, right: Node) -> Node {

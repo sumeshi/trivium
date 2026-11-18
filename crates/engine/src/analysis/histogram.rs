@@ -11,6 +11,18 @@ use integer::IntegerBins;
 use values::{datetime_point, finite, float_point, format_nanos, int_point};
 
 pub const DEFAULT_BUCKETS: usize = 50;
+/// Keep caller-controlled histogram output bounded, including empty buckets.
+/// The GUI uses at most 200; automation may request finer intervals.
+pub const MAX_HISTOGRAM_BUCKETS: usize = 4096;
+
+pub(crate) fn validate_bucket_count(buckets: usize) -> Result<(), String> {
+    if buckets > MAX_HISTOGRAM_BUCKETS {
+        return Err(format!(
+            "Histogram supports at most {MAX_HISTOGRAM_BUCKETS} buckets."
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct HistogramBucket {
@@ -80,6 +92,7 @@ pub fn histogram_series_ranged(
     buckets: usize,
     range: Option<(&str, &str)>,
 ) -> Result<Histogram, String> {
+    validate_bucket_count(buckets)?;
     let job = crate::jobs::JobContext::none();
     histogram_series_ranged_kind(
         column,

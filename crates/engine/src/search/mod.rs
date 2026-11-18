@@ -16,4 +16,4 @@ pub use text::{
 };
 pub use tokenize::{tokenize_search_query, SearchToken};
 pub use validate::validate_search_query;
-pub(crate) use validate::validate_search_tokens;
+pub(crate) use validate::{validate_search_input_size, validate_search_tokens};

@@ -8,7 +8,8 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::search::{
-    is_tag_scope, prepare_tag_tokens, tokenize_search_query, validate_search_tokens, SearchToken,
+    is_tag_scope, prepare_tag_tokens, tokenize_search_query, validate_search_input_size,
+    validate_search_tokens, SearchToken,
 };
 use crate::value_utils::{anyvalue_to_search_string, record_stringified_column_count};
 
@@ -38,6 +39,7 @@ impl PreparedQuery {
     ) -> Result<Self, AppError> {
         // An empty search scope is the same as "every data column".
         let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
+        validate_search_input_size(search.unwrap_or_default()).map_err(AppError::Message)?;
         let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
         let tokens = search_raw.map(tokenize_search_query).unwrap_or_default();
         if search_raw.is_some() {
@@ -54,6 +56,7 @@ impl PreparedQuery {
         });
         let tokens = prepare_tag_tokens(&tokens).map_err(AppError::Message)?;
         let search_node = search_tokens_to_node(&tokens)
+            .map_err(AppError::Message)?
             .as_ref()
             .map(PreparedNode::prepare_search)
             .transpose()

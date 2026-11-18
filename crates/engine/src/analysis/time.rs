@@ -29,6 +29,52 @@ struct Event {
     text: String,
 }
 
+const MAX_SPANS: usize = 10_000;
+const MAX_SPAN_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Default)]
+struct SpanBudget {
+    count: usize,
+    bytes: usize,
+}
+
+fn span_limit_error() -> String {
+    "Time analysis exceeds the interval limit. Narrow the filters or increase the analysis thresholds.".into()
+}
+
+impl SpanBudget {
+    fn remaining(&self) -> usize {
+        MAX_SPANS - self.count
+    }
+
+    fn push(
+        &mut self,
+        spans: &mut Vec<TimeSpan>,
+        start: &str,
+        end: &str,
+        count: u64,
+    ) -> Result<(), String> {
+        let bytes = self
+            .bytes
+            .saturating_add(start.len())
+            .saturating_add(end.len())
+            .saturating_add(std::mem::size_of::<TimeSpan>() + 64);
+        if self.count == MAX_SPANS || bytes > MAX_SPAN_BYTES {
+            return Err(span_limit_error());
+        }
+        // Account before cloning timestamps. Large padded source timestamps
+        // must not bypass the retained result bound through their labels.
+        self.count += 1;
+        self.bytes = bytes;
+        spans.push(TimeSpan {
+            start: start.into(),
+            end: end.into(),
+            count,
+        });
+        Ok(())
+    }
+}
+
 /// Gaps are quiet intervals of at least `gap_seconds`. Sessions break on a gap of
 /// `session_minutes`. Bursts are merged windows of `burst_window_seconds` with more
 /// than `burst_min` events.
@@ -100,13 +146,14 @@ pub(crate) fn analyze_series_with_job(
             .then_with(|| left.text.cmp(&right.text))
     });
     job.check_cancelled().map_err(|e| e.to_string())?;
+    let mut budget = SpanBudget::default();
     let result = TimeAnalysis {
         column: column.to_string(),
         missing,
         invalid,
-        gaps: gaps(&events, gap_seconds, job)?,
-        sessions: sessions(&events, session_minutes, job)?,
-        bursts: bursts(&events, burst_window_seconds, burst_min, job)?,
+        gaps: gaps(&events, gap_seconds, job, &mut budget)?,
+        sessions: sessions(&events, session_minutes, job, &mut budget)?,
+        bursts: bursts(&events, burst_window_seconds, burst_min, job, &mut budget)?,
     };
     job.check_cancelled().map_err(|e| e.to_string())?;
     Ok(result)
@@ -129,6 +176,7 @@ fn gaps(
     events: &[Event],
     gap_seconds: u64,
     job: &crate::jobs::JobContext,
+    budget: &mut SpanBudget,
 ) -> Result<Vec<TimeSpan>, String> {
     let minimum = i128::from(gap_seconds) * 1_000_000_000;
     let mut spans = Vec::new();
@@ -138,11 +186,12 @@ fn gaps(
         }
         let delta = i128::from(pair[1].nanos) - i128::from(pair[0].nanos);
         if delta >= minimum {
-            spans.push(TimeSpan {
-                start: pair[0].text.clone(),
-                end: pair[1].text.clone(),
-                count: (delta / 1_000_000_000) as u64,
-            });
+            budget.push(
+                &mut spans,
+                &pair[0].text,
+                &pair[1].text,
+                (delta / 1_000_000_000) as u64,
+            )?;
         }
     }
     Ok(spans)
@@ -152,6 +201,7 @@ fn sessions(
     events: &[Event],
     session_minutes: u64,
     job: &crate::jobs::JobContext,
+    budget: &mut SpanBudget,
 ) -> Result<Vec<TimeSpan>, String> {
     if events.is_empty() {
         return Ok(Vec::new());
@@ -165,11 +215,11 @@ fn sessions(
         }
         let delta = i128::from(events[index].nanos) - i128::from(events[index - 1].nanos);
         if delta >= minimum {
-            spans.push(span(&events[start..index]));
+            push_span(&events[start..index], &mut spans, budget)?;
             start = index;
         }
     }
-    spans.push(span(&events[start..]));
+    push_span(&events[start..], &mut spans, budget)?;
     Ok(spans)
 }
 
@@ -178,6 +228,7 @@ fn bursts(
     window_seconds: u64,
     burst_min: u64,
     job: &crate::jobs::JobContext,
+    budget: &mut SpanBudget,
 ) -> Result<Vec<TimeSpan>, String> {
     let window = i128::from(window_seconds) * 1_000_000_000;
     let mut merged: Vec<(usize, usize)> = Vec::new();
@@ -202,19 +253,34 @@ fn bursts(
                     continue;
                 }
             }
+            if merged.len() == budget.remaining() {
+                return Err(span_limit_error());
+            }
             merged.push((start, end));
         }
     }
-    Ok(merged
-        .into_iter()
-        .map(|(start, end)| span(&events[start..=end]))
-        .collect())
+    let mut spans = Vec::new();
+    for (index, (start, end)) in merged.into_iter().enumerate() {
+        if index.is_multiple_of(1024) {
+            job.check_cancelled().map_err(|e| e.to_string())?;
+        }
+        push_span(&events[start..=end], &mut spans, budget)?;
+    }
+    Ok(spans)
 }
 
-fn span(events: &[Event]) -> TimeSpan {
-    TimeSpan {
-        start: events[0].text.clone(),
-        end: events[events.len() - 1].text.clone(),
-        count: events.len() as u64,
-    }
+fn push_span(
+    events: &[Event],
+    spans: &mut Vec<TimeSpan>,
+    budget: &mut SpanBudget,
+) -> Result<(), String> {
+    budget.push(
+        spans,
+        &events[0].text,
+        &events[events.len() - 1].text,
+        events.len() as u64,
+    )
 }
+
+#[cfg(test)]
+mod tests;

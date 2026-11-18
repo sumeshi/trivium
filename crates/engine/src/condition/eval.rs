@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde_json::Value;
 
 use crate::error::AppError;
@@ -13,6 +13,7 @@ use crate::search::{TAG_ANY_COLUMN, TAG_EXACT_COLUMN};
 use super::model::{GroupKind, Node, Op};
 
 mod bound;
+mod budget;
 mod formats;
 mod ordered;
 pub use bound::BoundNode;
@@ -103,12 +104,14 @@ impl PreparedNode {
     }
 
     pub fn prepare(node: &Node) -> Result<Self, EvalError> {
+        budget::validate(node)?;
         Self::prepare_inner(node, false)
     }
 
     /// Metadata markers come only from the search tokenizer; structured
     /// conditions continue to address source columns without a new wire op.
     pub(crate) fn prepare_search(node: &Node) -> Result<Self, EvalError> {
+        budget::validate(node)?;
         Self::prepare_inner(node, true)
     }
 
@@ -363,5 +366,9 @@ fn lookup<'a>(row: &'a HashMap<String, Value>, column: &str) -> Option<&'a Value
 
 fn compile_regex(pattern: &str) -> Result<Regex, EvalError> {
     REGEX_COMPILES.fetch_add(1, AtomicOrdering::SeqCst);
-    Regex::new(pattern).map_err(|error| EvalError::regex(pattern, error))
+    RegexBuilder::new(pattern)
+        .size_limit(2 * 1024 * 1024)
+        .dfa_size_limit(2 * 1024 * 1024)
+        .build()
+        .map_err(|error| EvalError::regex(pattern, error))
 }

@@ -60,7 +60,7 @@ fn condition(column: &str, op: Op, values: &[&str], negated: bool) -> Node {
 // exercises the compatibility evaluator, not the new bound-slot adapter.
 fn owned_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
     let tokens = tokenize_search_query(spec.search.as_deref().unwrap_or_default());
-    let search = search_tokens_to_node(&tokens);
+    let search = search_tokens_to_node(&tokens).unwrap();
     let node = match (search, spec.condition.clone()) {
         (Some(search), Some(condition)) => Some(and_nodes(search, condition)),
         (Some(node), None) | (None, Some(node)) => Some(node),
