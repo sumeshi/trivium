@@ -1,6 +1,7 @@
 use tauri::State;
 
-use crate::commands::job::{run_blocking, run_job_with_request};
+use crate::commands::job::run_job_with_request;
+use crate::commands::storage_worker::{run_storage, run_storage_read};
 use crate::state::AppState;
 use trivium_engine::jobs::JobKind;
 use trivium_engine::models::{LoadProjectResponse, ProjectSummary};
@@ -9,8 +10,12 @@ use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 
 /// Lists saved projects ordered by creation time (newest first).
 #[tauri::command]
-pub fn list_projects(state: State<AppState>) -> Result<Vec<ProjectSummary>, String> {
-    ops::projects::list_projects(&state.projects).map_err(String::from)
+pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSummary>, String> {
+    let store = state.projects.clone();
+    run_storage_read(uuid::Uuid::nil(), move || {
+        ops::projects::list_projects(&store)
+    })
+    .await
 }
 
 /// Creates a new project from a CSV/JSON file on the blocking pool.
@@ -35,7 +40,10 @@ pub async fn delete_project(
     request: ProjectRequest,
 ) -> Result<(), String> {
     let store = state.projects.clone();
-    run_blocking(move || ops::projects::delete_project(&store, request)).await
+    run_storage(request.project_id, move || {
+        ops::projects::delete_project(&store, request)
+    })
+    .await
 }
 
 /// Loads project metadata, initial rows, IOC entries, and column metrics.

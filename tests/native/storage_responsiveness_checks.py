@@ -83,6 +83,25 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
         # concurrent invokes have no defined arrival order at an async handler.
         web.named("Safe", ".data-row")
         web.named("Critical", ".data-row")
+        # These commands used to perform their SQLite busy wait on the native
+        # window thread, bypassing the flag/view storage workers entirely.
+        # Submit real definitions while the same case is locked; a trusted
+        # menu click and another case's read below must still complete.
+        web.script("""
+          const probe=window.__storageProbe;
+          probe.definitions={};
+          const operations=[
+            ['save_iocs',{projectId:arguments[0],entries:[{flag:'suspicious',tag:'storage-probe',query:'synthetic'}]}],
+            ['save_color_rules',{projectId:arguments[0],rules:[{name:'storage-probe',color:'#26364f',
+              condition:{column:'c1',op:'contains',values:['synthetic'],negated:false}}]}]
+          ];
+          for(const [name,payload] of operations){
+            probe.definitions[name]={pending:true};
+            window.__TAURI_INTERNALS__.invoke(name,{payload}).then(
+              ()=>probe.definitions[name]={saved:true},
+              error=>probe.definitions[name]={error:String(error)});
+          }
+        """, owner)
         web.write('input[aria-label="Search rows"]', "first")
         web.applied(projectId=owner, search="first"); web.results(1)
         wait_for(lambda: writes("save_view_state", "first"), bool,
@@ -101,6 +120,8 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
         elapsed = time.monotonic() - started
         assert elapsed < 4, f"The window waited for SQLite's five-second busy timeout: {elapsed:.3f}s"
         assert probe["active"] is True and probe["frames"] > 0, probe
+        assert set(probe["definitions"]) == {"save_iocs", "save_color_rules"}, probe
+        assert all(value == {"pending": True} for value in probe["definitions"].values()), probe
         first_flag, first_view = writes("update_flag", "safe"), writes("save_view_state", "first")
         assert len(first_flag) == len(first_view) == 1
         assert all("result" not in entry and "error" not in entry for entry in first_flag + first_view)
@@ -113,6 +134,13 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
             lambda groups: all(group and "result" in group[-1] for group in groups),
             "actual UI flag and view queues finish after releasing the SQLite lock")
         assert all("error" not in entry for group in results for entry in group), results
+        definitions = wait_for(lambda: web.script("return window.__storageProbe.definitions;"),
+            lambda values: all("pending" not in value for value in values.values()),
+            "IOC and color-rule saves complete after the same-case lock is released")
+        assert all(value == {"saved": True} for value in definitions.values()), definitions
+        detail = web.command("load_project", {"projectId": owner}, request=True)
+        assert detail["iocs"] == [{"flag": "suspicious", "tag": "storage-probe", "query": "synthetic"}], detail
+        assert [rule["name"] for rule in detail["color_rules"]] == ["storage-probe"], detail
         assert results[0][0]["result"]["revision"] < results[1][0]["result"]["revision"], results
         assert results[1][0]["started"] >= results[0][0]["decode_done"], results
         assert results[3][0]["started"] >= results[2][0]["decode_done"], results
@@ -125,6 +153,7 @@ def verify_storage_responsiveness(web, data: dict, root: Path, evidence: Path, r
             "other_project_read_completed": True, "ui_frames_while_locked": probe["frames"],
             "responsive_phase_seconds": elapsed, "same_project_final_flag": "critical", "same_project_final_view": "last",
             "ui_flag_and_view_producers": True, "later_saves_dispatched_after_earlier_responses": True}
+        report["storage_responsiveness"]["ioc_and_color_rule_saves_off_window_thread"] = list(definitions)
         web.screenshot(evidence / "storage-lock-responsive.png")
     finally:
         if database is not None:

@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::commands::storage_worker::run_storage;
 use crate::state::AppState;
 use trivium_engine::models::IocEntry;
 use trivium_engine::ops;
@@ -7,21 +8,36 @@ use trivium_engine::ops::iocs::{ExportIocsPayload, ImportIocsPayload, SaveIocsPa
 
 /// Normalizes and persists IOC definitions, updating cached counts.
 #[tauri::command]
-pub fn save_iocs(state: State<AppState>, payload: SaveIocsPayload) -> Result<(), String> {
-    ops::iocs::save_iocs(&state.projects, payload).map_err(String::from)
+pub async fn save_iocs(state: State<'_, AppState>, payload: SaveIocsPayload) -> Result<(), String> {
+    let store = state.projects.clone();
+    run_storage(payload.project_id, move || {
+        ops::iocs::save_iocs(&store, payload)
+    })
+    .await
 }
 
 /// Imports IOC rules from a CSV, replacing the current set.
 #[tauri::command]
-pub fn import_iocs(
-    state: State<AppState>,
+pub async fn import_iocs(
+    state: State<'_, AppState>,
     payload: ImportIocsPayload,
 ) -> Result<Vec<IocEntry>, String> {
-    ops::iocs::import_iocs(&state.projects, payload).map_err(String::from)
+    let store = state.projects.clone();
+    run_storage(payload.project_id, move || {
+        ops::iocs::import_iocs(&store, payload)
+    })
+    .await
 }
 
 /// Writes the current IOC set to a destination CSV file.
 #[tauri::command]
-pub fn export_iocs(state: State<AppState>, payload: ExportIocsPayload) -> Result<(), String> {
-    ops::iocs::export_iocs(&state.projects, payload).map_err(String::from)
+pub async fn export_iocs(
+    state: State<'_, AppState>,
+    payload: ExportIocsPayload,
+) -> Result<(), String> {
+    let store = state.projects.clone();
+    run_storage(payload.project_id, move || {
+        ops::iocs::export_iocs(&store, payload)
+    })
+    .await
 }
