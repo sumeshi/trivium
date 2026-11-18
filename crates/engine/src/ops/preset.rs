@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::Context as _;
@@ -13,6 +12,8 @@ use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, ProjectMeta};
 use crate::project_io::{read_project_schema_columns, ProjectColumns};
 use crate::store::ProjectsStore;
+
+mod file;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PresetFile {
@@ -118,21 +119,12 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
         columns: project_columns(store, &meta)?,
     };
     validate_layout(&preset)?;
-    let data = serde_json::to_vec_pretty(&preset)
-        .with_context(|| "failed to serialize preset")
-        .map_err(AppError::from)?;
-
     let destination = PathBuf::from(&payload.destination);
     write_atomically(
         &destination,
         &JobContext::none(),
         || validate_destination(&destination, store, payload.allow_overwrite),
-        |_, writer| {
-            writer
-                .write_all(&data)
-                .context("failed to write preset")
-                .map_err(AppError::from)
-        },
+        |_, writer| file::write(&preset, writer),
     )
 }
 
@@ -142,11 +134,7 @@ pub fn load_preset(
     payload: LoadPresetPayload,
 ) -> Result<PresetData, AppError> {
     let path = PathBuf::from(&payload.source);
-    let mut data = Vec::new();
-    crate::source_file::open_regular(&path)
-        .and_then(|mut file| file.read_to_end(&mut data))
-        .with_context(|| format!("failed to read preset {}", payload.source))
-        .map_err(AppError::from)?;
+    let data = file::read(&path)?;
     let mut preset: PresetFile = serde_json::from_slice(&data)
         .with_context(|| format!("failed to parse preset {}", payload.source))
         .map_err(AppError::from)?;
