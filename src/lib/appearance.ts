@@ -59,7 +59,16 @@ function persist(settings: WallpaperSettings, coalesce = false) {
       await writeSettings(entry.settings);
     });
     entry.operation = operation; scheduled = entry;
-  } else operation = pendingWrite.then(() => writeSettings(settings));
+  } else {
+    // An image commit is an ordering boundary. Later slider input must queue
+    // after it, rather than updating an older slot ahead of this snapshot.
+    if (scheduled) {
+      clearTimeout(scheduled.timer);
+      scheduled.release();
+      scheduled = null;
+    }
+    operation = pendingWrite.then(() => writeSettings(settings));
+  }
   trackAcceptedSave(operation);
   pendingWrite = operation.catch(() => {});
   return operation;

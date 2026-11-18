@@ -226,6 +226,34 @@ test("image import/clear use native managed-image commands and persist no source
   });
 });
 
+test("slider changes after an image commit persist after its older settings snapshot", async context => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await environment(async f => {
+      const gate = deferred();
+      f.holdWrite(gate.promise);
+      const initial = setWallpaperSettings({ version: 2, enabled: false, strength: 5 });
+      context.mock.timers.tick(100);
+      await turn();
+      assert.equal(f.writes.length, 1, "the preceding file write must hold the queue");
+
+      const earlier = setWallpaperSettings({ version: 2, enabled: false, strength: 10 });
+      const importing = importWallpaper("/source/new.png");
+      await turn();
+      assert.equal(get(wallpaper).settings.enabled, true, "the imported image must publish before the next slider change");
+      const latest = setWallpaperSettings({ ...get(wallpaper).settings, strength: 20 });
+      context.mock.timers.tick(100);
+      gate.resolve();
+      await Promise.all([initial, earlier, importing, latest]);
+
+      const expected = { version: 2, enabled: true, strength: 20 };
+      assert.deepEqual(get(wallpaper).settings, expected);
+      assert.deepEqual(JSON.parse(f.files.get("/managed/appearance.json")!), expected);
+      assert.deepEqual(JSON.parse(f.cache.get("trivium:wallpaper")!), expected);
+    });
+  } finally { context.mock.timers.reset(); }
+});
+
 test("pending image imports merge later settings and a failed second import retains the first committed copy", async () => {
   await environment(async f => {
     await initWallpaper();
