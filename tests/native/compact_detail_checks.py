@@ -120,7 +120,7 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
                 finally:
                     web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "dense-row-detail-keys", "actions": [{"type": "keyUp", "value": "\ue008"}]}]})
                 wait_for(lambda: web.script("return document.activeElement.getAttribute('aria-label');"),
-                    lambda label: label == "Filter in last_field", "Shift+Tab wraps within the row inspector")
+                    lambda label: label == "Create IOC rule for last_field", "Shift+Tab wraps within the row inspector")
                 _key(web, "\ue004")
                 wait_for(lambda: web.script("return document.activeElement.getAttribute('aria-label');"),
                     lambda label: label == first, "Tab returns from the last field action to the first enabled control")

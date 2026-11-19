@@ -3,9 +3,33 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 
 from row_navigation import open_project, wait_for
+
+
+def _end_native_select(web) -> None:
+    # Finish WebKit's native select interaction before subsequent XTest input.
+    if os.name == "nt":
+        return
+    from ctypes import CDLL, c_int, c_ubyte, c_uint, c_ulong, c_void_p
+    from feedback_checks import _settle
+    from runtime import _x11_open
+
+    x11, display = _x11_open()
+    xtest = CDLL("libXtst.so.6")
+    x11.XKeysymToKeycode.argtypes, x11.XKeysymToKeycode.restype = [c_void_p, c_ulong], c_ubyte
+    xtest.XTestFakeKeyEvent.argtypes = [c_void_p, c_uint, c_int, c_ulong]
+    try:
+        escape = x11.XKeysymToKeycode(display, 0xFF1B)
+        assert escape and xtest.XTestFakeKeyEvent(display, escape, 1, 0)
+        assert xtest.XTestFakeKeyEvent(display, escape, 0, 0)
+        x11.XSync(display, 0)
+    finally:
+        x11.XCloseDisplay(display)
+    _settle(web)
+    web.drawer("Conditions")
 
 
 def _hidden(web, project_id: str) -> set[str]:
@@ -76,6 +100,7 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
         changed = copy.deepcopy(literal)
         changed["children"][0]["op"] = "in"
         web.choose('select[aria-label="Operator"]', "in")
+        _end_native_select(web)
         web.applied(condition=changed)
         web.results(2)
         changed["children"][0]["values"] = ["alpha"]

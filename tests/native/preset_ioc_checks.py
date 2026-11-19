@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 import sqlite3
 import uuid
@@ -13,6 +14,7 @@ from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 from preset_state_checks import verify_preset_state
+from cell_ioc_checks import verify_cell_iocs
 
 
 def _picker(web, destination: Path) -> None:
@@ -21,8 +23,7 @@ def _picker(web, destination: Path) -> None:
 
 def _open_iocs(web) -> None:
     web.drawer("IOC rules")
-    web.named("IOC Rules", ".filter-ioc")
-    wait_for(lambda: web.script("return !!document.querySelector('.ioc-dialog');"), bool, "IOC editor opens")
+    wait_for(lambda: web.script("return !!document.querySelector('.ioc-panel');"), bool, "IOC editor opens")
 
 
 def _rows(web, project_id: str) -> list[dict]:
@@ -47,13 +48,13 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     invalid = root / "invalid-ioc.csv"
     invalid.write_text("flag,tag,query\nsafe,valid,message:clear\ncritcal,bad,message:beacon\n", encoding="utf-8")
     _picker(web, invalid)
-    web.named("Import IOC rules", ".ioc-dialog")
-    wait_for(lambda: web.script("return document.querySelector('.ioc-dialog [role=alert]')?.textContent??'';"),
+    web.named("Import IOC rules", ".ioc-panel")
+    wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
              lambda text: "line 3" in text and "critcal" in text, "invalid IOC import reports the CSV line and original flag")
     assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == saved
     assert web.script("return document.querySelectorAll('.ioc-row').length;") == 1
     assert _rows(web, project_id) == original
-    web.named("Close IOC rules", ".ioc-dialog")
+    web.close_drawer()
 
     # Seed an older malformed saved definition in this test's isolated case.
     # Reopening must preserve it for correction rather than choosing Safe.
@@ -71,8 +72,9 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     assert flags[0]["flag"] == "critical" and "Critical" in flags[0]["label"], flags
     assert flags[1]["flag"] == "critcal" and "Invalid" in flags[1]["label"] and "critcal" in flags[1]["title"], flags
     assert web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].filter(e=>e.textContent.trim()==='Apply').map(e=>e.disabled);") == [False, True]
-    web.named("Save rules", ".ioc-dialog")
-    wait_for(lambda: web.script("return document.querySelector('.ioc-dialog [role=alert]')?.textContent??'';"),
+    web.write('input[aria-label="Rule tag 2"]', "needs correction")
+    web.named("Save rules", ".ioc-panel")
+    wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
              lambda text: "rule 2" in text and "critcal" in text, "legacy invalid flags require an explicit correction before saving")
     assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == legacy
     assert _rows(web, project_id) == original
@@ -80,8 +82,8 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     # Correcting the invalid definition keeps the valid definition intact.
     web.click(web.node(".ioc-row .flag-select-trigger", 1))
     web.click(web.node(".flag-select-menu .flag-option.flag-suspicious"))
-    web.named("Save rules", ".ioc-dialog")
-    wait_for(lambda: web.script("return !document.querySelector('.ioc-dialog');"), bool, "corrected IOC rules save")
+    web.named("Save rules", ".ioc-panel")
+    wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=status]')?.textContent;"), lambda text: text == "Rules saved.", "corrected IOC rules save")
     corrected = web.command("load_project", {"projectId": project_id}, request=True)["iocs"]
     assert sorted(rule["flag"] for rule in corrected) == ["critical", "suspicious"], corrected
     assert _rows(web, project_id) == original
@@ -213,16 +215,16 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.applied(search="clear")
         web.results(1)
         _open_iocs(web)
-        web.named("Add rule", ".ioc-dialog")
+        web.named("Add rule", ".ioc-panel")
         web.write('input[aria-label="Rule tag 1"]', "IOC")
         web.write('input[aria-label="Rule query 1"]', "message:beacon")
         assert not web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
-        assert not web.script("return [...document.querySelectorAll('.ioc-dialog button')].some(e=>e.textContent.trim()==='Preview');")
+        assert not web.script("return [...document.querySelectorAll('.ioc-panel button')].some(e=>e.textContent.trim()==='Preview');")
         help_text = web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').title;")
         assert all(term in help_text for term in ["AND", "OR", "-noise", '"failed login"', "column:value", "@tag:review", "@tag:*"]), help_text
         assert help_text == web.script("return document.querySelector('input[aria-label=\"Search rows\"]').title;"), "IOC queries share the main search's full help"
-        web.named("Save rules", ".ioc-dialog")
-        wait_for(lambda: web.script("return !document.querySelector('.ioc-dialog');"), bool, "saving definitions closes the editor")
+        web.named("Save rules", ".ioc-panel")
+        wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=status]')?.textContent;"), lambda text: text == "Rules saved.", "saving definitions keeps the panel open")
         web.results(1)
         original = _rows(web, project_id)
         assert [row["flag"] for row in original] == ["safe", "", ""], original
@@ -233,7 +235,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.write('input[aria-label="Rule query 1"]', "message:beacon")
         start = len(web.trace())
         web.named("Apply", ".ioc-row")
-        wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "2 rows annotated." in text, "IOC apply stays open and reports its committed count")
+        wait_for(lambda: web.script("return document.querySelector('.ioc-panel').textContent;"), lambda text: "2 rows annotated." in text, "IOC apply stays open and reports its committed count")
         operations = [entry for entry in web.trace()[start:] if entry["name"] in {"bulk_preview", "bulk_update"}]
         assert [entry["name"] for entry in operations] == ["bulk_preview", "bulk_update"], operations
         assert all(entry["request"]["target"] == "filtered" and entry["request"]["search"] == "message:beacon"
@@ -243,17 +245,25 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         assert [row["flag"] for row in applied] == ["critical", "", "critical"], applied
         assert applied[0]["memo"] == "human note" and applied[0]["tags"] == ["manual", "IOC"] and applied[0]["bookmarked"], applied[0]
         web.named("Undo", ".ioc-footer")
-        wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "2 rows restored." in text, "IOC undo restores the complete previous annotation")
+        wait_for(lambda: web.script("return document.querySelector('.ioc-panel').textContent;"), lambda text: "2 rows restored." in text, "IOC undo restores the complete previous annotation")
         assert _rows(web, project_id) == original
         export_path = root / "ioc-draft.csv"
         _picker(web, export_path)
-        web.named("Export IOC rules", ".ioc-dialog")
+        web.named("Export IOC rules", ".ioc-panel")
         wait_for(lambda: export_path.exists(), bool, "native IOC export writes a guarded CSV")
-        wait_for(lambda: web.script("return document.querySelector('.ioc-dialog').textContent;"), lambda text: "Rules exported." in text, "IOC export completes before closing")
+        wait_for(lambda: web.script("return document.querySelector('.ioc-panel').textContent;"), lambda text: "Rules exported." in text, "IOC export completes before closing")
         assert "critical,IOC,message:beacon" in export_path.read_text(encoding="utf-8")
+        with export_path.open(encoding="utf-8", newline="") as handle:
+            assert csv.DictReader(handle).fieldnames == ["flag", "tag", "query"], "Legacy query-only CSV stays three columns"
+        _picker(web, export_path)
+        web.named("Import IOC rules", ".ioc-panel")
+        wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=status]')?.textContent;"),
+                 lambda text: text == "Rules imported.", "legacy query CSV imports without changing annotations")
+        assert _rows(web, project_id) == original
         assert source.read_bytes() == original_source
         web.screenshot(evidence / "ioc-direct-apply-undo.png")
         invalid_flags = _invalid_ioc_flags(web, data, case, source, root, original)
+        verify_cell_iocs(web, data, root, evidence, report, _picker)
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
             "layout": layout,
             "state": preset_state,
@@ -264,8 +274,10 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
             "invalid_flags": invalid_flags}
     finally:
         web.script("window.__presetIocPicker?.restore();delete window.__presetIocPicker;")
-        if web.script("return !!document.querySelector('.ioc-dialog');"):
-            web.named("Close IOC rules", ".ioc-dialog")
+        if web.script("return !!document.querySelector('.ioc-panel');"):
+            if web.script("return ![...document.querySelectorAll('.ioc-footer button')].find(e=>e.textContent.trim()==='Discard').disabled;"):
+                web.named("Discard", ".ioc-panel")
+            web.close_drawer()
         web.close_drawer()
         web.tab(data["id"])
         web.results(data["total"])

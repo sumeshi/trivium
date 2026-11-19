@@ -35,6 +35,15 @@ def _rejected(web, name: str, payload: dict, expected_errors: list[dict]) -> Non
 def _ioc_queries(web, owner: str, root: Path, report: dict) -> None:
     saved = [{"flag": "critical", "tag": "review", "query": "message:match"}]
     web.command("save_iocs", {"projectId": owner, "entries": saved})
+    # Direct setup writes do not update the active case's owned editor draft.
+    # Reload through the UI before checking its saved baseline.
+    start = len(web.trace())
+    web.named("Workspace options")
+    web.named("Reload saved project", ".workspace-options")
+    wait_for(lambda: any(entry["name"] == "load_project" and entry["request"].get("projectId") == owner
+                         and "result" in entry for entry in web.trace()[start:]),
+             bool, "reload the saved IOC rules into the active case editor")
+    web.results(2)
     initial = _rows(web, owner)
     preview_args = {"projectId": owner, "target": "filtered", "search": "message:match", "flag": "critical"}
     token = web.command("bulk_preview", preview_args)["previewToken"]
@@ -56,17 +65,18 @@ def _ioc_queries(web, owner: str, root: Path, report: dict) -> None:
     # Unsaved invalid editor rows must be visibly invalid too.
     _open_iocs(web)
     for query in ["|", "||", '""']:
-        web.named("Add rule", ".ioc-dialog")
+        web.named("Add rule", ".ioc-panel")
         index = web.script("return document.querySelectorAll('.ioc-row').length-1;")
         web.write('.ioc-row input[aria-label^="Rule query"]', query, index)
         invalid = web.script("""
           const row=document.querySelectorAll('.ioc-row')[arguments[0]];
           return {disabled:row.querySelector('.ioc-rule-actions button').disabled,
             invalid:row.querySelector('input[aria-label^="Rule query"]').getAttribute('aria-invalid'),
-            message:row.querySelector('[role=alert]')?.textContent??''};
+            message:row.querySelector('.ioc-query-error')?.textContent??''};
         """, index)
         assert invalid["disabled"] and invalid["invalid"] == "true" and invalid["message"], invalid
-    web.named("Close IOC rules", ".ioc-dialog")
+    web.named("Discard", ".ioc-panel")
+    assert web.script("return document.querySelectorAll('.ioc-row').length;") == len(saved)
     web.close_drawer()
     assert _rows(web, owner) == initial
     assert len(web.command("query_project_rows", {"projectId": owner, "search": "", "offset": 0, "limit": 10})["rows"]) == 2
@@ -187,6 +197,8 @@ def verify_boundary_integrity(web, data: dict, root: Path, evidence: Path, repor
         _ordered_export(web, owner, root, report)
         web.screenshot(evidence / "boundary-export-integrity.png")
     finally:
+        if web.script("return [...document.querySelectorAll('.ioc-panel .ioc-footer button')].some(e=>e.textContent.trim()==='Discard'&&!e.disabled);"):
+            web.named("Discard", ".ioc-panel")
         web.close_drawer()
         if web.script("return !!document.querySelector('.export-dialog');"):
             web.named("Cancel", ".export-dialog")
