@@ -984,6 +984,7 @@ def main() -> None:
     selection.add_argument("--memo-ime-only", action="store_true")
     selection.add_argument("--integrity-only", action="store_true")
     selection.add_argument("--boundary-only", action="store_true")
+    selection.add_argument("--ioc-only", action="store_true")
     selection.add_argument("--close-only", action="store_true")
     selection.add_argument("--review-fixes-only", action="store_true")
     selection.add_argument("--file-drop-only", action="store_true")
@@ -1060,6 +1061,8 @@ def main() -> None:
                 if args.memo_ime_only and stage != "note text and composition confirmation":
                     continue
                 if args.boundary_only and stage not in {"IOC validation and ordered annotation export", "explicit GUI annotation restore", "Recent deletion confirmation and committed rows", "responsive storage writes under SQLite lock"}:
+                    continue
+                if args.ioc_only and stage != "portable presets and explicit IOC application":
                     continue
                 if args.integrity_only and stage not in {"native content security policy", "failed annotation reconciliation", "analysis preserves investigation rules"}:
                     continue

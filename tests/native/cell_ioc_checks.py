@@ -44,14 +44,18 @@ def verify_compact_ioc_list(web, owner: str, root: Path, evidence: Path, report:
     saved = web.command("load_project", {"projectId": owner}, request=True)["iocs"]
     before = web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 10})["rows"]
     source = root / "compact-ioc-list.csv"
+    intended = [{"flag": flag, "tag": f"review-{index + 1}", "query": f"score:{index + 1}"}
+                for index, flag in enumerate(["safe", "suspicious", "critical"] * 12)]
     with source.open("w", encoding="utf-8", newline="") as handle:
         out = csv.writer(handle)
         out.writerow(["flag", "tag", "query"])
-        out.writerows((flag, f"review-{index + 1}", f"score:{index + 1}")
-                      for index, flag in enumerate(["safe", "suspicious", "critical"] * 12))
+        out.writerows((entry["flag"], entry["tag"], entry["query"]) for entry in intended)
     picker(web, source)
     web.named("Import IOC rules", ".ioc-panel")
     _notice(web, "Rules imported.")
+    canonical = web.command("load_project", {"projectId": owner}, request=True)["iocs"]
+    fields = lambda entries: sorted((entry["flag"], entry["tag"], entry["query"]) for entry in entries)
+    assert fields(canonical) == fields(intended), "Import must preserve every rule even when its canonical order changes"
     layout = web.script("""
       const panel=document.querySelector('.ioc-panel'),editor=panel.querySelector('.ioc-editor'),list=panel.querySelector('.ioc-table'),
         rows=[...list.querySelectorAll('.ioc-row')],e=editor.getBoundingClientRect(),l=list.getBoundingClientRect();
@@ -59,23 +63,29 @@ def verify_compact_ioc_list(web, owner: str, root: Path, evidence: Path, report:
         rowHeights:rows.map(row=>row.getBoundingClientRect().height),listHeight:l.height,editorHeight:e.height,
         listOverflow:getComputedStyle(list).overflowY,scrollable:list.scrollHeight>list.clientHeight,
         editorFraction:e.height/(e.height+l.height),listInputs:list.querySelectorAll('input,textarea,select').length,
-        flags:rows.map(row=>row.querySelector('.ioc-list-flag').dataset.flag)};
+        flags:rows.map(row=>row.querySelector('.ioc-list-flag').dataset.flag),
+        queries:rows.map(row=>row.querySelector('.ioc-rule-text').textContent.trim())};
     """)
     assert layout["rows"] == 36 and layout["editors"] == 1 and layout["listInputs"] == 0, layout
     assert layout["scrollable"] and layout["listOverflow"] in ["auto", "scroll"], layout
     assert .1 <= layout["editorFraction"] <= .5 and max(layout["rowHeights"]) <= 64, layout
-    assert layout["flags"] == ["safe", "suspicious", "critical"] * 12, layout
+    assert layout["flags"] == [entry["flag"] for entry in canonical], layout
+    assert layout["queries"] == [entry["query"] for entry in canonical], layout
     _select_rule(web, 35)
-    assert web.script("return document.querySelector('[aria-label=\"Rule query 36\"]').value;") == "score:36"
+    assert web.script("return document.querySelector('[aria-label=\"Rule query 36\"]').value;") == canonical[-1]["query"]
     web.write('[aria-label="Rule tag 36"]', "edited without saving")
     _select_rule(web, 0)
-    assert web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').value;") == "score:1"
+    assert web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').value;") == canonical[0]["query"]
     _select_rule(web, 35)
     assert web.script("return document.querySelector('[aria-label=\"Rule tag 36\"]').value;") == "edited without saving"
     assert web.script("return document.querySelector('.ioc-table').scrollTop;") > 0
+    _settle(web)
     web.screenshot(evidence / "ioc-compact-many-rules.png")
     web.named("Discard", ".ioc-panel")
     assert web.script("return document.querySelectorAll('.ioc-row').length;") == 36
+    _select_rule(web, 35)
+    assert web.script("return document.querySelector('[aria-label=\"Rule tag 36\"]').value;") == canonical[-1]["tag"]
+    assert web.command("load_project", {"projectId": owner}, request=True)["iocs"] == canonical
     assert web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 10})["rows"] == before
     web.command("save_iocs", {"projectId": owner, "entries": saved})
     web.close_drawer()

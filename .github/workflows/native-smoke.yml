@@ -85,6 +85,9 @@ jobs:
       - name: Windows annotation transfer and storage checks
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --boundary-only
+      - name: Windows compact IOC editor and rule application
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --ioc-only
       - name: Windows normal close and saved investigation restart
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --close-only
