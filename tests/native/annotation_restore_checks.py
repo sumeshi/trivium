@@ -18,12 +18,51 @@ def _pick(web, source: Path) -> None:
              lambda value: value == source.name, "selected file populates the import form")
 
 
+def _displayed_annotations(web, annotations: list[dict]) -> None:
+    expected = [{"row": index, "flag": entry["flag"], "memo": entry["memo"] or "",
+                 "title": entry["memo"] or "Add note", "tags": len(entry["tags"]), "bookmarked": entry["bookmarked"]}
+                for index, entry in enumerate(annotations)]
+    wait_for(lambda: web.script("""
+      return [...document.querySelectorAll('.data-row:not(.loading)')].map(row=>({
+        row:Number(row.dataset.rowIndex),flag:row.querySelector('.flag-buttons .selected')?.getAttribute('aria-label').toLowerCase()??'',
+        memo:row.querySelector('.memo-text')?.textContent??'',title:row.querySelector('.memo-button').title,
+        tags:Number(row.querySelector('.row-tags-button span')?.textContent??0),bookmarked:row.classList.contains('bookmarked')}));
+    """), lambda rows: rows == expected, "actual table flags, notes, tags and bookmarks match the restored annotations")
+
+
+def _source_display(web, columns: list[dict], first_record: list[str], total: int) -> None:
+    # Keep one source field visible and inspect the actual full-record dialog.
+    web.named("Choose visible columns")
+    web.named("Deselect all", "#visible-column-menu")
+    web.click(web.element(f'#column-{columns[0]["id"]}'))
+    web.named("Done", "#visible-column-menu")
+    web.results(total)
+    web.tap(web.node(f'.data-row[data-row-index="0"] [data-column-id="{columns[0]["id"]}"]'))
+    for column, value in zip(columns, first_record):
+        selector = f'.row-detail-field[data-column-id="{column["id"]}"]'
+        web.script("document.querySelector(arguments[0]).scrollIntoView({block:'nearest'});", selector)
+        wait_for(lambda: web.script("const e=document.querySelector(arguments[0])?.querySelector('.row-field-value');return e?e.dataset.valueKind==='empty'?'':e.textContent:null;", selector),
+                 lambda actual: actual == value, f"restored full-record field {column['label']} displays the exact source text")
+    web.named("Close", ".row-detail-dialog")
+
+
+def _export_gui(web, destination: Path) -> None:
+    web.named("Export rows")
+    assert web.script("return document.querySelector('.export-annotations input').checked;")
+    web.script("window.__annotationRestorePicker.path=arguments[0];", str(destination))
+    web.named("Export…", ".export-dialog")
+    wait_for(destination.is_file, bool, "GUI export writes the annotated CSV")
+    wait_for(lambda: web.script("return !document.querySelector('.export-dialog');"), bool, "GUI export finishes")
+
+
 def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, report: dict) -> None:
     outer_query, outer_total = web.query(), web.state()["total"]
     source = root / f"annotation-source-{uuid.uuid4().hex[:8]}.csv"
     records = [
-        ["r-0000001", '<CommandLine>whoami</CommandLine>\n日本語, "quoted"', "source memo", "source critical"],
+        ["r-0000001", '<CommandLine>whoami</CommandLine>\r\n日本語, "quoted"', "source memo", "source critical"],
         ["r-0000002", "9007199254740993", "", "ordinary data"],
+        ["r-0000003", "2026-11-14T00:00:00.123456789Z", "source note only", "source suspicious"],
+        ["r-0000004", "<alice@example.org>", "untagged source note", ""],
     ]
     fields = ["source_id", "message", "trivium-memo", "trivium-critical"]
     with source.open("w", encoding="utf-8", newline="") as handle:
@@ -35,9 +74,11 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
     case = web.command("create_project", {"path": str(source)})
     owner = case["meta"]["id"]
     annotations = [
-        {"flag": "critical", "memo": 'Sender: <alice@example.org>\n<CommandLine>whoami</CommandLine>\n日本語, "quoted"  ',
+        {"flag": "critical", "memo": 'Sender: <alice@example.org>\r\n<CommandLine>whoami</CommandLine>\r\n日本語, "quoted"  ',
          "tags": ["alpha;beta", 'quote"tag', "日本語"], "bookmarked": True},
         {"flag": "safe", "memo": " \t ", "tags": [], "bookmarked": False},
+        {"flag": "suspicious", "memo": "調査中\r\n<XML>keep</XML>", "tags": ["check;again", "再調査"], "bookmarked": True},
+        {"flag": "", "memo": "", "tags": ["unflagged"], "bookmarked": False},
     ]
     for index, annotation in enumerate(annotations):
         web.command("update_flag", {"projectId": owner, "row_index": index, **annotation})
@@ -66,14 +107,11 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
     try:
         web.close_drawer()
         open_project(web, case["meta"]["name"])
-        web.results(2)
-        web.named("Export rows")
-        assert web.script("return document.querySelector('.export-annotations input').checked;")
-        web.script("window.__annotationRestorePicker.path=arguments[0];", str(exported))
-        web.named("Export…", ".export-dialog")
-        wait_for(lambda: exported.is_file(), bool, "GUI export writes the annotated CSV")
-        wait_for(lambda: web.script("return !document.querySelector('.export-dialog');"), bool, "export dialog completes")
+        web.results(len(records))
+        _export_gui(web, exported)
         exported_bytes = exported.read_bytes()
+        (evidence / "csv-source.csv").write_bytes(original)
+        (evidence / "csv-export-first.csv").write_bytes(exported_bytes)
 
         imported = []
         for restore in [False, True]:
@@ -122,30 +160,86 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
                 web.screenshot(evidence / "csv-annotation-restore-loading.png")
                 web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
             web.applied(projectId=project_id)
-            web.results(2)
+            web.results(len(records))
             request = next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")
             assert request["request"]["restore_annotations"] is restore, request
             loaded = web.command("load_project", {"projectId": project_id}, request=True)
             rows = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 10})["rows"]
-            assert [row["row_index"] for row in rows] == [0, 1], "Restore must not add source records"
-            assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(row=>Number(row.dataset.rowIndex));") == [0, 1]
+            assert [row["row_index"] for row in rows] == list(range(len(records))), "Restore must not add source records"
+            assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(row=>Number(row.dataset.rowIndex));") == list(range(len(records)))
             assert not web.script("return !!document.querySelector('.data-row.loading');")
             for row, expected in zip(rows, annotations):
                 for field in ["flag", "memo", "tags", "bookmarked"]:
                     actual = (row[field] or "") if field in {"flag", "memo"} else row[field]
                     assert actual == (expected[field] if restore else {"flag": "", "memo": "", "tags": [], "bookmarked": False}[field]), (field, row)
-            assert loaded["project"]["meta"]["flagged_records"] == (2 if restore else 0)
+            assert loaded["project"]["meta"]["flagged_records"] == (3 if restore else 0)
             # Colliding source names remain independent data columns in either mode.
             data_columns = loaded["columns_meta"][-len(fields):]
             assert [column["label"] for column in data_columns] == fields, data_columns
             for row, expected in zip(rows, records):
                 assert [row["cells"][column["id"]]["text"] for column in data_columns] == expected
+            expected_display = annotations if restore else [{"flag": "", "memo": "", "tags": [], "bookmarked": False} for _ in records]
+            _displayed_annotations(web, expected_display)
+            _source_display(web, data_columns, records[0], len(records))
             imported.append({"restore": restore, "flagged": loaded["project"]["meta"]["flagged_records"],
                              "annotations_exact": True, "colliding_source_columns_preserved": True})
+
+        # Change the restored investigation through the real table/editor, then
+        # export/import it again. Old annotation columns remain source data;
+        # the new leading annotation block must win even when names are suffixed.
+        latest = [dict(entry) for entry in annotations]
+        latest[0] = {**latest[0], "flag": "suspicious", "memo": 'Updated <bob@example.org>\n<CommandLine>hostname</CommandLine>\n再調査, "new"  '}
+        start = len(web.trace())
+        web.named("Suspicious", '.data-row[data-row-index="0"]')
+        wait_for(lambda: [entry for entry in web.trace()[start:] if entry["name"] == "update_flag" and "result" in entry],
+                 bool, "the edited restored flag is committed by the native engine")
+        web.tap(web.node('.data-row[data-row-index="0"] .memo-button'))
+        wait_for(lambda: web.script("return !!document.querySelector('.memo-dialog textarea');"), bool, "restored note editor opens")
+        web.script("const e=document.querySelector('.memo-dialog textarea');e.value=arguments[0];e.dispatchEvent(new Event('input',{bubbles:true}));", latest[0]["memo"])
+        web.named("Save", ".memo-dialog")
+        wait_for(lambda: web.script("return !document.querySelector('.memo-dialog');"), bool, "edited restored note is saved")
+        _displayed_annotations(web, latest)
+        second = root / f"annotation-export-second-{uuid.uuid4().hex[:8]}.csv"
+        _export_gui(web, second)
+        (evidence / "csv-export-second.csv").write_bytes(second.read_bytes())
+        with exported.open(encoding="utf-8", newline="") as handle:
+            first_csv = list(csv.reader(handle))
+        with second.open(encoding="utf-8", newline="") as handle:
+            second_csv = list(csv.reader(handle))
+        assert len(first_csv) == len(second_csv) == len(records) + 1
+        for first_row, second_row, current in zip(first_csv[1:], second_csv[1:], latest):
+            assert second_row[:6] == ["1" if current["flag"] == flag else "0" for flag in ("safe", "suspicious", "critical")] + [current["memo"], json.dumps(current["tags"], ensure_ascii=False, separators=(",", ":")), "1" if current["bookmarked"] else "0"]
+            assert second_row[6:12] == first_row[:6], "The earlier annotation block remains ordinary source data"
+        assert second_csv[1][:6] != first_csv[1][:6], "This roundtrip must distinguish edited annotations from the stale source block"
+        web.named("Open project menu")
+        _pick(web, second)
+        web.tap(web.node('.restore-annotations'))
+        wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"), bool, "second GUI restore is explicitly enabled")
+        start = len(web.trace())
+        web.named("Import and open", ".workspace-drawer")
+        wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "second exported CSV opens as an investigation")
+        second_id = next(item["meta"]["id"] for item in web.command("list_projects") if item["meta"].get("source_file_name") == second.name)
+        created.append((second_id, second.name))
+        web.applied(projectId=second_id)
+        web.results(len(records))
+        assert next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")["request"]["restore_annotations"] is True
+        loaded = web.command("load_project", {"projectId": second_id}, request=True)
+        rows = web.command("query_project_rows", {"projectId": second_id, "offset": 0, "limit": 10})["rows"]
+        assert [row["row_index"] for row in rows] == list(range(len(records)))
+        for row, current in zip(rows, latest):
+            assert all((row[field] or "" if field in {"flag", "memo"} else row[field]) == value for field, value in current.items()), row
+        data_columns = loaded["columns_meta"][-len(fields):]
+        assert [column["label"] for column in data_columns] == fields
+        assert [[row["cells"][column["id"]]["text"] for column in data_columns] for row in rows] == records
+        _displayed_annotations(web, latest)
+        _source_display(web, data_columns, records[0], len(records))
+        web.screenshot(evidence / "csv-annotation-second-restore.png")
         assert source.read_bytes() == original and exported.read_bytes() == exported_bytes
         report["annotation_restore"] = {"gui_export_import": True, "cases": imported,
             "csv_only_explicit_opt_in": True, "source_files_unchanged": True,
             "first_restored_page_has_no_placeholder_records": True,
+            "all_four_flag_states": True, "gui_edit_reexport_restore_uses_latest_annotations": True,
+            "actual_table_and_full_record_values_checked": True,
             "unverified": "Native picker interaction; only selected paths are substituted"}
     finally:
         web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;delete window.__annotationRestoreHoldNextQuery;")

@@ -337,7 +337,14 @@ class WebView:
 def open_project(web: WebView, name: str) -> None:
     if not web.script("return !!document.querySelector('.workspace-drawer');"):
         web.click(web.element('[aria-label="Open project menu"]'))
+    def refresh_finished() -> bool:
+        return web.script(
+            "return document.querySelector('[aria-label=\"Recent projects\"]')?.getAttribute('aria-busy')==='false';"
+        )
+    wait_for(refresh_finished, bool, "previous project discovery finishes")
     web.click(web.element('[aria-label="Refresh projects"]'))
+    # Recent keeps its existing cards visible while discovery updates their order.
+    wait_for(refresh_finished, bool, "project discovery finishes")
     card = wait_for(lambda: web.script(
         "return [...document.querySelectorAll('.project-card')]"
         ".find(e=>e.querySelector('.project-name')?.textContent.trim()===arguments[0])??null;", name,
