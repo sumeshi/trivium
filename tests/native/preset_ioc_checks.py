@@ -14,7 +14,7 @@ from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 from preset_state_checks import verify_preset_state
-from cell_ioc_checks import verify_cell_iocs
+from cell_ioc_checks import _select_rule, verify_cell_iocs, verify_compact_ioc_list
 
 
 def _picker(web, destination: Path) -> None:
@@ -68,10 +68,11 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     open_project(web, case["meta"]["name"])
     web.results(1)  # The previously saved text search remains active.
     _open_iocs(web)
-    flags = web.script("return [...document.querySelectorAll('.ioc-row .flag-select')].map(e=>({flag:e.dataset.flag,label:e.textContent.trim(),title:e.querySelector('button').title}));")
+    flags = web.script("return [...document.querySelectorAll('.ioc-row .ioc-list-flag')].map(e=>({flag:e.dataset.flag,label:e.getAttribute('aria-label')??'',title:e.title}));")
     assert flags[0]["flag"] == "critical" and "Critical" in flags[0]["label"], flags
     assert flags[1]["flag"] == "critcal" and "Invalid" in flags[1]["label"] and "critcal" in flags[1]["title"], flags
     assert web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].filter(e=>e.textContent.trim()==='Apply').map(e=>e.disabled);") == [False, True]
+    _select_rule(web, 1)
     web.write('input[aria-label="Rule tag 2"]', "needs correction")
     web.named("Save rules", ".ioc-panel")
     wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
@@ -80,7 +81,7 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     assert _rows(web, project_id) == original
 
     # Correcting the invalid definition keeps the valid definition intact.
-    web.click(web.node(".ioc-row .flag-select-trigger", 1))
+    web.click(web.node(".ioc-editor .flag-select-trigger"))
     web.click(web.node(".flag-select-menu .flag-option.flag-suspicious"))
     web.named("Save rules", ".ioc-panel")
     wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=status]')?.textContent;"), lambda text: text == "Rules saved.", "corrected IOC rules save")
@@ -263,6 +264,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         assert source.read_bytes() == original_source
         web.screenshot(evidence / "ioc-direct-apply-undo.png")
         invalid_flags = _invalid_ioc_flags(web, data, case, source, root, original)
+        verify_compact_ioc_list(web, project_id, root, evidence, report, _picker)
         verify_cell_iocs(web, data, root, evidence, report, _picker)
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
             "layout": layout,

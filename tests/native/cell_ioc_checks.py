@@ -21,6 +21,15 @@ def _notice(web, text: str) -> None:
              lambda value: value == text, text)
 
 
+def _select_rule(web, index: int) -> None:
+    button = web.node(f'.ioc-row [aria-label="Edit rule {index + 1}"]')
+    web.script("arguments[0].scrollIntoView({block:'nearest'});", button)
+    web.click(button)
+    wait_for(lambda: web.script("return !!document.querySelector(arguments[0]);",
+                               f'.ioc-editor [aria-label="Rule tag {index + 1}"]'),
+             bool, f"rule {index + 1} is selected in the shared editor")
+
+
 def _context(web, column: str) -> None:
     _settle(web)
     target = web.node(f'.data-row[data-row-index="0"] [data-column-id="{column}"]')
@@ -29,6 +38,54 @@ def _context(web, column: str) -> None:
     point.pop("target")
     context_click(web, point)
     wait_for(lambda: web.script("return !!document.querySelector('.cell-context-menu');"), bool, "trusted cell context menu opens")
+
+
+def verify_compact_ioc_list(web, owner: str, root: Path, evidence: Path, report: dict, picker) -> None:
+    saved = web.command("load_project", {"projectId": owner}, request=True)["iocs"]
+    before = web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 10})["rows"]
+    source = root / "compact-ioc-list.csv"
+    with source.open("w", encoding="utf-8", newline="") as handle:
+        out = csv.writer(handle)
+        out.writerow(["flag", "tag", "query"])
+        out.writerows((flag, f"review-{index + 1}", f"score:{index + 1}")
+                      for index, flag in enumerate(["safe", "suspicious", "critical"] * 12))
+    picker(web, source)
+    web.named("Import IOC rules", ".ioc-panel")
+    _notice(web, "Rules imported.")
+    layout = web.script("""
+      const panel=document.querySelector('.ioc-panel'),editor=panel.querySelector('.ioc-editor'),list=panel.querySelector('.ioc-table'),
+        rows=[...list.querySelectorAll('.ioc-row')],e=editor.getBoundingClientRect(),l=list.getBoundingClientRect();
+      return {rows:rows.length,editors:panel.querySelectorAll('.ioc-editor').length,
+        rowHeights:rows.map(row=>row.getBoundingClientRect().height),listHeight:l.height,editorHeight:e.height,
+        listOverflow:getComputedStyle(list).overflowY,scrollable:list.scrollHeight>list.clientHeight,
+        editorFraction:e.height/(e.height+l.height),listInputs:list.querySelectorAll('input,textarea,select').length,
+        flags:rows.map(row=>row.querySelector('.ioc-list-flag').dataset.flag)};
+    """)
+    assert layout["rows"] == 36 and layout["editors"] == 1 and layout["listInputs"] == 0, layout
+    assert layout["scrollable"] and layout["listOverflow"] in ["auto", "scroll"], layout
+    assert .1 <= layout["editorFraction"] <= .5 and max(layout["rowHeights"]) <= 64, layout
+    assert layout["flags"] == ["safe", "suspicious", "critical"] * 12, layout
+    _select_rule(web, 35)
+    assert web.script("return document.querySelector('[aria-label=\"Rule query 36\"]').value;") == "score:36"
+    web.write('[aria-label="Rule tag 36"]', "edited without saving")
+    _select_rule(web, 0)
+    assert web.script("return document.querySelector('[aria-label=\"Rule query 1\"]').value;") == "score:1"
+    _select_rule(web, 35)
+    assert web.script("return document.querySelector('[aria-label=\"Rule tag 36\"]').value;") == "edited without saving"
+    assert web.script("return document.querySelector('.ioc-table').scrollTop;") > 0
+    web.screenshot(evidence / "ioc-compact-many-rules.png")
+    web.named("Discard", ".ioc-panel")
+    assert web.script("return document.querySelectorAll('.ioc-row').length;") == 36
+    assert web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 10})["rows"] == before
+    web.command("save_iocs", {"projectId": owner, "entries": saved})
+    web.close_drawer()
+    web.named("Workspace options")
+    web.named("Reload saved project", ".workspace-options")
+    web.results(1)
+    _panel(web)
+    assert web.script("return document.querySelectorAll('.ioc-row').length;") == len(saved)
+    report["compact_ioc_list"] = {**layout, "draft_survives_rule_switch": True,
+        "discard_restores_definitions": True, "annotations_unchanged": True}
 
 
 def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker) -> None:
@@ -65,7 +122,7 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         web.named("Create IOC rule…", '[aria-label="Cell actions"]')
         wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Rule value 1\"]')?.value;"),
                  lambda value: value == raw, "cell action resolves the complete original spelling")
-        assert web.script("return document.querySelector('.ioc-row .flag-select').dataset.flag;") == "critical"
+        assert web.script("return document.querySelector('.ioc-editor .flag-select').dataset.flag;") == "critical"
         assert web.script("return document.querySelector('[aria-label=\"Rule column 1\"]').value;") == ids["message"]
         assert any(e["name"] == "get_cell" and e["request"].get("columnId") == ids["message"] for e in web.trace()[checkpoint:])
         assert saved_rules() == [] and rows() == original, "Creating a draft neither saves rules nor annotates"
@@ -123,7 +180,8 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         web.tap(web.node('.row-detail-dialog [aria-label="Create IOC rule for source_id"]'))
         wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Rule value 2\"]')?.value;"), lambda value: value == "r0", "row detail creates a second Critical cell draft")
         assert not web.script("return !!document.querySelector('.row-detail-dialog');")
-        assert web.script("return document.querySelectorAll('.ioc-row .flag-select')[1].dataset.flag;") == "critical"
+        assert web.script("return document.querySelector('.ioc-editor .flag-select').dataset.flag;") == "critical"
+        assert web.script("return document.querySelectorAll('.ioc-row .ioc-list-flag')[1].dataset.flag;") == "critical"
         web.named("Discard", ".ioc-panel")
         assert web.script("return document.querySelectorAll('.ioc-row').length;") == 1
         assert saved_rules() == expected and rows() == original

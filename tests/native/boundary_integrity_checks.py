@@ -67,12 +67,12 @@ def _ioc_queries(web, owner: str, root: Path, report: dict) -> None:
     for query in ["|", "||", '""']:
         web.named("Add rule", ".ioc-panel")
         index = web.script("return document.querySelectorAll('.ioc-row').length-1;")
-        web.write('.ioc-row input[aria-label^="Rule query"]', query, index)
+        web.write('.ioc-editor input[aria-label^="Rule query"]', query)
         invalid = web.script("""
           const row=document.querySelectorAll('.ioc-row')[arguments[0]];
           return {disabled:row.querySelector('.ioc-rule-actions button').disabled,
-            invalid:row.querySelector('input[aria-label^="Rule query"]').getAttribute('aria-invalid'),
-            message:row.querySelector('.ioc-query-error')?.textContent??''};
+            invalid:document.querySelector('.ioc-editor input[aria-label^="Rule query"]').getAttribute('aria-invalid'),
+            message:document.querySelector('.ioc-editor .ioc-query-error')?.textContent??''};
         """, index)
         assert invalid["disabled"] and invalid["invalid"] == "true" and invalid["message"], invalid
     web.named("Discard", ".ioc-panel")

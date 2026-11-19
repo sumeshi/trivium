@@ -150,7 +150,7 @@
     await selectTool('iocs');
     await tick();
     if (ruleId) await iocPanel?.focusRule(ruleId);
-    else drawerEl?.querySelector<HTMLElement>('.ioc-row input, .ioc-panel button.primary')?.focus();
+    else drawerEl?.querySelector<HTMLElement>('.ioc-editor input, .ioc-editor textarea, .ioc-panel button.primary')?.focus();
   }
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
