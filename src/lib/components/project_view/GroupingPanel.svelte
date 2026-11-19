@@ -10,7 +10,7 @@
   import { annotationVersions } from "./state";
   import { useWorkspace } from "../../workspaceContext";
 
-  const { backend, columnLabels, projectDetail, appliedFilters, conditionTree, createReadScope } = useWorkspace();
+  const { backend, columnLabels, projectDetail, appliedFilters, conditionTree, createReadScope, goBack, canGoBack } = useWorkspace();
   const reads = createReadScope();
   const requests = createLatestRequest();
   export let open = true;
@@ -18,6 +18,7 @@
   export let granularities: Record<string, GroupGranularity> = {};
   export let sortBy: GroupSortKey = "name";
   export let sortDirection: GroupSortDirection = "asc";
+  let panel: HTMLElement | null = null;
   let pendingColumn = "";
   let tree: GroupTreeResponse | null = null;
   let expanded = new Set<string>();
@@ -70,6 +71,21 @@
     const copy = [...groupColumns];
     [copy[index], copy[next]] = [copy[next], copy[index]];
     groupColumns = copy;
+  }
+
+  async function replaceColumn(index: number, column: string) {
+    if (groupColumns[index] === column || !columns.includes(column) || groupColumns.some((name, position) => position !== index && name === column)) return;
+    groupColumns = groupColumns.map((name, position) => position === index ? column : name);
+    await tick();
+    if (panel?.isConnected) panel.querySelector<HTMLElement>(`#group-level-${index}`)?.focus({ preventScroll: true });
+  }
+
+  function clearGrouping() {
+    groupColumns = [];
+    granularities = {};
+    expanded = new Set();
+    page = 0;
+    error = "";
   }
 
   function changeGranularity(name: string, event: Event) {
@@ -127,15 +143,13 @@
   }
 </script>
 
-<section class="grouping-panel" aria-label="Nested grouping">
-  <div class="add-level">
-    <select bind:value={pendingColumn} aria-label="Group column" disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS}>
-      {#each availableColumns as name}
-        <option value={name}>{$columnLabels.get(name) ?? name}</option>
-      {/each}
-    </select>
-    <button type="button" class="ghost" on:click={() => groupByColumn(pendingColumn)}
-      disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS} title="Add a nested group level">Add level</button>
+<section class="grouping-panel" aria-label="Nested grouping" bind:this={panel}>
+  <div class="group-setup-heading">
+    <span class="section-label">Grouping</span>
+    <button type="button" class="text-button" on:click={goBack} disabled={!$canGoBack}
+      aria-label="Back to previous filter" title="Undo the last Rules change">← Back</button>
+    <button type="button" class="text-button" on:click={clearGrouping} disabled={groupColumns.length === 0}
+      aria-label="Clear grouping" title="Remove grouping levels; keep Rules">Ungroup</button>
     <button type="button" class="icon-button" on:click={() => refreshRevision += 1}
       disabled={loading || groupColumns.length === 0} title="Recalculate groups" aria-label="Recalculate groups">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" /></svg>
@@ -144,8 +158,15 @@
   {#if groupColumns.length > 0}
     <ol class="group-levels" aria-label="Group levels">
       {#each groupColumns as name, index (name)}
-        <li data-group-column={name}>
-          <span class="level-number">{index + 1}</span><span class="level-name" title={$columnLabels.get(name) ?? name}>{$columnLabels.get(name) ?? name}</span>
+        <li data-group-column={name} style={`--level-depth: ${index}`}>
+          <label class="level-label" for={`group-level-${index}`}>{index === 0 ? "Group by" : "Then by"}</label>
+          <select class="level-column" id={`group-level-${index}`} aria-label={`Group level ${index + 1} column`}
+            value={name} title={$columnLabels.get(name) ?? name}
+            on:change={event => replaceColumn(index, event.currentTarget.value)}>
+            {#each columns.filter(column => column === name || !groupColumns.includes(column)) as column}
+              <option value={column}>{$columnLabels.get(column) ?? column}</option>
+            {/each}
+          </select>
           {#if $projectDetail?.column_kinds[name] === "datetime" || selectedGranularities[index] !== "exact"}
             <select class="group-granularity" aria-label={`Group ${$columnLabels.get(name) ?? name} by`} title="Datetime groups use UTC"
               value={selectedGranularities[index]} on:change={(event) => changeGranularity(name, event)}>
@@ -162,12 +183,22 @@
       {/each}
     </ol>
   {/if}
+  <div class="add-level">
+    <label class="level-label" for="group-next-column">{groupColumns.length ? "Then by" : "Group by"}</label>
+    <select id="group-next-column" bind:value={pendingColumn} aria-label="Group column" disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS}>
+      {#each availableColumns as name}
+        <option value={name}>{$columnLabels.get(name) ?? name}</option>
+      {/each}
+    </select>
+    <button type="button" class="ghost" on:click={() => groupByColumn(pendingColumn)}
+      disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS} title="Add a nested group level">Add level</button>
+  </div>
   {#if error}<p class="panel-error" role="alert">{error}</p>{/if}
   {#if loading}
     <p class="group-summary" role="status">Grouping current results…</p>
   {:else if tree}
     <div class="group-summary">
-      <span>{tree.total.toLocaleString()} rows · {tree.nodes.length.toLocaleString()} top groups</span>
+      <span><strong class="section-label">Values</strong> · {tree.total.toLocaleString()} rows · {tree.nodes.length.toLocaleString()} groups</span>
       <div class="group-sort">
         <select aria-label="Sort groups by" title="Sort each group level" value={sortBy} on:change={changeSort}>
           <option value="name">Name</option><option value="count">Count</option>
@@ -182,6 +213,9 @@
     </div>
     {#if tree.nodes.length === 0}<p class="group-summary">No groups in the current result.</p>{/if}
     <div class="group-tree" aria-label="Group results">
+      {#if presentation.rows.length}
+        <div class="group-result-heading" aria-hidden="true"><span>Value</span><span>Count</span></div>
+      {/if}
       {#each presentation.rows as row (row.key)}
         <div class="group-row" data-depth={row.depth} data-group-label={row.node.label} data-group-missing={isMissingGroup(row.node)} style={`--group-depth: ${row.depth}`}>
           {#if row.node.children.length > 0}
@@ -212,6 +246,9 @@
 
 <style>
   .grouping-panel { display: grid; gap: 9px; min-width: 0; }
+  .group-setup-heading { display: flex; align-items: center; gap: 5px; }
+  .section-label { font-weight: 600; color: var(--fg); font-size: 10px; }
+  .group-setup-heading > .section-label { flex: 1; }
   .add-level { display: flex; align-items: center; gap: 5px; }
   .add-level select { flex: 1; min-width: 0; }
   .add-level .ghost { flex: 0 0 auto; font-size: 11px; }
@@ -220,17 +257,18 @@
   .icon-button:focus-visible, .expand-group:focus-visible, .group-value:focus-visible, .text-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
   button:disabled { opacity: .4; }
   .group-levels { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
-  .group-levels li { display: flex; align-items: center; gap: 5px; min-width: 0; padding-left: 5px; border-left: 2px solid var(--accent-border); }
-  .level-number { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .level-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .group-levels li { display: flex; align-items: center; gap: 5px; min-width: 0; padding-left: calc(5px + min(var(--level-depth), 3) * 5px); border-left: 2px solid var(--border); }
+  .level-label { flex: 0 0 47px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .level-column { flex: 1; min-width: 0; width: 0; height: 27px; padding: 0 5px; font-size: 11px; }
   .group-granularity { flex: 0 0 102px; width: 102px; height: 25px; padding: 0 3px; font-size: 10px; }
-  .group-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 10px; color: var(--muted); }
+  .group-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
   .group-sort { display: flex; align-items: center; gap: 3px; }
   .group-sort select { flex: 0 0 auto; width: auto; min-width: 65px; height: 24px; padding: 2px 4px; font-size: 10px; }
   .group-sort .text-button { white-space: nowrap; }
   .text-button { background: transparent; border: 0; padding: 2px 4px; border-radius: 3px; color: var(--muted); font-size: 10px; }
   .panel-error { margin: 0; color: var(--critical); font-size: 11px; }
   .group-tree { display: grid; gap: 2px; min-width: 0; }
+  .group-result-heading { display: flex; justify-content: space-between; padding: 0 6px 3px 22px; color: var(--muted); font-size: 10px; }
   .group-row { display: flex; align-items: center; gap: 3px; padding-left: calc(var(--group-depth) * 13px); min-width: 0; }
   .expand-group, .leaf-mark { display: inline-flex; align-items: center; justify-content: center; width: 19px; height: 25px; flex: 0 0 19px; background: transparent; border: 0; padding: 0; color: var(--muted); }
   .expand-group:hover { color: var(--fg); }

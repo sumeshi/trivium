@@ -97,6 +97,10 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         assert next(row for row in initial if row["label"] == "" and not row["missing"])["display"] == "(empty string)"
         assert next(row for row in initial if row["label"] == " ")["display"] == '" "'
         assert not web.script("return !!document.querySelector('.group-granularity');"), "Text groups have no datetime granularity selector"
+        assert web.script("return document.querySelector('[aria-label=\"Group level 1 column\"]').value;") == columns["level1"]
+        assert not web.script("return !!document.querySelector('.group-levels .level-number');"), "Grouping settings must not look like numbered result rows"
+        assert web.script("return [...document.querySelectorAll('.group-result-heading span')].map(element=>element.textContent.trim());") == ["Value", "Count"]
+        assert web.script("return document.querySelector('.group-summary .section-label')?.textContent;") == "Values"
 
         for name in ("level2", "level3"):
             web.choose('select[aria-label="Group column"]', columns[name])
@@ -104,6 +108,18 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
             wait_for(lambda: web.script("return [...document.querySelectorAll('[aria-label=\"Group levels\"] li')].map(e=>e.dataset.groupColumn);"),
                 lambda selected: selected == [columns[f"level{i}"] for i in range(1, int(name[-1]) + 1)], f"{name} added as nested level")
             wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 10, f"{name} aggregation completed")
+        assert web.script("return [...document.querySelectorAll('.group-levels .level-label')].map(element=>element.textContent.trim());") == ["Group by", "Then by", "Then by"]
+        options = web.script("return [...document.querySelector('[aria-label=\"Group level 2 column\"]').options].map(option=>option.value);")
+        assert columns["level2"] in options and not {columns["level1"], columns["level3"]}.intersection(options), "A nested level cannot duplicate another selected column"
+        for replacement in ("large", "level3"):
+            start = len(web.trace())
+            web.choose('select[aria-label="Group level 3 column"]', columns[replacement])
+            expected_columns = [columns["level1"], columns["level2"], columns[replacement]]
+            wait_for(lambda: [entry for entry in web.trace()[start:] if entry["name"] == "group_tree"
+                     and entry["request"].get("groupColumns") == expected_columns and "result" in entry],
+                     bool, "editing a nested level aggregates the chosen source column")
+            wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 10,
+                     "nested replacement preserves complete root counts")
         web.click(web.script("return arguments[0].querySelector('.expand-group');", _row(web, 0, "alpha")))
         wait_for(lambda: _rows(web), lambda rows: any(row["depth"] == 1 and row["label"] == "x" and row["count"] == 3 for row in rows), "second-level child counts")
         children = [row for row in _rows(web) if row["depth"] == 1]
@@ -127,6 +143,10 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         selected = web.command("query_project_rows", {"projectId": project_id, **{key: value for key, value in web.query().items() if key != "projectId"}, "offset": 0, "limit": 10})
         assert [row["row_index"] for row in selected["rows"]] == [0, 1], selected
         checks.append({"path": ["alpha", "x", "red"], "count": 2, "source_rows": [0, 1]})
+        web.named("Back to previous filter", ".grouping-panel")
+        web.applied(projectId=project_id, condition=None)
+        web.results(len(records))
+        assert web.script("return document.querySelectorAll('[aria-label=\"Group levels\"] li').length;") == 3, "Returning from a group filter keeps its configured hierarchy"
 
         for missing, label, ids in ((True, "", [6, 7]), (False, "", [8]), (False, " ", [9])):
             _reset(web, len(records))
@@ -180,9 +200,24 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         selected = web.command("query_project_rows", {**web.query(), "offset": 0, "limit": 10})
         assert [row["row_index"] for row in selected["rows"]] == [0], selected
         checks.append({"path": ["alpha", "x", "9007199254740993"], "count": 1, "source_rows": [0], "existing_or_preserved": True})
+        web.named("Back to previous filter", ".grouping-panel")
+        web.applied(projectId=project_id, condition=original_or)
+        web.results(9)
+        before_clear = web.query()
+        web.named("Clear grouping", ".grouping-panel")
+        wait_for(lambda: web.script("return document.querySelectorAll('[aria-label=\"Group levels\"] li').length;"),
+                 lambda count: count == 0, "clearing grouping removes every configured level")
+        assert not _rows(web), "Clearing grouping removes its aggregate list"
+        assert web.query() == before_clear, "Clear grouping does not remove investigation Rules"
+        web.choose('select[aria-label="Group column"]', columns["level1"])
+        web.named("Add level", ".grouping-panel")
+        wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 9,
+                 "grouping can be rebuilt after clearing without losing prior Rules")
         report["nested_groups"] = {"header_action_opens_groups": True, "levels": 3,
             "reorder_remove_replace": True, "large_integer_exact": True, "existing_or_preserved": True,
             "name_and_count_sort_both_directions": True, "nested_sort_preserves_expansion_and_values": True,
+            "nested_columns_editable_without_duplicates": True, "local_back_preserves_previous_rules": True,
+            "clear_grouping_keeps_investigation_rules": True,
             "sort_does_not_rescan": True, "non_datetime_granularity_hidden": True,
             "root_groups": initial, "second_level": children, "third_level": grandchildren, "drilldowns": checks}
     finally:
