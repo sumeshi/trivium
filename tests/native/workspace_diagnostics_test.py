@@ -87,7 +87,17 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
             wait_for(lambda: "private-source-value", lambda value: False, "private-query", timeout=0)
         except AssertionError as error:
             annotation = self.capture("virtualized wide table and unchanged rows", error)
-        self.assertRegex(annotation, r"^::error title=Native workspace::Native workspace failed: virtualized wide table and unchanged rows \(AssertionError at row_navigation\.py:[0-9]+\)\n$")
+        self.assertRegex(annotation, r"^::error title=Native workspace::Native workspace failed: virtualized wide table and unchanged rows \(AssertionError at workspace_diagnostics_test\.py:[0-9]+\)\n$")
+        self.assertNotIn("private", annotation)
+        self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
+
+    def test_timeout_without_an_owned_caller_keeps_the_safe_helper_location(self):
+        try:
+            wait_for(lambda: "private-source", lambda value: False, "private-label", timeout=0)
+        except AssertionError as error:
+            error.__traceback__ = error.__traceback__.tb_next
+            annotation = self.capture("startup", error)
+        self.assertRegex(annotation, r"AssertionError at row_navigation\.py:[0-9]+")
         self.assertNotIn("private", annotation)
         self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
 
