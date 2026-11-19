@@ -126,8 +126,10 @@ def emit_workspace_failure(stage: str, error: Exception) -> None:
     for frame, line in traceback.walk_tb(error.__traceback__):
         path = Path(frame.f_code.co_filename).resolve()
         if path.parent == native and re.fullmatch(r"[a-z_][a-z0-9_]{0,63}\.py", path.name):
-            # A shared wait/driver wrapper hides which checkpoint actually failed.
-            if path.name != "row_navigation.py" or not location:
+            # Prefer the checkpoint over shared wait/driver wrappers.
+            wrapper = path.name == "row_navigation.py" or (
+                path.name == "workspace_ui.py" and isinstance(frame.f_locals.get("self"), WebView))
+            if not wrapper or not location:
                 location = f" at {path.name}:{line}"
     # The caller selects stage only from its fixed checkpoint labels below.
     message = f"Native workspace failed: {stage} ({kind}{location})"

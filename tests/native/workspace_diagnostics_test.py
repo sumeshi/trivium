@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from row_navigation import emit_navigation_failure, wait_for
-from workspace_ui import emit_unexpected_ipc_errors, emit_workspace_failure, main
+from workspace_ui import WorkspaceView, emit_unexpected_ipc_errors, emit_workspace_failure, main
 
 
 class WorkspaceDiagnosticsTests(unittest.TestCase):
@@ -98,6 +98,17 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
             error.__traceback__ = error.__traceback__.tb_next
             annotation = self.capture("startup", error)
         self.assertRegex(annotation, r"AssertionError at row_navigation\.py:[0-9]+")
+        self.assertNotIn("private", annotation)
+        self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
+
+    def test_view_driver_wait_reports_its_checkpoint_without_private_button_text(self):
+        view = object.__new__(WorkspaceView)
+        with patch("row_navigation.time.monotonic", side_effect=[0, 61]):
+            try:
+                view.named("private-source-button")
+            except AssertionError as error:
+                annotation = self.capture("startup", error)
+        self.assertRegex(annotation, r"AssertionError at workspace_diagnostics_test\.py:[0-9]+")
         self.assertNotIn("private", annotation)
         self.assertNotIn(str(Path(__file__).resolve().parent), annotation)
 
