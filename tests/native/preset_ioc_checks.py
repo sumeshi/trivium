@@ -47,7 +47,7 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     project_id = case["meta"]["id"]
     saved = web.command("load_project", {"projectId": project_id}, request=True)["iocs"]
     invalid = root / "invalid-ioc.csv"
-    invalid.write_text("flag,tag,query\nsafe,valid,message:clear\ncritcal,bad,message:beacon\n", encoding="utf-8")
+    invalid.write_bytes(b"flag,tag,query\r\nsafe,valid,message:clear\r\ncritcal,bad,message:beacon\r\n")
     _picker(web, invalid)
     web.named("Import IOC rules", ".ioc-panel")
     wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),

@@ -82,6 +82,64 @@ fn csv_rejects_invalid_flags_with_the_physical_line_and_original_value() {
 }
 
 #[test]
+fn csv_invalid_flag_locations_match_physical_lines_across_line_endings_and_blank_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("invalid-ioc.csv");
+    let mut failures = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for (prefix, expected_line) in [
+            (String::new(), 2),
+            (format!("safe,valid,notepad{newline}"), 3),
+            (format!("safe,\"multi{newline}line\",notepad{newline}"), 4),
+            (newline.into(), 3),
+            (format!("safe,valid,notepad{newline}{newline}"), 4),
+            (
+                format!("{newline}safe,\"multi{newline}line\",notepad{newline}{newline}"),
+                6,
+            ),
+        ] {
+            fs::write(
+                &path,
+                format!("flag,tag,query{newline}{prefix}critcal,bad,powershell{newline}"),
+            )
+            .unwrap();
+            let error = read_ioc_csv(&path).unwrap_err().to_string();
+            assert!(error.contains("\"critcal\""), "{error}");
+            if !error.contains(&format!("IOC CSV line {expected_line}:")) {
+                failures.push(format!(
+                    "newline={newline:?}, expected line {expected_line}: {error}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn crlf_csv_preserves_literal_cell_newlines_without_normalizing_source_values() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("literal-ioc.csv");
+    let literal = "  first\r\nsecond\ronly\nlast, \"quoted\"  ";
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::CRLF)
+        .from_path(&path)
+        .unwrap();
+    writer
+        .write_record(["flag", "tag", "query", "column", "value"])
+        .unwrap();
+    writer
+        .write_record(["critical", "review", "", "message", literal])
+        .unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+    let entries = read_ioc_csv(&path).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].flag, "critical");
+    assert_eq!(entries[0].cell.as_ref().unwrap().column, "message");
+    assert_eq!(entries[0].cell.as_ref().unwrap().value, literal);
+}
+
+#[test]
 fn failed_import_and_save_preserve_the_complete_existing_rule_set() {
     let (root, store, id) = setup();
     let project_dir = store.project_dir(&id);

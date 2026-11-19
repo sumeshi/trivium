@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -48,14 +48,17 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
         .with_context(|| format!("failed to open IOC CSV {:?}", path))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(source);
     let (column_at, value_at) = cell_headers(reader.headers()?)?;
+    let mut records = reader.into_records();
     let mut entries = Vec::new();
-    for (index, record) in reader.records().enumerate() {
+    let mut index = 0;
+    while let Some(record) = records.next() {
         let record = record.with_context(|| "failed to read IOC CSV record")?;
         let flag_value = record.get(0).unwrap_or("");
         let line = record
             .position()
             .map(|position| position.line())
-            .unwrap_or(index as u64 + 2);
+            .unwrap_or(index + 2);
+        index += 1;
         let flag = flag_value.to_string();
         let tag = record.get(1).unwrap_or("").to_string();
         let query = record.get(2).unwrap_or("").to_string();
@@ -74,19 +77,66 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
             }
             _ => None,
         };
-        if let Some(entry) = prepare_ioc_entry(
+        match prepare_ioc_entry(
             IocEntry {
                 flag,
                 tag,
                 query,
                 cell,
             },
-            &format!("IOC CSV line {line}"),
-        )? {
-            entries.push(entry);
+            "IOC CSV",
+        ) {
+            Ok(Some(entry)) => entries.push(entry),
+            Ok(None) => {}
+            Err(error) => {
+                // csv::Position can precede a leftover LF or skipped blank
+                // lines. Seek only after validation has failed: parsing ends
+                // here, so the reader's buffered source is never reused.
+                let line = record
+                    .position()
+                    .and_then(|position| {
+                        physical_record_line(records.reader_mut().get_mut(), position.byte()).ok()
+                    })
+                    .unwrap_or(line);
+                let detail = error.to_string();
+                bail!(
+                    "IOC CSV line {line}: {}",
+                    detail.strip_prefix("IOC CSV: ").unwrap_or(&detail)
+                );
+            }
         }
     }
     Ok(entries)
+}
+
+fn physical_record_line(source: &mut (impl Read + Seek), offset: u64) -> io::Result<u64> {
+    source.seek(SeekFrom::Start(0))?;
+    let mut line = 1;
+    let mut previous_cr = false;
+    let mut advance = |byte| {
+        if byte == b'\r' || (byte == b'\n' && !previous_cr) {
+            line += 1;
+        }
+        previous_cr = byte == b'\r';
+    };
+    let mut remaining = offset;
+    let mut buffer = [0u8; 8192];
+    while remaining > 0 {
+        let length = remaining.min(buffer.len() as u64) as usize;
+        source.read_exact(&mut buffer[..length])?;
+        for &byte in &buffer[..length] {
+            advance(byte);
+        }
+        remaining -= length as u64;
+    }
+    for byte in BufReader::new(source).bytes() {
+        let byte = byte?;
+        if !matches!(byte, b'\r' | b'\n') {
+            break;
+        }
+        advance(byte);
+    }
+    Ok(line)
 }
 
 pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) -> Result<()> {
