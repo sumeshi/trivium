@@ -168,6 +168,9 @@ fn prepare_ioc_entry(entry: IocEntry, location: &str) -> Result<Option<IocEntry>
 
 /// Optional cell fields extend the legacy positional three-column CSV.
 fn cell_headers(headers: &csv::StringRecord) -> Result<(Option<usize>, Option<usize>)> {
+    if headers.len() < 3 {
+        bail!("IOC CSV header: expected at least three columns (flag, tag, query).");
+    }
     let mut column = None;
     let mut value = None;
     for (index, header) in headers.iter().enumerate().skip(3) {
@@ -176,7 +179,10 @@ fn cell_headers(headers: &csv::StringRecord) -> Result<(Option<usize>, Option<us
         } else if header.trim().eq_ignore_ascii_case("value") {
             &mut value
         } else {
-            continue;
+            bail!(
+                "IOC CSV header: unsupported column {} {header:?}. Expected optional column and value fields.",
+                index + 1
+            );
         };
         if target.replace(index).is_some() {
             bail!("IOC CSV header: duplicate optional {header:?} column.");

@@ -358,6 +358,53 @@ fn incomplete_or_duplicate_optional_csv_headers_do_not_replace_saved_rules() {
 }
 
 #[test]
+fn unrecognized_optional_cell_headers_do_not_silently_erase_saved_rules() {
+    let f = Fixture::new();
+    let before = f.rules_bytes();
+    let annotations = f.annotations();
+    let source = f.root.join("misspelled-cell-headers.csv");
+    // A blank query must not erase rules; a valid query must not silently
+    // discard the unrecognized literal criteria and become broader.
+    for query in ["", "powershell"] {
+        write_csv(
+            &source,
+            &["flag", "tag", "query", "colum", "valeu"],
+            vec![vec![
+                "critical".into(),
+                "review".into(),
+                query.into(),
+                "message".into(),
+                "powershell".into(),
+            ]],
+        );
+        let error = f.import(&source).unwrap_err().to_string();
+        assert!(
+            error.contains("column 4") && error.contains("colum"),
+            "{error}"
+        );
+        assert_eq!(f.rules_bytes(), before);
+        assert_eq!(f.annotations(), annotations);
+    }
+}
+
+#[test]
+fn missing_legacy_csv_columns_do_not_silently_erase_saved_rules() {
+    let f = Fixture::new();
+    let before = f.rules_bytes();
+    let annotations = f.annotations();
+    let source = f.root.join("incomplete-query-headers.csv");
+    for headers in [vec!["flag"], vec!["flag", "tag"]] {
+        let mut row = vec!["critical".into()];
+        row.resize(headers.len(), "review".into());
+        write_csv(&source, &headers, vec![row]);
+        let error = f.import(&source).unwrap_err().to_string();
+        assert!(error.contains("three columns"), "{error}");
+        assert_eq!(f.rules_bytes(), before);
+        assert_eq!(f.annotations(), annotations);
+    }
+}
+
+#[test]
 fn cell_value_budget_counts_utf8_bytes_and_preserves_the_last_valid_rules() {
     let f = Fixture::new();
     let allowed = format!("{}a", "界".repeat(21_845));
