@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-test('the actual table reloads an unblocked adjacent visible page once without a scroll', () => {
+test('the actual table waits for the first result and reloads unblocked visible pages once', () => {
   // Run the real reactive component/controller/query with no-op DOM rendering.
   const script = String.raw`
 import assert from 'node:assert/strict';
@@ -35,6 +35,30 @@ globalThis.document={dispatchEvent:()=>true,activeElement:null,documentElement:{
 globalThis.HTMLElement=class {};globalThis.Element=class {};
 const {default: Table}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 const settle=async()=>{for(let step=0;step<24;step++){await Promise.resolve();await tick();}};
+{
+ const offsets=[];let release;const held=new Promise(resolve=>{release=resolve;});
+ const row=id=>({row_index:id,cells:{c1:{kind:'string',text:String(id)}},flag:'',memo:'',tags:[],bookmarked:false});
+ const records=offset=>Array.from({length:Math.min(250,276-offset)},(_,i)=>row(offset+i));
+ const filters=search=>({search,searchColumns:[],flag:'all',bookmarkedOnly:false,condition:null});
+ const api={cancelRequest:async()=>0,queryProjectRows:async args=>{
+  offsets.push(args.offset);if(args.offset===0)await held;
+  return {offset:args.offset,rows:records(args.offset),total_rows:276,total_filtered_rows:276,annotated_total:0,annotated_filtered:0,annotation_revision:0};
+ }};
+ const workspace=createWorkspaceController();globalThis.__workspace=workspace;
+ workspace.projectDetail.set({project:{meta:{id:'bootstrap',total_records:276}},columns:['c1'],columns_meta:[],column_max_chars:{c1:4},column_kinds:{c1:'string'},iocs:[],hidden_columns:[],initial_rows:[]});
+ workspace.currentProjectId.set('bootstrap');workspace.backend.set(api);workspace.viewportHeight.set(800);
+ const queries=createWorkspaceQuery(workspace,{backend:api,isReady:()=>true,restoreViewport:async()=>{},scopeChanged(){},summary(){},notify(){}});
+ queries.initialize(filters(''));workspace.totalFilteredRows.set(276);workspace.queryCountKnown.set(true);
+ workspace.registerLoadedPage(0,0,records(0).map(normalizeRow));workspace.registerLoadedPage(1,250,records(250).map(normalizeRow));
+ set_current_component({$$:{root:{},context:new Map()}});const table=new Table({$$inline:true,props:{ensureRangeLoaded:queries.ensureRangeLoaded}});
+ set_current_component(null);table.$$.fragment={d(){},p(){}};
+ const applying=queries.applyFilters(filters('keep'),true,true);await settle();
+ assert.deepEqual(offsets,[0],'only the explicit first request may run while the new result count is unknown');
+ assert.equal(get(workspace.queryCountKnown),false);assert.equal(table.$capture_state().rowSlots.length,0,'a held first response must not publish placeholder rows');
+ release();await applying;await settle();
+ assert.equal(get(workspace.queryCountKnown),true);assert.deepEqual(offsets,[0,250],'normal visible-range prefetch resumes after the first result');
+ table.$destroy();workspace.dispose();
+}
 for(const succeeds of [false,true]){
  const offsets=[];let finish;const pending=new Promise((resolve,reject)=>{finish=()=>succeeds?resolve({entry:note,revision:1,flaggedRecords:0}):reject(Error('disk full'));});
  const row=id=>({row_index:id,cells:{c1:{kind:'string',text:String(id)}},flag:'',memo:'',tags:[],bookmarked:false});

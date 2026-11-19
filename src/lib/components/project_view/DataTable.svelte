@@ -180,9 +180,9 @@
   $: endIndex = windowGeometry.end;
   $: offsetY = windowGeometry.innerTop;
   $: totalHeight = windowGeometry.height;
-  $: if (!resizingRows) {
-    // A settled optimistic edit can unblock an adjacent page while this
-    // rendered range stays unchanged. Retry that range once when it changes.
+  $: if (!resizingRows && $queryCountKnown) {
+    // The explicit first query establishes the result count. Once known, a
+    // settled edit can unblock an adjacent page without changing this range.
     $largePages;
     ensureRangeLoaded(startIndex, endIndex);
   }
