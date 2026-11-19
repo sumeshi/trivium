@@ -91,6 +91,7 @@ fn rule(query: &str) -> IocEntry {
         flag: "critical".into(),
         tag: "review".into(),
         query: query.into(),
+        cell: None,
     }
 }
 

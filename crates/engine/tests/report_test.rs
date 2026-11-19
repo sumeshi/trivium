@@ -80,6 +80,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, S
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
                 query: common::search(&ids, "EventID", "4625"),
+                cell: None,
             }],
         },
     )

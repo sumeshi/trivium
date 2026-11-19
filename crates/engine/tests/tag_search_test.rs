@@ -371,6 +371,7 @@ fn tag_cache_membership_changes_after_single_bulk_undo_and_ioc_application() {
                 flag: "critical".into(),
                 tag: "ioc".into(),
                 query: source_query.clone(),
+                cell: None,
             }],
         },
     )

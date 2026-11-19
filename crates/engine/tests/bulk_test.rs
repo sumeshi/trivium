@@ -77,6 +77,7 @@ fn setup(
                     flag: "critical".to_string(),
                     tag: "logon-fail".to_string(),
                     query: common::search(&ids, "EventID", "4625"),
+                    cell: None,
                 }],
             },
         )
@@ -720,6 +721,7 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
         flag: "critical".into(),
         tag: "logon-fail".into(),
         query: "EventID:4625".into(),
+        cell: None,
     };
     ops::iocs::save_iocs(
         &store,
@@ -793,6 +795,7 @@ fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_requires_source_overwri
         flag: "suspicious".into(),
         tag: "comma,tag".into(),
         query: "host:\"one,two\" | beacon".into(),
+        cell: None,
     };
     let source = root.join("bulk.csv");
     let original = fs::read(&source).unwrap();

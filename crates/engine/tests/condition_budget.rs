@@ -144,6 +144,7 @@ fn search_limits_apply_before_ast_construction_and_keep_boundary_queries() {
         flag: "safe".into(),
         tag: "review".into(),
         query: too_many,
+        cell: None,
     };
     assert!(trivium_engine::ioc::prepare_ioc_entries(vec![ioc])
         .unwrap_err()

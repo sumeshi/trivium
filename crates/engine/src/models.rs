@@ -204,11 +204,21 @@ pub struct ColorRule {
     pub color: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+/// A literal source-cell match, separate from the text-search language.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+pub struct IocCellMatch {
+    pub column: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 pub struct IocEntry {
     pub flag: String,
     pub tag: String,
     pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cell: Option<IocCellMatch>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]

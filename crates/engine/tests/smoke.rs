@@ -1339,6 +1339,7 @@ fn saving_iocs_does_not_flag_rows() {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
                 query: common::search(&ids, "EventID", "4625"),
+                cell: None,
             }],
         },
     )
@@ -1398,6 +1399,7 @@ fn export_and_reimport_roundtrip() {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
                 query: common::search(&ids, "EventID", "4625"),
+                cell: None,
             }],
         },
     )

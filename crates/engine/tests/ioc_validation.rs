@@ -22,6 +22,7 @@ fn rule(flag: &str) -> IocEntry {
         flag: flag.into(),
         tag: "review".into(),
         query: "powershell".into(),
+        cell: None,
     }
 }
 

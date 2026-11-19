@@ -91,6 +91,7 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
                 flag: "critical".to_string(),
                 tag: "logon-fail".to_string(),
                 query: common::search(&ids, "EventID", "4625"),
+                cell: None,
             }],
         },
     )

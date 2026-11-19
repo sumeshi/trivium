@@ -7,11 +7,12 @@ use crate::{
     error::AppError,
     export::atomic::{validate_destination, write_atomically},
     ioc::{
-        load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_ioc_entries,
-        write_ioc_csv_to_writer,
+        load_ioc_entries, prepare_ioc_entries, read_ioc_csv, save_prepared_ioc_entries,
+        validate_cell_columns, write_ioc_csv_to_writer,
     },
     jobs::JobContext,
-    models::IocEntry,
+    models::{IocEntry, ProjectMeta},
+    project_io::{read_project_schema_columns, ProjectColumns},
     store::ProjectsStore,
 };
 
@@ -53,7 +54,8 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
-    save_ioc_entries(&project_dir, &payload.entries).map_err(AppError::from)?;
+    let entries = prepare_project_entries(store, &meta, payload.entries)?;
+    save_prepared_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     Ok(())
 }
@@ -75,7 +77,8 @@ pub fn import_iocs(
         return Err(AppError::Message("Selected file does not exist.".into()));
     }
     let entries = read_ioc_csv(&source).map_err(AppError::from)?;
-    save_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
+    let entries = prepare_project_entries(store, &meta, entries)?;
+    save_prepared_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
     Ok(final_entries)
@@ -94,7 +97,7 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
         Some(entries) => entries,
         None => load_ioc_entries(&project_dir).map_err(AppError::from)?,
     };
-    let entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
+    let entries = prepare_project_entries(store, &meta, entries)?;
     let destination = PathBuf::from(payload.destination);
     write_atomically(
         &destination,
@@ -102,4 +105,26 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
         || validate_destination(&destination, store, payload.allow_overwrite),
         |_, writer| write_ioc_csv_to_writer(&entries, writer).map_err(AppError::from),
     )
+}
+
+/// Validate all criteria and source IDs before replacing settings or outputs.
+fn prepare_project_entries(
+    store: &ProjectsStore,
+    meta: &ProjectMeta,
+    entries: Vec<IocEntry>,
+) -> Result<Vec<IocEntry>, AppError> {
+    let entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
+    if entries.iter().any(|entry| entry.cell.is_some()) {
+        if meta.columns.is_empty() {
+            // Old cases derive source IDs from their Parquet footer. Ordinary
+            // cases already carry this mapping in metadata, without a read.
+            let path = store.project_dir(&meta.id).join("data.parquet");
+            let names = read_project_schema_columns(&path).map_err(AppError::from)?;
+            let columns = ProjectColumns::from_meta_and_names(meta, &names);
+            validate_cell_columns(&entries, columns.columns()).map_err(AppError::from)?;
+        } else {
+            validate_cell_columns(&entries, &meta.columns).map_err(AppError::from)?;
+        }
+    }
+    Ok(entries)
 }

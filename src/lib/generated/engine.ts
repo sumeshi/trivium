@@ -121,7 +121,8 @@ export type ColorRule = { name: string, condition: Node,
  * Normalized "#rrggbb" or "#rgb".
  */
 color: string, };
-export type IocEntry = { flag: string, tag: string, query: string, };
+export type IocCellMatch = { column: string, value: string, };
+export type IocEntry = { flag: string, tag: string, query: string, cell?: IocCellMatch, };
 export type LoadProjectResponse = { project: ProjectSummary,
 /**
  * Data column ids in source order. For legacy projects these are the
