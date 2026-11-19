@@ -327,6 +327,7 @@
       projects={$projectState.projects.filter(project => !$projectState.temporaryProjectIds.includes(project.meta.id))}
       selectedProjectId={$projectState.selectedProjectId}
       isLoadingProjects={$projectState.isLoadingProjects}
+      projectsError={$projectState.projectsError}
       creating={$projectState.creating}
       pendingDescription={$projectState.pendingDescription}
       pendingFilePaths={$projectState.pendingFilePaths}

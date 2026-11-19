@@ -10,6 +10,7 @@
   export let projects: ProjectSummary[];
   export let selectedProjectId: string | null;
   export let isLoadingProjects: boolean;
+  export let projectsError = '';
   export let creating: boolean;
   export let pendingDescription: string;
   export let pendingFilePaths: string[] = [];
@@ -170,14 +171,17 @@
         </button>
       </div>
 
+      {#if projectsError}
+        <p class="project-load-error" role="alert">{projectsError}</p>
+      {/if}
       {#if isLoadingProjects}
         <p class="empty-list">Loading projects…</p>
-      {:else if projects.length === 0}
+      {:else if projects.length === 0 && !projectsError}
         <div class="empty-list">
           <p>No projects yet.</p>
           <p>Import a CSV, JSON, or JSONL file to begin.</p>
         </div>
-      {:else}
+      {:else if projects.length > 0}
         <ul class="project-list">
           {#each projects as project}
             <li class="project-row">
@@ -369,6 +373,7 @@
   .pending-files { color: var(--muted); }
   .pending-files li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .import-failures { color: var(--danger); overflow-wrap: anywhere; }
+  .project-load-error { margin: 0; color: var(--danger); font-size: 11px; overflow-wrap: anywhere; }
 
   .pending-dot {
     width: 6px;

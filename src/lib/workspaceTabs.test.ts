@@ -37,6 +37,44 @@ function fixture(overrides: Partial<Backend> = {}) {
   return { controller: createProjectController(backend), backend, projects, deleted: () => deleted };
 }
 
+test("saved-case discovery failures remain visible until a successful retry without losing open tabs", async () => {
+  let failed = true;
+  const { controller, projects } = fixture({ listProjects: async () => {
+    if (failed) throw new Error("Cannot read saved case; its files were preserved.");
+    return [summary("a"), summary("b"), summary("c")];
+  } });
+  await assert.rejects(controller.loadProjects(), /Cannot read saved case/);
+  assert.match(get(controller.state).projectsError, /files were preserved/);
+  assert.equal(get(controller.state).projectsLoaded, false);
+  assert.equal(get(controller.state).isLoadingProjects, false);
+  failed = false;
+  await controller.loadProjects();
+  assert.equal(get(controller.state).projectsError, "");
+  assert.deepEqual(get(controller.state).projects, projects);
+  await controller.selectProject("a");
+  failed = true;
+  await assert.rejects(controller.loadProjects(true), /Cannot read saved case/);
+  assert.deepEqual(get(controller.state).projects, projects);
+  assert.deepEqual(get(controller.state).openProjectIds, ["a"]);
+  assert.equal(get(controller.state).projectDetail?.project.meta.id, "a");
+  assert.match(get(controller.state).projectsError, /files were preserved/);
+  controller.dispose();
+});
+
+test("a late discovery failure cannot replace a newer successful project list", async () => {
+  const old = deferred<ProjectSummary[]>();
+  let calls = 0;
+  const { controller, projects } = fixture({ listProjects: () => ++calls === 1 ? old.promise : Promise.resolve([summary("a"), summary("b"), summary("c")]) });
+  const first = controller.loadProjects();
+  await controller.loadProjects(true);
+  old.reject(new Error("stale discovery failure"));
+  await first;
+  assert.equal(get(controller.state).projectsError, "");
+  assert.equal(get(controller.state).projectsLoaded, true);
+  assert.deepEqual(get(controller.state).projects, projects);
+  controller.dispose();
+});
+
 test("opening and closing compact tabs never deletes saved projects or caches inactive rows", async () => {
   const { controller, deleted } = fixture();
   await controller.loadProjects();

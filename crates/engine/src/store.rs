@@ -25,7 +25,8 @@ impl ProjectsStore {
             preferences_root: None,
         };
         store.migrate_legacy_registry()?;
-        store.try_all()?;
+        // Checked listing validates saved cases when requested. The desktop
+        // runs that scan off its window thread; do not repeat it during setup.
         crate::ops::query::clear_result_cache();
         Ok(store)
     }

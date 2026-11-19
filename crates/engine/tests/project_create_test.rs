@@ -193,6 +193,87 @@ fn corrupt_legacy_registry_reports_failure_and_preserves_original_and_backup() {
 }
 
 #[test]
+fn constructor_defers_canonical_corruption_to_checked_listing_without_changing_files() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).unwrap();
+    let source = write_file(&root, "preserved.csv", "id,message\n1,preserved\n");
+    let id = create_project(&store, payload(&source)).unwrap().meta.id;
+    let project = store.project_dir(&id);
+    let database = project_database_path(&project);
+    let parquet = fs::read(project.join("data.parquet")).unwrap();
+    drop(store);
+    let corrupt = b"synthetic invalid SQLite database";
+    fs::write(&database, corrupt).unwrap();
+
+    // No legacy registry is present: constructing the workspace must not
+    // inspect every saved database before the native window can become ready.
+    let reopened = ProjectsStore::new(root.clone())
+        .expect("canonical case validation belongs to checked listing");
+    assert_eq!(fs::read(&database).unwrap(), corrupt);
+    let error = reopened
+        .try_all()
+        .expect_err("a damaged case must not look like an empty workspace");
+    assert!(
+        format!("{error:#}").contains("cannot read saved case"),
+        "{error:#}"
+    );
+    let error = trivium_engine::ops::projects::list_projects(&reopened)
+        .expect_err("the desktop's checked listing must report the same failure");
+    assert!(
+        error.to_string().contains("cannot read saved case"),
+        "{error}"
+    );
+    assert_eq!(fs::read(&database).unwrap(), corrupt);
+    assert_eq!(fs::read(project.join("data.parquet")).unwrap(), parquet);
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "id,message\n1,preserved\n"
+    );
+    assert_eq!(entries(&root.join("projects")), [project]);
+    drop(reopened);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn checked_listing_rejects_case_id_mismatch_without_rewriting_or_moving_the_case() {
+    let root = temp_root();
+    let store = ProjectsStore::new(root.clone()).unwrap();
+    let source = write_file(&root, "preserved.csv", "id,message\n1,preserved\n");
+    let id = create_project(&store, payload(&source)).unwrap().meta.id;
+    let project = store.project_dir(&id);
+    let database = project_database_path(&project);
+    let parquet = fs::read(project.join("data.parquet")).unwrap();
+    let wrong = Uuid::new_v4();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "UPDATE project_state SET metadata=json_set(metadata,'$.id',?1)",
+            [wrong.to_string()],
+        )
+        .unwrap();
+    drop(connection);
+    drop(store);
+    let saved_database = fs::read(&database).unwrap();
+
+    let reopened = ProjectsStore::new(root.clone()).expect("setup must defer the full scan");
+    let error = trivium_engine::ops::projects::list_projects(&reopened)
+        .expect_err("a mismatched ID must not be listed under either identity");
+    assert!(
+        error
+            .to_string()
+            .contains("metadata ID does not match its directory"),
+        "{error}"
+    );
+    assert!(reopened.try_all().is_err());
+    assert_eq!(fs::read(database).unwrap(), saved_database);
+    assert_eq!(fs::read(project.join("data.parquet")).unwrap(), parquet);
+    assert_eq!(entries(&root.join("projects")), [project]);
+    assert!(!reopened.project_dir(&wrong).exists());
+    drop(reopened);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn failed_registration_keeps_existing_project_metadata_intact() {
     let root = temp_root();
     let store = ProjectsStore::new(root.clone()).expect("failed to create store");

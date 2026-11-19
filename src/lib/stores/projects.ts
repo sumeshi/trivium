@@ -12,6 +12,7 @@ export interface ProjectsState {
   selectedProjectId: string | null;
   projectDetail: LoadProjectResponse | null;
   isLoadingProjects: boolean;
+  projectsError: string;
   isLoadingDetail: boolean;
   creating: boolean;
   projectsLoaded: boolean;
@@ -48,7 +49,7 @@ export function createProjectController(backend: Backend) {
   const temporaryProjects = new Map<string, ProjectSummary>();
   const state = writable<ProjectsState>({
     projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
-    isLoadingProjects: false, isLoadingDetail: false, creating: false,
+    isLoadingProjects: false, projectsError: "", isLoadingDetail: false, creating: false,
     projectsLoaded: false, pendingDescription: "", pendingFilePaths: [],
     pendingDelimiter: "", pendingRestoreAnnotations: false,
     importProgress: null, importFailures: [],
@@ -88,32 +89,34 @@ export function createProjectController(backend: Backend) {
     if (disposed) return;
     if (get(state).projectsLoaded && !force) return;
     const generation = ++listGeneration;
-    state.update((value) => ({ ...value, isLoadingProjects: true }));
+    state.update((value) => ({ ...value, isLoadingProjects: true, projectsError: "" }));
+    let savedProjects: ProjectSummary[];
     try {
-      const savedProjects = await backend.listProjects();
-      if (disposed || generation !== listGeneration) return;
-      const projects = [...savedProjects.filter(project => !temporaryProjects.has(project.meta.id)), ...temporaryProjects.values()];
-      const existing = new Set(projects.map((project) => project.meta.id));
-      const current = get(state);
-      const openProjectIds = current.openProjectIds.filter((id) => existing.has(id));
-      const selectedExists = !!current.selectedProjectId && existing.has(current.selectedProjectId);
-      const nextId = selectedExists ? current.selectedProjectId : openProjectIds[0] ?? null;
-      if (nextId !== current.selectedProjectId) {
-        detailGeneration += 1;
-        reads.cancelAll();
-      }
-      state.update((value) => ({
-        ...value, projects, openProjectIds, projectsLoaded: true, isLoadingProjects: false,
-        selectedProjectId: nextId,
-        projectDetail: selectedExists ? value.projectDetail : null,
-        isLoadingDetail: selectedExists ? value.isLoadingDetail : !!nextId,
-      }));
-      if (!selectedExists && nextId) await loadProjectDetail(nextId);
+      savedProjects = await backend.listProjects();
     } catch (error) {
       if (disposed || generation !== listGeneration) return;
-      state.update((value) => ({ ...value, isLoadingProjects: false }));
+      state.update((value) => ({ ...value, isLoadingProjects: false,
+        projectsError: errorMessage(error, "Could not load saved projects.") }));
       throw error;
     }
+    if (disposed || generation !== listGeneration) return;
+    const projects = [...savedProjects.filter(project => !temporaryProjects.has(project.meta.id)), ...temporaryProjects.values()];
+    const existing = new Set(projects.map((project) => project.meta.id));
+    const current = get(state);
+    const openProjectIds = current.openProjectIds.filter((id) => existing.has(id));
+    const selectedExists = !!current.selectedProjectId && existing.has(current.selectedProjectId);
+    const nextId = selectedExists ? current.selectedProjectId : openProjectIds[0] ?? null;
+    if (nextId !== current.selectedProjectId) {
+      detailGeneration += 1;
+      reads.cancelAll();
+    }
+    state.update((value) => ({
+      ...value, projects, openProjectIds, projectsLoaded: true, isLoadingProjects: false,
+      selectedProjectId: nextId,
+      projectDetail: selectedExists ? value.projectDetail : null,
+      isLoadingDetail: selectedExists ? value.isLoadingDetail : !!nextId,
+    }));
+    if (!selectedExists && nextId) await loadProjectDetail(nextId);
   }
 
   async function loadProjectDetail(projectId: string) {
