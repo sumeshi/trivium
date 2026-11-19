@@ -11,7 +11,7 @@ use crate::{
         validate_cell_columns, write_ioc_csv_to_writer,
     },
     jobs::JobContext,
-    models::{IocEntry, ProjectMeta},
+    models::{ColumnMeta, IocEntry, ProjectMeta},
     project_io::{read_project_schema_columns, ProjectColumns},
     store::ProjectsStore,
 };
@@ -77,7 +77,7 @@ pub fn import_iocs(
         return Err(AppError::Message("Selected file does not exist.".into()));
     }
     let entries = read_ioc_csv(&source).map_err(AppError::from)?;
-    let entries = prepare_project_entries(store, &meta, entries)?;
+    let entries = prepare_csv_entries(store, &meta, entries, CsvColumns::Import)?;
     save_prepared_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -97,7 +97,7 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
         Some(entries) => entries,
         None => load_ioc_entries(&project_dir).map_err(AppError::from)?,
     };
-    let entries = prepare_project_entries(store, &meta, entries)?;
+    let entries = prepare_csv_entries(store, &meta, entries, CsvColumns::Export)?;
     let destination = PathBuf::from(payload.destination);
     write_atomically(
         &destination,
@@ -115,16 +115,83 @@ fn prepare_project_entries(
 ) -> Result<Vec<IocEntry>, AppError> {
     let entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
     if entries.iter().any(|entry| entry.cell.is_some()) {
-        if meta.columns.is_empty() {
-            // Old cases derive source IDs from their Parquet footer. Ordinary
-            // cases already carry this mapping in metadata, without a read.
-            let path = store.project_dir(&meta.id).join("data.parquet");
-            let names = read_project_schema_columns(&path).map_err(AppError::from)?;
-            let columns = ProjectColumns::from_meta_and_names(meta, &names);
-            validate_cell_columns(&entries, columns.columns()).map_err(AppError::from)?;
-        } else {
-            validate_cell_columns(&entries, &meta.columns).map_err(AppError::from)?;
+        validate_cell_columns(&entries, &project_columns(store, meta)?).map_err(AppError::from)?;
+    }
+    Ok(entries)
+}
+
+fn project_columns(store: &ProjectsStore, meta: &ProjectMeta) -> Result<Vec<ColumnMeta>, AppError> {
+    if !meta.columns.is_empty() {
+        return Ok(meta.columns.clone());
+    }
+    // Old cases derive source IDs from their Parquet footer. Ordinary cases
+    // carry this mapping in metadata, without reading project data.
+    let path = store.project_dir(&meta.id).join("data.parquet");
+    let names = read_project_schema_columns(&path).map_err(AppError::from)?;
+    Ok(ProjectColumns::from_meta_and_names(meta, &names)
+        .columns()
+        .to_vec())
+}
+
+enum CsvColumns {
+    Import,
+    Export,
+}
+
+/// The CSV uses portable source names/pointers; saved and API rules use IDs.
+fn prepare_csv_entries(
+    store: &ProjectsStore,
+    meta: &ProjectMeta,
+    entries: Vec<IocEntry>,
+    direction: CsvColumns,
+) -> Result<Vec<IocEntry>, AppError> {
+    let mut entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
+    if !entries.iter().any(|entry| entry.cell.is_some()) {
+        return Ok(entries);
+    }
+    let columns = project_columns(store, meta)?;
+    for (index, entry) in entries.iter_mut().enumerate() {
+        let Some(cell) = &mut entry.cell else {
+            continue;
+        };
+        let source = match direction {
+            CsvColumns::Import => cell.column.as_str(),
+            CsvColumns::Export => columns
+                .iter()
+                .find(|column| column.id == cell.column)
+                .ok_or_else(|| {
+                    AppError::Message(format!(
+                        "IOC rule {}: column {:?} was not found in this project.",
+                        index + 1,
+                        cell.column
+                    ))
+                })?
+                .source
+                .as_str(),
+        };
+        if source.trim().is_empty() {
+            return Err(AppError::Message(format!(
+                "IOC rule {}: an unnamed source column cannot be shared through CSV.",
+                index + 1
+            )));
         }
+        let mut matches = columns.iter().filter(|column| column.source == source);
+        let resolved = matches.next().ok_or_else(|| {
+            AppError::Message(format!(
+                "IOC rule {}: source column {source:?} was not found in this project.",
+                index + 1
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(AppError::Message(format!(
+                "IOC rule {}: source column {source:?} is ambiguous in this project.",
+                index + 1
+            )));
+        }
+        cell.column = match direction {
+            CsvColumns::Import => resolved.id.clone(),
+            CsvColumns::Export => source.to_string(),
+        };
     }
     Ok(entries)
 }

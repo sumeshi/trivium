@@ -241,8 +241,18 @@ fn cell_literals_survive_saved_rules_and_mixed_csv_roundtrips_without_auto_annot
         csv.headers().unwrap(),
         &csv::StringRecord::from(vec!["flag", "tag", "query", "column", "value"])
     );
+    let mut csv_entries = entries.clone();
+    for entry in &mut csv_entries {
+        if let Some(cell) = &mut entry.cell {
+            cell.column = "message".into();
+        }
+    }
     assert_eq!(
         serde_json::to_value(read_ioc_csv(&output).unwrap()).unwrap(),
+        serde_json::to_value(csv_entries).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(f.import(&output).unwrap()).unwrap(),
         expected
     );
 
@@ -253,7 +263,7 @@ fn cell_literals_survive_saved_rules_and_mixed_csv_roundtrips_without_auto_annot
             let (value, column) = entry
                 .cell
                 .as_ref()
-                .map(|cell| (cell.value.clone(), cell.column.clone()))
+                .map(|cell| (cell.value.clone(), "message".to_string()))
                 .unwrap_or_default();
             vec![
                 entry.flag.clone(),
@@ -329,6 +339,22 @@ fn incomplete_or_duplicate_optional_csv_headers_do_not_replace_saved_rules() {
         assert!(f.import(&source).is_err(), "{headers:?}");
         assert_eq!(f.rules_bytes(), saved);
     }
+    write_csv(
+        &source,
+        &["flag", "tag", "query", "column", "value"],
+        vec![vec![
+            "critical".into(),
+            "blank-cell".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]],
+    );
+    assert!(
+        f.import(&source).is_err(),
+        "a blank five-column cell row must not silently clear saved rules"
+    );
+    assert_eq!(f.rules_bytes(), saved);
 }
 
 #[test]

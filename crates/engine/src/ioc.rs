@@ -41,6 +41,8 @@ pub(crate) fn save_prepared_ioc_entries(project_dir: &Path, entries: &[IocEntry]
     crate::storage::save_setting_bytes(project_dir, "iocs", &data)
 }
 
+/// Reads portable CSV definitions. Cell columns here are source names/pointers;
+/// `ops::iocs::import_iocs` resolves them to project IDs before saving them.
 pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
     let source = crate::source_file::open_regular(path)
         .with_context(|| format!("failed to open IOC CSV {:?}", path))?;
@@ -61,7 +63,7 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
             (Some(column), Some(value)) => {
                 let column = record.get(column).unwrap_or("");
                 let value = record.get(value).unwrap_or("");
-                if column.is_empty() && value.is_empty() {
+                if column.is_empty() && value.is_empty() && !query.trim().is_empty() {
                     None
                 } else {
                     Some(IocCellMatch {
