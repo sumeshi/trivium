@@ -894,10 +894,12 @@
 {/if}
 
 <style>
-  .column-title { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  .column-heading { gap: 0; }
+  .column-title { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
   .column-title .header-label { min-width: 0; }
   .column-type { flex: 0 0 auto; color: var(--muted); font-size: .9em; font-weight: 400; letter-spacing: 0; text-transform: none; }
-  .column-sort { user-select: none; -webkit-user-select: none; touch-action: none; }
+  .column-sort { user-select: none; -webkit-user-select: none; touch-action: none; padding-left: 8px; padding-right: 0; }
+  .column-actions-trigger { flex-basis: 16px; width: 16px; }
   .column-heading.dragging .column-sort { cursor: grabbing; }
   .table-query-state { position: absolute; inset: 38px 0 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; background: var(--surface); text-align: center; }
   .table-query-state p { margin: 0; color: var(--fg); font-size: 13px; }

@@ -143,6 +143,11 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
     wait_for(lambda: _width(web, ids["host"]),
              lambda widths: all(abs(width - defaults[ids["host"]]) <= 1 for width in widths.values()),
              "explicit empty widths restore automatic widths")
+    host_label = web.script("""
+      const label=document.querySelector('.column-heading[data-column-id="'+arguments[0]+'"] .header-label');
+      return {text:label.textContent.trim(),width:label.clientWidth,needed:label.scrollWidth};
+    """, ids["host"])
+    assert host_label["text"] == "host" and host_label["needed"] <= host_label["width"] + 1, host_label
     assert web.query() == original_query, "Column layout presets do not change the search scope"
     return {"custom_order": custom_order, "changed_widths_only": saved["columnWidths"],
             "save_modify_load_restores_layout": True, "omitted_layout_preserves_current": True,
