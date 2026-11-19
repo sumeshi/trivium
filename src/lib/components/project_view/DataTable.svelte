@@ -736,7 +736,7 @@
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo note-heading" class:frozenDataEdge={frozenLayout.offsets.size === 0}>
-            <span class="header-label">Note</span>
+            <span class="note-label">Note</span>
             <ColumnResizeHandle label="Note" width={noteColumnWidth} minWidth={MIN_MEMO_WIDTH} maxWidth={MAX_MEMO_WIDTH}
               tabIndex={0} on:resize={(event) => dispatch('noteWidth', event.detail)}
               on:fit={() => fitColumn(null)}
