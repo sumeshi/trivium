@@ -8,6 +8,7 @@ from column_pin_checks import _key
 from feedback_checks import _settle
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
+from storage_responsiveness_checks import _case_database
 
 
 def _recent(web, name: str):
@@ -17,9 +18,8 @@ def _recent(web, name: str):
 def _failed_reload_retry(web, owner: str, root: Path, evidence: Path, report: dict) -> None:
     web.named("Close workspace menu", ".workspace-drawer")
     wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "Recent closes before reloading")
-    paths = list(root.glob(f"**/projects/{owner}/data.parquet"))
-    assert len(paths) == 1, paths
-    source = paths[0]
+    source = _case_database(root, owner).with_name("data.parquet")
+    assert source.is_file(), "The owned native-test case data file was not found"
     missing = source.with_name("data.parquet-unavailable")
     source.rename(missing)
     try:
