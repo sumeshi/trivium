@@ -162,6 +162,13 @@ pub fn query_project_rows_with_job(
     if has_row_id {
         page_projection.push(INTERNAL_ROW_ID.to_string());
     }
+    // Legacy files can have no internal columns. Keep their row count when
+    // every source column is hidden; the anchor never becomes a visible cell.
+    if page_projection.is_empty() {
+        if let Some(column) = columns.first() {
+            page_projection.push(column.clone());
+        }
+    }
 
     let offset = payload.offset.unwrap_or(0);
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
