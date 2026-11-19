@@ -12,12 +12,12 @@
     <span class="filter-label">Rules</span>
     <span class="condition-count">{$queryCountKnown ? `${$totalFilteredRows.toLocaleString()} rows` : $queryError ? 'Result unavailable' : 'Loading…'}</span>
   </div>
-  <p class="rules-help" title="AND requires every condition; OR accepts any condition. Value checks suggest recognized formats. Blank text conditions wait until a value is entered.">Changes apply automatically. Blank text conditions wait for a value.</p>
+  <p class="rules-help" title="AND requires every condition; OR accepts any condition. Value checks suggest recognized formats. Blank text conditions wait until a value is entered.">Changes apply automatically.</p>
   <ConditionBranch node={$conditionTree} {columns} isRoot />
 </div>
 
 <style>
   .condition-editor { gap: 10px; min-width: 0; }
   .condition-toolbar { gap: 7px; }
-  .rules-help { margin: 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+  .rules-help { margin: 0; font-size: 10px; line-height: 1.45; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

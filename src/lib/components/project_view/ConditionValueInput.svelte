@@ -46,10 +46,17 @@
   $: errors = checkedValues.flatMap((value, index) => value.error
     ? [`${checkedValues.length > 1 ? `Value ${index + 1}: ` : ""}${value.error}`] : []);
   $: validationHint = state?.status === "checked" ? state.result.hint : null;
+  $: inputHint = [savedValuesHint ?? help.hint, validationHint && validationHint !== help.hint ? validationHint : null]
+    .filter(Boolean).join("\n");
   $: accepted = state?.status === "checked" && state.result.valid && (ordered || node.op === "regex");
   $: acceptedLabel = node.op === "regex" ? "Regular expression accepted."
     : kind === "datetime" ? "Timestamp format accepted."
       : kind === "int" || kind === "float" ? "Number format accepted." : "Comparison format accepted.";
+  $: checkMessage = draft ? "Enter text to apply this rule."
+    : state?.status === "checking" ? "Checking format…"
+      : invalid ? errors.join(" ") || validationHint || "This value is not valid for the comparison."
+        : state?.status === "unavailable" ? "Format check unavailable."
+          : accepted ? acceptedLabel : "";
   $: pickerValue = utcPickerValue(pickedDate, pickedTime);
 
   const setValue = (value: string) => patchCondition(node.id, { value, exact: false });
@@ -70,7 +77,7 @@
       inputmode={kind === "int" && ordered ? "numeric" : undefined}
       value={node.value}
       placeholder={help.placeholder}
-      title={savedValuesHint}
+      title={inputHint}
       on:input={(event) => setValue(event.currentTarget.value)}
       aria-label="Value"
       aria-describedby={`condition-help-${node.id} condition-check-${node.id}`}
@@ -87,27 +94,15 @@
       </button>
     {/if}
   </div>
-  <p id={`condition-help-${node.id}`} class="value-help">{savedValues ? 'Saved values stay exact. Editing replaces the list.' : help.hint}</p>
-  <div id={`condition-check-${node.id}`} class="value-check" class:invalid role="status" aria-live="polite" aria-atomic="true">
-    {#if draft}
-      <span>Enter text to apply this rule.</span>
-    {:else if state?.status === "checking"}
-      <span>Checking format…</span>
-    {:else if invalid}
-      <span>{errors.join(" ") || validationHint || "This value is not valid for the comparison."} Check the value before relying on the result.</span>
-    {:else if state?.status === "unavailable"}
-      <span>Format check unavailable. The text is preserved.</span>
-    {:else if accepted}
-      <span>{acceptedLabel}</span>
-    {/if}
-    {#if validationHint && !draft && !invalid && validationHint !== help.hint}<span class="engine-hint">{validationHint}</span>{/if}
-  </div>
+  <span id={`condition-help-${node.id}`} class="value-help">{inputHint}</span>
+  <div id={`condition-check-${node.id}`} class="value-check" class:invalid role="status" aria-live="polite"
+    aria-atomic="true" title={checkMessage}>{checkMessage}</div>
   {#if pickerOpen && kind === "datetime" && ordered}
     <div id={`condition-picker-${node.id}`} class="date-picker" role="group" aria-label="UTC date and time helper">
       <label>UTC date<input type="date" bind:value={pickedDate} aria-label="UTC date" /></label>
       <label>UTC time<input type="time" step="1" bind:value={pickedTime} aria-label="UTC time" /></label>
-      <button type="button" class="insert-date" disabled={!pickerValue} on:click={insertPicker}>Insert UTC</button>
-      <p>The picker inserts a new UTC value (Z). Edit the text for fractional seconds or another timezone; opening this helper keeps the current value.</p>
+      <button type="button" class="insert-date" disabled={!pickerValue} on:click={insertPicker}
+        title="Insert the chosen date and time as UTC (Z). Edit the text for fractional seconds or another timezone.">Insert UTC</button>
     </div>
   {/if}
 </div>
@@ -117,17 +112,16 @@
   .value-controls { display: flex; gap: 3px; align-items: center; min-width: 0; }
   input.condition-value { flex: 1; min-width: 0; width: 100%; height: 27px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 11px; }
   input.condition-value[aria-invalid="true"] { border-color: var(--danger); }
-  .value-help, .value-check { margin: 0; font-size: 10px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+  .value-help { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .value-check { margin: 0; font-size: 10px; line-height: 1.45; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .value-check:empty { display: none; }
   .value-check.invalid { color: var(--danger); }
-  .engine-hint { display: block; }
   .date-assist { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 27px; height: 27px; padding: 0; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--surface); }
   .date-assist:hover { color: var(--fg); border-color: var(--border-strong); }
   input:focus-visible, button:focus-visible { outline: 1px solid var(--accent-border); outline-offset: 1px; }
   .date-picker { display: flex; flex-wrap: wrap; align-items: end; gap: 5px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-weak); }
   .date-picker label { flex: 1; min-width: 110px; display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 10px; }
   .date-picker input { min-width: 0; width: 100%; height: 27px; padding: 0 4px; font-size: 11px; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
-  .date-picker p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
   .insert-date { height: 27px; padding: 0 6px; border: 1px solid var(--accent-border); border-radius: 4px; background: var(--accent-soft); color: var(--fg); font-size: 10px; }
   .insert-date:disabled { opacity: .5; }
 </style>

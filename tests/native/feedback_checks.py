@@ -132,6 +132,13 @@ def _column_and_dates(web, data, report) -> None:
     web.choose('select[aria-label="Operator"]', "ge")
     web.write('input[aria-label="Value"]', "not-a-timestamp")
     wait_for(lambda: web.script("return document.querySelector('input[aria-label=\"Value\"]').getAttribute('aria-invalid');"), lambda x: x == "true", "invalid datetime is visibly marked")
+    invalid_feedback = web.script("""
+      const input=document.querySelector('input[aria-label="Value"]'),error=document.querySelector('.value-check.invalid');
+      return {message:error.textContent,title:error.title,height:error.getBoundingClientRect().height,
+        lineHeight:parseFloat(getComputedStyle(error).lineHeight),described:input.getAttribute('aria-describedby').split(' ').includes(error.id)};
+    """)
+    assert invalid_feedback["message"] and invalid_feedback["title"] == invalid_feedback["message"] and invalid_feedback["described"], invalid_feedback
+    assert invalid_feedback["height"] <= invalid_feedback["lineHeight"] + 1, invalid_feedback
     instant = "2026-11-11T12:00:00.123456789Z"
     offset = "2026-11-11T21:00:00.123456789+09:00"
     accepted = web.command("validate_condition_values", {"kind": "datetime", "op": "ge", "values": [instant, offset]})
@@ -140,6 +147,17 @@ def _column_and_dates(web, data, report) -> None:
     assert not invalid["valid"] and invalid["values"][0]["error"], invalid
     web.write('input[aria-label="Value"]', offset)
     wait_for(lambda: web.script("return document.querySelector('.value-check').textContent;"), lambda s: "Timestamp format accepted" in s, "real engine accepts nanoseconds and offset")
+    compact_help = web.script("""
+      const input=document.querySelector('input[aria-label="Value"]'),check=document.querySelector('.value-check'),help=document.querySelector('.value-help'),rules=document.querySelector('.rules-help');
+      return {checkHeight:check.getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(check).lineHeight),
+        helpWidth:help.getBoundingClientRect().width,helpHeight:help.getBoundingClientRect().height,
+        described:input.getAttribute('aria-describedby').split(' ').includes(help.id),title:input.title,description:help.textContent,
+        extraHint:!!document.querySelector('.engine-hint'),rulesHeight:rules.getBoundingClientRect().height,rulesLineHeight:parseFloat(getComputedStyle(rules).lineHeight)};
+    """)
+    assert compact_help["checkHeight"] <= compact_help["lineHeight"] + 1 and not compact_help["extraHint"], compact_help
+    assert compact_help["helpWidth"] <= 1 and compact_help["helpHeight"] <= 1 and compact_help["described"], compact_help
+    assert "9 fractional digits" in compact_help["title"] and compact_help["title"] == compact_help["description"], compact_help
+    assert compact_help["rulesHeight"] <= compact_help["rulesLineHeight"] + 1, compact_help
     web.named("Choose UTC date and time")
     assert web.script("return document.querySelector('input[aria-label=\"Value\"]').value;") == offset
     web.script("for(const [label,value] of [['UTC date','2026-11-12'],['UTC time','13:14:15']]){const e=document.querySelector('input[aria-label=\"'+label+'\"]');e.value=value;e.dispatchEvent(new Event('input',{bubbles:true}));}")
@@ -153,6 +171,7 @@ def _column_and_dates(web, data, report) -> None:
     assert web.script("return !!document.querySelector('#analysis-drawer');"), "Clearing filters must not require closing Rules"
     report["column_and_dates"] = {"column_search_focus": True, "blank_rule_keeps_results": True,
         "invalid_marked": True, "nanoseconds_preserved": True, "offset_same_instant": True,
+        "compact_rule_help": True, "full_validation_help_accessible": True,
         "picker_open_preserves_text": True, "explicit_utc_insert": True, "clear_with_rules_open": True,
         "picker_form_fill": "DOM input events; trusted Insert UTC click"}
     _clear(web, data["total"])
@@ -220,11 +239,17 @@ def _sticky_feedback(web, data, evidence, report) -> None:
         _theme(web, "trivium")
         web.script("window.__workspaceHold={name:'query_project_rows',projectId:arguments[0],search:'keep',ready:false,release:null};", data["id"])
         web.write('input[aria-label="Search rows"]', "keep")
-        wait_for(lambda: web.script("return window.__workspaceHold.ready;"), bool, "real native query response held for loading-row check")
-        wait_for(lambda: web.script("return document.querySelectorAll('.data-row.loading').length;"), lambda n: n >= 2, "loading rows displayed")
+        wait_for(lambda: web.script("return window.__workspaceHold.ready;"), bool, "real native query response held for initial-result check")
+        wait_for(lambda: web.script("return document.querySelectorAll('.data-row').length;"), lambda n: n == 0,
+                 "an unknown result does not mount placeholder or stale rows")
         _horizontal_to(web, 700)
         assert "Loading rows" in web.script("return document.querySelector('.table-query-state[role=status]')?.textContent??'';")
-        loading = _check_sticky(web, ".data-row.loading", "loading", query_loading=True)
+        loading = web.script("""
+          return {rows:document.querySelectorAll('.data-row').length,
+            spacer:!!document.querySelector('.virtual-spacer'),
+            status:document.querySelector('.table-query-state[role=status]')?.textContent??''};
+        """)
+        assert loading["rows"] == 0 and loading["spacer"] and "Loading rows" in loading["status"], loading
         web.screenshot(evidence / "feedback-sticky-loading.png")
         web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
         web.applied(search="keep"); web.results(data["total"] - data["total"] // 5)
