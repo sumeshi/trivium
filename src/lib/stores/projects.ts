@@ -2,7 +2,7 @@ import { derived, get, writable } from "svelte/store";
 import { createOwnedRequests } from "../workspaceRequests.ts";
 import { errorMessage } from "../errors.ts";
 import type { Backend } from "../backend";
-import type { LoadProjectResponse, ProjectSummary } from "../types";
+import type { IocEntry, LoadProjectResponse, ProjectSummary } from "../types";
 
 export interface ProjectsState {
   projects: ProjectSummary[];
@@ -355,9 +355,14 @@ export function createProjectController(backend: Backend) {
     }));
   }
 
+  function updateIocs(projectId: string, entries: readonly IocEntry[]) {
+    state.update(value => value.projectDetail?.project.meta.id === projectId
+      ? { ...value, projectDetail: { ...value.projectDetail, iocs: structuredClone([...entries]) } } : value);
+  }
+
   return {
     dispose,
-    state: { subscribe: state.subscribe }, canCreateProject, loadProjects,
+    state: { subscribe: state.subscribe }, canCreateProject, loadProjects, updateIocs,
     loadProjectDetail, selectProject, closeProject, refreshSelected, createProjects,
     deleteProject, adoptTemporaryProject, cleanupTemporaryProjects,
     setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations,

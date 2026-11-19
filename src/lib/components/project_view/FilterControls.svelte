@@ -17,6 +17,7 @@
   import BulkControls from './BulkControls.svelte';
   import TimelinePanel from './TimelinePanel.svelte';
   import ExtractPanel from './ExtractPanel.svelte';
+  import IocRulesPanel from './IocRulesPanel.svelte';
   import type { ExtractPending } from '../../extractTypes';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
@@ -61,6 +62,7 @@
   let drawerTrigger: HTMLButtonElement | null = null;
   let searchControls: SearchControls | undefined;
   let groupingPanel: GroupingPanel | undefined;
+  let iocPanel: IocRulesPanel | undefined;
   let groupColumns: string[] = [];
   let groupGranularities: Record<string, GroupGranularity> = {};
   // Keep small analysis inputs while inactive panels are unmounted. Results
@@ -140,6 +142,13 @@
     await selectTool('groups');
     await tick();
     groupingPanel?.groupByColumn(columnId);
+  }
+  export async function openIocEditor(ruleId?: string): Promise<void> {
+    drawerTrigger = document.getElementById('tool-group-annotations') as HTMLButtonElement | null;
+    await selectTool('iocs');
+    await tick();
+    if (ruleId) await iocPanel?.focusRule(ruleId);
+    else drawerEl?.querySelector<HTMLElement>('.ioc-row input, .ioc-panel button.primary')?.focus();
   }
   let flagMenuOpen = false;
   let flagPickerEl: HTMLDivElement | null = null;
@@ -434,12 +443,7 @@
         {:else if activeTool === 'bulk'}
           <BulkControls on:refresh />
         {:else}
-          <div class="filter-ioc">
-            <p class="condition-count">Save reusable IOC queries, flag labels and tags. Saving a definition does not change row annotations.</p>
-            <button type="button" class="ghost" title="Manage saved IOC definitions" on:click={() => {
-              closeTool(); dispatch('iocManagerOpen');
-            }}>IOC Rules</button>
-          </div>
+          <IocRulesPanel bind:this={iocPanel} />
         {/if}
       </div>
     </div>

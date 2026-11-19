@@ -53,6 +53,7 @@
     noteWidth: { width: number };
     columnFormat: { columnId: string; format: 'original' | 'iso' };
     retry: void;
+    iocRule: { projectId: string; columnId: string; value: string };
   }>();
 
   type CellMenuState = {
@@ -832,6 +833,7 @@
       {...cellMenu}
       on:close={() => (cellMenu = null)}
       on:notify={(event) => dispatch('notify', event.detail)}
+      on:iocRule={(event) => dispatch('iocRule', event.detail)}
     />
   {/key}
 {/if}

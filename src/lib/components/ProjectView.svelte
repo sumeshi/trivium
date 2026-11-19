@@ -3,7 +3,6 @@
   import { get } from 'svelte/store';
   import { save } from '@tauri-apps/plugin-dialog';
   import DataTable from './project_view/DataTable.svelte';
-  import IocManagerDialog from './project_view/IocManagerDialog.svelte';
   import MemoEditorDialog from './project_view/MemoEditorDialog.svelte';
   import ExpandedCellDialog from './project_view/ExpandedCellDialog.svelte';
   import ExportDialog from './project_view/ExportDialog.svelte';
@@ -23,7 +22,7 @@
   import { cloneTree } from '../viewState';
   import type { WorkspaceSession } from '../workspaceSession';
   import {
-    normalizeIocFlag, MIN_DATA_WIDTH, MEMO_COL_WIDTH, MIN_MEMO_WIDTH, MAX_MEMO_WIDTH,
+    MIN_DATA_WIDTH, MEMO_COL_WIDTH, MIN_MEMO_WIDTH, MAX_MEMO_WIDTH,
     WIDTH_LIMIT_CHARS, CHAR_PIXEL, COLUMN_PADDING, MAX_DATA_WIDTH,
   } from './project_view/state';
   import type {
@@ -52,7 +51,7 @@
   export let extractPending: ExtractPending | null = null;
   export let extractError: string | null = null;
 
-  const workspace = createWorkspaceController();
+  const workspace = createWorkspaceController((projectId, entries) => dispatch('iocsSaved', { projectId, entries }));
   provideWorkspace(workspace);
   const {
     goBack, goForward, historyRestore, recordAppliedCondition, rememberOffset, resetHistory,
@@ -60,8 +59,8 @@
     visibleColumns, hiddenColumns, frozenThrough, columnOrder, columnFormats, columnLabels, search, searchColumns, flagFilter,
     bookmarkedOnly, sortKey, sortDirection, isExporting,
     totalRows, totalFilteredRows, appliedResultLoading, queryCountKnown, queryError, flaggedCount,
-    expandedCell, memoEditor, iocManagerOpen, scrollLeft,
-    bodyScrollEl, headerScrollEl, iocDraft, currentProjectId, lastHiddenColumnsRef,
+    expandedCell, memoEditor, scrollLeft,
+    bodyScrollEl, headerScrollEl, currentProjectId, lastHiddenColumnsRef,
     viewGeneration, invalidateViewRequests, selectedRowIds, appliedFilters, sortRevision,
     conditionPayload, conditionTree,
   } = workspace;
@@ -72,6 +71,7 @@
     summary: { projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] };
     extract: ExtractIntent;
     cancelExtract: void;
+    iocsSaved: { projectId: string; entries: LoadProjectResponse['iocs'] };
   }>();
 
   let filterControls: FilterControls | undefined;
@@ -242,15 +242,18 @@
   }
 
   export function unsavedDraftMessage(): string | null {
-    return memoDialog?.hasUnsavedChanges() ? 'Save or cancel your note before closing.' : null;
+    if (memoDialog?.hasUnsavedChanges()) return 'Save or cancel your note before closing.';
+    return workspace.iocEditor.hasUnsavedChanges() && !workspace.iocEditor.isBusy()
+      ? 'Save or discard your IOC rules before leaving this project.' : null;
   }
 
   export function canAutoNavigate(): boolean {
-    return !memoDialog?.hasUncommittedChanges();
+    return !memoDialog?.hasUncommittedChanges() && !workspace.iocEditor.hasUnsavedChanges() && !workspace.iocEditor.isBusy();
   }
 
   export function focusUnsavedDraft(): void {
-    memoDialog?.focusDraft();
+    if (memoDialog?.hasUncommittedChanges()) memoDialog.focusDraft();
+    else void filterControls?.openIocEditor();
   }
 
   export function pauseForClose(): void {
@@ -342,6 +345,7 @@
     applyingProjectId = projectId;
     const tabSession = session?.projectId === projectId ? session : null;
     currentProjectId.set(projectId);
+    workspace.iocEditor.initialize(projectId, detail.iocs);
     setHistoryProject(projectId);
 
     // Use this project's defaults while its saved view is loading.
@@ -392,12 +396,6 @@
     columnFormats.set(saved?.columnFormats ?? {});
     sortKey.set(saved?.sortKey ?? null);
     sortDirection.set(saved?.sortDirection ?? 'asc');
-    iocDraft.set(detail.iocs.map((entry) => ({
-      id: crypto.randomUUID(),
-      flag: normalizeIocFlag(entry.flag),
-      tag: entry.tag,
-      query: entry.query
-    })));
     initializeColumnWidths(saved?.columnWidths);
     noteColumnWidth = Math.min(MAX_MEMO_WIDTH, Math.max(MIN_MEMO_WIDTH, Math.round(saved?.noteColumnWidth ?? MEMO_COL_WIDTH)));
     const filters: AppliedFilters = {
@@ -426,7 +424,6 @@
     // Dialog state belongs to the previous project and must not be applied here.
     expandedCell.set(null);
     memoEditor.set(null);
-    iocManagerOpen.set(false);
     if (tabSession) restoreHistory(tabSession.history);
     else resetHistory(get(conditionTree), savedRow);
 
@@ -625,21 +622,19 @@
     void forceRefreshFilteredRows(true);
   };
 
-  const openIocManager = () => {
-    if (!projectDetail) {
+  const addCellIoc = async (event: CustomEvent<{ projectId: string; columnId: string; value: string }>) => {
+    const { projectId, columnId, value } = event.detail;
+    if (destroyed || closing || projectId !== $currentProjectId || !projectDetail.columns.includes(columnId)) return;
+    if (workspace.iocEditor.isBusy()) {
+      dispatch('notify', { message: 'Wait for the IOC operation to finish.', tone: 'error' });
       return;
     }
-    iocDraft.set(projectDetail.iocs.map((entry) => ({
-      id: crypto.randomUUID(),
-      flag: normalizeIocFlag(entry.flag),
-      tag: entry.tag,
-      query: entry.query
-    })));
-    iocManagerOpen.set(true);
-  };
-
-  const closeIocManager = () => {
-    iocManagerOpen.set(false);
+    try {
+      const id = workspace.iocEditor.addCell(columnId, value);
+      if (id) await filterControls?.openIocEditor(id);
+    } catch (error) {
+      dispatch('notify', { message: errorMessage(error, 'Could not create IOC rule.'), tone: 'error' });
+    }
   };
 
   /**
@@ -768,8 +763,6 @@
       if (event.key === 'Escape') {
         if (exportSnapshot) {
           exportSnapshot = null;
-        } else if ($iocManagerOpen) {
-          closeIocManager();
         } else if ($memoEditor) {
           memoEditor.set(null);
         } else {
@@ -823,7 +816,7 @@
     {extractPending} {extractError}
     on:extract={(event) => dispatch('extract', event.detail)} on:cancelExtract={() => dispatch('cancelExtract')}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
-    on:iocManagerOpen={openIocManager} on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
+    on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 
   <HistoryButtons slot="history" />
   <div slot="navigation" class="table-navigation">
@@ -872,12 +865,9 @@
   </div>
   </FilterControls>
 
-  <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} />
+  <ExpandedCellDialog on:notify={(e) => dispatch('notify', e.detail)} on:iocRule={event => void addCellIoc(event)} />
 
   <MemoEditorDialog bind:this={memoDialog} on:notify={(e) => dispatch('notify', e.detail)} />
-
-  <IocManagerDialog on:notify={(e) => dispatch('notify', e.detail)} on:refresh={() => dispatch('refresh')}
-    on:annotationsChanged={queueAnnotationRefresh} />
 
   {#if exportSnapshot}
     <ExportDialog
@@ -888,6 +878,7 @@
   {/if}
 
   <DataTable {columnWidths} {noteColumnWidth} {ensureRangeLoaded} on:notify={(e) => dispatch('notify', e.detail)}
+    on:iocRule={event => void addCellIoc(event)}
     on:noteWidth={changeNoteWidth}
     on:retry={() => void queries.retryFailedPage()}
     on:columnWidth={changeColumnWidth} on:columnFormat={changeColumnFormat}

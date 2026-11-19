@@ -2,11 +2,22 @@ import { createWorkspaceState } from "./workspaceState.ts";
 import { createConditionState } from "./stores/condition.ts";
 import { createViewHistory } from "./stores/viewHistory.ts";
 import { createOwnedRequests } from "./workspaceRequests.ts";
-import { derived } from "svelte/store";
+import { derived, get } from "svelte/store";
+import { createIocEditor } from "./iocEditor.ts";
+import type { IocEntry } from "./types";
 
 /** A mounted investigation owns data; inactive tabs retain only snapshots. */
-export function createWorkspaceController() {
+export function createWorkspaceController(onIocsSaved: (projectId: string, entries: IocEntry[]) => void = () => {}) {
   const state = createWorkspaceState();
+  const iocEditor = createIocEditor({
+    backend: () => get(state.backend),
+    project: () => get(state.projectDetail),
+    annotationsChanged: () => state.annotationRefreshRequested.update(value => value + 1),
+    saved: (projectId, entries) => {
+      state.projectDetail.update(detail => detail?.project.meta.id === projectId ? { ...detail, iocs: entries } : detail);
+      onIocsSaved(projectId, entries);
+    },
+  });
   const conditions = createConditionState({
     columns: derived(state.projectDetail, detail => detail?.columns ?? []),
     searchColumns: state.searchColumns,
@@ -23,6 +34,7 @@ export function createWorkspaceController() {
     ...state,
     ...conditions,
     ...history,
+    iocEditor,
     onDispose,
     createReadScope() {
       const scope = createOwnedRequests();
@@ -34,6 +46,7 @@ export function createWorkspaceController() {
       disposed = true;
       for (const cleanup of [...cleanups]) cleanup();
       cleanups.clear();
+      iocEditor.dispose();
       state.dispose();
       const empty = { type: "group" as const, id: "root", kind: "and" as const, collapsed: false, children: [] };
       conditions.conditionTree.set(empty);

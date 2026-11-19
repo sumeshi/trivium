@@ -491,12 +491,6 @@ button.primary:disabled {
   letter-spacing: 0;
 }
 
-.filter-ioc {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .table-wrapper {
   flex: 1;
   display: flex;
@@ -1307,56 +1301,6 @@ button.primary:disabled {
   font-size: 0.85rem;
 }
 
-.ioc-dialog {
-  width: min(720px, 95vw);
-  max-height: 82vh;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.ioc-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.ioc-spacer {
-  flex: 1;
-}
-
-.ioc-table {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 48vh;
-  overflow-y: auto;
-}
-
-.ioc-header,
-.ioc-row {
-  display: grid;
-  grid-template-columns: 140px 1fr 1.5fr 80px;
-  gap: 12px;
-  align-items: center;
-}
-
-.ioc-header {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.ioc-row input {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-}
-
 .flag-select {
   position: relative;
   width: 100%;
@@ -1486,29 +1430,6 @@ button.primary:disabled {
 .flag-option:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
-}
-
-.ioc-row input:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 2px;
-}
-
-.ioc-row > button {
-  white-space: nowrap;
-  justify-self: end;
-}
-
-.ioc-empty {
-  margin: 0;
-  padding: 12px 0;
-  color: var(--muted);
-  font-style: italic;
-}
-
-.ioc-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
 }
 
 .ghost.danger {

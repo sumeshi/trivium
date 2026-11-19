@@ -23,6 +23,7 @@
   const dispatch = createEventDispatcher<{
     close: void;
     notify: { message: string; tone: 'success' | 'error' };
+    iocRule: { projectId: string; columnId: string; value: string };
   }>();
 
   let menuEl: HTMLDivElement | null = null;
@@ -31,6 +32,7 @@
   let top = y;
   let busy = false;
   let alive = true;
+  let closed = false;
   // A null/missing cell has no string value for an eq/ne condition, and the
   // evaluator intentionally treats null as non-matching. Do not offer a filter
   // that would silently match a literal "null" or empty string instead.
@@ -41,7 +43,7 @@
     reads.dispose();
   });
 
-  const close = () => dispatch('close');
+  const close = () => { closed = true; dispatch('close'); };
 
   const placeMenu = () => {
     if (!menuEl) return;
@@ -138,6 +140,37 @@
     openCell(projectId, columnId, preview, row);
     close();
   };
+
+  const createIocRule = async () => {
+    if (busy || !filterable || closed) return;
+    const owner = { projectId, rowIndex, columnId };
+    const current = () => alive && !closed && projectId === owner.projectId
+      && rowIndex === owner.rowIndex && columnId === owner.columnId
+      && $projectDetail?.project.meta.id === owner.projectId;
+    if (!current()) return;
+    busy = true;
+    try {
+      let value = preview;
+      if (truncated) {
+        const api = $backend;
+        if (!api) throw new Error('The full cell value is unavailable.');
+        const full = await reads.run('cell', api, requestId => api.getCell({ ...owner, requestId }));
+        if (!current()) return;
+        if (full.truncated || full.kind === 'null' || full.kind === 'missing' || typeof full.text !== 'string') {
+          throw new Error('The full cell value is unavailable.');
+        }
+        value = full.text;
+      }
+      if (!current()) return;
+      close();
+      dispatch('iocRule', { projectId: owner.projectId, columnId: owner.columnId, value });
+    } catch (error) {
+      if (!current()) return;
+      console.error(error);
+      dispatch('notify', { message: 'Failed to load the full cell value.', tone: 'error' });
+      close();
+    }
+  };
 </script>
 
 <svelte:window
@@ -179,5 +212,10 @@
   </button>
   <button type="button" role="menuitem" disabled={busy} on:click={viewDetails}>
     View details
+  </button>
+  <button type="button" role="menuitem" disabled={busy || !filterable}
+    title={filterable ? 'Create a Critical IOC rule from this exact value.' : 'Null and missing cells have no IOC rule value.'}
+    on:click={createIocRule}>
+    Create IOC rule…
   </button>
 </div>

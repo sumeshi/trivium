@@ -92,6 +92,8 @@ Assign one of three flags to rows as you investigate:
 
 You can also add notes, tags, and bookmarks to individual rows. Use **Annotate → Bulk annotate** to apply flags, notes, or tags to selected rows, the current results, or all rows. You can undo the most recent bulk operation.
 
+Right-click a cell or use its record details to create an IOC rule from the exact value. Edit rules in **Annotate → IOC rules**; **Save rules** keeps their definitions, while **Apply** annotates matching rows across the project.
+
 <img src="assets/screenshots/bulk-annotation.png" alt="Bulk annotation of flags and notes" width="720">
 
 ### Timeline & Analysis

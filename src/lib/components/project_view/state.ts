@@ -110,7 +110,6 @@ export type MemoEditorTarget = {
   row: CachedRow;
 };
 
-export { normalizeIocFlag } from "../../iocRules.ts";
 
 export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
   if (!f) return "";

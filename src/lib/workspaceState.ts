@@ -1,6 +1,6 @@
 import { derived, get, writable } from "svelte/store";
 import type { AnnotationPatch, Backend } from "./backend";
-import type { FlagEntry, FlagFilterValue, FlagSymbol, IocEntry, LoadProjectResponse } from "./types";
+import type { FlagEntry, FlagFilterValue, FlagSymbol, LoadProjectResponse } from "./types";
 import { createWorkspacePages } from "./workspacePages.ts";
 import { emptySelection, selectionAfterScopeChange, setRowsSelected, toggleRowId } from "./selection.ts";
 import type { SelectionScope } from "./selection";
@@ -178,7 +178,6 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     row: CachedRow;
   } | null>(null);
   const memoEditor = writable<MemoEditorTarget | null>(null);
-  const iocManagerOpen = writable(false);
 
   interface PendingAnnotation {
     confirmed: FlagEntry;
@@ -326,8 +325,6 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     }
   );
 
-  const iocDraft = writable<IocEntry[]>([]);
-
   const toggleSort = (column: string) => {
     if (get(sortKey) === column) {
       if (get(sortDirection) === "asc") {
@@ -402,7 +399,6 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     selectionScope = null;
     expandedCell.set(null);
     memoEditor.set(null);
-    iocDraft.set([]);
     projectDetail.set(null);
     currentProjectId.set(null);
     backend.set(null);
@@ -449,7 +445,6 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     syncSelectionScope,
     expandedCell,
     memoEditor,
-    iocManagerOpen,
     saveAnnotation,
     applyAnnotationCounts,
     isAnnotationRevisionCurrent,
@@ -470,7 +465,6 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     columnOrder,
     columnFormats,
     orderedColumns,
-    iocDraft,
     toggleSort,
     setFlag,
     editMemo,

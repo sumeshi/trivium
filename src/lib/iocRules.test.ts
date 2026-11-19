@@ -1,12 +1,39 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { iocBulkArgs, iocQueryError, isIocFlag, normalizeIocFlag, requireIocFlag, requireIocQuery } from "./iocRules.ts";
+import { createCellIocEntry, iocBulkArgs, iocEntryError, iocQueryError, isIocFlag, normalizeIocFlag, prepareIocEntries, requireIocFlag, requireIocQuery } from "./iocRules.ts";
 import { applyBulkAnnotation } from "./bulkAnnotation.ts";
 import type { BulkAnnotateArgs } from "./backend";
 import type { BulkCount } from "./types";
 import type { IocEntry } from "./types";
 
 const rule: IocEntry = { flag: "critical", tag: " C2 ", query: " host:evil | beacon " };
+
+test("cell IOC rules preserve literal evidence and use a column-specific equality condition", () => {
+  for (const value of ['', '   ', ' "powershell -enc" | user:alice ', 'C:\\Temp\\file\\', 'one\r\ntwo', '{"command":"a|b"}', '日本語']) {
+    const entry = createCellIocEntry(' source:name " | ', value);
+    assert.equal(entry.flag, 'critical');
+    assert.equal(entry.query, '');
+    const args = iocBulkArgs('case', entry);
+    assert.equal(args.search, '');
+    assert.deepEqual(args.condition, { column: ' source:name " | ', op: 'eq', values: [value], negated: false });
+    assert.equal(args.flagFilter, 'all');
+    assert.equal(args.bookmarkedOnly, false);
+    assert.equal(iocEntryError(entry, [' source:name " | ']), null);
+    assert.match(iocEntryError(entry, ['other'])!, /unavailable/);
+  }
+});
+
+test("cell rules cannot lose a column, combine match modes, or silently truncate large values", () => {
+  for (const column of ['', ' \t']) assert.throws(() => createCellIocEntry(column, 'value'), /column/);
+  assert.throws(() => iocBulkArgs('case', { ...createCellIocEntry('c1', 'value'), query: 'another' }), /not both/);
+  const boundary = '🙂'.repeat(16384);
+  assert.equal(createCellIocEntry('c1', boundary).cell?.value, boundary);
+  assert.throws(() => createCellIocEntry('c1', boundary + 'a'), /64 KiB/);
+  const entry = { ...createCellIocEntry('c1', ' exact '), id: 'ui-only', tag: ' review ' };
+  assert.deepEqual(prepareIocEntries([entry, { flag: 'critical', tag: '', query: '  ' }]), [
+    { flag: 'critical', tag: 'review', query: '', cell: { column: 'c1', value: ' exact ' } },
+  ]);
+});
 
 test("IOC Apply uses all data and the normal search language, with a non-destructive annotation patch", () => {
   const args = iocBulkArgs("case", rule);

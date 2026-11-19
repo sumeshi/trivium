@@ -120,6 +120,14 @@
     showToast(event.detail.message, event.detail.tone);
   };
 
+  const canLeaveProject = () => {
+    const message = activeView?.unsavedDraftMessage();
+    if (!message && activeView?.canAutoNavigate() !== false) return true;
+    showToast(message ?? 'Wait for the current edit to finish.', 'error');
+    activeView?.focusUnsavedDraft();
+    return false;
+  };
+
   const pickCsv = async () => {
     if (editsBlocked()) return;
     try {
@@ -200,7 +208,7 @@
   };
 
   const handleRefreshRequest = async () => {
-    if (editsBlocked()) return;
+    if (editsBlocked() || !canLeaveProject()) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
@@ -215,7 +223,7 @@
   };
 
   const handleSelectProject = async (projectId: string) => {
-    if (editsBlocked()) return;
+    if (editsBlocked() || (projectId !== $projectState.selectedProjectId && !canLeaveProject())) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
@@ -231,7 +239,7 @@
   };
 
   const handleCloseTab = async (projectId: string) => {
-    if (editsBlocked()) return;
+    if (editsBlocked() || (projectId === $projectState.selectedProjectId && !canLeaveProject())) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
@@ -374,6 +382,7 @@
             onSessionSnapshot={retainSession}
             on:refresh={handleRefreshRequest}
             on:summary={handleSummaryUpdate}
+            on:iocsSaved={event => projectController.updateIocs(event.detail.projectId, event.detail.entries)}
             on:notify={handleNotify}
             on:extract={(event) => void startExtraction(event.detail)} on:cancelExtract={() => extractions.cancel()}
           />

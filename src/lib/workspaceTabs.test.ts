@@ -75,6 +75,26 @@ test("a late discovery failure cannot replace a newer successful project list", 
   controller.dispose();
 });
 
+test("saved IOC definitions update only the active case metadata without reopening its view", async () => {
+  let loads = 0;
+  const { controller } = fixture({ loadProject: async id => { loads += 1; return detail(id); } });
+  await controller.selectProject("a");
+  const before = get(controller.state);
+  const entries = [{ flag: "critical", tag: "review", query: "", cell: { column: "c1", value: ' "evidence" ' } }];
+  controller.updateIocs("a", entries);
+  entries[0].cell.value = "later draft edit";
+  const after = get(controller.state);
+  assert.equal(loads, 1);
+  assert.equal(after.projectDetail?.iocs[0].cell?.value, ' "evidence" ');
+  assert.equal(after.projectDetail?.project, before.projectDetail?.project);
+  assert.equal(after.openProjectIds, before.openProjectIds);
+  await controller.selectProject("b");
+  controller.updateIocs("a", entries);
+  assert.deepEqual(get(controller.state).projectDetail?.iocs, []);
+  assert.equal(loads, 2);
+  controller.dispose();
+});
+
 test("opening and closing compact tabs never deletes saved projects or caches inactive rows", async () => {
   const { controller, deleted } = fixture();
   await controller.loadProjects();

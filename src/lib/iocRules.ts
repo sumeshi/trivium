@@ -58,14 +58,56 @@ export function requireIocQuery(value: string, location = "IOC rule"): string {
   return value.trim();
 }
 
+const MAX_CELL_VALUE_BYTES = 64 * 1024;
+
+/** Saved cell rules use the same exact-value predicate as Filter in. */
+export function prepareIocEntries(entries: readonly IocEntry[]): IocEntry[] {
+  return entries.flatMap<IocEntry>((entry, index) => {
+    const location = `IOC rule ${index + 1}`;
+    const flag = requireIocFlag(entry.flag, location), tag = entry.tag.trim();
+    if (entry.cell) {
+      if (entry.query.trim()) throw new Error(`${location}: choose a query or a cell value, not both.`);
+      const { column, value } = entry.cell;
+      if (typeof column !== "string" || !column.trim() || typeof value !== "string") {
+        throw new Error(`${location}: choose a column and enter its exact value.`);
+      }
+      if (new TextEncoder().encode(value).length > MAX_CELL_VALUE_BYTES) {
+        throw new Error(`${location}: cell values must be at most 64 KiB.`);
+      }
+      return [{ flag, tag, query: "", cell: { column, value } }];
+    }
+    const query = entry.query.trim();
+    if (!query) {
+      if (tag) throw new Error(`Enter a query for rule ${index + 1}.`);
+      return [];
+    }
+    return [{ flag, tag, query: requireIocQuery(query, location) }];
+  });
+}
+
+export function createCellIocEntry(column: string, value: string): IocEntry {
+  return prepareIocEntries([{ flag: "critical", tag: "", query: "", cell: { column, value } }])[0];
+}
+
+export function iocEntryError(entry: IocEntry, columns?: readonly string[]): string | null {
+  try {
+    if (!prepareIocEntries([entry]).length) return "Enter a query first.";
+    if (entry.cell && columns && !columns.includes(entry.cell.column)) {
+      return "This column is unavailable in the current project.";
+    }
+    return null;
+  } catch (error) { return error instanceof Error ? error.message.replace(/^IOC rule 1: /, "") : "Invalid IOC rule."; }
+}
+
 /** IOC rules use the normal bulk preview/apply transaction, never a live overlay. */
 export function iocBulkArgs(projectId: string, entry: IocEntry): BulkAnnotateArgs {
-  const search = requireIocQuery(entry.query), tag = entry.tag.trim();
-  const flag = requireIocFlag(entry.flag);
+  const rule = prepareIocEntries([entry])[0];
+  if (!rule) throw new Error("Enter a query first.");
   return {
-    projectId, target: "filtered", search, searchColumns: [], condition: null,
+    projectId, target: "filtered", search: rule.query, searchColumns: [],
+    condition: rule.cell ? { column: rule.cell.column, op: "eq", values: [rule.cell.value], negated: false } : null,
     flagFilter: "all", bookmarkedOnly: false, sortKey: null, sortDirection: "asc",
-    flag,
-    ...(tag ? { add_tags: [tag] } : {}),
+    flag: requireIocFlag(rule.flag),
+    ...(rule.tag ? { add_tags: [rule.tag] } : {}),
   };
 }

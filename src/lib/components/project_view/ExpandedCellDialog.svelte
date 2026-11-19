@@ -20,7 +20,11 @@
   } = useWorkspace();
   const reads = createReadScope();
   const navigationReads = createReadScope();
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{
+    notify: { message: string; tone: 'success' | 'error' };
+    iocRule: { projectId: string; columnId: string; value: string };
+  }>();
+  let alive = true;
   let fields: ReadonlyMap<string, DetailField> = new Map();
   let loadedKey = '';
   let copyStatus = '';
@@ -78,6 +82,7 @@
   });
 
   onDestroy(() => {
+    alive = false;
     fieldObserver?.disconnect();
     details.dispose(); reads.dispose(); navigation.dispose(); navigationReads.dispose();
   });
@@ -234,6 +239,15 @@
     addFilterCondition(column, 'eq', value);
     closeCell();
   };
+  const createIocField = (column: string) => {
+    const target = $expandedCell;
+    const value = detailFilterValue(loadedValue(column));
+    if (!alive || !target || value === null || target.projectId !== $projectDetail?.project.meta.id
+      || loadedKey !== `${target.projectId}\u0000${target.rowIndex}\u0000${target.columnId}`) return;
+    const payload = { projectId: target.projectId, columnId: column, value };
+    closeCell();
+    dispatch('iocRule', payload);
+  };
 </script>
 
 <svelte:window on:keydown={handleDialogKey} />
@@ -305,6 +319,11 @@
                   disabled={detailFilterValue(value) === null} on:click={() => filterField(column)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /><path d="M18 15v6m-3-3h6" /></svg>
                 </button>
+                <button type="button" class="ghost" aria-label={`Create IOC rule for ${label}`}
+                  title="Create a Critical IOC rule from this exact value."
+                  disabled={detailFilterValue(value) === null} on:click={() => createIocField(column)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4m0 1c4-4 9 4 14 0v10c-5 4-10-4-14 0" /></svg>
+                </button>
               </dd>
             </div>
           {/each}
@@ -318,7 +337,7 @@
   .row-detail-navigation { display: flex; align-items: center; gap: 3px; }
   .row-detail-position { color: var(--muted); font-size: 11px; margin-right: 5px; }
   .row-fields { display: block; margin: 0; border: 1px solid var(--border); border-radius: 4px; }
-  .row-detail-field { display: grid; grid-template-columns: minmax(110px, 20%) minmax(0, 1fr) 50px; min-height: 29px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; min-width: 0; }
+  .row-detail-field { display: grid; grid-template-columns: minmax(110px, 20%) minmax(0, 1fr) 75px; min-height: 29px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; min-width: 0; }
   .row-detail-field:last-child { border-bottom: 0; }
   .row-detail-field.is-focus { border-left-color: var(--accent); background: var(--surface-weak); }
   dt { padding: 4px 8px; color: var(--fg); line-height: 20px; }
@@ -334,5 +353,5 @@
   .row-detail-copy-status { margin: 0; min-height: 0; color: var(--muted); font-size: 11px; }
   .row-detail-copy-status:empty { display: none; }
   .memo-error { margin: 0 0 6px; }
-  @media (max-width: 480px) { .row-detail-field { grid-template-columns: minmax(76px, 28%) minmax(0, 1fr) 50px; } }
+  @media (max-width: 480px) { .row-detail-field { grid-template-columns: minmax(76px, 28%) minmax(0, 1fr) 75px; } }
 </style>
