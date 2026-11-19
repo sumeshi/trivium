@@ -655,6 +655,8 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
 
 
 def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str, Any]) -> None:
+    original_query = web.query()
+    assert original_query.get("condition") is None, "The gesture fixture starts without Rules"
     web.drawer("Timeline")
     wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "timeline before gestures")
     point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),left:Math.round(r.left),width:Math.round(r.width)};")
@@ -681,12 +683,34 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
         before = len(web.trace())
         web.named(action, "#analysis-drawer")
         wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "histogram"), None), lambda entry: bool(entry and "result" in entry), f"{action} completes")
-    point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width*.3),to:Math.round(r.left+r.width*.7),y:Math.round(r.top+r.height*.5)};")
-    web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "native-mouse", "parameters": {"pointerType": "mouse"}, "actions": [
-        {"type": "pointerMove", "x": point["x"], "y": point["y"], "duration": 0, "origin": "viewport"},
-        {"type": "pointerDown", "button": 0}, {"type": "pointerMove", "x": point["to"], "y": point["y"], "duration": 150, "origin": "viewport"},
-        {"type": "pointerUp", "button": 0}
-    ]}]})
+    def drag_period() -> None:
+        point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width*.3),to:Math.round(r.left+r.width*.7),y:Math.round(r.top+r.height*.5)};")
+        web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "native-mouse", "parameters": {"pointerType": "mouse"}, "actions": [
+            {"type": "pointerMove", "x": point["x"], "y": point["y"], "duration": 0, "origin": "viewport"},
+            {"type": "pointerDown", "button": 0}, {"type": "pointerMove", "x": point["to"], "y": point["y"], "duration": 150, "origin": "viewport"},
+            {"type": "pointerUp", "button": 0}
+        ]}]})
+
+    def show_full_period() -> None:
+        start = len(web.trace())
+        button = web.node('[aria-label="Show all events"]')
+        assert not web.script("return arguments[0].disabled;", button), "A time filter can be reset even when its selected period is empty"
+        web.click(button)
+        web.applied(**original_query)
+        web.results(data["total"])
+        completed = wait_for(lambda: next((entry for entry in reversed(web.trace()[start:])
+            if entry["name"] == "histogram" and "result" in entry
+            and entry["request"].get("projectId") == data["id"]
+            and entry["request"].get("column") == data["columns"]["timestamp"]
+            and entry["request"].get("condition") is None
+            and entry["request"].get("range") is None
+            and entry["request"].get("focus") is False), None),
+            bool, "Show all clears the selected time filter and loads the complete period")
+        assert completed["result"]["outside"] == 0 and not completed["result"].get("auto_focused", False)
+        wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"),
+                 lambda count: count == 0, "full event period is visibly restored")
+
+    drag_period()
     wait_for(lambda: web.query().get("condition"), bool, "pointer drag selects a structured time range")
     web.close_drawer()
     web.drawer("Conditions")
@@ -696,15 +720,23 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     values = [clause["value"] for clause in clauses[1:]]
     assert all("." in value and len(value.split(".")[-1].removesuffix("Z")) == 9 for value in values), values
     web.close_drawer()
-    web.named("Clear all filters")
-    web.applied(search="", searchColumns=[], flagFilter="all", bookmarkedOnly=False, condition=None)
-    web.results(data["total"])
+    web.drawer("Timeline")
+    show_full_period()
+    # The full fixture spans 2001 to 2026 with no events between them.
+    # Selecting its middle interval verifies recovery from a zero-row range.
+    drag_period()
+    wait_for(lambda: web.query().get("condition"), bool, "dragging after Show all creates another time filter")
+    web.results(0)
+    show_full_period()
+    web.close_drawer()
     web.drawer("Conditions")
     empty_editor = web.script("return {rows:document.querySelectorAll('.condition-row').length,groups:document.querySelectorAll('select[aria-label=\"Combine conditions\"]').length};")
     assert empty_editor == {"rows": 0, "groups": 1}, empty_editor
     web.close_drawer()
     report["timeline_gestures"] = {"native_wheel": wheel_supported, "native_nonzero_wheel_events": len(events) if wheel_supported else None,
-                                   "zoom_and_pan": True, "native_pointer_drag": True, "exact_nanosecond_range_values": values}
+                                   "zoom_and_pan": True, "native_pointer_drag": True, "exact_nanosecond_range_values": values,
+                                   "show_all_resets_time_filter": True, "native_drag_after_show_all": True,
+                                   "show_all_recovers_empty_time_filter": True}
 
 
 def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence: Path, report: dict[str, Any]) -> None:

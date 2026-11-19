@@ -92,6 +92,70 @@ test("timeline and time-analysis controls adjust separate owned ranges", () => {
   ] });
 });
 
+test("showing the full timeline period removes its range without losing earlier Rules or drilldowns", () => {
+  for (const kind of ["and", "or"] as const) {
+    const state = createConditionState();
+    const manual: ConditionNode = { kind, children: [host, event] };
+    state.conditionTree.set(presetCondition(manual)!);
+    state.filterByRange("Timestamp", "2026-11-14T00:00:00.000000001Z", "2026-11-15T00:00:00.000000009Z");
+    state.filterByValue("User", "alice");
+    state.clearRangeFilter("Timestamp");
+    const expected: { kind: "and"; children: ConditionNode[] } = {
+      kind: "and", children: [...(kind === "and" ? manual.children : [manual]), match("User", "alice")],
+    };
+    assert.deepEqual(get(state.conditionPayload), expected);
+    state.clearRangeFilter("Timestamp");
+    assert.deepEqual(get(state.conditionPayload), expected, "clearing an already full period is harmless");
+    state.filterByRange("Timestamp", "later-start", "later-end");
+    assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [...expected.children,
+      range("Timestamp", "later-start", "later-end")] });
+  }
+});
+
+test("full timeline periods recover intact ranges from reopened views and preserve other columns", () => {
+  const state = createConditionState();
+  const manual: ConditionNode = { kind: "or", children: [host, event] };
+  state.conditionTree.set(presetCondition(manual)!);
+  state.filterByRange("Timestamp", "a", "b");
+  state.filterByRange("OtherTime", "c", "d", "time-analysis");
+  state.conditionTree.set(structuredClone(get(state.conditionTree)));
+  state.clearRangeFilter("Timestamp");
+  assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [manual, range("OtherTime", "c", "d")] });
+  state.conditionTree.set(presetCondition(range("Timestamp", "a", "b"))!);
+  state.clearRangeFilter("Timestamp");
+  assert.equal(get(state.conditionPayload), null, "a restored range may itself be the root");
+});
+
+test("full timeline periods preserve a separately owned time-analysis range even on the same column", () => {
+  const state = createConditionState();
+  state.filterByRange("Timestamp", "timeline-start", "timeline-end");
+  state.filterByRange("Timestamp", "analysis-start", "analysis-end", "time-analysis");
+  state.clearRangeFilter("Timestamp");
+  assert.deepEqual(get(state.conditionPayload), range("Timestamp", "analysis-start", "analysis-end"));
+  state.filterByRange("Timestamp", "analysis-later", "analysis-last", "time-analysis");
+  assert.deepEqual(get(state.conditionPayload), range("Timestamp", "analysis-later", "analysis-last"), "the other control retains ownership");
+  state.filterByRange("OldTimelineColumn", "old-start", "old-end");
+  state.clearRangeFilter("Timestamp");
+  assert.deepEqual(get(state.conditionPayload), range("Timestamp", "analysis-later", "analysis-last"), "changing columns still clears this timeline's old range");
+});
+
+test("full timeline periods do not prune manual OR expressions or partial edited range groups", () => {
+  const examples: ConditionNode[] = [
+    { kind: "or", children: [host, range("Timestamp", "a", "b")] },
+    { kind: "and", children: [host, { kind: "or", children: [range("Timestamp", "a", "b"), event] }] },
+    { kind: "and", children: [host, { kind: "and", children: [
+      { column: "Timestamp", op: "ge", values: ["a"], negated: false },
+      { column: "Timestamp", op: "le", values: ["b"], negated: false },
+    ] }] },
+  ];
+  for (const example of examples) {
+    const state = createConditionState();
+    state.conditionTree.set(presetCondition(example)!);
+    state.clearRangeFilter("Timestamp");
+    assert.deepEqual(get(state.conditionPayload), example);
+  }
+});
+
 test("editing a generated range turns it into a user rule that later selections preserve", () => {
   for (const edit of [
     (state: ReturnType<typeof createConditionState>, group: EditorGroup) => state.patchCondition(group.children[1].id, { value: "user-start" }),

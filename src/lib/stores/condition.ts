@@ -197,6 +197,31 @@ export function createConditionState(scope: {
     });
   }
 
+  /** Remove this control's period, including an intact period restored from a view. */
+  function clearRangeFilter(column: string, source = "timeline"): void {
+    const owned = ranges.get(source);
+    const otherRanges = new Set([...ranges].filter(([name]) => name !== source).map(([, range]) => range.id));
+    const canonicalRange = (node: EditorNode) => {
+      if (node.type !== "group" || node.kind !== "and" || node.children.length !== 3) return false;
+      const [guard, first, last] = node.children;
+      if (guard.type !== "condition" || first.type !== "condition" || last.type !== "condition") return false;
+      return [guard, first, last].every(value => value.column === column && !value.negated && conditionValues(value).length === 1)
+        && guard.op === "regex" && conditionValues(guard)[0] === "\\S" && first.op === "ge" && last.op === "le";
+    };
+    conditionTree.update(root => {
+      // OR and mixed manual groups cannot be safely widened by pruning children.
+      if (canonicalRange(root) && !otherRanges.has(root.id)) return { ...root, children: [] };
+      if (root.kind !== "and") return root;
+      const children = root.children.filter(node => {
+        if (otherRanges.has(node.id)) return true;
+        if (owned?.id === node.id && owned.signature === signature(node)) return false;
+        return !canonicalRange(node) || node.type === "group" && Boolean(node.snippets?.length);
+      });
+      return children.length === root.children.length ? root : { ...root, children };
+    });
+    ranges.delete(source);
+  }
+
   function addCondition(groupId: string, column: string): void {
     const child = leaf(column);
     edit((root) => mapNode(root, (node) => {
@@ -348,7 +373,7 @@ export function createConditionState(scope: {
     return children.length === 0 ? null : children.length === 1 ? children[0] : { kind: "and" as const, children };
   });
 
-  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, addCondition, addGroup,
+  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
     addFormatCondition, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
     removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }

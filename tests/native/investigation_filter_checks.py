@@ -55,6 +55,40 @@ def _range_from_first_bucket(web, project_id: str, column: str, expected_leaves:
     return condition
 
 
+def _show_full_period(web, project_id: str, column: str, expected_rules: dict, expected_rows: int) -> None:
+    before = len(web.trace())
+    current_condition = web.query()["condition"]
+    wait_for(lambda: next((entry for entry in reversed(web.trace())
+             if entry["name"] == "histogram" and "result" in entry
+             and entry["request"].get("projectId") == project_id
+             and entry["request"].get("column") == column
+             and entry["request"].get("condition") == current_condition), None),
+             bool, "filtered timeline finishes before resetting its period")
+    button = web.node('[aria-label="Show all events"]')
+    assert not web.script("return arguments[0].disabled;", button), "Full-period reset remains available inside an already-full filtered graph"
+    scope = {key: value for key, value in web.query().items() if key != "condition"}
+    web.click(button)
+    web.applied(projectId=project_id, condition=expected_rules)
+    web.results(expected_rows)
+    assert {key: value for key, value in web.query().items() if key != "condition"} == scope
+
+    def completed_full_period():
+        return next((entry for entry in reversed(web.trace()[before:])
+            if entry["name"] == "histogram" and "result" in entry
+            and entry["request"].get("projectId") == project_id
+            and entry["request"].get("column") == column
+            and entry["request"].get("condition") == expected_rules
+            and entry["request"].get("range") is None
+            and entry["request"].get("focus") is False), None)
+
+    result = wait_for(completed_full_period, bool,
+                      "Show all survives the applied-filter update and requests the complete period")["result"]
+    assert result["outside"] == 0 and not result.get("auto_focused", False), result
+    assert sum(bucket["count"] for bucket in result["buckets"]) + result["missing"] + result["invalid"] == expected_rows
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"),
+             lambda count: count == 0, "the complete restored period is displayed")
+
+
 def verify_investigation_filters(web, data: dict, root: Path, evidence: Path, report: dict) -> None:
     outer_query, outer_total = web.query(), web.state()["total"]
     source = root / f"mixed-datetime-{uuid.uuid4().hex[:8]}.csv"
@@ -135,8 +169,32 @@ def verify_investigation_filters(web, data: dict, root: Path, evidence: Path, re
                 assert _has_subtree(after_stats, original_rules), after_stats
             rows = web.command("query_project_rows", {**web.query(), "offset": 0, "limit": 5})["rows"]
             assert [row["row_index"] for row in rows] == [0], rows
+            # Show all resets only the timeline range, keeping manual AND/OR
+            # and statistics drilldowns. Reopening also exercises the former
+            # disabled-button bug for a one-event/full-filtered histogram.
+            host_stat = {"column": ids["Host"], "op": "in", "values": ["WS01"], "negated": False}
+            without_time = {"kind": "and", "children": [*(rules if kind == "and" else [original_rules]), host_stat]}
+            web.close_drawer()
+            web.drawer("Timeline")
+            _show_full_period(web, project_id, timestamp, without_time, 3)
+            condition = _range_from_first_bucket(web, project_id, timestamp, 6)
+
+            # Tab restoration recreates the editor from its saved snapshot;
+            # time-range reset must also work when in-memory ownership is gone.
+            web.close_drawer()
+            web.tab(data["id"])
+            web.results(data["total"])
+            web.tab(project_id)
+            web.applied(projectId=project_id, condition=condition)
+            web.results(1)
+            web.drawer("Timeline")
+            web.choose('select[aria-label="Timeline column"]', timestamp)
+            _show_full_period(web, project_id, timestamp, without_time, 3)
+            _range_from_first_bucket(web, project_id, timestamp, 6)
             checked.append({"root": kind, "manual_rules_preserved": True, "range_rules": 3,
-                            "repeated_range_does_not_accumulate": True, "stats_preserves_rules": True, "source_rows": [0]})
+                            "repeated_range_does_not_accumulate": True, "stats_preserves_rules": True, "source_rows": [0],
+                            "show_all_removes_only_time_range": True, "full_period_request_survives_filter_update": True,
+                            "tab_restored_range_reset": True, "range_selection_after_reset": True})
         assert source.read_bytes() == original
         assert web.command("load_project", {"projectId": project_id}, request=True)["column_kinds"][timestamp] == "string"
         web.screenshot(evidence / "investigation-rules-preserved.png")

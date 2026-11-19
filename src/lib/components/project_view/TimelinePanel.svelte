@@ -18,7 +18,7 @@
   import type { AppliedFilters } from "./state";
   import { useWorkspace } from "../../workspaceContext";
   const {
-    appliedFilters, backend, columnLabels, projectDetail, filterByRange, createReadScope,
+    appliedFilters, backend, columnLabels, projectDetail, filterByRange, clearRangeFilter, createReadScope,
   } = useWorkspace();
 
   const reads = createReadScope();
@@ -38,6 +38,8 @@
   let zoomRange: { min: string; max: string } | null = null;
   let histogram: Histogram | null = null;
   let autoFocus = true;
+  let fullPeriod = false;
+  let fullPeriodScope = "";
   let loading = false;
   let lastRequestKey = "";
   let requestTimer: ReturnType<typeof setTimeout> | null = null;
@@ -68,6 +70,7 @@
   };
 
   const zoom = (factor: number) => {
+    fullPeriod = false;
     const current = zoomRange ?? visibleRange(histogram);
     const full = histogram?.full_range;
     if (current && full) zoomRange = zoomTimelineRange(current, full, factor);
@@ -75,6 +78,7 @@
   };
 
   const pan = (direction: -1 | 1) => {
+    fullPeriod = false;
     const current = zoomRange ?? visibleRange(histogram);
     const full = histogram?.full_range;
     if (current && full) zoomRange = panTimelineRange(current, full, direction);
@@ -82,6 +86,8 @@
   };
 
   const showAll = () => {
+    fullPeriod = true;
+    clearRangeFilter(column);
     zoomRange = null;
     autoFocus = false;
   };
@@ -92,7 +98,10 @@
     const min = parseTimelineNanos(first.start), rawEnd = parseTimelineNanos(last.end);
     if (min === null || rawEnd === null) return;
     const max = rawEnd - (last.end_inclusive ? 0n : 1n);
-    if (max >= min) filterByRange(column, first.start, formatTimelineNanos(max));
+    if (max >= min) {
+      fullPeriod = false;
+      filterByRange(column, first.start, formatTimelineNanos(max));
+    }
   };
 
   const bucketIndexAt = (event: MouseEvent): number | null => {
@@ -273,6 +282,10 @@
 
   $: timeColumns = $projectDetail?.columns ?? [];
   $: projectId = $projectDetail?.project.meta.id ?? "";
+  $: if (`${projectId}::${column}` !== fullPeriodScope) {
+    fullPeriodScope = `${projectId}::${column}`;
+    fullPeriod = false;
+  }
   $: filtersKey = `${$appliedFilters.search}::${$appliedFilters.flag}::${$appliedFilters.searchColumns.join("|")}::${$appliedFilters.bookmarkedOnly}::${JSON.stringify($appliedFilters.condition)}`;
   $: resetKey = `${projectId}::${column}::${filtersKey}`;
   $: if (resetKey !== lastResetKey) {
@@ -280,7 +293,7 @@
     zoomRange = null;
     histogram = null;
     inspectedIndex = null;
-    autoFocus = true;
+    autoFocus = !fullPeriod;
     cancelHistogram();
     error = "";
     dragStart = null;
@@ -313,7 +326,6 @@
   $: currentMin = currentRange ? parseTimelineNanos(currentRange.min) : null;
   $: currentMax = currentRange ? parseTimelineNanos(currentRange.max) : null;
   $: canZoom = fullMin !== null && fullMax !== null && fullMax > fullMin;
-  $: atFullRange = currentMin === fullMin && currentMax === fullMax;
   $: canPanLeft = currentMin !== null && fullMin !== null && currentMin > fullMin;
   $: canPanRight = currentMax !== null && fullMax !== null && currentMax < fullMax;
   $: slotWidth = viewWidth / Math.max(buckets.length, 1);
@@ -340,7 +352,8 @@
       <button type="button" class="ghost" disabled={!canZoom} on:click={() => zoom(1.2)} title="Zoom out" aria-label="Zoom out">−</button>
       <button type="button" class="ghost" disabled={!canPanLeft} on:click={() => pan(-1)} title="Pan left" aria-label="Pan left">←</button>
       <button type="button" class="ghost" disabled={!canPanRight} on:click={() => pan(1)} title="Pan right" aria-label="Pan right">→</button>
-      <button type="button" class="ghost" disabled={!histogram || atFullRange} on:click={showAll} title="Show the entire event period" aria-label="Show all events">Show all</button>
+      <button type="button" class="ghost" disabled={!$backend || !projectId || !column} on:click={showAll}
+        title="Clear the timeline time filter and show the full period" aria-label="Show all events">Show all</button>
     </div>
     {#if open}
       {#if error}
