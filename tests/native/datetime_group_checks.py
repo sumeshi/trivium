@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 
 from feedback_checks import _settle
-from refinement_grouping import _row, _rows
+from refinement_grouping import _row, _rows, _sort
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
@@ -36,6 +36,7 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         web.drawer("Groups")
         web.choose('select[aria-label="Group column"]', columns["timestamp"])
         web.named("Add level", ".grouping-panel")
+        assert web.script("return [...document.querySelector('select[aria-label=\"Group timestamp by\"]').options].map(e=>e.value);") == ["exact", "year", "month", "day", "hour", "minute"], "Datetime groups retain Exact and UTC calendar units"
         web.choose('select[aria-label="Group timestamp by"]', "day")
 
         def day_groups():
@@ -63,6 +64,8 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         web.named("Add level", ".grouping-panel")
         wait_for(lambda: web.script("return document.querySelectorAll('[aria-label=\"Group levels\"] li').length;"),
             lambda count: count == 2, "ordinary host nested below the day level")
+        assert not web.script("return !!document.querySelector('select[aria-label=\"Group host by\"]');"), "Ordinary host groups have no datetime selector"
+        assert web.script("return document.querySelectorAll('.group-granularity').length;") == 1
         wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 9,
             "nested day aggregation completes")
         expand_day = wait_for(lambda: web.script("return [...document.querySelectorAll('.group-row')].find(e=>e.dataset.depth==='0'&&e.dataset.groupLabel==='2026-11-14')?.querySelector('.expand-group')??null;"),
@@ -85,9 +88,14 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         assert {row["label"]: row["count"] for row in hourly if row["label"].startswith("2026-")} == {
             "2026-11-14T02:00Z": 1, "2026-11-14T23:00Z": 2, "2026-11-15T00:00Z": 2,
         }, hourly
+        _sort(web, "name", "asc")
+        assert [row["label"] for row in day_groups() if row["label"].startswith("2026-")] == [
+            "2026-11-14T02:00Z", "2026-11-14T23:00Z", "2026-11-15T00:00Z"]
         web.close_drawer()
         web.drawer("Groups")
         assert web.script("return document.querySelector('select[aria-label=\"Group timestamp by\"]').value;") == "hour"
+        assert web.script("return document.querySelector('select[aria-label=\"Sort groups by\"]').value;") == "name"
+        assert web.script("return !!document.querySelector('[aria-label=\"Sort groups descending\"]');"), "Group sort order survives closing the drawer"
         web.named("Move group host up", ".grouping-panel")
         wait_for(lambda: web.script("return [...document.querySelectorAll('[aria-label=\"Group levels\"] li')].map(e=>e.dataset.groupColumn);"),
             lambda ids: ids == [columns["host"], columns["timestamp"]], "time granularity follows its source column when levels reorder")
@@ -104,6 +112,7 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         web.screenshot(evidence / "datetime-granular-groups.png")
         report["datetime_groups"] = {"timezone": "UTC", "days": daily, "hours": hourly,
             "day_source_ids": [0, 1, 8], "nested_source_ids": [0, 1],
+            "datetime_only_granularity": True, "sort_survives_drawer": True,
             "granularity_survives_drawer_and_reorder": True, "source_timestamp_precision_unchanged": True}
     finally:
         web.close_drawer()

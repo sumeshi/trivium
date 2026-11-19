@@ -18,6 +18,39 @@ def _row(web, depth: int, label: str, missing: bool = False):
     return wait_for(lambda: web.script("return [...document.querySelectorAll('.group-row')].find(e=>Number(e.dataset.depth)===arguments[0]&&e.dataset.groupLabel===arguments[1]&&(e.dataset.groupMissing==='true')===arguments[2])??null;", depth, label, missing), bool, f"group depth {depth}, label {label!r}, missing {missing}")
 
 
+def _sort(web, by: str, direction: str) -> None:
+    selector = 'select[aria-label="Sort groups by"]'
+    if web.script("return document.querySelector(arguments[0])?.value;", selector) != by:
+        web.choose(selector, by)
+    action = f"Sort groups {direction}ending"
+    if web.script("return !!document.querySelector(arguments[0]);", f'[aria-label="{action}"]'):
+        web.named(action, ".grouping-panel")
+    _settle(web)
+    opposite = "descending" if direction == "asc" else "ascending"
+    assert web.script("return !!document.querySelector(arguments[0]);", f'[aria-label="Sort groups {opposite}"]')
+
+
+def _verify_sorting(web) -> None:
+    before = len([entry for entry in web.trace() if entry["name"] == "group_tree"])
+    initial = {(row["depth"], row["missing"], row["label"]): row["count"] for row in _rows(web)}
+    for by, direction, roots, children, grandchildren in [
+        ("count", "asc", [1, 1, 2, 2, 4], ["y", "x"], ["blue", "red"]),
+        ("name", "asc", ["alpha", "beta"], ["x", "y"], ["blue", "red"]),
+        ("name", "desc", ["beta", "alpha"], ["y", "x"], ["red", "blue"]),
+        ("count", "desc", [4, 2, 2, 1, 1], ["x", "y"], ["red", "blue"]),
+    ]:
+        _sort(web, by, direction)
+        rows = _rows(web)
+        assert {(row["depth"], row["missing"], row["label"]): row["count"] for row in rows} == initial
+        root_rows = [row for row in rows if row["depth"] == 0]
+        actual = [row["count"] for row in root_rows] if by == "count" else [
+            row["label"] for row in root_rows if row["label"] in {"alpha", "beta"}]
+        assert actual == roots, (by, direction, rows)
+        assert [row["label"] for row in rows if row["depth"] == 1] == children, (by, direction, rows)
+        assert [row["label"] for row in rows if row["depth"] == 2] == grandchildren, (by, direction, rows)
+    assert len([entry for entry in web.trace() if entry["name"] == "group_tree"]) == before, "Changing group order must not rescan the source data"
+
+
 def _reset(web, total: int) -> None:
     if web.script("return !document.querySelector('[aria-label=\"Clear all filters\"]').disabled;"):
         web.named("Clear all filters")
@@ -63,6 +96,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         assert next(row for row in initial if row["missing"])["display"] == "(missing / null)"
         assert next(row for row in initial if row["label"] == "" and not row["missing"])["display"] == "(empty string)"
         assert next(row for row in initial if row["label"] == " ")["display"] == '" "'
+        assert not web.script("return !!document.querySelector('.group-granularity');"), "Text groups have no datetime granularity selector"
 
         for name in ("level2", "level3"):
             web.choose('select[aria-label="Group column"]', columns[name])
@@ -78,6 +112,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         wait_for(lambda: _rows(web), lambda rows: any(row["depth"] == 2 and row["label"] == "red" and row["count"] == 2 for row in rows), "third-level child counts")
         grandchildren = [row for row in _rows(web) if row["depth"] == 2]
         assert {(row["label"], row["count"]) for row in grandchildren} == {("red", 2), ("blue", 1)}, grandchildren
+        _verify_sorting(web)
         _settle(web)
         web.screenshot(evidence / "refinement-nested-groups.png")
         web.named("Collapse all", ".grouping-panel")
@@ -115,6 +150,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         wait_for(lambda: web.script("return [...document.querySelectorAll('[aria-label=\"Group levels\"] li')].map(e=>e.dataset.groupColumn);"),
             lambda selected: selected == [columns["level1"], columns["level2"], columns["large"]], "removed and replaced nesting level")
         wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 10, "replacement level aggregation completes")
+        assert not web.script("return !!document.querySelector('.group-granularity');"), "Text and integer groups use exact values without a redundant selector"
 
         # Build a real OR in the editor; one matching group member is excluded.
         web.close_drawer()
@@ -146,6 +182,8 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         checks.append({"path": ["alpha", "x", "9007199254740993"], "count": 1, "source_rows": [0], "existing_or_preserved": True})
         report["nested_groups"] = {"header_action_opens_groups": True, "levels": 3,
             "reorder_remove_replace": True, "large_integer_exact": True, "existing_or_preserved": True,
+            "name_and_count_sort_both_directions": True, "nested_sort_preserves_expansion_and_values": True,
+            "sort_does_not_rescan": True, "non_datetime_granularity_hidden": True,
             "root_groups": initial, "second_level": children, "third_level": grandchildren, "drilldowns": checks}
     finally:
         web.close_drawer()

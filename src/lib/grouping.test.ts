@@ -1,11 +1,62 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities } from "./grouping.ts";
+import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities, sortGroupTree } from "./grouping.ts";
 import type { GroupTreeNode } from "./types";
 import type { EditorGroup } from "./stores/condition";
 
 const node = (label: string, children: GroupTreeNode[] = [], value: unknown = label): GroupTreeNode =>
   ({ label, children, value, count: 1 });
+
+test("group ordering sorts siblings by name or count without flattening or changing source values", () => {
+  const nodes = [
+    { ...node("beta", [{ ...node("z"), count: 3 }, node("a")]), count: 4 },
+    { ...node("alpha", [node("9007199254740993", [], 9007199254740992)]), count: 2 },
+    { ...node("gamma"), count: 2 },
+  ];
+  const original = structuredClone(nodes);
+  const labels = (by: "name" | "count", direction: "asc" | "desc") =>
+    sortGroupTree(nodes, by, direction).map(part => part.label);
+  assert.deepEqual(labels("name", "asc"), ["alpha", "beta", "gamma"]);
+  assert.deepEqual(labels("name", "desc"), ["gamma", "beta", "alpha"]);
+  assert.deepEqual(labels("count", "asc"), ["alpha", "gamma", "beta"]);
+  assert.deepEqual(labels("count", "desc"), ["beta", "alpha", "gamma"]);
+  const sorted = sortGroupTree(nodes, "count", "desc");
+  assert.deepEqual(sorted[0].children.map(part => part.label), ["z", "a"]);
+  const originalPath = [nodes[1], nodes[1].children[0]];
+  const sortedPath = [sorted[1], sorted[1].children[0]];
+  assert.equal(groupPathKey(sortedPath), groupPathKey(originalPath));
+  const root: EditorGroup = { type: "group", id: "root", kind: "and", collapsed: false, children: [] };
+  const filtered = appendGroupPath(root, ["parent", "large"], sortedPath);
+  assert.equal(filtered.children[1].type === "condition" && filtered.children[1].value, "9007199254740993");
+  assert.deepEqual(nodes, original);
+});
+
+test("sorting retains null, empty and whitespace groups and exact calendar ranges", () => {
+  const day = { ...node("2026-11-14"), range: { start: "2026-11-14T00:00:00Z", end: "2026-11-15T00:00:00Z" } };
+  const nodes = [node("", [], null), day, node(""), node(" ")];
+  const sorted = sortGroupTree(nodes, "name", "asc");
+  assert.deepEqual(sorted.map(groupDisplayValue), ["(empty string)", "(missing / null)", '" "', "2026-11-14"]);
+  assert.equal(new Set(sorted.map(part => groupPathKey([part]))).size, 4);
+  assert.deepEqual(sorted.at(-1)?.range, day.range);
+  assert.deepEqual(sortGroupTree(nodes, "name", "desc").map(groupDisplayValue), sorted.map(groupDisplayValue).reverse());
+});
+
+test("sorting precedes pagination and preserves expanded paths across sibling reordering", () => {
+  const root = node("parent", Array.from({ length: 205 }, (_, index) =>
+    ({ ...node(`child-${String(index).padStart(3, "0")}`), count: index + 1 })));
+  const expanded = new Set([groupPathKey([root])]);
+  const sorted = sortGroupTree([root], "count", "desc");
+  const first = groupRowsPage(sorted, expanded, 0);
+  const second = groupRowsPage(sorted, expanded, 1);
+  const last = groupRowsPage(sorted, expanded, 2);
+  assert.equal(first.rows[1].node.label, "child-204");
+  assert.equal(second.rows[0].node.label, "child-105");
+  assert.equal(last.rows.at(-1)?.node.label, "child-000");
+  const rows = [first, second, last].flatMap(part => part.rows);
+  assert.equal(rows.length, 206);
+  assert.equal(new Set(rows.map(part => part.key)).size, 206);
+  assert.deepEqual(second.rows[0].path.map(part => part.label), ["parent", "child-105"]);
+});
 
 test("legacy group columns use exact defaults and retain explicit time granularity choices", () => {
   const columns = ["__proto__", "constructor", "toString", "timestamp"];

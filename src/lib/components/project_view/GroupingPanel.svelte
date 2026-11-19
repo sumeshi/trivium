@@ -2,8 +2,8 @@
   import { onDestroy, tick } from "svelte";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
-  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities } from "../../grouping";
-  import type { GroupGranularity } from "../../grouping";
+  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities, sortGroupTree } from "../../grouping";
+  import type { GroupGranularity, GroupSortDirection, GroupSortKey } from "../../grouping";
   import type { Backend } from "../../backend";
   import type { GroupTreeNode, GroupTreeResponse } from "../../types";
   import type { AppliedFilters } from "./state";
@@ -16,6 +16,8 @@
   export let open = true;
   export let groupColumns: string[] = [];
   export let granularities: Record<string, GroupGranularity> = {};
+  export let sortBy: GroupSortKey = "name";
+  export let sortDirection: GroupSortDirection = "asc";
   let pendingColumn = "";
   let tree: GroupTreeResponse | null = null;
   let expanded = new Set<string>();
@@ -49,7 +51,8 @@
     lastKey = requestKey;
     void loadTree($backend, projectId, [...groupColumns], [...selectedGranularities], $appliedFilters);
   }
-  $: presentation = groupRowsPage(tree?.nodes ?? [], expanded, page);
+  $: sortedNodes = sortGroupTree(tree?.nodes ?? [], sortBy, sortDirection);
+  $: presentation = groupRowsPage(sortedNodes, expanded, page);
 
   export async function groupByColumn(columnId: string): Promise<void> {
     if (!columns.includes(columnId) || groupColumns.includes(columnId)) return;
@@ -72,6 +75,17 @@
   function changeGranularity(name: string, event: Event) {
     const value = (event.currentTarget as HTMLSelectElement).value as GroupGranularity;
     granularities = { ...granularities, [name]: value };
+  }
+
+  function changeSort(event: Event) {
+    sortBy = (event.currentTarget as HTMLSelectElement).value as GroupSortKey;
+    sortDirection = sortBy === "name" ? "asc" : "desc";
+    page = 0;
+  }
+
+  function toggleSortDirection() {
+    sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    page = 0;
   }
 
   function toggle(key: string) {
@@ -132,10 +146,12 @@
       {#each groupColumns as name, index (name)}
         <li data-group-column={name}>
           <span class="level-number">{index + 1}</span><span class="level-name" title={$columnLabels.get(name) ?? name}>{$columnLabels.get(name) ?? name}</span>
-          <select class="group-granularity" aria-label={`Group ${$columnLabels.get(name) ?? name} by`} title="Datetime groups use UTC"
-            value={selectedGranularities[index]} on:change={(event) => changeGranularity(name, event)}>
-            {#each GROUP_GRANULARITIES as [value, label]}<option {value}>{label}</option>{/each}
-          </select>
+          {#if $projectDetail?.column_kinds[name] === "datetime" || selectedGranularities[index] !== "exact"}
+            <select class="group-granularity" aria-label={`Group ${$columnLabels.get(name) ?? name} by`} title="Datetime groups use UTC"
+              value={selectedGranularities[index]} on:change={(event) => changeGranularity(name, event)}>
+              {#each GROUP_GRANULARITIES as [value, label]}<option {value}>{label}</option>{/each}
+            </select>
+          {/if}
           <button type="button" class="icon-button" on:click={() => moveColumn(index, -1)} disabled={index === 0}
             aria-label={`Move group ${$columnLabels.get(name) ?? name} up`} title="Move level up">↑</button>
           <button type="button" class="icon-button" on:click={() => moveColumn(index, 1)} disabled={index === groupColumns.length - 1}
@@ -152,7 +168,17 @@
   {:else if tree}
     <div class="group-summary">
       <span>{tree.total.toLocaleString()} rows · {tree.nodes.length.toLocaleString()} top groups</span>
-      <button type="button" class="text-button" on:click={() => { expanded = new Set(); page = 0; }} disabled={expanded.size === 0}>Collapse all</button>
+      <div class="group-sort">
+        <select aria-label="Sort groups by" title="Sort each group level" value={sortBy} on:change={changeSort}>
+          <option value="name">Name</option><option value="count">Count</option>
+        </select>
+        <button type="button" class="icon-button" on:click={toggleSortDirection}
+          aria-label={sortDirection === "asc" ? "Sort groups descending" : "Sort groups ascending"}
+          title={sortDirection === "asc" ? "Ascending — switch to descending" : "Descending — switch to ascending"}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={sortDirection === "asc" ? "M7 19V5m-4 4 4-4 4 4M14 7h7m-7 5h5m-5 5h3" : "M7 5v14m-4-4 4 4 4-4M14 7h3m-3 5h5m-5 5h7"} /></svg>
+        </button>
+        <button type="button" class="text-button" on:click={() => { expanded = new Set(); page = 0; }} disabled={expanded.size === 0}>Collapse all</button>
+      </div>
     </div>
     {#if tree.nodes.length === 0}<p class="group-summary">No groups in the current result.</p>{/if}
     <div class="group-tree" aria-label="Group results">
@@ -199,6 +225,9 @@
   .level-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
   .group-granularity { flex: 0 0 102px; width: 102px; height: 25px; padding: 0 3px; font-size: 10px; }
   .group-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 10px; color: var(--muted); }
+  .group-sort { display: flex; align-items: center; gap: 3px; }
+  .group-sort select { flex: 0 0 auto; width: auto; min-width: 65px; height: 24px; padding: 2px 4px; font-size: 10px; }
+  .group-sort .text-button { white-space: nowrap; }
   .text-button { background: transparent; border: 0; padding: 2px 4px; border-radius: 3px; color: var(--muted); font-size: 10px; }
   .panel-error { margin: 0; color: var(--critical); font-size: 11px; }
   .group-tree { display: grid; gap: 2px; min-width: 0; }

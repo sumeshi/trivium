@@ -3,7 +3,7 @@
   import { FLAG_FILTER_OPTIONS } from './state';
   import { appendEmptyColumnRule } from '../../appliedFilterSummary';
   import { MAX_GROUP_LEVELS } from '../../grouping';
-  import type { GroupGranularity } from '../../grouping';
+  import type { GroupGranularity, GroupSortDirection, GroupSortKey } from '../../grouping';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
@@ -65,6 +65,8 @@
   let iocPanel: IocRulesPanel | undefined;
   let groupColumns: string[] = [];
   let groupGranularities: Record<string, GroupGranularity> = {};
+  let groupSortBy: GroupSortKey = "name";
+  let groupSortDirection: GroupSortDirection = "asc";
   // Keep small analysis inputs while inactive panels are unmounted. Results
   // and request scopes remain owned by the mounted panel.
   let timelineColumn = "";
@@ -433,7 +435,8 @@
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}
-          <GroupingPanel bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities} />
+          <GroupingPanel bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities}
+            bind:sortBy={groupSortBy} bind:sortDirection={groupSortDirection} />
         {:else if activeTool === 'time'}
           <TimePanel open={true} bind:column={timeColumn} />
         {:else if activeTool === 'timeline'}

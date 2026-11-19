@@ -6,6 +6,8 @@ import type * as Wire from "./generated/engine";
 export const MAX_GROUP_LEVELS = 8;
 export const GROUP_PAGE_SIZE = 100;
 export type GroupGranularity = Wire.GroupGranularity;
+export type GroupSortKey = "name" | "count";
+export type GroupSortDirection = "asc" | "desc";
 export const GROUP_GRANULARITIES = [
   ["exact", "Exact"], ["year", "Year (UTC)"], ["month", "Month (UTC)"],
   ["day", "Day (UTC)"], ["hour", "Hour (UTC)"], ["minute", "Minute (UTC)"],
@@ -38,6 +40,23 @@ export function groupDisplayValue(node: GroupTreeNode): string {
   if (node.label === "") return "(empty string)";
   if (node.label.trim() === "") return JSON.stringify(node.label);
   return node.label;
+}
+
+/** Sort siblings before paging, retaining original values and path identities. */
+export function sortGroupTree(
+  nodes: readonly GroupTreeNode[], by: GroupSortKey, direction: GroupSortDirection,
+): GroupTreeNode[] {
+  const names = (left: GroupTreeNode, right: GroupTreeNode) =>
+    (left.label < right.label ? -1 : left.label > right.label ? 1 : 0)
+      || Number(isMissingGroup(left)) - Number(isMissingGroup(right));
+  const sign = direction === "asc" ? 1 : -1;
+  const compare = by === "count"
+    ? (left: GroupTreeNode, right: GroupTreeNode) => sign * (left.count - right.count) || names(left, right)
+    : (left: GroupTreeNode, right: GroupTreeNode) => sign * names(left, right);
+  const visit = (siblings: readonly GroupTreeNode[]): GroupTreeNode[] => siblings
+    .map(node => ({ ...node, children: visit(node.children) }))
+    .sort(compare);
+  return visit(nodes);
 }
 
 /** Walk only expanded branches, keeping at most one page of rendered rows. */
