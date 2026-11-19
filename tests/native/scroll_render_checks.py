@@ -1,4 +1,4 @@
-"""Keep retained rows' stripes stable when the virtual window shifts by one row."""
+"""Keep native scrolling covered by loaded rows and retained stripes stable."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,7 +40,37 @@ def verify_scroll_rendering(web, data, evidence: Path, report: dict) -> None:
         assert samples[1]["first_rendered"] == samples[0]["first_rendered"] + 1, samples
         assert samples[0]["retained_rows"] == samples[1]["retained_rows"], samples
         web.screenshot(evidence / "scroll-stable-row-stripes.png")
-        report["stable_scroll_rendering"] = {"retained_rows_keep_original_stripe_across_virtual_window_parity": True, "samples": samples}
+        web.button("First")
+        web.results(data["total"])
+        _settle(web)
+        start = len(web.trace())
+        web.script("""
+          const e=document.querySelector('.virtual-viewport'),p=window.__scrollTurnCoverage={e,samples:[]};
+          p.listen=()=>queueMicrotask(()=>{
+            const r=e.getBoundingClientRect(),rows=[...e.querySelectorAll('.data-row')],first=rows[0],last=rows.at(-1);
+            const a=first?.getBoundingClientRect(),b=last?.getBoundingClientRect();
+            const unloaded=rows.filter(row=>!row.hasAttribute('data-row-index')).filter(row=>{
+              const box=row.getBoundingClientRect();return box.bottom>r.top+1&&box.top<r.bottom-1;}).length;
+            p.samples.push({top:e.scrollTop,first:Number(first?.dataset.position),last:Number(last?.dataset.position),
+              covered:!!a&&!!b&&a.top<=r.top+1&&(b.bottom>=r.bottom-1||Number(last.dataset.position)===arguments[0]-1),
+              unloaded,loading:e.querySelectorAll('.data-row.loading').length});
+          });e.addEventListener('scroll',p.listen,{passive:true});
+        """, data["total"])
+        turns = []
+        for delta in (320, -320):
+            before = web.state()["scrollTop"]
+            count = web.script("return window.__scrollTurnCoverage.samples.length;")
+            web.request("POST", web.route("actions"), {"actions": [{"type": "wheel", "id": f"turn-wheel-{uuid.uuid4().hex}", "actions": [
+                {"type": "scroll", **point, "deltaX": 0, "deltaY": delta, "duration": 0}]}]})
+            wait_for(web.state, lambda value: abs(value["scrollTop"] - before - delta) <= 1, "native wheel moves the cache-warm viewport")
+            current = wait_for(lambda: web.script("return window.__scrollTurnCoverage.samples.slice(arguments[0]);", count),
+                               bool, "scroll-event microtask records DOM coverage")
+            assert all(item["covered"] and item["unloaded"] == 0 and item["loading"] == 0 for item in current), current
+            turns.extend(current)
+        assert not any(entry["name"] == "query_project_rows" for entry in web.trace()[start:]), "The coverage regression must use already cached rows"
+        report["stable_scroll_rendering"] = {"retained_rows_keep_original_stripe_across_virtual_window_parity": True,
+            "samples": samples, "loaded_rows_cover_viewport_in_scroll_event_turn": turns}
     finally:
+        web.script("const p=window.__scrollTurnCoverage;if(p){p.e.removeEventListener('scroll',p.listen);delete window.__scrollTurnCoverage;}")
         web.button("First")
         web.results(data["total"])

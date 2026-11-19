@@ -495,7 +495,15 @@
     if (scrollFrame === null) scrollFrame = requestAnimationFrame(flushScroll);
   };
 
-  const handleScroll = (event: Event) => queueScroll(event.currentTarget as HTMLDivElement);
+  const handleScroll = (event: Event) => {
+    const target = event.currentTarget as HTMLDivElement;
+    // Native scrolling has already moved the viewport. Let Svelte update its
+    // rows in this event's microtask instead of waiting for another frame.
+    if (!resizingRows && target.isConnected && $scrollTop !== target.scrollTop) {
+      scrollTop.set(target.scrollTop);
+    }
+    queueScroll(target);
+  };
 
   // The body owns horizontal position. A delayed header event must never feed
   // an older offset back into it; only the body and external scrollbar publish.
