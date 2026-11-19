@@ -15,6 +15,7 @@ from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
 from preset_state_checks import verify_preset_state
 from cell_ioc_checks import _select_rule, verify_cell_iocs, verify_compact_ioc_list
+from storage_responsiveness_checks import _case_database
 
 
 def _picker(web, destination: Path) -> None:
@@ -60,10 +61,8 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     # Reopening must preserve it for correction rather than choosing Safe.
     web.tab(data["id"])
     web.named(f"Close {source.name}")
-    databases = list(root.glob(f"**/projects/{project_id}/project.sqlite"))
-    assert len(databases) == 1, databases
     legacy = [*saved, {"flag": "critcal", "tag": "invalid", "query": "message:clear"}]
-    with sqlite3.connect(databases[0]) as database:
+    with sqlite3.connect(_case_database(root, project_id)) as database:
         database.execute("UPDATE settings SET value=? WHERE key='iocs'", (json.dumps(legacy).encode(),))
     open_project(web, case["meta"]["name"])
     web.results(1)  # The previously saved text search remains active.
@@ -288,5 +287,6 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.close_drawer()
         web.tab(data["id"])
         web.results(data["total"])
-        web.named(f"Close {source.name}")
+        if web.script("return !!document.getElementById(arguments[0]);", f"project-tab-{project_id}"):
+            web.named(f"Close {source.name}")
         delete_fixture_project(web, project_id)
