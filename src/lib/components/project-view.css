@@ -635,6 +635,7 @@ button.primary:disabled {
 .virtual-viewport {
   flex: 1 1 auto;
   overflow-y: auto;
+  overscroll-behavior: none;
   /* Put horizontal controls outside the rows: WebKitGTK's native scrollbar
      hit area otherwise intercepts the last row's flag and memo buttons. */
   overflow-x: hidden;
@@ -649,6 +650,7 @@ button.primary:disabled {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior: none;
   background: var(--surface-weak);
 }
 

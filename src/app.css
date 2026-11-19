@@ -18,6 +18,7 @@
   html,
   body {
     min-height: 100%;
+    overscroll-behavior: none;
     background-color: var(--bg);
     color: var(--fg);
     @apply antialiased;
