@@ -93,10 +93,12 @@ export function createConditionState(scope: {
   searchColumns?: Readable<readonly string[]>;
 } = {}) {
   const tree = writable<EditorGroup>(rootGroup());
-  // Only untouched ranges added by this analysis control can be replaced. A
+  // Only unchanged ranges added by this analysis control can be replaced. A
   // restored tree or a user-edited range becomes an ordinary investigation rule.
   const ranges = new Map<string, { id: string; signature: string }>();
-  const signature = (node: EditorNode) => JSON.stringify(node,
+  // Moving the three AND rows changes their presentation, not their bounds.
+  const signature = (node: EditorNode) => JSON.stringify(node.type === "group"
+    ? { ...node, children: [...node.children].sort((a, b) => a.id.localeCompare(b.id)) } : node,
     (key, value: unknown) => key === "collapsed" ? undefined : value);
   const conditionTree = {
     subscribe: tree.subscribe,
@@ -203,10 +205,11 @@ export function createConditionState(scope: {
     const otherRanges = new Set([...ranges].filter(([name]) => name !== source).map(([, range]) => range.id));
     const canonicalRange = (node: EditorNode) => {
       if (node.type !== "group" || node.kind !== "and" || node.children.length !== 3) return false;
-      const [guard, first, last] = node.children;
-      if (guard.type !== "condition" || first.type !== "condition" || last.type !== "condition") return false;
-      return [guard, first, last].every(value => value.column === column && !value.negated && conditionValues(value).length === 1)
-        && guard.op === "regex" && conditionValues(guard)[0] === "\\S" && first.op === "ge" && last.op === "le";
+      const values = node.children.filter((child): child is EditorCondition => child.type === "condition");
+      return values.length === 3
+        && values.every(value => value.column === column && !value.negated && conditionValues(value).length === 1)
+        && values.some(value => value.op === "regex" && conditionValues(value)[0] === "\\S")
+        && values.some(value => value.op === "ge") && values.some(value => value.op === "le");
     };
     conditionTree.update(root => {
       // OR and mixed manual groups cannot be safely widened by pruning children.

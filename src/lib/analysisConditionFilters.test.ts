@@ -126,6 +126,30 @@ test("full timeline periods recover intact ranges from reopened views and preser
   assert.equal(get(state.conditionPayload), null, "a restored range may itself be the root");
 });
 
+test("Show all clears an intact period after its Rules rows are reordered and saved", () => {
+  const manual: ConditionNode = { kind: "or", children: [host, event] };
+  for (const restore of [false, true]) {
+    const state = createConditionState();
+    state.conditionTree.set(presetCondition(manual)!);
+    state.filterByRange("Timestamp", "2026-11-14T00:00:00.000000001Z", "2026-11-15T00:00:00.000000009Z");
+    const period = rangeGroup(state, 1);
+    state.moveNode(period.children[1].id, -1);
+    if (restore) state.conditionTree.set(structuredClone(get(state.conditionTree)));
+    state.clearRangeFilter("Timestamp");
+    assert.deepEqual(get(state.conditionPayload), manual, "moving a bound above its guard must not make the period impossible to reset");
+  }
+});
+
+test("reordering a period's Rules rows does not make later timeline selections accumulate old bounds", () => {
+  const state = createConditionState();
+  state.conditionTree.set(presetCondition(host)!);
+  state.filterByRange("Timestamp", "old-start", "old-end");
+  const period = rangeGroup(state, 1);
+  state.moveNode(period.children[2].id, -1);
+  state.filterByRange("Timestamp", "new-start", "new-end");
+  assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [host, range("Timestamp", "new-start", "new-end")] });
+});
+
 test("full timeline periods preserve a separately owned time-analysis range even on the same column", () => {
   const state = createConditionState();
   state.filterByRange("Timestamp", "timeline-start", "timeline-end");
