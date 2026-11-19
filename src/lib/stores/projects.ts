@@ -15,6 +15,7 @@ export interface ProjectsState {
   deletingProjectIds: string[];
   projectsError: string;
   isLoadingDetail: boolean;
+  detailError: string;
   creating: boolean;
   projectsLoaded: boolean;
   pendingDescription: string;
@@ -51,7 +52,7 @@ export function createProjectController(backend: Backend) {
   const state = writable<ProjectsState>({
     projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
     isLoadingProjects: false, deletingProjectIds: [], projectsError: "", isLoadingDetail: false, creating: false,
-    projectsLoaded: false, pendingDescription: "", pendingFilePaths: [],
+    projectsLoaded: false, detailError: "", pendingDescription: "", pendingFilePaths: [],
     pendingDelimiter: "", pendingRestoreAnnotations: false,
     importProgress: null, importFailures: [],
   });
@@ -124,6 +125,7 @@ export function createProjectController(backend: Backend) {
       selectedProjectId: nextId,
       projectDetail: selectedExists ? value.projectDetail : null,
       isLoadingDetail: selectedExists ? value.isLoadingDetail : !!nextId,
+      detailError: selectedExists ? value.detailError : "",
     }));
     if (!selectedExists && nextId) await loadProjectDetail(nextId);
   }
@@ -132,7 +134,7 @@ export function createProjectController(backend: Backend) {
     if (disposed) return;
     const generation = ++detailGeneration;
     state.update((value) => ({
-      ...value, selectedProjectId: projectId, projectDetail: null, isLoadingDetail: true,
+      ...value, selectedProjectId: projectId, projectDetail: null, isLoadingDetail: true, detailError: "",
       openProjectIds: value.openProjectIds.includes(projectId)
         ? value.openProjectIds : [...value.openProjectIds, projectId],
     }));
@@ -143,10 +145,11 @@ export function createProjectController(backend: Backend) {
       // ProjectView intentionally fetches fresh pages. Keeping the import seed
       // here would retain another row payload without ever displaying it.
       const detail = { ...loaded, initial_rows: [] };
-      state.update((value) => ({ ...value, projectDetail: detail, isLoadingDetail: false }));
+      state.update((value) => ({ ...value, projectDetail: detail, isLoadingDetail: false, detailError: "" }));
     } catch (error) {
       if (!isCurrent()) return;
-      state.update((value) => ({ ...value, projectDetail: null, isLoadingDetail: false }));
+      state.update((value) => ({ ...value, projectDetail: null, isLoadingDetail: false,
+        detailError: errorMessage(error, "Could not open the saved project.") }));
       throw error;
     }
   }
@@ -193,7 +196,7 @@ export function createProjectController(backend: Backend) {
     const nextId = openProjectIds[Math.min(index, openProjectIds.length - 1)] ?? null;
     state.update((value) => ({
       ...value, openProjectIds, selectedProjectId: nextId,
-      projectDetail: null, isLoadingDetail: !!nextId,
+      projectDetail: null, isLoadingDetail: !!nextId, detailError: "",
     }));
     if (nextId) await loadProjectDetail(nextId);
   }
@@ -333,7 +336,7 @@ export function createProjectController(backend: Backend) {
       state.update(value => ({ ...value, temporaryProjectIds: [...temporaryProjects.keys()],
         projects: value.projects.filter(project => project.meta.id !== id),
         openProjectIds: value.openProjectIds.filter(projectId => projectId !== id),
-        ...(value.selectedProjectId === id ? { selectedProjectId: null, projectDetail: null, isLoadingDetail: false } : {}) }));
+        ...(value.selectedProjectId === id ? { selectedProjectId: null, projectDetail: null, isLoadingDetail: false, detailError: "" } : {}) }));
       await afterClose();
     }
   }
@@ -366,7 +369,7 @@ export function createProjectController(backend: Backend) {
     temporaryProjects.clear();
     state.update((value) => ({
       ...value, projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null,
-      projectDetail: null, isLoadingProjects: false, deletingProjectIds: [], isLoadingDetail: false,
+      projectDetail: null, isLoadingProjects: false, deletingProjectIds: [], isLoadingDetail: false, detailError: "",
       pendingFilePaths: [], pendingRestoreAnnotations: false,
       creating: false, importProgress: null, importFailures: [],
     }));

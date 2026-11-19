@@ -218,13 +218,23 @@
     }
   };
 
+  const readProject = async (read: () => Promise<void>, fallback: string) => {
+    try { await read(); return true; }
+    catch (error) {
+      // Navigation still drains before close; a recoverable read is not a failed save.
+      console.error(error);
+      showToast(errorMessage(error, fallback), 'error');
+      return false;
+    }
+  };
+
   const handleRefreshRequest = async () => {
     if (editsBlocked() || !canLeaveProject()) return;
     navigationVersion += 1;
     try {
       await acceptSave(async () => {
         captureActive();
-        await projectController.refreshSelected();
+        await readProject(() => projectController.refreshSelected(), 'Failed to refresh project data.');
         await tick();
       });
     } catch (error) {
@@ -239,8 +249,9 @@
     try {
       await acceptSave(async () => {
         captureActive();
-        await projectController.selectProject(projectId);
-        sidebarOpen = false;
+        if (await readProject(() => projectController.selectProject(projectId), 'Failed to load project data.')) {
+          sidebarOpen = false;
+        }
         await tick();
       });
     } catch (error) {
@@ -259,7 +270,7 @@
           pendingDeletions.add(projectId);
           try { await projectController.deleteProject(projectId, tick); }
           finally { pendingDeletions.delete(projectId); }
-        } else await projectController.closeProject(projectId);
+        } else await readProject(() => projectController.closeProject(projectId), 'Failed to load the next project.');
         sessions.delete(projectId);
         await tick();
       });
@@ -379,6 +390,15 @@
         <div class="flex flex-1 items-center justify-center text-muted">
           Loading project…
         </div>
+      {:else if $projectState.detailError}
+        <div class="project-load-error" role="alert">
+          <h2>Could not open project</h2>
+          <p>{$projectState.detailError}</p>
+          <button type="button" aria-label="Retry loading project" on:click={() => {
+            const projectId = $projectState.selectedProjectId;
+            if (projectId) void handleSelectProject(projectId);
+          }}>Retry</button>
+        </div>
       {:else if $projectState.projectDetail}
         {#key $projectState.selectedProjectId}
         <div class="flex-1 min-h-0" id={`project-panel-${$projectState.selectedProjectId}`} role="tabpanel" aria-labelledby={`project-tab-${$projectState.selectedProjectId}`}>
@@ -423,3 +443,11 @@
       on:retry={() => { if (closeListenerError) void startCloseListener(); else void close.retry(); }} />
   {/if}
   <Toast />
+
+<style>
+  .project-load-error { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; min-width: 0; }
+  .project-load-error h2 { margin: 0; color: var(--fg); font-size: 14px; }
+  .project-load-error p { margin: 0; max-width: 48rem; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .project-load-error button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 12px; }
+  .project-load-error button:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 2px; }
+</style>

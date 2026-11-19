@@ -131,6 +131,63 @@ test("late project details cannot replace the active tab", async () => {
   assert.deepEqual(get(controller.state).openProjectIds, ["a", "b"]);
 });
 
+test("an unreadable selected case retains an owned error and retries without another import or list scan", async () => {
+  const retry = deferred<LoadProjectResponse>();
+  const loads: string[] = [];
+  let lists = 0, failed = true;
+  const f = fixture({
+    listProjects: async () => { lists += 1; return [summary("a"), summary("b")]; },
+    loadProject: async id => {
+      loads.push(id);
+      if (id === "b") return detail(id);
+      if (failed) throw new Error("Project data file missing.");
+      return retry.promise;
+    },
+    createProject: async () => { throw new Error("Retry must not import the source again"); },
+  });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("b");
+  await assert.rejects(f.controller.selectProject("a"), /Project data file missing/);
+  let state = get(f.controller.state);
+  assert.equal(state.selectedProjectId, "a");
+  assert.equal(state.projectDetail, null, "a failed case must never display the previous case's data");
+  assert.equal(state.isLoadingDetail, false);
+  assert.equal(state.detailError, "Project data file missing.");
+  await f.controller.loadProjects(true);
+  assert.equal(get(f.controller.state).detailError, "Project data file missing.", "refreshing Recent does not erase the failed case's reason");
+  failed = false;
+  const retrying = f.controller.selectProject("a");
+  assert.equal(get(f.controller.state).detailError, "");
+  assert.equal(get(f.controller.state).isLoadingDetail, true);
+  retry.resolve(detail("a"));
+  await retrying;
+  state = get(f.controller.state);
+  assert.equal(state.detailError, "");
+  assert.equal(state.projectDetail?.project.meta.id, "a");
+  assert.deepEqual(loads, ["b", "a", "a"]);
+  assert.equal(lists, 2, "retry reads only the selected saved case");
+  f.controller.dispose();
+});
+
+test("late case-load failures cannot replace a newer error and closing the failed case clears it", async () => {
+  const old = deferred<LoadProjectResponse>();
+  const f = fixture({ loadProject: id => id === "a" ? old.promise : Promise.reject("Current case is unreadable.") });
+  const first = f.controller.selectProject("a");
+  await assert.rejects(f.controller.selectProject("b"));
+  assert.equal(get(f.controller.state).detailError, "Current case is unreadable.");
+  old.reject(new Error("Stale case load failed."));
+  await first;
+  assert.equal(get(f.controller.state).selectedProjectId, "b");
+  assert.equal(get(f.controller.state).detailError, "Current case is unreadable.");
+  await f.controller.closeProject("a");
+  assert.equal(get(f.controller.state).detailError, "Current case is unreadable.");
+  await f.controller.closeProject("b");
+  assert.equal(get(f.controller.state).selectedProjectId, null);
+  assert.equal(get(f.controller.state).detailError, "");
+  f.controller.dispose();
+  assert.equal(get(f.controller.state).detailError, "");
+});
+
 test("closing a loading tab invalidates both its late success and late failure", async () => {
   for (const reject of [false, true]) {
     const response = deferred<LoadProjectResponse>();

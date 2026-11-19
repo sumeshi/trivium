@@ -14,6 +14,47 @@ def _recent(web, name: str):
     return web.script("return [...document.querySelectorAll('.project-row')].find(row=>row.querySelector('.project-name')?.textContent.trim()===arguments[0])??null;", name)
 
 
+def _failed_reload_retry(web, owner: str, root: Path, evidence: Path, report: dict) -> None:
+    web.named("Close workspace menu", ".workspace-drawer")
+    wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "Recent closes before reloading")
+    paths = list(root.glob(f"**/projects/{owner}/data.parquet"))
+    assert len(paths) == 1, paths
+    source = paths[0]
+    missing = source.with_name("data.parquet-unavailable")
+    source.rename(missing)
+    try:
+        start = len(web.trace())
+        web.named("Workspace options")
+        web.named("Reload saved project", ".workspace-options")
+        wait_for(lambda: web.script("return document.querySelector('.project-load-error[role=alert]')?.textContent??'';"),
+                 lambda text: "Project data file missing." in text and "Retry" in text,
+                 "an actual case I/O failure keeps a reason and retry control in the workspace")
+        assert web.state()["active"] == f"project-tab-{owner}"
+        assert not web.script("return !!document.querySelector('.project-view');"), "A failed reload must not show stale evidence"
+        errors = [entry for entry in web.trace()[start:] if entry["name"] == "load_project"
+                  and entry["request"].get("projectId") == owner and entry.get("error")]
+        assert len(errors) == 1 and errors[0]["error"] == "Project data file missing.", errors
+        report.setdefault("boundary_expected_errors", []).append({key: errors[0][key] for key in ("name", "request", "error")})
+        web.screenshot(evidence / "project-load-error-retry.png")
+        missing.rename(source)
+        retry_start = len(web.trace())
+        web.named("Retry loading project")
+        web.applied(projectId=owner)
+        web.results(2)
+        calls = web.trace()[retry_start:]
+        assert len([entry for entry in calls if entry["name"] == "load_project" and entry["request"].get("projectId") == owner]) == 1
+        assert not any(entry["name"] in {"create_project", "list_projects"} for entry in calls), "Retry reopens the saved case without importing or rescanning Recent"
+        assert not web.script("return !!document.querySelector('.project-load-error');")
+        row = web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 1})["rows"][0]
+        assert row["flag"] == "critical" and row["memo"] == "Keep until deletion is confirmed." and row["bookmarked"], row
+        report["project_load_retry"] = {"actual_missing_case_data": True, "persistent_reason": True,
+            "stale_rows_hidden": True, "explicit_retry_only": True, "annotations_preserved": True}
+    finally:
+        if missing.exists():
+            missing.rename(source)
+    web.named("Open project menu")
+
+
 def verify_recent_delete(web, data: dict, root: Path, evidence: Path, report: dict) -> None:
     outer_query, outer_total = web.query(), web.state()["total"]
     source = root / f"recent-delete-{uuid.uuid4().hex[:8]}.csv"
@@ -51,6 +92,7 @@ def verify_recent_delete(web, data: dict, root: Path, evidence: Path, report: di
         _key(web, "\ue00c")
         wait_for(lambda: web.script("return !document.querySelector('.delete-project-dialog');"), bool, "Escape cancels deletion")
         assert _recent(web, name) and web.state()["active"] == before
+        _failed_reload_retry(web, owner, root, evidence, report)
 
         web.script("window.__workspaceHold={name:'list_projects',ready:false};")
         web.named("Refresh projects", ".workspace-drawer")
