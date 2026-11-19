@@ -68,6 +68,8 @@ test("direct IOC Apply freezes the rule and commits once with its internally che
 
 test("IOC rules cannot annotate everything with an empty query or silently choose a flag", () => {
   assert.throws(() => iocBulkArgs("case", { ...rule, query: "  " }), /query/);
+  assert.equal(iocEntryError({ ...rule, query: "" }), "Enter a query first.");
+  assert.throws(() => prepareIocEntries([rule, { ...rule, query: "" }]), /IOC rule 2: Enter a query first\./);
   assert.throws(() => iocBulkArgs("case", { ...rule, flag: "" as IocEntry["flag"] }), /flag/);
   assert.equal(Object.hasOwn(iocBulkArgs("case", { ...rule, tag: " " }), "add_tags"), false);
 });

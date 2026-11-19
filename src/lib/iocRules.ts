@@ -78,7 +78,7 @@ export function prepareIocEntries(entries: readonly IocEntry[]): IocEntry[] {
     }
     const query = entry.query.trim();
     if (!query) {
-      if (tag) throw new Error(`Enter a query for rule ${index + 1}.`);
+      if (tag) throw new Error(`${location}: Enter a query first.`);
       return [];
     }
     return [{ flag, tag, query: requireIocQuery(query, location) }];
