@@ -10,6 +10,7 @@
   export let projects: ProjectSummary[];
   export let selectedProjectId: string | null;
   export let isLoadingProjects: boolean;
+  export let deletingProjectIds: string[] = [];
   export let projectsError = '';
   export let creating: boolean;
   export let pendingDescription: string;
@@ -156,11 +157,13 @@
       <p class="import-help">Source file is opened read-only.</p>
     </section>
 
-    <section class="project-section">
+    <section class="project-section" aria-label="Recent projects" aria-busy={isLoadingProjects}>
       <div class="section-head">
         <h3>Recent</h3>
+        {#if isLoadingProjects && projects.length > 0}<span class="project-refresh-state" role="status">Refreshing…</span>{/if}
         <button
           class="icon-button"
+          disabled={isLoadingProjects}
           on:click={() => dispatch('loadProjects')}
           aria-label="Refresh projects"
           title="Refresh projects"
@@ -174,7 +177,7 @@
       {#if projectsError}
         <p class="project-load-error" role="alert">{projectsError}</p>
       {/if}
-      {#if isLoadingProjects}
+      {#if isLoadingProjects && projects.length === 0}
         <p class="empty-list">Loading projects…</p>
       {:else if projects.length === 0 && !projectsError}
         <div class="empty-list">
@@ -183,18 +186,20 @@
         </div>
       {:else if projects.length > 0}
         <ul class="project-list">
-          {#each projects as project}
-            <li class="project-row">
+          {#each projects as project (project.meta.id)}
+            {@const deleting = deletingProjectIds.includes(project.meta.id)}
+            <li class="project-row" aria-busy={deleting}>
               <button
                 type="button"
                 class="project-card"
                 class:selected={project.meta.id === selectedProjectId}
+                disabled={deleting}
                 on:click={() => dispatch('selectProject', project.meta.id)}
               >
                 <div class="project-top">
                   <span class="project-name" title={project.meta.source_file_name || project.meta.name}>{project.meta.name}</span>
                   <span class="project-date">
-                    {dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
+                    {deleting ? 'Deleting…' : dayjs(project.meta.created_at).format('YYYY-MM-DD HH:mm')}
                   </span>
                 </div>
                 {#if project.meta.source_sha256}
@@ -214,6 +219,7 @@
               <button
                 type="button"
                 class="delete-button"
+                disabled={deleting}
                 on:click={(event) => {
                   event.stopPropagation();
                   dispatch('deleteProject', project.meta.id);
@@ -374,6 +380,8 @@
   .pending-files li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .import-failures { color: var(--danger); overflow-wrap: anywhere; }
   .project-load-error { margin: 0; color: var(--danger); font-size: 11px; overflow-wrap: anywhere; }
+  .project-refresh-state { margin-left: auto; color: var(--muted); font-size: 10px; }
+  .project-card:disabled, .delete-button:disabled { opacity: .6; cursor: progress; }
 
   .pending-dot {
     width: 6px;
@@ -433,6 +441,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
   }
 
   .section-head h3 {

@@ -284,7 +284,80 @@ test("a failed deletion restores its open tab, view and selection without deleti
   assert.equal(get(f.controller.state).selectedProjectId, "a");
   assert.equal(get(f.controller.state).projectDetail?.project.meta.id, "a");
   assert.equal(get(f.controller.state).projects.length, 3);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, []);
   await f.controller.selectProject("a"); // Deletion admission was released after failure.
+  f.controller.dispose();
+});
+
+test("Recent retains pending deletions and removes only the acknowledged case without rescanning", async () => {
+  const deletion = deferred<void>();
+  let lists = 0;
+  const f = fixture({
+    listProjects: async () => { lists += 1; return [summary("a"), summary("b"), summary("c")]; },
+    deleteProject: () => deletion.promise,
+  });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  const deleting = f.controller.deleteProject("a");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(get(f.controller.state).projects.map(project => project.meta.id), ["a", "b", "c"]);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, ["a"]);
+  assert.equal(get(f.controller.state).isLoadingProjects, false);
+  deletion.resolve();
+  await deleting;
+  assert.deepEqual(get(f.controller.state).projects.map(project => project.meta.id), ["b", "c"]);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, []);
+  assert.equal(lists, 1, "A confirmed deletion updates its known ID without replacing the entire Recent list");
+  f.controller.dispose();
+});
+
+test("a delayed Recent refresh cannot resurrect a case after its deletion commits", async () => {
+  const deletion = deferred<void>();
+  const staleList = deferred<ProjectSummary[]>();
+  let lists = 0;
+  const f = fixture({
+    listProjects: () => ++lists === 1 ? Promise.resolve([summary("a"), summary("b"), summary("c")]) : staleList.promise,
+    deleteProject: () => deletion.promise,
+  });
+  await f.controller.loadProjects();
+  await f.controller.selectProject("a");
+  await f.controller.selectProject("b");
+  const deleting = f.controller.deleteProject("a");
+  await new Promise(resolve => setImmediate(resolve));
+  const refreshing = f.controller.loadProjects(true);
+  assert.equal(get(f.controller.state).isLoadingProjects, true);
+  assert.equal(get(f.controller.state).projects.length, 3);
+  deletion.resolve();
+  await deleting;
+  staleList.resolve([summary("a"), summary("b"), summary("c")]);
+  await refreshing;
+  assert.deepEqual(get(f.controller.state).projects.map(project => project.meta.id), ["b", "c"]);
+  assert.equal(get(f.controller.state).selectedProjectId, "b");
+  assert.deepEqual(get(f.controller.state).openProjectIds, ["b"]);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, []);
+  assert.equal(get(f.controller.state).isLoadingProjects, false);
+  f.controller.dispose();
+});
+
+test("discovery keeps an in-flight deletion in place even if storage has already removed it", async () => {
+  const deletion = deferred<void>();
+  let lists = 0;
+  const f = fixture({
+    listProjects: async () => ++lists === 1
+      ? [summary("a"), summary("b"), summary("c")]
+      : [summary("b"), summary("c")],
+    deleteProject: () => deletion.promise,
+  });
+  await f.controller.loadProjects();
+  const deleting = f.controller.deleteProject("a");
+  await new Promise(resolve => setImmediate(resolve));
+  await f.controller.loadProjects(true);
+  assert.deepEqual(get(f.controller.state).projects.map(project => project.meta.id), ["a", "b", "c"]);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, ["a"]);
+  deletion.resolve();
+  await deleting;
+  assert.deepEqual(get(f.controller.state).projects.map(project => project.meta.id), ["b", "c"]);
+  assert.deepEqual(get(f.controller.state).deletingProjectIds, []);
   f.controller.dispose();
 });
 

@@ -13,6 +13,7 @@
   import ProjectTabs from './lib/components/app/ProjectTabs.svelte';
   import Toast from './lib/components/app/Toast.svelte';
   import CloseDialog from './lib/components/app/CloseDialog.svelte';
+  import DeleteProjectDialog from './lib/components/app/DeleteProjectDialog.svelte';
   import FileDropOverlay from './lib/components/app/FileDropOverlay.svelte';
   import { initWallpaper } from './lib/appearance';
   import { createExtractScan } from './lib/extractScan';
@@ -52,6 +53,7 @@
   });
 
   let sidebarOpen = true;
+  let deleteCandidate: { id: string; name: string } | null = null;
   let activeView: ProjectView | null = null;
   let closeReady = false;
   let closeListenerError = '';
@@ -85,7 +87,7 @@
     blocked: () => !closeReady ? 'Wait for the app to be ready.'
       : close.isBlocked() ? 'Finish the close request before adding files.'
       : $projectState.creating ? 'An import is already running.'
-      : document.querySelector('.cell-dialog-backdrop,.appearance-backdrop') ? 'Close the dialog before adding files.' : null,
+      : document.querySelector('.cell-dialog-backdrop,.appearance-backdrop,.delete-project-backdrop') ? 'Close the dialog before adding files.' : null,
     select: (paths) => {
       projectController.setPendingFiles(paths);
       sidebarOpen = true;
@@ -95,6 +97,7 @@
   });
   const fileDropState = fileDrop.state;
   $: if (closing) fileDrop.clear();
+  $: if (closing) deleteCandidate = null;
   const sessions = new Map<string, WorkspaceSession>();
   const pendingDeletions = new Set<string>();
   $: openProjects = $projectState.openProjectIds.flatMap((id) => {
@@ -179,12 +182,20 @@
     }
   };
 
+  const requestDeleteProject = (projectId: string) => {
+    if (editsBlocked() || deleteCandidate || $projectState.deletingProjectIds.includes(projectId)) return;
+    const project = $projectState.projects.find(project => project.meta.id === projectId);
+    if (project) deleteCandidate = { id: projectId, name: project.meta.source_file_name || project.meta.name };
+  };
+
+  const confirmDeleteProject = () => {
+    const candidate = deleteCandidate;
+    deleteCandidate = null;
+    if (candidate) void deleteProject(candidate.id);
+  };
+
   const deleteProject = async (projectId: string) => {
     if (editsBlocked()) return;
-    const confirmed = window.confirm('Delete this project? The imported copy will be removed.');
-    if (!confirmed) {
-      return;
-    }
     navigationVersion += 1;
     if ($extractState.pending?.request.projectId === projectId) extractions.cancel();
     try {
@@ -324,7 +335,7 @@
 
 <svelte:window on:blur={() => fileDrop.clear()} on:keydown={(event) => { if (event.key === 'Escape') fileDrop.clear(); }} />
 
-<div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle'}>
+<div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle' || Boolean(deleteCandidate)}>
   <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId}
     temporaryProjectIds={$projectState.temporaryProjectIds}
@@ -335,6 +346,7 @@
       projects={$projectState.projects.filter(project => !$projectState.temporaryProjectIds.includes(project.meta.id))}
       selectedProjectId={$projectState.selectedProjectId}
       isLoadingProjects={$projectState.isLoadingProjects}
+      deletingProjectIds={$projectState.deletingProjectIds}
       projectsError={$projectState.projectsError}
       creating={$projectState.creating}
       pendingDescription={$projectState.pendingDescription}
@@ -348,7 +360,7 @@
       on:delimiterChange={(e) => projectController.setPendingDelimiter(e.detail)}
       on:restoreAnnotationsChange={(e) => projectController.setPendingRestoreAnnotations(e.detail)}
       on:selectProject={(e) => handleSelectProject(e.detail)}
-      on:deleteProject={(e) => deleteProject(e.detail)}
+      on:deleteProject={(e) => requestDeleteProject(e.detail)}
       on:pickCsv={pickCsv}
       on:createProject={createProject}
       on:loadProjects={() =>
@@ -397,6 +409,10 @@
     {/if}
   </main>
 </div>
+
+{#if deleteCandidate}
+  <DeleteProjectDialog name={deleteCandidate.name} on:cancel={() => deleteCandidate = null} on:confirm={confirmDeleteProject} />
+{/if}
 
 {#if $fileDropState}<FileDropOverlay state={$fileDropState} />{/if}
 

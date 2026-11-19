@@ -12,6 +12,7 @@ export interface ProjectsState {
   selectedProjectId: string | null;
   projectDetail: LoadProjectResponse | null;
   isLoadingProjects: boolean;
+  deletingProjectIds: string[];
   projectsError: string;
   isLoadingDetail: boolean;
   creating: boolean;
@@ -49,7 +50,7 @@ export function createProjectController(backend: Backend) {
   const temporaryProjects = new Map<string, ProjectSummary>();
   const state = writable<ProjectsState>({
     projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null, projectDetail: null,
-    isLoadingProjects: false, projectsError: "", isLoadingDetail: false, creating: false,
+    isLoadingProjects: false, deletingProjectIds: [], projectsError: "", isLoadingDetail: false, creating: false,
     projectsLoaded: false, pendingDescription: "", pendingFilePaths: [],
     pendingDelimiter: "", pendingRestoreAnnotations: false,
     importProgress: null, importFailures: [],
@@ -100,9 +101,17 @@ export function createProjectController(backend: Backend) {
       throw error;
     }
     if (disposed || generation !== listGeneration) return;
-    const projects = [...savedProjects.filter(project => !temporaryProjects.has(project.meta.id)), ...temporaryProjects.values()];
-    const existing = new Set(projects.map((project) => project.meta.id));
     const current = get(state);
+    const projects = [...savedProjects.filter(project => !temporaryProjects.has(project.meta.id)), ...temporaryProjects.values()];
+    const discovered = new Set(projects.map(project => project.meta.id));
+    // A native delete may have committed while its response is still pending.
+    // Keep its existing row in place until this controller acknowledges it.
+    current.projects.forEach((project, index) => {
+      if (deletingProjects.has(project.meta.id) && !discovered.has(project.meta.id)) {
+        projects.splice(Math.min(index, projects.length), 0, project);
+      }
+    });
+    const existing = new Set(projects.map((project) => project.meta.id));
     const openProjectIds = current.openProjectIds.filter((id) => existing.has(id));
     const selectedExists = !!current.selectedProjectId && existing.has(current.selectedProjectId);
     const nextId = selectedExists ? current.selectedProjectId : openProjectIds[0] ?? null;
@@ -264,6 +273,8 @@ export function createProjectController(backend: Backend) {
     const index = before.openProjectIds.indexOf(projectId);
     const wasSelected = before.selectedProjectId === projectId;
     deletingProjects.add(projectId);
+    listGeneration += 1;
+    state.update(value => ({ ...value, deletingProjectIds: [...deletingProjects], isLoadingProjects: false }));
     let closedGeneration = detailGeneration;
     let adjacentLoadFailed = false;
     try {
@@ -276,6 +287,12 @@ export function createProjectController(backend: Backend) {
       // The app passes tick so the old ProjectView enqueues its final save.
       await afterClose();
       await backend.deleteProject(projectId);
+      // Publish only a confirmed deletion. A discovery started before this
+      // commit must not put the removed case back into Recent.
+      listGeneration += 1;
+      if (!disposed) state.update(value => ({ ...value,
+        projects: value.projects.filter(project => project.meta.id !== projectId), isLoadingProjects: false,
+      }));
       forgetTemporaryProject(projectId);
     } catch (error) {
       if (!disposed && index >= 0) {
@@ -295,8 +312,8 @@ export function createProjectController(backend: Backend) {
       throw error;
     } finally {
       deletingProjects.delete(projectId);
+      if (!disposed) state.update(value => ({ ...value, deletingProjectIds: [...deletingProjects] }));
     }
-    await loadProjects(true);
     return { adjacentLoadFailed };
   }
 
@@ -349,7 +366,7 @@ export function createProjectController(backend: Backend) {
     temporaryProjects.clear();
     state.update((value) => ({
       ...value, projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null,
-      projectDetail: null, isLoadingProjects: false, isLoadingDetail: false,
+      projectDetail: null, isLoadingProjects: false, deletingProjectIds: [], isLoadingDetail: false,
       pendingFilePaths: [], pendingRestoreAnnotations: false,
       creating: false, importProgress: null, importFailures: [],
     }));

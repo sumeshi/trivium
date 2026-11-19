@@ -46,6 +46,7 @@ from investigation_filter_checks import verify_investigation_filters
 from csp_checks import verify_content_policy
 from boundary_integrity_checks import verify_boundary_integrity
 from annotation_restore_checks import verify_annotation_restore
+from recent_delete_checks import verify_recent_delete
 from storage_responsiveness_checks import verify_storage_responsiveness
 from graceful_close_checks import verify_graceful_close
 from review_fixes_checks import verify_review_fixes
@@ -979,6 +980,7 @@ def main() -> None:
                 ("normal close drains saves before exit", lambda: verify_graceful_close(app, data, root, evidence, report)),
                 ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
                 ("explicit GUI annotation restore", lambda: verify_annotation_restore(web, data, root, evidence, report)),
+                ("Recent deletion confirmation and committed rows", lambda: verify_recent_delete(web, data, root, evidence, report)),
                 ("responsive storage writes under SQLite lock", lambda: verify_storage_responsiveness(web, data, root, evidence, report)),
                 ("native content security policy", lambda: verify_content_policy(web, report)),
                 ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
@@ -1025,7 +1027,7 @@ def main() -> None:
                     continue
                 if args.memo_ime_only and stage != "note text and composition confirmation":
                     continue
-                if args.boundary_only and stage not in {"IOC validation and ordered annotation export", "explicit GUI annotation restore", "responsive storage writes under SQLite lock"}:
+                if args.boundary_only and stage not in {"IOC validation and ordered annotation export", "explicit GUI annotation restore", "Recent deletion confirmation and committed rows", "responsive storage writes under SQLite lock"}:
                     continue
                 if args.integrity_only and stage not in {"native content security policy", "failed annotation reconciliation", "analysis preserves investigation rules"}:
                     continue
