@@ -85,6 +85,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     pendingAnnotations.clear();
     lastAnnotationRevision = -1;
     needsAnnotationRefresh = false;
+    annotationBlockedPages.clear();
   }
   const totalRows = writable(0);
   /** Rows matching the applied QuerySpec. Sole source for the virtual row count. */
@@ -192,6 +193,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   let lastAnnotationRevision = -1;
   const annotationRefreshRequested = writable(0);
   let needsAnnotationRefresh = false;
+  const annotationBlockedPages = new Set<number>();
 
   function annotationScopeKey(): string {
     const filters = get(appliedFilters);
@@ -238,7 +240,15 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     const flag = normalizeFlag(entry.flag);
     const delta = Number(Boolean(flag)) - Number(Boolean(state.displayedFlag));
     state.displayedFlag = flag;
+    const previouslyBlocked = get(largePages);
     updateCachedRow(rowIndex, (cached) => applyAnnotationEntry(cached, entry));
+    const blocked = get(largePages);
+    if (blocked !== previouslyBlocked) {
+      for (const page of blocked) {
+        if (!previouslyBlocked.has(page)) annotationBlockedPages.add(page);
+      }
+      if (annotationBlockedPages.size > 0) needsAnnotationRefresh = true;
+    }
     // An optimistic note/tag can exceed the cache bound and remove this page.
     // Retry once after pending saves settle, when a rollback or smaller retry
     // can fit again. Do not repeatedly reload the oversized pending value.
@@ -302,6 +312,13 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
       if (isCurrent() && state.patches.size === 0) {
         pendingAnnotations.delete(rowIndex);
         if (pendingAnnotations.size === 0 && needsAnnotationRefresh) {
+          // Only optimistic annotation growth created these markers. Permit one
+          // fresh read after settlement, including pages the user scrolled away
+          // from. A truly oversized saved page marks itself again when read.
+          if (annotationBlockedPages.size > 0) {
+            largePages.update(pages => new Set([...pages].filter(page => !annotationBlockedPages.has(page))));
+            annotationBlockedPages.clear();
+          }
           needsAnnotationRefresh = false;
           annotationRefreshRequested.update((value) => value + 1);
         }

@@ -11,7 +11,8 @@ import { createWorkspaceNavigation } from "./workspaceNavigation.ts";
 import { createOwnedRequests } from "./workspaceRequests.ts";
 import { createWorkspaceAnnotationObserver } from "./workspaceAnnotations.ts";
 import { markAnnotationsChanged, markBulkAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
-import { virtualWindow } from "./virtualScroll.ts";
+import { maxScrollTop, virtualWindow } from "./virtualScroll.ts";
+import { estimatePageBytes } from "./pageCache.ts";
 import { createWorkspaceView } from "./workspaceView.ts";
 import { effectiveSearchScopeKey } from "./searchScope.ts";
 
@@ -522,6 +523,68 @@ for (const scenario of ["failed", "queued-small", "later-small"] as const) {
     queries.ensureRangeLoaded(0, 1);
     await settle();
     assert.equal(reads.length, completedReads);
+    workspace.dispose();
+  });
+}
+
+for (const succeeds of [false, true]) {
+  test(`a modest note on a wide page recovers after a native resize and save ${succeeds ? "success" : "failure"}`, async () => {
+    // A real 26-row tail page with 1,259 complete 256-character source
+    // columns fits just below the bound. A normal 10 KiB note pushes it over.
+    const cells = Object.fromEntries(Array.from({ length: 1259 }, (_, index) =>
+      [`c${index}`, { kind: 'string' as const, text: 'x'.repeat(256), truncated: false }]));
+    const source = Array.from({ length: 26 }, (_, index) => ({ ...row(PAGE_SIZE + index), cells }));
+    const cached = source.map(normalizeRow);
+    assert.equal(16 * 1024 * 1024 - estimatePageBytes(cached), 4096);
+    const mutation = deferred<UpdateFlagResult>();
+    const offsets: number[] = [];
+    const largeEntry = { flag: "", memo: "n".repeat(10 * 1024), tags: [], bookmarked: false };
+    const { workspace, queries } = setup({ updateFlag: () => mutation.promise,
+      queryProjectRows: async (args) => {
+        const offset = args.offset ?? 0;
+        offsets.push(offset);
+        const rows = offset === PAGE_SIZE
+          ? source.map((entry, index) => index === 0 && succeeds ? { ...entry, ...largeEntry } : entry)
+          : [row(offset)];
+        return { ...response(offset, rows, 276),
+          annotation_revision: succeeds ? 1 : 0 };
+      },
+    }, `offscreen-oversized-${succeeds}`, 276);
+    workspace.totalFilteredRows.set(276);
+    const height = get(workspace.rowHeight);
+    workspace.viewportHeight.set(25 * height);
+    workspace.scrollTop.set(maxScrollTop(276, 25 * height, height));
+    assert.equal(workspace.currentVisiblePage(), 1);
+    workspace.registerLoadedPage(0, 0, [normalizeRow(row(0))]);
+    workspace.registerLoadedPage(1, PAGE_SIZE, cached);
+    const original = cached[0];
+    const saving = workspace.saveAnnotation(get(workspace.currentProjectId)!, original, { memo: largeEntry.memo })
+      .then(() => true, () => false);
+    assert.deepEqual([...get(workspace.largePages)], [1]);
+    // Native window resizing remains available while the note dialog saves.
+    // DataTable clamps its offset to this smaller physical maximum, moving the
+    // visible start to the preceding page without a table gesture behind it.
+    workspace.viewportHeight.set(28 * height);
+    workspace.scrollTop.set(maxScrollTop(276, 28 * height, height));
+    assert.equal(workspace.currentVisiblePage(), 0);
+    await settle();
+    assert.deepEqual(offsets, [], "an oversized pending value remains blocked during resize");
+    if (succeeds) mutation.resolve({ entry: largeEntry, revision: 1, flaggedRecords: 0 });
+    else mutation.reject(new Error("disk full"));
+    assert.equal(await saving, succeeds);
+    await settle();
+    assert.deepEqual(offsets, [0], "settlement refreshes only the currently visible page");
+    assert.equal(get(workspace.largePages).has(1), false, "the offscreen transient marker must not block a later visit");
+    workspace.viewportHeight.set(25 * height);
+    workspace.scrollTop.set(maxScrollTop(276, 25 * height, height));
+    queries.ensureRangeLoaded(PAGE_SIZE, 276);
+    await settle();
+    assert.deepEqual(offsets, [0, PAGE_SIZE]);
+    assert.equal(get(workspace.largePages).has(1), succeeds);
+    assert.equal(get(workspace.rowsCache).has(PAGE_SIZE), !succeeds);
+    queries.ensureRangeLoaded(PAGE_SIZE, 276);
+    await settle();
+    assert.deepEqual(offsets, [0, PAGE_SIZE], "a truly oversized stored page must not create a read loop");
     workspace.dispose();
   });
 }

@@ -180,7 +180,12 @@
   $: endIndex = windowGeometry.end;
   $: offsetY = windowGeometry.innerTop;
   $: totalHeight = windowGeometry.height;
-  $: if (!resizingRows) ensureRangeLoaded(startIndex, endIndex);
+  $: if (!resizingRows) {
+    // A settled optimistic edit can unblock an adjacent page while this
+    // rendered range stays unchanged. Retry that range once when it changes.
+    $largePages;
+    ensureRangeLoaded(startIndex, endIndex);
+  }
   $: if (!resizingRows && !pendingScrollEl && $bodyScrollEl
     && maxScrollTop(effectiveTotalRows, $viewportHeight, $rowHeight) >= $scrollTop
     && Math.abs($bodyScrollEl.scrollTop - $scrollTop) > 1) {
