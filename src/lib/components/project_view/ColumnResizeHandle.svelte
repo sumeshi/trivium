@@ -7,7 +7,7 @@
   export let minWidth = MIN_DATA_WIDTH;
   export let maxWidth = MAX_DATA_WIDTH;
   export let tabIndex = -1;
-  const dispatch = createEventDispatcher<{ resize: { width: number } }>();
+  const dispatch = createEventDispatcher<{ resize: { width: number }; fit: void }>();
   let start: { x: number; width: number } | null = null;
   let pendingWidth = width;
   let frame: number | null = null;
@@ -54,11 +54,17 @@
     window.addEventListener('blur', finish);
     window.addEventListener('trivium-pause-gestures', finish);
   };
+  const fit = (event: MouseEvent | KeyboardEvent) => {
+    event.preventDefault(); event.stopPropagation();
+    cleanup();
+    dispatch('fit');
+  };
   const keydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && start) {
       cancel(event); event.stopPropagation(); return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'Enter') { fit(event); return; }
     const step = event.shiftKey ? 1 : 10;
     const next = event.key === 'ArrowLeft' ? width - step
       : event.key === 'ArrowRight' ? width + step
@@ -76,8 +82,9 @@
   aria-orientation="horizontal" aria-label={`Resize column ${label}`}
   aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={Math.round(width)}
   aria-valuetext={`${Math.round(width)} pixels`}
-  title={`Resize ${label} (drag or arrow keys)`} draggable="false" tabindex={tabIndex}
-  on:mousedown={begin} on:keydown={keydown} on:keydown on:click|stopPropagation></div>
+  title={`Resize ${label} (drag or arrow keys); double-click or Enter to fit visible rows`} aria-keyshortcuts="Enter"
+  draggable="false" tabindex={tabIndex}
+  on:mousedown={begin} on:dblclick={fit} on:keydown={keydown} on:keydown on:click|stopPropagation></div>
 
 <style>
   .column-resize-handle {

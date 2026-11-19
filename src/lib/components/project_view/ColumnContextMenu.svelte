@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
+  import type { ColumnKind } from '../../types';
 
   export let columnId: string;
   export let label: string;
@@ -7,6 +8,7 @@
   export let y: number;
   export let frozen = false;
   export let displayFormat: 'original' | 'iso' = 'original';
+  export let columnKind: ColumnKind | undefined = undefined;
 
   const dispatch = createEventDispatcher<{
     close: { restoreFocus: boolean };
@@ -22,6 +24,10 @@
   let left = x;
   let top = y;
   const close = (restoreFocus = false) => dispatch('close', { restoreFocus });
+  const toggleDisplayFormat = () => {
+    if (columnKind !== 'datetime') return;
+    dispatch('format', { columnId, format: displayFormat === 'iso' ? 'original' : 'iso' });
+  };
   const outside = (event: MouseEvent) => {
     if (!menu?.contains(event.target as Node)) close();
   };
@@ -53,6 +59,7 @@
 
 <div class="cell-context-menu column-context-menu" bind:this={menu}
   style={`left: ${left}px; top: ${top}px;`} role="menu" aria-label={`Column actions: ${label}`}
+  data-column-kind={columnKind ?? 'unknown'}
   on:keydown={keydown} tabindex="-1">
   <span class="column-menu-label" title={label}>{label}</span>
   <button type="button" role="menuitem" on:click={() => dispatch('search', { columnId })}>
@@ -72,12 +79,14 @@
     on:click={() => frozen ? dispatch('unfreeze') : dispatch('freeze', { columnId })}>
     {frozen ? 'Unfreeze data columns' : 'Freeze columns through this column'}
   </button>
-  <div class="column-menu-separator" role="separator"></div>
-  <button type="button" role="menuitem"
-    title="Changes display only; source values stay unchanged"
-    on:click={() => dispatch('format', { columnId, format: displayFormat === 'iso' ? 'original' : 'iso' })}>
-    {displayFormat === 'iso' ? 'Show original values' : 'Show ISO datetime'}
-  </button>
+  {#if columnKind === 'datetime'}
+    <div class="column-menu-separator" role="separator"></div>
+    <button type="button" role="menuitem"
+      title="Changes display only; source values stay unchanged"
+      on:click={toggleDisplayFormat}>
+      {displayFormat === 'iso' ? 'Show original values' : 'Show ISO datetime'}
+    </button>
+  {/if}
 </div>
 
 <style>

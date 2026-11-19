@@ -8,6 +8,8 @@
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { moveDisplayColumn } from '../../columnLayoutActions';
+  import { columnKindLabel } from '../../columnTypes';
+  import { visibleColumnWidth } from '../../columnAutoFit';
   import TableRow from './TableRow.svelte';
   import ColumnResizeHandle from './ColumnResizeHandle.svelte';
   import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from '../../frozenColumns';
@@ -18,7 +20,7 @@
     STICKY_COLUMNS_WIDTH, MIN_DATA_WIDTH, MAX_DATA_WIDTH, BUFFER,
   } from './state';
   import type { CachedRow, VirtualRow } from './state';
-  import type { CellKind } from '../../types';
+  import type { CellKind, ColumnKind } from '../../types';
   import { headerSelectionState } from '../../selection';
   import CellContextMenu from './CellContextMenu.svelte';
   import ColumnContextMenu from './ColumnContextMenu.svelte';
@@ -90,6 +92,8 @@
   let previousRowHeight = get(rowHeight);
   let resizingRows = false;
   let rowResizeRevision = 0;
+  const emptyColumnKinds: Readonly<Record<string, ColumnKind>> = {};
+  $: columnKinds = $projectDetail?.column_kinds ?? emptyColumnKinds;
 
   const resizeRows = async (height: number) => {
     const previous = previousRowHeight;
@@ -316,6 +320,17 @@
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation(); void focusHeaderColumn(columnId);
     } else columnTab(event, index);
+  };
+  const fitColumn = (columnId: string | null) => {
+    const body = get(bodyScrollEl), header = get(headerScrollEl);
+    if (!body?.isConnected || !header || !get(queryCountKnown)) return;
+    const heading = columnId === null ? header.querySelector<HTMLElement>('.note-heading')
+      : [...header.querySelectorAll<HTMLElement>('.column-heading')].find(element => element.dataset.columnId === columnId);
+    if (!heading) return;
+    const width = visibleColumnWidth(body, heading, columnId,
+      columnId === null ? MIN_MEMO_WIDTH : MIN_DATA_WIDTH, columnId === null ? MAX_MEMO_WIDTH : MAX_DATA_WIDTH);
+    if (columnId === null) dispatch('noteWidth', { width });
+    else dispatch('columnWidth', { columnId, width });
   };
   const endColumnDrag = () => {
     const gesture = columnDrag;
@@ -721,9 +736,10 @@
           <div class="header-cell sticky sticky-index">#</div>
           <div class="header-cell sticky sticky-flag">Flag</div>
           <div class="header-cell sticky sticky-memo note-heading" class:frozenDataEdge={frozenLayout.offsets.size === 0}>
-            <span>Note</span>
+            <span class="header-label">Note</span>
             <ColumnResizeHandle label="Note" width={noteColumnWidth} minWidth={MIN_MEMO_WIDTH} maxWidth={MAX_MEMO_WIDTH}
               tabIndex={0} on:resize={(event) => dispatch('noteWidth', event.detail)}
+              on:fit={() => fitColumn(null)}
               on:keydown={(event) => { if (isTabKey(event) && !event.shiftKey) columnTab(event, -1); }} />
           </div>
           {#each renderedColumns as column (column.id)}
@@ -748,9 +764,18 @@
                 on:contextmenu={(event) => openColumnMenu(event, column.id)}
                 on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnHeaderKey(event, column.id); }}
                 aria-pressed={$sortKey === column.id}
+                aria-label={$columnLabels.get(column.id) ?? column.id}
+                aria-describedby={`column-kind-${column.index}`}
                 aria-keyshortcuts="F2"
                 title={`Sort ${$columnLabels.get(column.id) ?? column.id}; drag to move; F2 to resize; right-click for actions`}>
-                <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
+                <span class="column-title">
+                  <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
+                  <span class="column-type" id={`column-kind-${column.index}`}
+                    data-column-kind={columnKinds[column.id] ?? 'unknown'}
+                    title={`Inferred type: ${columnKindLabel(columnKinds[column.id])}`}>
+                    {columnKindLabel(columnKinds[column.id])}
+                  </span>
+                </span>
                 {#if $sortKey === column.id}
                   <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
                 {/if}
@@ -766,6 +791,7 @@
               </button>
               <ColumnResizeHandle label={$columnLabels.get(column.id) ?? column.id} width={column.width}
                 on:keydown={(event) => resizeKeydown(event, column.id, column.index)}
+                on:fit={() => fitColumn(column.id)}
                 on:resize={(event) => dispatch('columnWidth', { columnId: column.id, width: event.detail.width })} />
             </div>
           {/each}
@@ -801,7 +827,7 @@
                 row={item.row} position={item.position} {projectId}
                 selected={item.row ? $selectedRowIds.has(item.row.row_index) : false}
                 {largePage} showLargeNotice={item.position === startIndex}
-                columns={renderedColumns} columnCount={$visibleColumns.length} {gridTemplate}
+                columns={renderedColumns} columnCount={$visibleColumns.length} {gridTemplate} {columnKinds}
                 frozenOffsets={frozenLayout.offsets} frozenPan={frozenViewport.pan} lastFrozen={frozenLayout.lastColumn}
                 {focusColumn} {openCellMenu} {columnTab}
               />
@@ -851,6 +877,7 @@
       label={$columnLabels.get(columnMenu.columnId) ?? columnMenu.columnId}
       frozen={frozenLayout.offsets.has(columnMenu.columnId)}
       displayFormat={$columnFormats[columnMenu.columnId] ?? 'original'}
+      columnKind={columnKinds[columnMenu.columnId]}
       x={columnMenu.x} y={columnMenu.y}
       on:search={(event) => searchColumn(event.detail.columnId)}
       on:hide={(event) => void hideColumn(event.detail.columnId)}
@@ -867,6 +894,9 @@
 {/if}
 
 <style>
+  .column-title { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  .column-title .header-label { min-width: 0; }
+  .column-type { flex: 0 0 auto; color: var(--muted); font-size: .9em; font-weight: 400; letter-spacing: 0; text-transform: none; }
   .column-sort { user-select: none; -webkit-user-select: none; touch-action: none; }
   .column-heading.dragging .column-sort { cursor: grabbing; }
   .table-query-state { position: absolute; inset: 38px 0 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; background: var(--surface); text-align: center; }

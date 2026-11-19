@@ -37,8 +37,11 @@ def _menu_items(web) -> list[str]:
     items = wait_for(lambda: web.script("return [...document.querySelectorAll('.column-context-menu [role=menuitem]')].map(e=>e.textContent.trim());"),
                      bool, "column menu items mount")
     assert items[:4] == ["Search this column", "Add rule for this column…", "Group by this column", "Hide this column"], items
-    assert len(items) == 6 and items[4] in ["Freeze columns through this column", "Unfreeze data columns"], items
-    assert items[5] in ["Show ISO datetime", "Show original values"], items
+    assert items[4] in ["Freeze columns through this column", "Unfreeze data columns"], items
+    kind = web.script("return document.querySelector('.column-context-menu').dataset.columnKind;")
+    assert len(items) == (6 if kind == "datetime" else 5), (kind, items)
+    if kind == "datetime":
+        assert items[5] in ["Show ISO datetime", "Show original values"], items
     assert not web.script("return !!document.querySelector('.column-context-menu button:disabled');"), items
     return items
 

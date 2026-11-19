@@ -3,6 +3,7 @@
 <script lang="ts">
   import { beforeUpdate } from 'svelte';
   import type { CachedRow } from './state';
+  import type { ColumnKind } from '../../types';
   import { PAGE_SIZE, FLAG_OPTIONS, normalizeFlag } from './state';
   import type { TableColumn } from '../../columnWindow';
   import { isTabKey } from '../../keyboard';
@@ -22,6 +23,7 @@
   export let largePage = false;
   export let showLargeNotice = false;
   export let columns: readonly TableColumn[];
+  export let columnKinds: Readonly<Record<string, ColumnKind>> = {};
   export let columnCount: number;
   export let gridTemplate: string;
   export let frozenOffsets: ReadonlyMap<string, number>;
@@ -200,7 +202,7 @@
         row && column.id in row.previewCache
           ? row.previewCache[column.id]
           : ''}
-      {@const formatted = $columnFormats[column.id] === 'iso' && row ? formatIsoCell(row.cells[column.id]) : null}
+      {@const formatted = columnKinds[column.id] === 'datetime' && $columnFormats[column.id] === 'iso' && row ? formatIsoCell(row.cells[column.id]) : null}
       <button
         type="button"
         class="cell"

@@ -13,12 +13,17 @@ from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 
 
-def _action(web, column: str, command: str) -> None:
+def _menu(web, column: str) -> list[str]:
     header = web.script("return document.querySelector('.data-header [data-column-id=\"'+arguments[0]+'\"] .column-sort');", column)
     assert header, column
     web.script("arguments[0].focus({preventScroll:true});", header)
+    _settle(web)  # Focus can reveal an offscreen column; finish that scroll before opening its menu.
     _key(web, "\ue015")
-    items = _menu_items(web)
+    return _menu_items(web)
+
+
+def _action(web, column: str, command: str) -> None:
+    items = _menu(web, column)
     if command in ["Show ISO datetime", "Show original values"]:
         assert items[-1] == command, items
     web.named(command, ".column-context-menu")
@@ -148,21 +153,81 @@ def _focus_resize(web, column: str) -> None:
              lambda value: value == column, "F2 focuses the column's resize handle")
 
 
+def _fit_visible(web, column: str) -> dict:
+    _focus_resize(web, column)
+    _key(web, "\ue011")  # Home, followed by twenty 10px steps, starts at 280px.
+    _key(web, "\ue014", 20)
+    _horizontal_to(web, 0)
+    web.script("const v=document.querySelector('.virtual-viewport'),h=document.querySelector('.data-row').getBoundingClientRect().height;v.scrollTop=Math.max(0,79*h-v.clientHeight);")
+    overscan = wait_for(lambda: web.script("""
+      const row=document.querySelector('.data-row[data-row-index="82"]'),v=document.querySelector('.virtual-viewport').getBoundingClientRect();
+      if(!row)return null;const r=row.getBoundingClientRect();
+      return {below:r.top-v.bottom,height:r.height,text:row.querySelector('[data-column-id="'+arguments[0]+'"] .cell-text')?.textContent};
+    """, column), lambda value: value is not None and value["below"] >= value["height"] * 2
+        and "offscreen-long" in value["text"], "the long cached value is mounted in overscan, below the visible viewport")
+    _settle(web)
+    before, checkpoint = web.query(), len(web.trace())
+    handle = web.node(f'.data-header [data-column-id="{column}"] .column-resize-handle')
+    point = web.script("""
+      const e=arguments[0],r=e.getBoundingClientRect(),x=Math.round(r.left+r.width/2),y=Math.round(r.top+r.height/2);
+      window.__columnFit=[];window.__columnFitListener=event=>window.__columnFit.push({trusted:event.isTrusted,type:event.type});
+      e.addEventListener('dblclick',window.__columnFitListener);
+      return {x,y,hit:e.contains(document.elementFromPoint(x,y))};
+    """, handle)
+    assert point.pop("hit"), point
+    try:
+        web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "column-autofit",
+            "parameters": {"pointerType": "mouse"}, "actions": [
+                {"type": "pointerMove", **point, "origin": "viewport", "duration": 0},
+                {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
+                {"type": "pause", "duration": 80},
+                {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0}]}]})
+        widths = wait_for(lambda: _width(web, column), lambda value: 80 <= value["header"] < 240
+                         and abs(value["header"] - value["cell"]) <= 1,
+                         "double-click fits the short visible cells, excluding the long cached offscreen value")
+        assert web.script("return window.__columnFit;") == [{"trusted": True, "type": "dblclick"}]
+        visible = web.script("""
+          const v=document.querySelector('.virtual-viewport').getBoundingClientRect();
+          return [...document.querySelectorAll('.data-row:not(.loading)')].filter(e=>{
+            const r=e.getBoundingClientRect();return r.bottom>v.top&&r.top<v.bottom;
+          }).map(e=>({id:Number(e.dataset.rowIndex),fits:(()=>{
+            const text=e.querySelector('[data-column-id="'+arguments[0]+'"] .cell-text');
+            return text.scrollWidth<=text.clientWidth+1;
+          })()}));
+        """, column)
+        assert visible and all(row["id"] < 82 and row["fits"] for row in visible), visible
+        _settle(web)
+        assert web.query() == before, "Auto-fit changes presentation only"
+        assert not [entry for entry in web.trace()[checkpoint:]
+                    if entry["name"] in {"query_project_rows", "get_cell", "locate_project_row"}], "Auto-fit must not scan or fetch source data"
+        return {"trusted_double_click": True, "width": widths, "visible_rows": [row["id"] for row in visible],
+                "offscreen_long_value_ignored": True, "mounted_overscan_value": overscan, "no_source_reads": True}
+    finally:
+        web.request("DELETE", web.route("actions"))
+        web.script("arguments[0].removeEventListener('dblclick',window.__columnFitListener);delete window.__columnFit;delete window.__columnFitListener;", handle)
+
+
 def verify_column_presentation(web, data, root: Path, evidence: Path, report: dict) -> None:
     source = root / f"column-presentation-{uuid.uuid4().hex[:8]}.csv"
     timestamps = ["2024/04/01 09:02:03.123456789+09:00", "2024-04-01 00:02:04.000000001Z", "2024-04-01T00:03:00Z"]
     with source.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["record", "created", "message", "not_time"])
-        writer.writerows(zip(["r1", "r2", "r3"], timestamps, ["alpha", "beta", "gamma"], ["not-a-timestamp", "42", "wrong"]))
+        writer.writerows(zip(["r1", "r2", "r3"], timestamps, ["alpha", "beta", "gamma"], [timestamps[0], "42", "wrong"]))
+        writer.writerows((f"r{index + 1}", timestamps[-1], "ordinary" if index < 82 else "offscreen-long-" * 100, "wrong")
+                         for index in range(3, 83))
     original = source.read_bytes()
     case = web.command("create_project", {"path": str(source)})
     project_id = case["meta"]["id"]
     try:
         open_project(web, case["meta"]["name"])
-        web.results(3)
+        web.results(83)
         detail = web.command("load_project", {"projectId": project_id}, request=True)
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
+        types = web.script("return [...document.querySelectorAll('.data-header [data-column-id]')].map(e=>({id:e.dataset.columnId,name:e.querySelector('.header-label').textContent.trim(),kind:e.querySelector('.column-type')?.dataset.columnKind,label:e.querySelector('.column-type')?.textContent.trim()}));")
+        assert {item["id"]: item["kind"] for item in types} == {column: detail["column_kinds"][column] for column in columns.values()}, types
+        assert all(item["label"] and item["name"] in columns for item in types), types
+        auto_fit = _fit_visible(web, columns["message"])
         web.write('input[aria-label="Search rows"]', "alpha | beta")
         query = web.applied(projectId=project_id, search="alpha | beta")
         web.results(2)
@@ -223,8 +288,9 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         _action(web, columns["created"], "Show original values")
         wait_for(lambda: _value(web, columns["created"]), lambda value: value == timestamps[0], "original display can be restored")
         _action(web, columns["created"], "Show ISO datetime")
-        _action(web, columns["not_time"], "Show ISO datetime")
-        wait_for(lambda: web.view()["toast"], lambda value: "not_time" in value and "Unrecognized timestamp" in value, "invalid timestamp display is rejected visibly")
+        items = _menu(web, columns["not_time"])
+        assert not any(item in ["Show ISO datetime", "Show original values"] for item in items), items
+        _key(web, "\ue00c")
         saved = _saved(web, project_id, lambda state: state.get("columnOrder") == desired
             and abs(state.get("columnWidths", {}).get(columns["created"], 0) - final_width) <= 1
             and state.get("columnFormats", {}).get(columns["created"]) == "iso", "column presentation saved")
@@ -237,20 +303,30 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         web.results(2)
         _unchanged(web, query)
         web.named(f"Close {source.name}")
+        wait_for(lambda: [entry for entry in web.trace() if entry["name"] == "save_view_state"
+            and entry["request"].get("projectId") == project_id and "result" not in entry and "error" not in entry],
+            lambda pending: not pending, "the closed view finishes saving before the stale format fixture")
+        web.command("save_view_state", {"projectId": project_id,
+            "state": {**saved, "columnFormats": {**saved.get("columnFormats", {}), columns["not_time"]: "iso"}}})
         open_project(web, case["meta"]["name"])
         web.results(2)
         _settle(web)
         assert _order(web) == desired and web.query() == query, (_order(web), web.query())
         assert all(abs(width - final_width) <= 1 for width in _width(web, columns["created"]).values())
         assert _value(web, columns["created"]) == "2024-04-01T00:02:03.123456789Z"
+        assert _value(web, columns["not_time"]) == timestamps[0], "A saved ISO setting cannot convert a globally Text column"
+        assert not web.script("return !!document.querySelector('.data-row [data-column-id=\"'+arguments[0]+'\"].datetime-error');", columns["not_time"])
+        assert not any(item in ["Show ISO datetime", "Show original values"] for item in _menu(web, columns["not_time"]))
+        _key(web, "\ue00c")
         _prefix(web, desired[:2], "saved reordered frozen prefix reopens")
         assert source.read_bytes() == original
         web.screenshot(evidence / "column-presentation.png")
         report["column_presentation"] = {"drag": drag, "display_order": desired, "widths": widths,
-            "six_item_menu_and_single_toggles": True, "keyboard_resize_f2_escape_tab": True,
+            "datetime_only_iso_action": True, "header_types": types, "visible_auto_fit": auto_fit,
+            "compact_menu_and_single_toggles": True, "keyboard_resize_f2_escape_tab": True,
             "frozen_prefix": [item["id"] for item in frozen["headers"] if item["pinned"]],
             "iso_nanoseconds_and_offset": True, "raw_get_cell_and_export_preserved": True,
-            "invalid_timestamp_rejected": True, "query_and_selection_unchanged": True,
+            "non_datetime_iso_not_offered": True, "stale_text_iso_setting_ignored": True, "query_and_selection_unchanged": True,
             "saved_order_width_format_reopened": True}
     finally:
         web.close_drawer()
