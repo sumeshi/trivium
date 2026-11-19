@@ -51,6 +51,15 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
           const path=window.__annotationRestorePicker.path;window.__annotationRestorePicker.path=null;
           return Promise.resolve(new Response(JSON.stringify(path),{headers:{'Tauri-Response':'ok','Content-Type':'application/json'}}));
         }
+        const next=window.__annotationRestoreHoldNextQuery;
+        if(next&&name==='query_project_rows'){
+          let args={};try{args=JSON.parse(typeof options.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
+          const projectId=(args.payload??args.request??{}).projectId;
+          if(projectId&&!next.excluded.includes(projectId)){
+            window.__workspaceHold={name,projectId,ready:false,release:null};
+            delete window.__annotationRestoreHoldNextQuery;
+          }
+        }
         return previous.call(window,input,options,...rest);
       };
     """)
@@ -85,18 +94,42 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
                          bool, "annotation restoration is selected before importing the annotated CSV")
                 web.screenshot(evidence / "csv-annotation-restore-option.png")
             start = len(web.trace())
+            if restore:
+                assert web.script("return !window.__workspaceHold;"), "The restore check must own its response hold"
+                web.script("window.__annotationRestoreHoldNextQuery={excluded:arguments[0]};",
+                           [data["id"], *[project_id for project_id, _ in created]])
             web.named("Import and open", ".workspace-drawer")
             wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "GUI import opens the saved investigation")
             known = {project_id for project_id, _ in created}
             project_id = next(item["meta"]["id"] for item in web.command("list_projects")
                 if item["meta"].get("source_file_name") == exported.name and item["meta"]["id"] not in known)
             created.append((project_id, exported.name))
+            if restore:
+                wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool,
+                         "the restored CSV's actual first-page response is held")
+                assert web.script("return window.__workspaceHold.request.projectId;") == project_id
+                pending = web.script("""
+                  const viewport=document.querySelector('.virtual-viewport');
+                  return {rows:document.querySelectorAll('.data-row').length,
+                    viewportHeight:viewport?.getBoundingClientRect().height??0,
+                    viewportWidth:viewport?.getBoundingClientRect().width??0,
+                    spacer:!!document.querySelector('.virtual-spacer'),
+                    status:document.querySelector('.table-query-state[role=status]')?.textContent??''};
+                """)
+                assert pending["rows"] == 0, ("Unknown restored results must not render placeholder records", pending)
+                assert pending["viewportHeight"] > 0 and pending["viewportWidth"] > 0 and pending["spacer"], pending
+                assert "Loading rows" in pending["status"], pending
+                web.screenshot(evidence / "csv-annotation-restore-loading.png")
+                web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
             web.applied(projectId=project_id)
             web.results(2)
             request = next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")
             assert request["request"]["restore_annotations"] is restore, request
             loaded = web.command("load_project", {"projectId": project_id}, request=True)
             rows = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 10})["rows"]
+            assert [row["row_index"] for row in rows] == [0, 1], "Restore must not add source records"
+            assert web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(row=>Number(row.dataset.rowIndex));") == [0, 1]
+            assert not web.script("return !!document.querySelector('.data-row.loading');")
             for row, expected in zip(rows, annotations):
                 for field in ["flag", "memo", "tags", "bookmarked"]:
                     actual = (row[field] or "") if field in {"flag", "memo"} else row[field]
@@ -112,8 +145,10 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         assert source.read_bytes() == original and exported.read_bytes() == exported_bytes
         report["annotation_restore"] = {"gui_export_import": True, "cases": imported,
             "csv_only_explicit_opt_in": True, "source_files_unchanged": True,
+            "first_restored_page_has_no_placeholder_records": True,
             "unverified": "Native picker interaction; only selected paths are substituted"}
     finally:
+        web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;delete window.__annotationRestoreHoldNextQuery;")
         web.script("window.__annotationRestorePicker?.restore();delete window.__annotationRestorePicker;")
         web.close_drawer()
         open_project(web, data["name"])

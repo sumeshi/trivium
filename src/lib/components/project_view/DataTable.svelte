@@ -446,7 +446,9 @@
     return result;
   };
 
-  $: virtualRows = buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex);
+  // A first response updates spacer geometry before its rows are published.
+  // Keep that loading state free of evidence controls; normal paging stays live.
+  $: virtualRows = $queryCountKnown ? buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex) : [];
   $: {
     const next = recycleSlots(virtualRows, (row) => row.position, rowSlots);
     if (next !== rowSlots) rowSlots = next;
