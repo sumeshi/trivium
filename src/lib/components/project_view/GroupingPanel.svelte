@@ -47,6 +47,7 @@
     lastKey = "";
     tree = null;
     loading = false;
+    error = "";
   }
   $: if (open && $backend && projectId && groupColumns.length > 0 && requestKey !== lastKey) {
     lastKey = requestKey;

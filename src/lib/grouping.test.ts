@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities, sortGroupTree } from "./grouping.ts";
 import type { GroupTreeNode } from "./types";
 import type { EditorGroup } from "./stores/condition";
+import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
 
 const node = (label: string, children: GroupTreeNode[] = [], value: unknown = label): GroupTreeNode =>
   ({ label, children, value, count: 1 });
@@ -141,3 +142,36 @@ test("time ranges narrow an existing OR group without replacing its filters", ()
   assert.deepEqual(next.children.slice(1).map((row) => row.type === "condition" ? row.op : "group"), ["regex", "ge", "lt"]);
   assert.equal(root.children.length, 1);
 });
+
+test("removing the last group level retires errors, pending replies and displayed groups", () => runSvelteTest(String.raw`
+const flush=async()=>{for(let i=0;i<5;i++){await Promise.resolve();await tick();}};
+const pending=[];
+globalThis.__annotations=writable({});
+globalThis.__workspace={backend:writable({groupTree:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))}),
+ projectDetail:writable({project:{meta:{id:'case'}},columns:['timestamp'],column_kinds:{timestamp:'datetime'}}),
+ columnLabels:writable(new Map()),conditionTree:writable({type:'group',id:'root',kind:'and',children:[]}),
+ appliedFilters:writable({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition:null}),
+ goBack(){},canGoBack:writable(false),
+ createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
+const Panel=await compileHeadless('GroupingPanel');
+const panel=await mountHeadless(Panel,{groupColumns:['timestamp'],granularities:{timestamp:'day'}});
+const state=()=>panel.$capture_state();
+try{
+ await flush();assert.equal(pending.length,1);
+ pending[0].reject(Error('Invalid timestamp in the selected level.'));await flush();
+ assert.equal(state().error,'Invalid timestamp in the selected level.');
+ // The remove-level button writes the remaining columns directly.
+ panel.$set({groupColumns:[]});await flush();
+ assert.equal(state().error,'','An ungrouped panel must not retain a failure for removed criteria.');
+ assert.equal(state().tree,null);assert.equal(state().loading,false);
+ panel.$set({groupColumns:['timestamp']});await flush();assert.equal(pending.length,2);
+ panel.$set({groupColumns:[]});await flush();
+ pending[1].reject(Error('Old request failed.'));await flush();
+ assert.equal(state().error,'','A retired request cannot republish an error.');
+ panel.$set({groupColumns:['timestamp']});await flush();assert.equal(pending.length,3);
+ pending[2].resolve({columns:['timestamp'],nodes:[{label:'2026-11-19',value:'2026-11-19',count:1,children:[]}],total:1});await flush();
+ assert.equal(state().tree.total,1);
+ panel.$set({groupColumns:[]});await flush();
+ assert.equal(state().tree,null);assert.equal(state().error,'');assert.equal(state().loading,false);
+}finally{panel.$destroy();}
+`));
