@@ -2,7 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
-  import { appendGroupPath, GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities, sortGroupTree } from "../../grouping";
+  import { GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities, sortGroupTree } from "../../grouping";
   import type { GroupGranularity, GroupSortDirection, GroupSortKey } from "../../grouping";
   import type { Backend } from "../../backend";
   import type { GroupTreeNode, GroupTreeResponse } from "../../types";
@@ -10,7 +10,7 @@
   import { annotationVersions } from "./state";
   import { useWorkspace } from "../../workspaceContext";
 
-  const { backend, columnLabels, projectDetail, appliedFilters, conditionTree, createReadScope, goBack, canGoBack } = useWorkspace();
+  const { backend, columnLabels, projectDetail, appliedFilters, filterByGroupPath, clearGroupFilter, createReadScope, goBack, canGoBack } = useWorkspace();
   const reads = createReadScope();
   const requests = createLatestRequest();
   export let open = true;
@@ -27,6 +27,7 @@
   let loading = false;
   let lastKey = "";
   let refreshRevision = 0;
+  let previousGrouping = "";
 
   onDestroy(() => { reads.dispose(); requests.dispose(); });
 
@@ -40,6 +41,11 @@
     $appliedFilters.flag, $appliedFilters.bookmarkedOnly, $appliedFilters.condition,
   ]);
   $: selectedGranularities = selectedGroupGranularities(groupColumns, granularities);
+  $: groupingKey = JSON.stringify([projectId, groupColumns, selectedGranularities]);
+  $: if (groupingKey !== previousGrouping) {
+    if (previousGrouping) clearGroupFilter();
+    previousGrouping = groupingKey;
+  }
   $: requestKey = JSON.stringify([projectId, groupColumns, selectedGranularities, annotationRevision, filterKey, refreshRevision]);
   $: if (!open || !$backend || !projectId || groupColumns.length === 0) {
     reads.cancelAll();
@@ -82,6 +88,7 @@
   }
 
   function clearGrouping() {
+    clearGroupFilter();
     groupColumns = [];
     granularities = {};
     expanded = new Set();
@@ -140,7 +147,7 @@
   function applyPath(path: GroupTreeNode[]) {
     if (!tree || loading) return;
     const columns = tree.columns;
-    conditionTree.update((root) => appendGroupPath(root, columns, path));
+    filterByGroupPath(columns, path);
   }
 </script>
 
@@ -150,7 +157,7 @@
     <button type="button" class="text-button" on:click={goBack} disabled={!$canGoBack}
       aria-label="Back to previous filter" title="Undo the last Rules change">← Back</button>
     <button type="button" class="text-button" on:click={clearGrouping} disabled={groupColumns.length === 0}
-      aria-label="Clear grouping" title="Remove grouping levels; keep Rules">Ungroup</button>
+      aria-label="Clear grouping" title="Remove grouping levels and their filter; keep other Rules">Ungroup</button>
     <button type="button" class="icon-button" on:click={() => refreshRevision += 1}
       disabled={loading || groupColumns.length === 0} title="Recalculate groups" aria-label="Recalculate groups">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" /></svg>

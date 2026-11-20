@@ -4,6 +4,8 @@ import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, select
 import type { GroupTreeNode } from "./types";
 import type { EditorGroup } from "./stores/condition";
 import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
+import { get } from "svelte/store";
+import { createConditionState, presetCondition } from "./stores/condition.ts";
 
 const node = (label: string, children: GroupTreeNode[] = [], value: unknown = label): GroupTreeNode =>
   ({ label, children, value, count: 1 });
@@ -151,7 +153,7 @@ globalThis.__workspace={backend:writable({groupTree:()=>new Promise((resolve,rej
  projectDetail:writable({project:{meta:{id:'case'}},columns:['timestamp'],column_kinds:{timestamp:'datetime'}}),
  columnLabels:writable(new Map()),conditionTree:writable({type:'group',id:'root',kind:'and',children:[]}),
  appliedFilters:writable({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition:null}),
- goBack(){},canGoBack:writable(false),
+ goBack(){},canGoBack:writable(false),filterByGroupPath(){},clearGroupFilter(){},
  createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
 const Panel=await compileHeadless('GroupingPanel');
 const panel=await mountHeadless(Panel,{groupColumns:['timestamp'],granularities:{timestamp:'day'}});
@@ -173,5 +175,110 @@ try{
  assert.equal(state().tree.total,1);
  panel.$set({groupColumns:[]});await flush();
  assert.equal(state().tree,null);assert.equal(state().error,'');assert.equal(state().loading,false);
+}finally{panel.$destroy();}
+`));
+
+test("repeated group selection is a no-op and Ungroup restores pre-existing OR rules", () => {
+  const state = createConditionState();
+  const original = { kind: "or" as const, children: [
+    { column: "gate", op: "eq" as const, values: ["keep"], negated: false },
+    { column: "gate", op: "eq" as const, values: ["other"], negated: false },
+  ] };
+  state.conditionTree.set(presetCondition(original)!);
+  state.filterByGroupPath(["host", "user"], [node("alpha"), node("a,b")]);
+  const selected = get(state.conditionTree);
+  let publications = 0;
+  const unsubscribe = state.conditionTree.subscribe(() => publications++);
+  for (let index = 0; index < 5; index++) state.filterByGroupPath(["host", "user"], [node("alpha"), node("a,b")]);
+  assert.equal(get(state.conditionTree), selected);
+  assert.equal(publications, 1, "unchanged selections do not publish another query/history update");
+  assert.equal(selected.children.length, 3);
+  assert.deepEqual(get(state.conditionPayload), { kind: "and", children: [original,
+    { column: "host", op: "eq", values: ["alpha"], negated: false },
+    { column: "user", op: "eq", values: ["a,b"], negated: false },
+  ] });
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionPayload), original);
+  unsubscribe();
+});
+
+test("a new group path replaces its own constraints and retains later manual filters", () => {
+  const state = createConditionState();
+  state.filterByValue("gate", "keep");
+  state.filterByGroupPath(["host", "user"], [node("alpha"), node("alice")]);
+  state.filterByValue("message", "manual");
+  state.filterByGroupPath(["host", "user"], [node("beta"), node("bob")]);
+  const conditions = get(state.conditionTree).children as import("./stores/condition").EditorCondition[];
+  assert.deepEqual(conditions.map(row => [row.column, row.value]), [
+    ["gate", "keep"], ["host", "beta"], ["user", "bob"], ["message", "manual"],
+  ]);
+  state.moveNode(conditions[2].id, 1);
+  state.clearGroupFilter();
+  assert.deepEqual((get(state.conditionTree).children as typeof conditions).map(row => [row.column, row.value]), [
+    ["gate", "keep"], ["message", "manual"],
+  ]);
+});
+
+test("existing exact rules and restored paths are not duplicated or claimed by grouping", () => {
+  const state = createConditionState();
+  const original = { column: "host", op: "eq" as const, values: ["alpha"], negated: false };
+  state.conditionTree.set(presetCondition(original)!);
+  state.filterByGroupPath(["host", "user"], [node("alpha"), node("alice")]);
+  assert.equal(get(state.conditionTree).children.length, 2);
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionPayload), original);
+  state.filterByGroupPath(["user"], [node("alice")]);
+  const saved = structuredClone(get(state.conditionTree));
+  state.conditionTree.set(saved);
+  state.filterByGroupPath(["user"], [node("alice")]);
+  assert.equal(get(state.conditionTree).children.length, 2);
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionTree), saved, "restored Rules are preserved without proof of control ownership");
+});
+
+test("editing a group constraint converts it into a user rule that Ungroup preserves", () => {
+  const state = createConditionState();
+  state.filterByGroupPath(["host"], [node("alpha")]);
+  state.patchCondition(get(state.conditionTree).children[0].id, { value: "manually edited" });
+  const edited = structuredClone(get(state.conditionTree));
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionTree), edited);
+  state.filterByGroupPath(["host"], [node("beta")]);
+  assert.equal(get(state.conditionTree).children.length, 2);
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionTree), edited);
+});
+
+test("group selection, Ungroup and hierarchy edits synchronize through the actual panel", () => runSvelteTest(String.raw`
+const {get,derived}=await import('svelte/store');
+const {createConditionState,presetCondition}=await import('./src/lib/stores/condition.ts');
+const conditions=createConditionState();
+const original={column:'gate',op:'eq',values:['keep'],negated:false};
+conditions.conditionTree.set(presetCondition(original));
+const path=[{label:'alpha',value:'alpha',count:1,children:[]}];
+const requests=[];
+const flush=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await tick();}};
+globalThis.__annotations=writable({});
+globalThis.__workspace={...conditions,backend:writable({groupTree:async request=>{requests.push(request);return {columns:request.groupColumns,nodes:path,total:1};}}),
+ projectDetail:writable({project:{meta:{id:'case'}},columns:['host','time'],column_kinds:{host:'string',time:'datetime'}}),
+ columnLabels:writable(new Map()),appliedFilters:derived(conditions.conditionPayload,condition=>({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition})),
+ goBack(){},canGoBack:writable(false),
+ createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
+const Panel=await compileHeadless('GroupingPanel');
+const panel=await mountHeadless(Panel,{groupColumns:['host']});
+const state=()=>panel.$capture_state();
+try{
+ await flush();state().applyPath(path);await flush();
+ assert.equal(requests.length,2);
+ for(let i=0;i<5;i++){state().applyPath(path);await flush();}
+ assert.equal(requests.length,2,'Repeated clicks must not reload the same group results');
+ assert.equal(get(conditions.conditionTree).children.length,2);
+ state().clearGrouping();await flush();
+ assert.deepEqual(get(conditions.conditionPayload),original);
+ assert.deepEqual(state().groupColumns,[]);assert.equal(state().tree,null);
+ panel.$set({groupColumns:['host']});await flush();state().applyPath(path);await flush();
+ panel.$set({groupColumns:['time'],granularities:{time:'day'}});await flush();
+ assert.deepEqual(get(conditions.conditionPayload),original,'Changed group levels retire the former path');
+ assert.deepEqual(state().groupColumns,['time']);
 }finally{panel.$destroy();}
 `));

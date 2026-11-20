@@ -1,6 +1,7 @@
 import { derived, writable } from "svelte/store";
 import type { Readable } from "svelte/store";
-import type { CompareOp, ConditionNode } from "../types";
+import type { CompareOp, ConditionNode, GroupTreeNode } from "../types";
+import { groupPathConditions } from "../grouping.ts";
 import type { FormatDefinition } from "../formats";
 import { isFormatDefinition, formatDefinitionKey } from "../formats.ts";
 import {
@@ -96,6 +97,12 @@ export function createConditionState(scope: {
   // Only unchanged ranges added by this analysis control can be replaced. A
   // restored tree or a user-edited range becomes an ordinary investigation rule.
   const ranges = new Map<string, { id: string; signature: string }>();
+  let groupFilter: { ids: string[]; signature: string; path: string } | null = null;
+  const groupSignature = (root: EditorGroup, ids: string[]) => {
+    if (root.kind !== "and") return null;
+    const nodes = ids.map(id => root.children.find(node => node.id === id));
+    return nodes.every(Boolean) ? JSON.stringify(nodes) : null;
+  };
   // Moving the three AND rows changes their presentation, not their bounds.
   const signature = (node: EditorNode) => JSON.stringify(node.type === "group"
     ? { ...node, children: [...node.children].sort((a, b) => a.id.localeCompare(b.id)) } : node,
@@ -104,6 +111,7 @@ export function createConditionState(scope: {
     subscribe: tree.subscribe,
     set(root: EditorGroup): void {
       ranges.clear();
+      groupFilter = null;
       tree.set(root);
     },
     update(update: (root: EditorGroup) => EditorGroup): void {
@@ -113,6 +121,7 @@ export function createConditionState(scope: {
           const node = next.kind === "and" && next.children.find((child) => child.id === owned.id);
           if (!node || signature(node) !== owned.signature) ranges.delete(source);
         }
+        if (groupFilter && groupSignature(next, groupFilter.ids) !== groupFilter.signature) groupFilter = null;
         return next;
       });
     },
@@ -165,6 +174,40 @@ export function createConditionState(scope: {
       exact: true, negated: false,
     }));
     conditionTree.update((root) => appendConditionsAnd(root, children));
+  }
+
+  /** One replaceable group drilldown; repeated clicks do not add more Rules. */
+  function filterByGroupPath(columns: string[], path: GroupTreeNode[]): void {
+    const children = groupPathConditions(columns, path);
+    if (!children.length) return;
+    const key = JSON.stringify(children, (name, value: unknown) => name === "id" ? undefined : value);
+    if (groupFilter?.path === key) return;
+    conditionTree.update(root => {
+      const ownedIds = new Set(groupFilter?.ids ?? []);
+      const ordinary = root.children.filter(node => !ownedIds.has(node.id));
+      const existing = new Set(root.kind === "and" ? ordinary.map(node => JSON.stringify(toNode(node))) : []);
+      const added = children.filter(node => !existing.has(JSON.stringify(toNode(node))));
+      if (!added.length) {
+        groupFilter = null;
+        return ordinary.length === root.children.length ? root : { ...root, children: ordinary };
+      }
+      let next: EditorGroup;
+      if (groupFilter) {
+        const first = root.children.findIndex(node => ownedIds.has(node.id));
+        next = { ...root, children: root.children.flatMap((node, index) =>
+          index === first ? added : ownedIds.has(node.id) ? [] : [node]) };
+      } else next = appendConditionsAnd(root, added);
+      groupFilter = { ids: added.map(node => node.id), signature: JSON.stringify(added), path: key };
+      return next;
+    });
+  }
+
+  /** Ungroup removes only this control's unchanged drilldown, never user Rules. */
+  function clearGroupFilter(): void {
+    if (!groupFilter) return;
+    const ids = new Set(groupFilter.ids);
+    conditionTree.update(root => ({ ...root, children: root.children.filter(node => !ids.has(node.id)) }));
+    groupFilter = null;
   }
 
   /**
@@ -376,7 +419,7 @@ export function createConditionState(scope: {
     return children.length === 0 ? null : children.length === 1 ? children[0] : { kind: "and" as const, children };
   });
 
-  return { conditionTree, filterByValue, filterByValues, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
+  return { conditionTree, filterByValue, filterByValues, filterByGroupPath, clearGroupFilter, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
     addFormatCondition, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
     removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }

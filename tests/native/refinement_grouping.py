@@ -102,6 +102,24 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         assert web.script("return [...document.querySelectorAll('.group-result-heading span')].map(element=>element.textContent.trim());") == ["Value", "Count"]
         assert web.script("return document.querySelector('.group-summary .section-label')?.textContent;") == "Values"
 
+        web.click(web.script("return arguments[0].querySelector('.group-value');", _row(web, 0, "alpha")))
+        web.results(4)
+        wait_for(lambda: _rows(web), lambda rows: len(rows) == 1 and rows[0]["label"] == "alpha" and rows[0]["count"] == 4,
+                 "a selected group remains one group in the filtered results")
+        selected_query, checkpoint = web.query(), len(web.trace())
+        for _ in range(3):
+            web.click(web.script("return arguments[0].querySelector('.group-value');", _row(web, 0, "alpha")))
+            _settle(web)
+        assert web.query() == selected_query, "Repeated clicks must not duplicate a group filter"
+        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] in {"query_project_rows", "group_tree"}], "Repeated selection must not reload the same results"
+        web.named("Clear grouping", ".grouping-panel")
+        web.applied(projectId=project_id, condition=None)
+        web.results(len(records))
+        web.choose('select[aria-label="Group column"]', columns["level1"])
+        web.named("Add level", ".grouping-panel")
+        wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 10,
+                 "Ungroup removes its own filter before rebuilding the hierarchy")
+
         for name in ("level2", "level3"):
             web.choose('select[aria-label="Group column"]', columns[name])
             web.named("Add level", ".grouping-panel")
@@ -204,11 +222,18 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.applied(projectId=project_id, condition=original_or)
         web.results(9)
         before_clear = web.query()
+        web.click(web.script("return arguments[0].querySelector('.expand-group');", _row(web, 0, "alpha")))
+        web.click(web.script("return arguments[0].querySelector('.expand-group');", _row(web, 1, "x")))
+        web.click(web.script("return arguments[0].querySelector('.group-value');", _row(web, 2, "9007199254740993")))
+        web.applied(projectId=project_id, condition=expected)
+        web.results(1)
         web.named("Clear grouping", ".grouping-panel")
+        web.applied(projectId=project_id, condition=original_or)
+        web.results(9)
         wait_for(lambda: web.script("return document.querySelectorAll('[aria-label=\"Group levels\"] li').length;"),
                  lambda count: count == 0, "clearing grouping removes every configured level")
         assert not _rows(web), "Clearing grouping removes its aggregate list"
-        assert web.query() == before_clear, "Clear grouping does not remove investigation Rules"
+        assert web.query() == before_clear, "Ungroup removes its drilldown while preserving investigation Rules"
         web.choose('select[aria-label="Group column"]', columns["level1"])
         web.named("Add level", ".grouping-panel")
         wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 9,
@@ -218,6 +243,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
             "name_and_count_sort_both_directions": True, "nested_sort_preserves_expansion_and_values": True,
             "nested_columns_editable_without_duplicates": True, "local_back_preserves_previous_rules": True,
             "clear_grouping_keeps_investigation_rules": True,
+            "repeated_single_group_does_not_duplicate_or_reload": True, "ungroup_removes_only_group_filter": True,
             "sort_does_not_rescan": True, "non_datetime_granularity_hidden": True,
             "root_groups": initial, "second_level": children, "third_level": grandchildren, "drilldowns": checks}
     finally:

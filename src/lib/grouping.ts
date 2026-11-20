@@ -89,13 +89,12 @@ export function groupRowsPage(
   return { rows: page === requested ? rows : finalRows, total: count, page, pages };
 }
 
-/** Append an exact group path while preserving the current AND/OR expression. */
-export function appendGroupPath(
-  root: EditorGroup,
+/** Exact constraints for every selected level, retaining source text and bounds. */
+export function groupPathConditions(
   columns: string[],
   path: GroupTreeNode[],
   createId: () => string = () => crypto.randomUUID(),
-): EditorGroup {
+): EditorCondition[] {
   const children: EditorCondition[] = [];
   path.forEach((node, index) => {
     const column = columns[index];
@@ -115,5 +114,15 @@ export function appendGroupPath(
       children.push(condition("eq", node.label));
     }
   });
-  return appendConditionsAnd(root, children, createId);
+  return children;
+}
+
+/** Append an exact group path while preserving the current AND/OR expression. */
+export function appendGroupPath(
+  root: EditorGroup,
+  columns: string[],
+  path: GroupTreeNode[],
+  createId: () => string = () => crypto.randomUUID(),
+): EditorGroup {
+  return appendConditionsAnd(root, groupPathConditions(columns, path, createId), createId);
 }
