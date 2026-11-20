@@ -30,7 +30,8 @@ for(const kind of ['string','int','float','null',undefined,'datetime']){
   const labels={string:'Text',int:'Int',float:'Float',datetime:'Datetime',null:'Null',unknown:'Unknown'};
   const kindLabel=labels[kind??'unknown'];
   assert.match(html,/class="column-menu-name[^\"]*">Evidence<\/span>/);
-  assert.match(html,new RegExp('class="column-menu-type[^\"]*"[^>]*data-column-kind="'+(kind??'unknown')+'"[^>]*>'+kindLabel+'<'));
+  const typeMarkup=html.match(/class="column-menu-type[^\"]*"[^>]*data-column-kind="([^\"]+)"[^>]*>([^<]*)</);
+  assert.deepEqual(typeMarkup?.slice(1),[kind??'unknown','['+kindLabel+']']);
   assert.match(html,new RegExp('data-column-kind="'+(kind??'unknown')+'"'));
   assert.equal((html.match(/role="menuitem"/g)??[]).length,kind==='datetime'?6:5,kind);
   assert.equal(html.includes(displayFormat==='iso'?'Show original values':'Show ISO datetime'),kind==='datetime',kind);

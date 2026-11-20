@@ -236,7 +236,8 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
                 rightOfName:k.left>=n.right-1,sameLine:k.bottom>n.top&&n.bottom>k.top};
             """, column)
             assert item["name"] == name and item["kind"] == detail["column_kinds"][column], item
-            assert item["label"] == {"string": "Text", "int": "Int", "float": "Float", "datetime": "Datetime", "null": "Null"}[item["kind"]], item
+            expected_type = {"string": "Text", "int": "Int", "float": "Float", "datetime": "Datetime", "null": "Null"}[item["kind"]]
+            assert item["label"] == f"[{expected_type}]", item
             assert item["rightOfName"] and item["sameLine"], item
             types.append(item)
             _key(web, "\ue00c")

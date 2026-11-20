@@ -65,7 +65,7 @@
   <span class="column-menu-label" title={label}>
     <span class="column-menu-name">{label}</span>
     <span class="column-menu-type" data-column-kind={columnKind ?? 'unknown'}
-      title={`Inferred type: ${columnKindLabel(columnKind)}`}>{columnKindLabel(columnKind)}</span>
+      title={`Inferred type: ${columnKindLabel(columnKind)}`}>[{columnKindLabel(columnKind)}]</span>
   </span>
   <button type="button" role="menuitem" on:click={() => dispatch('search', { columnId })}>
     Search this column
