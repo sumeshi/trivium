@@ -105,21 +105,23 @@ def _ranking(web, values, columns):
 
 def _scan(web, project_id, values):
     checkpoint = len(web.trace())
+    existing_tabs = set(web.script("return [...document.querySelectorAll('.project-tabs [role=tab]')].map(e=>e.id);"))
     web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
     web.named("IPv4-like", ".extract-panel")
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
         lambda value: bool(value and ("result" in value or "error" in value)), "real extraction creates a CSV")
     assert "result" in entry and "error" not in entry, entry
-    result = entry["result"]
-    derived_id = result["meta"]["id"]
-    wait_for(lambda: web.script("return !!document.getElementById(arguments[0]);", f"project-tab-{derived_id}"),
-             bool, "generated CSV opens in a background file tab")
+    new_tabs = wait_for(lambda: set(web.script("return [...document.querySelectorAll('.project-tabs [role=tab]')].map(e=>e.id);")) - existing_tabs,
+                        bool, "generated CSV opens in a background file tab")
+    assert len(new_tabs) == 1, new_tabs
+    derived_id = new_tabs.pop().removeprefix("project-tab-")
     assert web.script("return document.querySelector('.project-tabs [role=tab][aria-selected=true]')?.id;") == f"project-tab-{project_id}"
     assert web.script("return !!document.querySelector('.extract-panel');"), "Extract remains open for another scan"
     assert not any(item["name"] in ("load_project", "query_project_rows")
                    and item["request"].get("projectId") == derived_id for item in web.trace()[checkpoint:]), "Background tabs retain metadata without loading row data"
-    return {"id": derived_id, "request": entry["request"], "meta": result["meta"], "expected_values": list(values)}
+    detail = web.command("load_project", {"projectId": derived_id}, request=True)
+    return {"id": derived_id, "request": entry["request"], "meta": detail["project"]["meta"], "expected_values": list(values)}
 
 
 def _open_generated(web, case):
@@ -266,7 +268,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         assert first["request"]["search"] == "cohort:keep" and first["request"]["scope"] == "filtered"
         assert {item["meta"]["id"] for item in web.command("list_projects")} == project_ids
         assert Path(first["meta"]["source_path"]).is_file()
-        assert web.script("return document.querySelectorAll('[role=tablist] [role=tab][aria-selected=true]').length;") == 1
+        assert web.script("return document.querySelectorAll('.project-tabs [role=tab][aria-selected=true]').length;") == 1
         assert web.query() == saved_query
         assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "filtered"
         web.choose('[aria-label="Extraction rows"]', "all")
