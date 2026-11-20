@@ -3,27 +3,34 @@ import { test } from 'node:test';
 import { columnKindLabel } from './columnTypes.ts';
 import { runSvelteTest } from '../../tests/ui/headlessSvelte.ts';
 
-test('column headings distinguish inferred kinds and missing metadata', () => {
+test('column kinds distinguish inferred types and missing metadata', () => {
   const kinds = ['string', 'int', 'float', 'datetime', 'null', undefined] as const;
   assert.deepEqual(kinds.map(columnKindLabel), ['Text', 'Int', 'Float', 'Datetime', 'Null', 'Unknown']);
 });
 
 test('only inferred datetime columns expose and dispatch the ISO display toggle', () => runSvelteTest(String.raw`
 const {readFile}=await import('node:fs/promises');
-const {resolve}=await import('node:path');
+const {dirname,extname,resolve}=await import('node:path');
+const {pathToFileURL}=await import('node:url');
 const {compile,preprocess}=await import('svelte/compiler');
 const {default:sveltePreprocess}=await import('svelte-preprocess');
 const filename=resolve('src/lib/components/project_view/ColumnContextMenu.svelte');
 const source=await preprocess(await readFile(filename,'utf8'),sveltePreprocess({typescript:true}),{filename});
 let code=compile(source.code,{filename,generate:'ssr',css:'external'}).js.code;
-code=code.replace(/((?:^|\n)import(?:\s+[^;]+?\s+from)?\s*)(['"])([^'"]+)\2/g,
- (_all,prefix,_quote,specifier)=>prefix+JSON.stringify(import.meta.resolve(specifier)));
+code=code.replace(/((?:^|\n)import(?:\s+[^;]+?\s+from)?\s*)(['"])([^'"]+)\2/g,(_all,prefix,_quote,specifier)=>{
+ const url=specifier.startsWith('.')?pathToFileURL(resolve(dirname(filename),specifier+(extname(specifier)?'':'.ts'))).href:import.meta.resolve(specifier);
+ return prefix+JSON.stringify(url);
+});
 const {default:RenderedMenu}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 const Menu=await compileHeadless('ColumnContextMenu');
 const props={columnId:'c1',label:'Evidence',x:0,y:0};
 for(const kind of ['string','int','float','null',undefined,'datetime']){
  for(const displayFormat of ['original','iso']){
   const html=RenderedMenu.render({...props,columnKind:kind,displayFormat}).html;
+  const labels={string:'Text',int:'Int',float:'Float',datetime:'Datetime',null:'Null',unknown:'Unknown'};
+  const kindLabel=labels[kind??'unknown'];
+  assert.match(html,/class="column-menu-name[^\"]*">Evidence<\/span>/);
+  assert.match(html,new RegExp('class="column-menu-type[^\"]*"[^>]*data-column-kind="'+(kind??'unknown')+'"[^>]*>'+kindLabel+'<'));
   assert.match(html,new RegExp('data-column-kind="'+(kind??'unknown')+'"'));
   assert.equal((html.match(/role="menuitem"/g)??[]).length,kind==='datetime'?6:5,kind);
   assert.equal(html.includes(displayFormat==='iso'?'Show original values':'Show ISO datetime'),kind==='datetime',kind);

@@ -26,11 +26,8 @@ export function visibleColumnWidth(
   };
 
   const sort = heading.querySelector<HTMLElement>('.column-sort');
-  const title = heading.querySelector<HTMLElement>('.column-title');
-  const kind = heading.querySelector('.column-type');
   const indicator = heading.querySelector('.sort-indicator');
-  let width = box(heading) + text(heading.querySelector('.header-label,.note-label')) + text(kind);
-  if (title && kind) width += gap(title);
+  let width = box(heading) + text(heading.querySelector('.header-label,.note-label'));
   const actions = heading.querySelector<HTMLElement>('.column-actions-trigger');
   if (sort) width += box(sort) + text(indicator) + (indicator ? gap(sort) : 0)
     + outerWidth(actions) + (actions ? gap(heading) : 0);

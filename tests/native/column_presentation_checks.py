@@ -224,9 +224,22 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         web.results(83)
         detail = web.command("load_project", {"projectId": project_id}, request=True)
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
-        types = web.script("return [...document.querySelectorAll('.data-header [data-column-id]')].map(e=>({id:e.dataset.columnId,name:e.querySelector('.header-label').textContent.trim(),kind:e.querySelector('.column-type')?.dataset.columnKind,label:e.querySelector('.column-type')?.textContent.trim()}));")
-        assert {item["id"]: item["kind"] for item in types} == {column: detail["column_kinds"][column] for column in columns.values()}, types
-        assert all(item["label"] and item["name"] in columns for item in types), types
+        assert not web.script("return !!document.querySelector('.data-header .column-type');"), "Column types belong in the context menu, not table headings"
+        types = []
+        for name, column in columns.items():
+            _menu(web, column)
+            item = web.script("""
+              const heading=document.querySelector('.column-context-menu .column-menu-label'),
+                name=heading.querySelector('.column-menu-name'),kind=heading.querySelector('.column-menu-type'),
+                n=name.getBoundingClientRect(),k=kind.getBoundingClientRect();
+              return {id:arguments[0],name:name.textContent.trim(),kind:kind.dataset.columnKind,label:kind.textContent.trim(),
+                rightOfName:k.left>=n.right-1,sameLine:k.bottom>n.top&&n.bottom>k.top};
+            """, column)
+            assert item["name"] == name and item["kind"] == detail["column_kinds"][column], item
+            assert item["label"] == {"string": "Text", "int": "Int", "float": "Float", "datetime": "Datetime", "null": "Null"}[item["kind"]], item
+            assert item["rightOfName"] and item["sameLine"], item
+            types.append(item)
+            _key(web, "\ue00c")
         auto_fit = _fit_visible(web, columns["message"])
         web.write('input[aria-label="Search rows"]', "alpha | beta")
         query = web.applied(projectId=project_id, search="alpha | beta")
@@ -322,7 +335,7 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
         assert source.read_bytes() == original
         web.screenshot(evidence / "column-presentation.png")
         report["column_presentation"] = {"drag": drag, "display_order": desired, "widths": widths,
-            "datetime_only_iso_action": True, "header_types": types, "visible_auto_fit": auto_fit,
+            "datetime_only_iso_action": True, "context_menu_types": types, "header_types_absent": True, "visible_auto_fit": auto_fit,
             "compact_menu_and_single_toggles": True, "keyboard_resize_f2_escape_tab": True,
             "frozen_prefix": [item["id"] for item in frozen["headers"] if item["pinned"]],
             "iso_nanoseconds_and_offset": True, "raw_get_cell_and_export_preserved": True,

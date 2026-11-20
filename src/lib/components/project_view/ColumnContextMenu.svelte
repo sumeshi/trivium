@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { ColumnKind } from '../../types';
+  import { columnKindLabel } from '../../columnTypes';
 
   export let columnId: string;
   export let label: string;
@@ -61,7 +62,11 @@
   style={`left: ${left}px; top: ${top}px;`} role="menu" aria-label={`Column actions: ${label}`}
   data-column-kind={columnKind ?? 'unknown'}
   on:keydown={keydown} tabindex="-1">
-  <span class="column-menu-label" title={label}>{label}</span>
+  <span class="column-menu-label" title={label}>
+    <span class="column-menu-name">{label}</span>
+    <span class="column-menu-type" data-column-kind={columnKind ?? 'unknown'}
+      title={`Inferred type: ${columnKindLabel(columnKind)}`}>{columnKindLabel(columnKind)}</span>
+  </span>
   <button type="button" role="menuitem" on:click={() => dispatch('search', { columnId })}>
     Search this column
   </button>
@@ -92,5 +97,7 @@
 <style>
   .column-context-menu { min-width: 190px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
   .column-menu-separator { border-top: 1px solid var(--border); margin: 3px 0; }
-  .column-menu-label { display: block; padding: 4px 7px 5px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .column-menu-label { display: flex; align-items: baseline; gap: 7px; padding: 4px 7px 5px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+  .column-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .column-menu-type { flex-shrink: 0; font-weight: 400; }
 </style>

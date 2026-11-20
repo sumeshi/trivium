@@ -8,7 +8,6 @@
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { moveDisplayColumn } from '../../columnLayoutActions';
-  import { columnKindLabel } from '../../columnTypes';
   import { visibleColumnWidth } from '../../columnAutoFit';
   import TableRow from './TableRow.svelte';
   import ColumnResizeHandle from './ColumnResizeHandle.svelte';
@@ -765,17 +764,9 @@
                 on:keydown={(event) => { columnTab(event, column.index); if (!event.defaultPrevented) columnHeaderKey(event, column.id); }}
                 aria-pressed={$sortKey === column.id}
                 aria-label={$columnLabels.get(column.id) ?? column.id}
-                aria-describedby={`column-kind-${column.index}`}
                 aria-keyshortcuts="F2"
                 title={`Sort ${$columnLabels.get(column.id) ?? column.id}; drag to move; F2 to resize; right-click for actions`}>
-                <span class="column-title">
-                  <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
-                  <span class="column-type" id={`column-kind-${column.index}`}
-                    data-column-kind={columnKinds[column.id] ?? 'unknown'}
-                    title={`Inferred type: ${columnKindLabel(columnKinds[column.id])}`}>
-                    {columnKindLabel(columnKinds[column.id])}
-                  </span>
-                </span>
+                <span class="header-label">{$columnLabels.get(column.id) ?? column.id}</span>
                 {#if $sortKey === column.id}
                   <span class="sort-indicator" aria-hidden="true">{$sortDirection === 'asc' ? '▲' : '▼'}</span>
                 {/if}
@@ -895,9 +886,6 @@
 
 <style>
   .column-heading { gap: 0; }
-  .column-title { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
-  .column-title .header-label { min-width: 0; }
-  .column-type { flex: 0 0 auto; color: var(--muted); font-size: .9em; font-weight: 400; letter-spacing: 0; text-transform: none; }
   .column-sort { user-select: none; -webkit-user-select: none; touch-action: none; padding-left: 8px; padding-right: 0; }
   .column-actions-trigger { flex-basis: 16px; width: 16px; }
   .column-heading.dragging .column-sort { cursor: grabbing; }
