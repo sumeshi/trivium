@@ -101,16 +101,15 @@
 </script>
 
 <div class="stats-panel bulk-form">
-  <p class="condition-count bulk-wide bulk-intro">Apply flags, notes and tags to multiple rows. Unselected flags and blank fields stay unchanged.</p>
-  <label class="bulk-field">Rows
+  <label class="bulk-field bulk-inline">Rows
     <select bind:value={target} aria-label="Bulk target" disabled={busy} on:change={invalidate}>
       <option value="selection" disabled={$selectedCount === 0}>Selected ({$selectedCount})</option>
       <option value="filtered">Current results ({$queryCountKnown ? $totalFilteredRows : $appliedResultLoading ? '…' : 'unavailable'})</option>
       <option value="all">All rows ({allRowCount})</option>
     </select>
   </label>
-  <div class="bulk-field">
-    <span>Flag</span>
+  <div class="bulk-field bulk-inline">
+    <span title="Unselected flags stay unchanged">Flag</span>
     <div class="bulk-flag-buttons" role="group" aria-label="Bulk flag">
       {#each FLAG_OPTIONS as option}
         <button type="button" class={`bulk-flag bulk-flag-${option.value}`} class:selected={flag === option.value}
@@ -121,24 +120,26 @@
       <button type="button" class="bulk-flag bulk-unflag" class:selected={flag === ''}
         aria-label="Clear bulk flags" aria-pressed={flag === ''}
         title="Remove flags from target rows; click again to leave flags unchanged" disabled={busy}
-        on:click={() => chooseFlag('')}>–</button>
+        on:click={() => chooseFlag('')}>Unflagged</button>
     </div>
   </div>
   <div class="bulk-field bulk-wide">
-    <label for="bulk-note">Note</label>
+    <div class="bulk-field-heading">
+      <label for="bulk-note">Note</label>
+      <label class="bulk-clear" title="Remove notes from matching rows">
+        <input type="checkbox" bind:checked={clearMemo} disabled={busy} on:change={event => { if (event.currentTarget.checked) memo = ""; invalidate(); }} />
+        Clear note
+      </label>
+    </div>
     <input id="bulk-note" bind:value={memo} placeholder="Add or replace note" aria-label="Bulk note" disabled={busy || clearMemo} on:input={invalidate} />
-    <label class="bulk-clear" title="Remove notes from matching rows">
-      <input type="checkbox" bind:checked={clearMemo} disabled={busy} on:change={event => { if (event.currentTarget.checked) memo = ""; invalidate(); }} />
-      Clear note
-    </label>
   </div>
   <div class="bulk-field bulk-wide">
     <label for="bulk-tag">Tag</label>
     <div class="bulk-tag">
       <select bind:value={tagOperation} aria-label="Bulk tag action" disabled={busy} on:change={invalidate}>
-        <option value="add">Add</option><option value="remove">Remove</option>
+        <option value="add">Add</option><option value="remove">Remove</option><option value="clear">Clear tags</option>
       </select>
-      <input id="bulk-tag" bind:value={tagInput} placeholder="Tag name" aria-label="Bulk tag" title="One exact tag name; blank leaves tags unchanged" disabled={busy} on:input={invalidate} />
+      <input id="bulk-tag" bind:value={tagInput} placeholder="Tag name" aria-label="Bulk tag" title="One exact tag name; blank leaves tags unchanged" disabled={busy || tagOperation === 'clear'} on:input={invalidate} />
     </div>
     <span class="condition-count">Labels for related rows. Click tags to search.</span>
   </div>
@@ -152,12 +153,13 @@
 </div>
 
 <style>
-  .bulk-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .bulk-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .bulk-field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; color: var(--muted); font-size: 11px; }
   .bulk-field > label { color: var(--muted); }
+  .bulk-inline { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 6px; }
+  .bulk-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .bulk-wide { grid-column: 1 / -1; }
   .bulk-field input:not([type=checkbox]), .bulk-field select { min-width: 0; width: 100%; }
-  .bulk-intro { line-height: 1.45; }
   .bulk-flag-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 31px; }
   .bulk-flag { padding: 4px 5px; border: 1px solid var(--border); border-radius: 4px; background: transparent; font: inherit; white-space: nowrap; }
   .bulk-flag-safe { color: var(--positive); }
@@ -169,9 +171,9 @@
   .bulk-flag-suspicious.selected { background: var(--flag-suspicious-selected-bg, var(--warning)); color: var(--flag-suspicious-selected-fg, var(--flag-selected-text)); border-color: var(--flag-suspicious-selected-border, var(--warning)); }
   .bulk-flag-critical.selected { background: var(--flag-critical-selected-bg, var(--danger)); color: var(--flag-critical-selected-fg, var(--flag-selected-text)); border-color: var(--flag-critical-selected-border, var(--danger)); }
   .bulk-flag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .bulk-clear { display: inline-flex; align-items: center; gap: 5px; }
+  .bulk-clear { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .bulk-tag { display: flex; gap: 5px; }
-  .bulk-tag select { flex: 0 0 84px; }
+  .bulk-tag select { flex: 0 0 92px; }
   .bulk-tag input { flex: 1; }
   .bulk-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
   .bulk-actions button { padding: 4px 8px; }

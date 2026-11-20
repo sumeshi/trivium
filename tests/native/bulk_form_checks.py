@@ -38,6 +38,10 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');")
         assert not web.script("return [...document.querySelectorAll('.bulk-form button')].some(e=>e.textContent.trim()==='Preview');")
         assert not web.script("return [...document.querySelectorAll('.bulk-form input')].some(e=>e.placeholder==='Keep');")
+        assert web.script("return [...document.querySelectorAll('[aria-label=\"Bulk flag\"] button')].map(e=>e.getAttribute('aria-label'));") == [
+            "Set bulk flag Critical", "Set bulk flag Suspicious", "Set bulk flag Safe", "Clear bulk flags"]
+        note_heading = web.script("const heading=document.querySelector('.bulk-field-heading'),note=heading.querySelector('label[for=bulk-note]').getBoundingClientRect(),clear=heading.querySelector('.bulk-clear').getBoundingClientRect();return {note:(note.top+note.bottom)/2,clear:(clear.top+clear.bottom)/2};")
+        assert abs(note_heading["note"] - note_heading["clear"]) <= 1, "Clear note belongs beside the Note label"
         assert web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
         web.named("Set bulk flag Safe", ".bulk-form")
         assert web.script("return document.querySelector('[aria-label=\"Set bulk flag Safe\"]').getAttribute('aria-pressed');") == "true"
@@ -59,6 +63,22 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert _rows(web, project_id) == tag_only, "Reapplying an identical patch changes no rows"
         web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
         assert _rows(web, project_id) == original
+
+        web.choose('select[aria-label="Bulk tag action"]', "clear")
+        assert web.script("return document.querySelector('[aria-label=\"Bulk tag\"]').disabled;"), "Clear tags does not require or consume a tag name"
+        start = len(web.trace())
+        web.named("Apply", ".bulk-form"); _status(web, "1 rows applied")
+        updates = _calls(web, start, project_id, "bulk_update")
+        assert len(updates) == 1 and updates[0]["request"]["tags"] == [], updates
+        assert not {"flag", "memo", "add_tags", "remove_tags"}.intersection(updates[0]["request"]), updates
+        cleared_tags = _rows(web, project_id)
+        for index in [0, 2]:
+            assert cleared_tags[index]["tags"] == []
+            assert {key: value for key, value in cleared_tags[index].items() if key != "tags"} == {key: value for key, value in original[index].items() if key != "tags"}
+        assert cleared_tags[1] == original[1]
+        web.named("Undo", ".bulk-form"); _status(web, "1 rows restored")
+        assert _rows(web, project_id) == original
+        web.choose('select[aria-label="Bulk tag action"]', "add")
 
         web.named("Set bulk flag Critical", ".bulk-form")
         web.write('input[aria-label="Bulk note"]', "combined note")
@@ -141,6 +161,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             "combined_single_operation": True, "preview_hidden": True, "optional_flag_toggles": True,
             "identical_reapply_keeps_previous_undo": True,
             "undo_with_empty_selection": True, "clear_flag_note_remove_tag_atomic": True,
+            "clear_tags_preserves_other_annotations_and_undo": True, "note_clear_action_inline": True,
             "closed_panel_and_case_apply_keeps_captured_scope": True, "alive_target_change_aborts_precommit": True}
     finally:
         web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;")

@@ -5,19 +5,19 @@ import { ROW_HEIGHT } from "../../virtualScroll.ts";
 export { annotationVersions, bulkAnnotationVersions } from "../../annotationVersions.ts";
 
 export const FLAG_OPTIONS = [
-  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe, tone: "safe" },
-  {
-    value: "suspicious",
-    label: "Suspicious",
-    hint: FLAG_HINTS.suspicious,
-    tone: "suspicious",
-  },
   {
     value: "critical",
     label: "Critical",
     hint: FLAG_HINTS.critical,
     tone: "critical",
   },
+  {
+    value: "suspicious",
+    label: "Suspicious",
+    hint: FLAG_HINTS.suspicious,
+    tone: "suspicious",
+  },
+  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe, tone: "safe" },
 ] as const;
 
 export type { FlagFilterValue } from "../../types";
@@ -27,9 +27,9 @@ export const FLAG_FILTER_OPTIONS: Array<{
   label: string;
   hint?: string;
 }> = [
-  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe },
-  { value: "suspicious", label: "Suspicious", hint: FLAG_HINTS.suspicious },
   { value: "critical", label: "Critical", hint: FLAG_HINTS.critical },
+  { value: "suspicious", label: "Suspicious", hint: FLAG_HINTS.suspicious },
+  { value: "safe", label: "Safe", hint: FLAG_HINTS.safe },
   { value: "none", label: "Unflagged", hint: "–" },
 ];
 

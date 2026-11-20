@@ -32,7 +32,7 @@
   const PLOT_TOP = 10;
   const PLOT_BOTTOM = 130;
   const FLAG_STACK = ["unflagged", "safe", "suspicious", "critical"] as const;
-  const DETAIL_FLAGS = ["safe", "suspicious", "critical", "unflagged"] as const;
+  const DETAIL_FLAGS = ["critical", "suspicious", "safe", "unflagged"] as const;
 
   export let column = "";
   let zoomRange: { min: string; max: string } | null = null;
@@ -199,7 +199,7 @@
 
   const bucketTitle = (bucket: HistogramBucket) =>
     `[${bucket.start}, ${bucket.end}${bucket.end_inclusive ? "]" : ")"}\n` +
-    `Total: ${bucket.count} · Safe: ${bucket.flags.safe} · Suspicious: ${bucket.flags.suspicious} · Critical: ${bucket.flags.critical} · Unflagged: ${bucket.flags.unflagged}`;
+    `Total: ${bucket.count} · Critical: ${bucket.flags.critical} · Suspicious: ${bucket.flags.suspicious} · Safe: ${bucket.flags.safe} · Unflagged: ${bucket.flags.unflagged}`;
 
   const loadHistogram = async (
     api: Backend,
@@ -318,7 +318,6 @@
   $: buckets = histogram?.buckets ?? [];
   $: maxCount = buckets.reduce((max, bucket) => Math.max(max, bucket.count), 0);
   $: bucketTotal = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
-  $: totalRows = bucketTotal + (histogram?.outside ?? 0) + (histogram?.missing ?? 0) + (histogram?.invalid ?? 0);
   $: currentRange = zoomRange ?? visibleRange(histogram);
   $: fullRange = histogram?.full_range;
   $: fullMin = fullRange ? parseTimelineNanos(fullRange.min) : null;
@@ -359,23 +358,14 @@
       {#if error}
         <p class="condition-count" role="alert">{error}</p>
       {:else if histogram && buckets.length > 0 && buckets[0].start}
-        <p class="condition-count timeline-summary" data-in-window={bucketTotal} data-outside={histogram.outside}>
-          In window {bucketTotal.toLocaleString()} / {totalRows.toLocaleString()}
-          · Outside {histogram.outside.toLocaleString()}
-          {#if histogram.missing > 0}· Missing {histogram.missing.toLocaleString()}{/if}
-          {#if histogram.invalid > 0}· Unparseable {histogram.invalid.toLocaleString()}{/if}
-          {#if histogram.auto_focused}· Focused period{/if}
-        </p>
         <div class="timeline-window-range" aria-label="Visible timeline period">
           <span>Window (UTC)</span><code>{shownRange?.min}</code><span>to</span><code>{shownRange?.max}</code>
         </div>
-        <div class="timeline-legend" aria-label="Timeline flag colors">
-          <span class="flag-safe">Safe</span><span class="flag-suspicious">Suspicious</span>
-          <span class="flag-critical">Critical</span><span class="flag-unflagged">Unflagged</span>
-        </div>
-        <p class="timeline-help" id="timeline-inspection-help">Each bar is a time interval; dots mark flag presence. Point or use ← / → to inspect; drag to filter.</p>
+        <span class="visually-hidden" id="timeline-inspection-help">Point or use the arrow keys to inspect intervals; drag to filter.</span>
         <!-- Pointer and keyboard inspection share the same exact bucket details. -->
-        <div class="timeline-chart" bind:clientWidth={plotWidth}>
+        <div class="timeline-chart" data-in-window={bucketTotal} data-outside={histogram.outside}
+          data-missing={histogram.missing} data-invalid={histogram.invalid} data-auto-focused={histogram.auto_focused}
+          bind:clientWidth={plotWidth}>
         <svg bind:this={svgEl} class="timeline-svg" viewBox={`0 0 ${viewWidth} ${VIEW_HEIGHT}`}
           role="slider" tabindex="0" aria-label={`Timeline histogram for ${$columnLabels.get(column) ?? column}`}
           aria-orientation="horizontal" aria-valuemin="1" aria-valuemax={buckets.length}
@@ -383,6 +373,7 @@
           aria-valuetext={inspectedBucket ? `Interval ${(inspectedIndex ?? 0) + 1}. ${bucketTitle(inspectedBucket)}` : ''}
           aria-describedby="timeline-inspection-help"
           on:mousedown={startDrag} on:mousemove={inspectBucket} on:keydown={inspectWithKeyboard} on:wheel|nonpassive={handleWheel}>
+          <title>Point or use ← / → to inspect; drag to filter.</title>
           <line class="axis" x1="0" y1={PLOT_BOTTOM} x2={viewWidth} y2={PLOT_BOTTOM} />
           {#each buckets as bucket, index (`${index}:${bucket.start}`)}
             <g class="timeline-bucket" class:inspected={inspectedIndex === index} data-bucket-index={index} data-count={bucket.count} data-safe={bucket.flags.safe}
@@ -425,6 +416,17 @@
           {/each}
         </svg>
         </div>
+        <div class="timeline-legend" aria-label="Timeline flag colors">
+          <span class="flag-critical">Critical</span><span class="flag-suspicious">Suspicious</span>
+          <span class="flag-safe">Safe</span><span class="flag-unflagged">Unflagged</span>
+        </div>
+        {#if histogram.outside > 0 || histogram.missing > 0 || histogram.invalid > 0}
+          <p class="condition-count timeline-notice" aria-label="Events outside the timeline">
+            {#if histogram.outside > 0}<span>Outside window {histogram.outside.toLocaleString()}</span>{/if}
+            {#if histogram.missing > 0}<span>Missing {histogram.missing.toLocaleString()}</span>{/if}
+            {#if histogram.invalid > 0}<span>Unparseable {histogram.invalid.toLocaleString()}</span>{/if}
+          </p>
+        {/if}
         {#if inspectedBucket && inspectedIndex !== null}
           <section class="timeline-bucket-detail" aria-label="Timeline bucket details" data-bucket-index={inspectedIndex}>
             <div class="timeline-detail-heading"><strong>{selection ? `Selection: ${selection.end - selection.start + 1} intervals` : `Interval ${inspectedIndex + 1} / ${buckets.length}`}</strong><span>Total {inspectedBucket.count.toLocaleString()}</span></div>
@@ -472,7 +474,8 @@
   .flag-unflagged { fill: var(--muted); color: var(--muted); }
   .timeline-window-range { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; color: var(--muted); font-size: 10.5px; }
   .timeline-window-range code { color: var(--fg); font: 10.5px var(--font-mono); overflow-wrap: anywhere; }
-  .timeline-help { margin: 3px 0 5px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+  .timeline-notice { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   .timeline-flag-marker { stroke: var(--surface-weak); stroke-width: .7; }
   .inspection-cursor { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; pointer-events: none; }
   .timeline-svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -490,5 +493,5 @@
   .axis { stroke: var(--border); stroke-width: 1; }
   .axis-label { fill: var(--muted); font-size: 11px; }
   .bucket-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow: auto; }
-  .bucket-list button { display: flex; justify-content: space-between; width: 100%; gap: 8px; text-align: left; }
+  .bucket-list button { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; text-align: left; }
 </style>

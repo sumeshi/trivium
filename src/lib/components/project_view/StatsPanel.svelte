@@ -204,7 +204,6 @@
   {:else if statsLoading}
     <p class="condition-count" role="status">Loading column stats…</p>
   {:else if stats}
-    <p class="stats-summary">{stats.kind} <span>Missing <b>{stats.missing.toLocaleString()}</b></span> <span>Unique <b>{stats.unique.toLocaleString()}</b></span></p>
     <section class="stat-section" aria-label="Most frequent values">
       <h3>Top values <small>Click a value to filter</small></h3>
       <ValueCountList column={stats.column} items={stats.top} />
@@ -255,8 +254,6 @@
   .stats-controls select { flex: 1; min-width: 0; }
   .histogram-mode { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
   .histogram-mode select { flex: 1; min-width: 0; }
-  .stats-summary { display: flex; gap: 14px; flex-wrap: wrap; margin: 0; color: var(--muted); font-size: 11px; }
-  .stats-summary b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
   .stat-section { display: grid; gap: 7px; }
   h3 { font-size: 11px; font-weight: 600; color: var(--fg); margin: 0; }
   h3 small { font-size: 10px; font-weight: 400; margin-left: 7px; color: var(--muted); }

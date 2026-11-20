@@ -104,6 +104,7 @@
           <input value={entry.tag} placeholder="Tag" aria-label={`Rule tag ${activeIndex + 1}`}
             on:input={event => iocEditor.update(id, 'tag', event.currentTarget.value)} disabled={busy} />
         </div>
+        <div class="ioc-rule-body">
         {#if entry.cell}
           <div class="ioc-cell-label"><span>Cell equals</span>
             <select aria-label={`Rule column ${activeIndex + 1}`} disabled={busy} value={entry.cell.column}
@@ -124,6 +125,7 @@
               on:input={event => iocEditor.update(id, 'query', event.currentTarget.value)} disabled={busy} />
           </div>
         {/if}
+        </div>
       {#if activeProblem}<small id="ioc-editor-error" class="ioc-query-error" title={activeProblem}>{activeProblem}</small>
       {:else}<p class="condition-count ioc-intro">Save keeps rules. Apply changes matching rows.</p>{/if}
     {:else}<p class="condition-count ioc-empty">Add a rule to start.</p>{/if}
@@ -170,14 +172,16 @@
 
 <style>
   .ioc-panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; height: 100%; }
-  .ioc-controls, .ioc-labels, .ioc-cell-label, .ioc-rule-actions, .ioc-footer { display: flex; align-items: center; gap: 6px; }
+  .ioc-controls, .ioc-rule-actions, .ioc-footer { display: flex; align-items: center; gap: 6px; }
   .ioc-controls button, .ioc-rule-actions button, .ioc-footer button { padding: 4px 7px; }
   .ioc-spacer { flex: 1; }
   .ioc-intro, .ioc-empty { margin: 0; }
-  .ioc-content { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 6px; }
-  .ioc-editor { display: flex; flex-direction: column; gap: 5px; flex: 0 1 auto; min-height: 65px; max-height: 33%; overflow: auto; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .ioc-content { display: grid; grid-template-rows: minmax(0, 3fr) minmax(0, 7fr); flex: 1; min-width: 0; min-height: 0; gap: 6px; }
+  .ioc-editor { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; overflow: auto; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .ioc-labels { display: grid; grid-template-columns: 48px 112px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; flex: 0 0 auto; }
+  .ioc-rule-body { display: flex; flex-direction: column; gap: 5px; flex: 1 0 auto; min-width: 0; min-height: 61px; }
   .ioc-editor .ioc-empty { margin: auto 0; }
-  .ioc-table { flex: 1; min-height: 60px; overflow: auto; overscroll-behavior: contain; }
+  .ioc-table { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
   .ioc-row { display: flex; align-items: center; min-width: 0; min-height: 42px; border-bottom: 1px solid var(--border); border-left: 2px solid transparent; }
   .ioc-row.selected { border-left-color: var(--accent-border); background: var(--accent-soft); }
   .ioc-select { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 4px 6px; text-align: left; border: 0; background: transparent; color: var(--fg); }
@@ -190,19 +194,17 @@
   .ioc-list-flag.flag-safe { color: var(--flag-safe-text); }
   .ioc-list-flag.flag-suspicious { color: var(--flag-suspicious-text); }
   .ioc-list-flag.flag-critical, .ioc-list-flag:not(.flag-safe):not(.flag-suspicious) { color: var(--flag-critical-text); }
-  .ioc-labels .condition-count { flex: 0 0 auto; }
-  .ioc-labels :global(.flag-select) { flex: 0 0 112px; width: 112px; }
+  .ioc-labels :global(.flag-select) { width: 112px; }
   .ioc-labels :global(.flag-select-trigger) { padding: 4px 7px; border-radius: 4px; font-size: 11px; gap: 6px; }
   .ioc-labels :global(.flag-label) { font-size: 10.5px; text-transform: none; letter-spacing: 0; }
   .ioc-labels :global(.flag-select-menu) { min-width: 132px; border-radius: 4px; padding: 3px; }
   .ioc-labels :global(.flag-option) { padding: 5px 7px; gap: 6px; }
-  .ioc-labels input { flex: 1; width: 0; }
-  .ioc-cell-label { color: var(--muted); font-size: 11px; }
-  .ioc-cell-label select { flex: 1; min-width: 0; }
-  .ioc-editor input, .ioc-editor textarea, .ioc-editor select { min-width: 0; width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--fg); font-size: 11px; }
+  .ioc-labels input { width: 100%; }
+  .ioc-cell-label { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; }
+  .ioc-editor input, .ioc-editor textarea, .ioc-editor select { box-sizing: border-box; min-width: 0; max-width: 100%; width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--fg); font-size: 11px; }
   .ioc-editor input:focus-visible, .ioc-editor textarea:focus-visible, .ioc-editor select:focus-visible, .ioc-select:focus-visible { outline: 2px solid var(--accent-border); outline-offset: -2px; }
-  .ioc-query { min-width: 0; }
-  .ioc-cell-value { resize: vertical; font-family: var(--font-mono); }
+  .ioc-query { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+  .ioc-cell-value { flex: 1; min-height: 40px; resize: none; font-family: var(--font-mono); }
   .ioc-rule-actions { flex: 0 0 auto; gap: 3px; padding-right: 3px; }
   .ioc-rule-actions .icon-button { width: 25px; height: 25px; padding: 4px; }
   .ioc-query-error { color: var(--danger); font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

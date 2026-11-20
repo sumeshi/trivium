@@ -30,6 +30,16 @@ def _select_rule(web, index: int) -> None:
              bool, f"rule {index + 1} is selected in the shared editor")
 
 
+def _editor_layout(web) -> dict:
+    _settle(web)
+    return web.script("""
+      const editor=document.querySelector('.ioc-editor'),list=document.querySelector('.ioc-table'),
+        field=editor.querySelector('.ioc-cell-value,.ioc-query input'),e=editor.getBoundingClientRect(),f=field.getBoundingClientRect();
+      return {top:e.top,height:e.height,left:f.left,width:f.width,listTop:list.getBoundingClientRect().top,
+        overflow:editor.scrollWidth>editor.clientWidth};
+    """)
+
+
 def _context(web, column: str) -> None:
     _settle(web)
     target = web.node(f'.data-row[data-row-index="0"] [data-column-id="{column}"]')
@@ -136,6 +146,19 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         assert web.script("return document.querySelector('[aria-label=\"Rule column 1\"]').value;") == ids["message"]
         assert any(e["name"] == "get_cell" and e["request"].get("columnId") == ids["message"] for e in web.trace()[checkpoint:])
         assert saved_rules() == [] and rows() == original, "Creating a draft neither saves rules nor annotates"
+        cell_layout = _editor_layout(web)
+        for _ in range(2):
+            web.named("Add rule", ".ioc-panel")
+            wait_for(lambda: web.script("return !!document.querySelector('.ioc-query input');"), bool,
+                     "adding a query rule selects the same fixed editor")
+            query_layout = _editor_layout(web)
+            assert not query_layout["overflow"]
+            assert all(abs(query_layout[key] - cell_layout[key]) <= 1 for key in ["top", "height", "left", "width", "listTop"]), (cell_layout, query_layout)
+        _select_rule(web, 0)
+        assert web.script("return document.querySelector('[aria-label=\"Rule value 1\"]').value;") == raw
+        assert _editor_layout(web) == cell_layout, "Switching back to source text keeps the editor and list geometry"
+        web.named("Delete rule 3", ".ioc-panel")
+        web.named("Delete rule 2", ".ioc-panel")
         web.write('[aria-label="Rule tag 1"]', "cell-review")
         web.close_drawer()
         _panel(web)
@@ -199,6 +222,7 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
             "critical_draft_only": True, "save_keeps_query_and_selection": True, "exact_column_matching_rows": [0, 3],
             "manual_annotations_preserved": True, "undo_restores_original": True, "extended_csv_roundtrip": True,
             "hidden_draft_retained": True, "dirty_close_and_reload_blocked": True, "row_detail_flag_action": True}
+        report["cell_iocs"]["editor_geometry_stable_when_adding_and_switching_rules"] = True
     except Exception:
         web.screenshot(evidence / "cell-ioc-failure.png")
         raise

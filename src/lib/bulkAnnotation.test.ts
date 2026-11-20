@@ -37,6 +37,12 @@ test("tag-only updates keep existing flags and notes, and remove is one-directio
   assert.deepEqual(buildBulkPatch({ ...blank, tag: "label", tagOperation: "remove" }), { remove_tags: ["label"] });
 });
 
+test("clearing tags uses the explicit replacement patch without changing notes or flags", () => {
+  assert.deepEqual(buildBulkPatch({ ...blank, tagOperation: "clear" }), { tags: [] });
+  assert.deepEqual(buildBulkPatch({ ...blank, tag: "previous add input", tagOperation: "clear" }), { tags: [] });
+  assert.deepEqual(buildBulkPatch({ ...blank, tag: "previous add input", tagOperation: "add" }), { add_tags: ["previous add input"] });
+});
+
 test("clearing a flag or note is explicit and can be combined with tag removal", () => {
   assert.deepEqual(buildBulkPatch({ ...blank, flag: "", memo: "ignored", clearMemo: true, tag: "old", tagOperation: "remove" }),
     { flag: "", memo: null, remove_tags: ["old"] });

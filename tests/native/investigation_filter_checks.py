@@ -39,8 +39,8 @@ def _range_from_first_bucket(web, project_id: str, column: str, expected_leaves:
              and entry["request"].get("buckets") == 60
              and entry["request"].get("condition") == active_condition), None),
              bool, "timeline histogram uses the actual applied Rules")
-    wait_for(lambda: web.script("return document.querySelector('.timeline-summary')?.textContent??'';"),
-             lambda text: "In window" in text, "timeline for the applied Rules")
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.inWindow??-1);"),
+             lambda count: count >= 1, "timeline for the applied Rules")
     before = len(web.trace())
     web.script("document.querySelector('.timeline-svg').focus();")
     _key(web, "\ue011")  # Home
@@ -85,7 +85,7 @@ def _show_full_period(web, project_id: str, column: str, expected_rules: dict, e
                       "Show all survives the applied-filter update and requests the complete period")["result"]
     assert result["outside"] == 0 and not result.get("auto_focused", False), result
     assert sum(bucket["count"] for bucket in result["buckets"]) + result["missing"] + result["invalid"] == expected_rows
-    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"),
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"),
              lambda count: count == 0, "the complete restored period is displayed")
 
 
@@ -109,8 +109,9 @@ def verify_investigation_filters(web, data: dict, root: Path, evidence: Path, re
         web.drawer("Timeline")
         assert web.script("return document.querySelector('[aria-label=\"Timeline column\"]').value;") == ""
         web.choose('select[aria-label="Timeline column"]', timestamp)
-        wait_for(lambda: web.script("return document.querySelector('.timeline-summary')?.textContent??'';"),
-                 lambda text: "In window 3 / 5" in text and "Missing 1" in text and "Unparseable 1" in text,
+        wait_for(lambda: web.script("const chart=document.querySelector('.timeline-chart');return chart?{inside:Number(chart.dataset.inWindow),missing:Number(chart.dataset.missing),invalid:Number(chart.dataset.invalid),notice:document.querySelector('.timeline-notice')?.textContent??''}:null;"),
+                 lambda chart: bool(chart and chart["inside"] == 3 and chart["missing"] == 1 and chart["invalid"] == 1
+                                    and "Missing 1" in chart["notice"] and "Unparseable 1" in chart["notice"]),
                  "manual datetime timeline counts valid, blank, and invalid values")
         web.drawer("Time analysis")
         web.choose('select[aria-label="Time column"]', timestamp)
@@ -122,6 +123,7 @@ def verify_investigation_filters(web, data: dict, root: Path, evidence: Path, re
         wait_for(lambda: web.script("return document.querySelector('.histogram-section')?.textContent??'';"),
                  lambda text: "3 values" in text and "Missing 1" in text and "Unparseable 1" in text,
                  "manual datetime stats histogram")
+        assert not web.script("return !!document.querySelector('.stats-summary');"), "Column stats omit the redundant kind, missing and unique summary row"
         web.drawer("Time analysis")
         assert web.script("return document.querySelector('[aria-label=\"Time column\"]').value;") == timestamp
         web.drawer("Column stats")

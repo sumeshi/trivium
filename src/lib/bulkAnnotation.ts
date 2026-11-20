@@ -5,7 +5,7 @@ import { errorMessage } from "./errors.ts";
 
 export type BulkTarget = "selection" | "filtered" | "all";
 export type BulkFlag = "keep" | NonNullable<AnnotationPatch["flag"]>;
-export type BulkTagOperation = "add" | "remove";
+export type BulkTagOperation = "add" | "remove" | "clear";
 
 /** Omitted fields stay unchanged; tag text is one exact label, including commas. */
 export function buildBulkPatch(input: {
@@ -20,7 +20,8 @@ export function buildBulkPatch(input: {
   if (input.clearMemo) patch.memo = null;
   else if (input.memo.trim()) patch.memo = input.memo;
   const tag = input.tag.trim();
-  if (tag) patch[input.tagOperation === "remove" ? "remove_tags" : "add_tags"] = [tag];
+  if (input.tagOperation === "clear") patch.tags = [];
+  else if (tag) patch[input.tagOperation === "remove" ? "remove_tags" : "add_tags"] = [tag];
   return patch;
 }
 

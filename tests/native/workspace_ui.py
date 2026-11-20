@@ -323,7 +323,7 @@ class WorkspaceView(WebView):
             if checked != (token in tokens):
                 self.click(checkbox)
         actual = self.script("return [...document.querySelectorAll('#flag-filter-menu label')].filter(e=>e.querySelector('input').checked).map(e=>e.textContent.trim());")
-        assert actual == [label for label, token in FLAGS if token in tokens]
+        assert actual == [label for label, token in [FLAGS[2], FLAGS[1], FLAGS[0], FLAGS[3]] if token in tokens]
         self.click(self.element('button[aria-controls="flag-filter-menu"]'))
         wire = "|".join(token for _, token in FLAGS if token in tokens) or "all"
         self.applied(flagFilter=wire)
@@ -595,21 +595,21 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     assert time_reads < sum(entry["name"] == "time_analysis" for entry in web.trace())
     web.drawer("Timeline")
     web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
-    focused = wait_for(lambda: web.script("const e=document.querySelector('.timeline-summary');return e?{inside:Number(e.dataset.inWindow),outside:Number(e.dataset.outside),text:e.textContent}:null;"), lambda value: bool(value and 0 < value["outside"] < data["total"] / 4), "dense timeline initial focus")
+    focused = wait_for(lambda: web.script("const e=document.querySelector('.timeline-chart');return e?{inside:Number(e.dataset.inWindow),outside:Number(e.dataset.outside),text:e.textContent}:null;"), lambda value: bool(value and 0 < value["outside"] < data["total"] / 4), "dense timeline initial focus")
     assert focused["inside"] + focused["outside"] == data["total"], focused
     web.screenshot(evidence / "timeline-focused.png")
     web.named("Show all events", "#analysis-drawer")
-    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda value: value == 0, "show all includes old outliers")
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"), lambda value: value == 0, "show all includes old outliers")
     histogram_reads = sum(entry["name"] == "histogram" for entry in web.trace())
     web.choose('select[aria-label="Timeline column"]', "")
-    wait_for(lambda: web.script("return !document.querySelector('.timeline-svg,.timeline-summary');"),
+    wait_for(lambda: web.script("return !document.querySelector('.timeline-svg,.timeline-chart');"),
              bool, "clearing the timeline column removes its previous chart")
     assert histogram_reads == sum(entry["name"] == "histogram" for entry in web.trace())
     web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
-    wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "reselecting the same timeline column loads a fresh chart")
+    wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "reselecting the same timeline column loads a fresh chart")
     assert histogram_reads < sum(entry["name"] == "histogram" for entry in web.trace())
     web.named("Show all events", "#analysis-drawer")
-    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda value: value == 0, "reselected timeline shows all events before editing flags")
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"), lambda value: value == 0, "reselected timeline shows all events before editing flags")
     buckets = web.script("return [...document.querySelectorAll('.timeline-bucket')].map(e=>({count:Number(e.dataset.count),safe:Number(e.dataset.safe),suspicious:Number(e.dataset.suspicious),critical:Number(e.dataset.critical),unflagged:Number(e.dataset.unflagged),title:e.querySelector('title').textContent}));")
     assert buckets and sum(bucket["count"] for bucket in buckets) == data["total"]
     assert all(bucket["count"] == sum(bucket[flag] for flag in ["safe", "suspicious", "critical", "unflagged"]) for bucket in buckets)
@@ -643,7 +643,7 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     filtered = sum(i % 4 in [0, 2] and i % 5 != 0 for i in range(1, data["total"] + 1))
     web.results(filtered)
     web.drawer("Timeline")
-    wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "filtered timeline")
+    wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "filtered timeline")
     web.named("Show all events", "#analysis-drawer")
     expected_flags = {"safe": sum(i % 4 == 0 and i % 5 != 0 for i in range(1, data["total"] + 1)),
                       "critical": sum(i % 4 == 2 and i % 5 != 0 for i in range(1, data["total"] + 1)), "suspicious": 0, "unflagged": 0}
@@ -663,7 +663,7 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     original_query = web.query()
     assert original_query.get("condition") is None, "The gesture fixture starts without Rules"
     web.drawer("Timeline")
-    wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "timeline before gestures")
+    wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "timeline before gestures")
     point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),left:Math.round(r.left),width:Math.round(r.width)};")
     before = sum(entry["name"] == "histogram" for entry in web.trace())
     web.script("window.__workspaceWheelEvents=[];window.addEventListener('wheel',event=>{if(event.target.closest?.('.timeline-svg')&&event.deltaY!==0)window.__workspaceWheelEvents.push({delta:event.deltaY,trusted:event.isTrusted});},true);")
@@ -712,7 +712,7 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
             and entry["request"].get("focus") is False), None),
             bool, "Show all clears the selected time filter and loads the complete period")
         assert completed["result"]["outside"] == 0 and not completed["result"].get("auto_focused", False)
-        wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"),
+        wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"),
                  lambda count: count == 0, "full event period is visibly restored")
 
     drag_period()

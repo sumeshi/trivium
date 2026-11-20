@@ -101,9 +101,12 @@ def _timeline(web, project_id: str, evidence: Path) -> dict:
     web.drawer("Timeline")
     heading = web.script("const e=document.querySelector('#analysis-tool-label'),r=e.getBoundingClientRect(),t=document.querySelector('.analysis-tabs').getBoundingClientRect();return {tag:e.tagName,label:e.textContent.trim(),clickable:!!e.closest('button,a,summary,[role=button]'),aboveTabs:r.bottom<=t.top+1};")
     assert heading == {"tag": "H3", "label": "Analyze", "clickable": False, "aboveTabs": True}, heading
-    wait_for(lambda: web.script("return !!document.querySelector('.timeline-summary');"), bool, "real timestamp histogram opens")
+    wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "real timestamp histogram opens")
     web.named("Show all", ".analysis-drawer")
-    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-summary')?.dataset.outside??-1);"), lambda count: count == 0, "all sparse and dense events included")
+    wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"), lambda count: count == 0, "all sparse and dense events included")
+    legend = web.script("const legend=document.querySelector('.timeline-legend'),chart=document.querySelector('.timeline-chart');return {labels:[...legend.children].map(e=>e.textContent),below:legend.getBoundingClientRect().top>=chart.getBoundingClientRect().bottom-1};")
+    assert legend == {"labels": ["Critical", "Suspicious", "Safe", "Unflagged"], "below": True}, legend
+    assert not web.script("return !!document.querySelector('.timeline-summary,.timeline-help,.timeline-notice');"), "An inclusive valid timeline has no redundant count or help row"
     marker = wait_for(lambda: web.script("return document.querySelector('.timeline-flag-marker[data-flag=\"critical\"][data-count=\"1\"]');"), bool, "single flagged event has a visible presence marker")
     geometry = web.script("const e=arguments[0],r=e.getBoundingClientRect(),s=getComputedStyle(e);return {width:r.width,height:r.height,opacity:s.opacity,display:s.display,bucket:e.dataset.bucketIndex};", marker)
     assert geometry["width"] >= 4 and geometry["height"] >= 4 and geometry["opacity"] == "1" and geometry["display"] != "none", geometry
@@ -116,6 +119,7 @@ def _timeline(web, project_id: str, evidence: Path) -> dict:
     bucket = web.script("const e=document.querySelector('.timeline-bucket[data-bucket-index=\"'+arguments[0]+'\"]');return {total:Number(e.dataset.count),critical:Number(e.dataset.critical),title:e.querySelector('title').textContent};", index)
     details = web.script("return {start:document.querySelector('.timeline-bucket-start').textContent,end:document.querySelector('.timeline-bucket-end').textContent,counts:[...document.querySelectorAll('.timeline-detail-count')].map(e=>({flag:e.dataset.flag,count:Number(e.dataset.count)}))};")
     assert bucket["total"] == bucket["critical"] == 1 and sum(item["count"] for item in details["counts"]) == 1, (bucket, details)
+    assert [item["flag"] for item in details["counts"]] == ["critical", "suspicious", "safe", "unflagged"], details
     assert details["start"] in bucket["title"] and details["end"] in bucket["title"], (bucket, details)
     reads_before = sum(entry["name"] == "histogram" for entry in web.trace())
     web.script("document.querySelector('.timeline-svg').focus();")
@@ -130,6 +134,11 @@ def _timeline(web, project_id: str, evidence: Path) -> dict:
     _settle(web)
     assert web.script("return document.querySelector('.timeline-bucket-detail').dataset.bucketIndex;") == index
     assert sum(entry["name"] == "histogram" for entry in web.trace()) == reads_before, "Inspecting intervals must not aggregate again"
+    intervals = web.script("return document.querySelector('.bucket-list').closest('details').querySelector('summary');")
+    web.click(intervals)
+    aligned = web.script("const button=document.querySelector('.bucket-list button'),r=button.getBoundingClientRect(),mid=(r.top+r.bottom)/2;return {align:getComputedStyle(button).alignItems,offsets:[...button.children].map(e=>{const b=e.getBoundingClientRect();return Math.abs((b.top+b.bottom)/2-mid);})};")
+    assert aligned["align"] == "center" and all(offset <= 1 for offset in aligned["offsets"]), aligned
+    web.click(intervals)
     web.screenshot(evidence / "followup-single-flag-timeline.png")
     return {"separate_noninteractive_category": heading, "single_flag_marker": geometry,
         "axis_ticks": ticks, "exact_window_range": window, "bucket": bucket, "details": details,
