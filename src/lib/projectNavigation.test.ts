@@ -13,8 +13,8 @@ const summary=id=>({meta:{id,name:id,source_file_name:id+'.csv',created_at:'2026
 const detail=id=>({project:summary(id),columns:['c1'],columns_meta:[],column_max_chars:{},
   column_kinds:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
 const failReads=new Set();
-const loaded=[],extractionJobs=[];
-let failDelete=false,finished=0;
+const loaded=[],deleted=[],extractionJobs=[],deleteJobs=[];
+let failDelete=false,holdDeletes=false,finished=0;
 mockIPC((command,args)=>{
   if(command==='list_projects') return [summary('a'),summary('b')];
   if(command==='load_project') {
@@ -24,7 +24,9 @@ mockIPC((command,args)=>{
     return detail(id);
   }
   if(command==='delete_project') {
+    deleted.push(args.request.projectId);
     if(failDelete) throw new Error('Delete failed.');
+    if(holdDeletes) return new Promise(resolve=>deleteJobs.push({id:args.request.projectId,resolve}));
     return;
   }
   if(command==='finish_app_close') { finished++;return; }
@@ -120,4 +122,131 @@ assert.deepEqual(get(state.projectState).openProjectIds,['a','b','late-result'])
 assert.deepEqual(loaded,['a','b']);
 app.$destroy();
 clearMocks();
+`));
+
+test('Close others keeps the target workspace and never deletes saved cases or loads closing tabs', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('temporary'),false);
+await state.handleCloseTabs('a');
+assert.deepEqual(get(state.projectState).openProjectIds,['a']);
+assert.equal(get(state.projectState).selectedProjectId,'a');
+assert.deepEqual(loaded,['a','b','a'],'the inactive kept tab loads once; closing tabs never load');
+assert.deepEqual(deleted,['temporary']);
+assert.deepEqual(get(state.projectState).projects.map(project=>project.meta.id),['a','b']);
+app.$destroy();clearMocks();
+`));
+
+test('Close all checks drafts before any tab changes, while Close others can keep a dirty active tab', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+let focused=0;
+app.$inject_state({activeView:{unsavedDraftMessage:()=> 'Save your note.',canAutoNavigate:()=>false,
+ focusUnsavedDraft(){focused++;},snapshotSession:()=>null}});
+await state.handleCloseTabs(null);
+await state.handleCloseTabs('a');
+assert.deepEqual(get(state.projectState).openProjectIds,['a','b']);
+assert.equal(get(state.projectState).selectedProjectId,'b');assert.equal(focused,2);
+await state.handleCloseTabs('b');
+assert.deepEqual(get(state.projectState).openProjectIds,['b']);
+assert.equal(get(state.projectState).selectedProjectId,'b');
+assert.deepEqual(deleted,[]);assert.deepEqual(loaded,['a','b']);
+app.$destroy();clearMocks();
+`));
+
+test('Close all retires the active tab first, drains temporary cleanup and never loads adjacent cases', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('temporary'),false);
+holdDeletes=true;
+const operation=state.handleCloseTabs(null);
+for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));
+assert.equal(get(state.projectState).selectedProjectId,null);
+assert.equal(app.$capture_state().tabCloseBusy,true);
+await state.handleSelectProject('a');
+assert.deepEqual(loaded,['a','b'],'navigation is held while a bulk close is running');
+const closing=state.close.request();
+await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,0);
+assert.equal(deleteJobs.length,1);deleteJobs[0].resolve();
+await operation;await closing;
+assert.deepEqual(get(state.projectState).openProjectIds,[]);
+assert.equal(get(state.projectState).projectDetail,null);
+assert.deepEqual(deleted,['temporary']);assert.deepEqual(loaded,['a','b']);
+assert.equal(finished,1,'normal app close waits for the accepted batch');
+assert.equal(app.$capture_state().tabCloseBusy,false);
+app.$destroy();clearMocks();
+`));
+
+test('a failed active temporary-tab cleanup stops Close all and preserves the other tabs', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('temporary'));
+failDelete=true;
+await state.handleCloseTabs(null);
+assert.deepEqual(get(state.projectState).openProjectIds,['a','b','temporary']);
+assert.equal(get(state.projectState).selectedProjectId,'temporary');
+assert.deepEqual(get(state.projectState).temporaryProjectIds,['temporary']);
+assert.equal(app.$capture_state().tabCloseBusy,false);
+app.$destroy();clearMocks();
+`));
+
+test('Close all cancels a pending extraction and never reopens its late result', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');
+const operation=extract();await new Promise(resolve=>setImmediate(resolve));
+await state.handleCloseTabs(null);
+assert.deepEqual(get(state.projectState).openProjectIds,[]);
+extractionJobs[0].resolve(summary('cancelled-result'));await operation;
+assert.deepEqual(get(state.projectState).openProjectIds,[]);
+assert.deepEqual(deleted,['cancelled-result']);
+app.$destroy();clearMocks();
+`));
+
+test('Close others preserves a kept source extraction completing during temporary-tab cleanup', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');
+await state.projectController.adoptTemporaryProject(summary('old-result'),false);
+const scan=extract();await new Promise(resolve=>setImmediate(resolve));
+holdDeletes=true;
+const batch=state.handleCloseTabs('a');
+for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));
+assert.equal(app.$capture_state().tabCloseBusy,true);
+extractionJobs[0].resolve(summary('new-result'));await scan;
+assert.deepEqual(get(state.projectState).openProjectIds,['a','new-result']);
+assert.equal(get(state.projectState).selectedProjectId,'a');
+deleteJobs[0].resolve();await batch;
+assert.deepEqual(get(state.projectState).temporaryProjectIds,['new-result']);
+assert.deepEqual(deleted,['old-result']);assert.deepEqual(loaded,['a']);
+app.$destroy();clearMocks();
+`));
+
+test('a failed inactive temporary cleanup leaves the failed tab active and saved cases reopenable', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('temporary'),false);
+failDelete=true;
+await state.handleCloseTabs(null);
+assert.deepEqual(get(state.projectState).openProjectIds,['temporary']);
+assert.equal(get(state.projectState).selectedProjectId,'temporary');
+assert.deepEqual(get(state.projectState).projects.filter(item=>item.meta.id!=='temporary').map(item=>item.meta.id),['a','b']);
+assert.deepEqual(deleted,['temporary']);
+app.$destroy();clearMocks();
+`));
+
+test('Close right preserves the active left tab and an inactive context tab without extra loads', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('right'),false);
+await state.handleSelectProject('a');
+const loads=[...loaded];
+await state.handleCloseTabs('b',true);
+assert.deepEqual(get(state.projectState).openProjectIds,['a','b']);
+assert.equal(get(state.projectState).selectedProjectId,'a');
+assert.deepEqual(loaded,loads);assert.deepEqual(deleted,['right']);
+await state.handleCloseTabs('b',true);
+assert.deepEqual(get(state.projectState).openProjectIds,['a','b']);
+app.$destroy();clearMocks();
+`));
+
+test('Close right selects the context tab once when the active tab is on its right', () => runSvelteTest(appFixture + String.raw`
+await state.handleSelectProject('a');await state.handleSelectProject('b');
+await state.projectController.adoptTemporaryProject(summary('right'));
+await state.handleCloseTabs('b',true);
+assert.deepEqual(get(state.projectState).openProjectIds,['a','b']);
+assert.equal(get(state.projectState).selectedProjectId,'b');
+assert.deepEqual(loaded,['a','b','right','b']);
+assert.deepEqual(deleted,['right']);
+app.$destroy();clearMocks();
 `));

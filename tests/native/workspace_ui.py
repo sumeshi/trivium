@@ -53,6 +53,7 @@ from review_fixes_checks import verify_review_fixes
 from file_drop_checks import verify_file_drop
 from extract_checks import verify_extract
 from appearance_checks import verify_appearance
+from tab_menu_checks import verify_tab_close_menu
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, native_workspace, start_driver, stop_driver
 
 
@@ -1065,6 +1066,7 @@ def main() -> None:
                 ("UTC datetime grouping", lambda: verify_datetime_groups(web, data, root, evidence, report)),
                 ("portable presets and explicit IOC application", lambda: verify_presets_iocs(web, data, root, evidence, report)),
                 ("timeline wheel/pan/drag", lambda: timeline_gestures(web, data, report)),
+                ("project tab close menu", lambda: verify_tab_close_menu(web, data, root, evidence, report)),
                 ("multiple project tabs", lambda: tab_workspace(web, data, root, evidence, report)),
                 ("pending annotation close and reopen", lambda: pending_annotation_reopen(web, data, root, report)),
                 ("table text size without layout changes", lambda: verify_table_text(app, data, root, evidence, report)),
@@ -1073,7 +1075,7 @@ def main() -> None:
                 ("shared patterns and extraction result tabs", lambda: verify_extract(app, data, root, evidence, report)),
                 ("custom themes and managed wallpaper", lambda: verify_appearance(app, data, root, evidence, report)),
             ]:
-                if args.extensions_only and stage not in {"shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:
+                if args.extensions_only and stage not in {"project tab close menu", "shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:
                     continue
                 if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:
                     continue

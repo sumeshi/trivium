@@ -60,6 +60,7 @@
   let stopCloseListener: UnlistenFn | undefined;
   let stopFileDropListener: UnlistenFn | undefined;
   let startingCloseListener = false;
+  let tabCloseBusy = false;
   let appDestroyed = false;
   let initializedApp = false;
   const close = createAppClose({
@@ -82,10 +83,11 @@
   });
   const closeState = close.state;
   $: closing = $closeState.phase !== 'idle';
-  const editsBlocked = () => !closeReady || close.isBlocked();
+  const editsBlocked = () => !closeReady || close.isBlocked() || tabCloseBusy;
   const fileDrop = createFileDrop({
     blocked: () => !closeReady ? 'Wait for the app to be ready.'
       : close.isBlocked() ? 'Finish the close request before adding files.'
+      : tabCloseBusy ? 'Wait for tabs to close before adding files.'
       : $projectState.creating ? 'An import is already running.'
       : document.querySelector('.cell-dialog-backdrop,.appearance-backdrop,.delete-project-backdrop') ? 'Close the dialog before adding files.' : null,
     select: (paths) => {
@@ -256,22 +258,57 @@
     }
   };
 
+  const closeTab = async (projectId: string, selectAdjacent = true) => {
+    if ($projectState.temporaryProjectIds.includes(projectId)) {
+      pendingDeletions.add(projectId);
+      try { await projectController.deleteProject(projectId, tick, selectAdjacent); }
+      finally { pendingDeletions.delete(projectId); }
+    } else await readProject(() => projectController.closeProject(projectId, selectAdjacent), 'Failed to load the next project.');
+    sessions.delete(projectId);
+    await tick();
+  };
+
   const handleCloseTab = async (projectId: string) => {
     if (editsBlocked() || (projectId === $projectState.selectedProjectId && !canLeaveProject())) return;
     try {
-      await acceptSave(async () => {
-        captureActive();
-        if ($projectState.temporaryProjectIds.includes(projectId)) {
-          pendingDeletions.add(projectId);
-          try { await projectController.deleteProject(projectId, tick); }
-          finally { pendingDeletions.delete(projectId); }
-        } else await readProject(() => projectController.closeProject(projectId), 'Failed to load the next project.');
-        sessions.delete(projectId);
-        await tick();
-      });
+      await acceptSave(async () => { captureActive(); await closeTab(projectId); });
     } catch (error) {
       showToast(errorMessage(error, 'Failed to load the next project.'), 'error');
     }
+  };
+
+  const handleCloseTabs = async (keepProjectId: string | null, rightOnly = false) => {
+    if (editsBlocked() || keepProjectId && !$projectState.openProjectIds.includes(keepProjectId)) return;
+    const targets = rightOnly
+      ? keepProjectId ? $projectState.openProjectIds.slice($projectState.openProjectIds.indexOf(keepProjectId) + 1) : []
+      : $projectState.openProjectIds.filter(id => id !== keepProjectId);
+    if (!targets.length) return;
+    if (targets.includes($projectState.selectedProjectId ?? '') && !canLeaveProject()) return;
+    if ($projectState.creating) { showToast('Wait for the import to finish before closing multiple tabs.', 'error'); return; }
+    tabCloseBusy = true;
+    if (!keepProjectId || targets.includes($extractState.pending?.request.projectId ?? '')) extractions.cancel();
+    try {
+      await acceptSave(async () => {
+        captureActive();
+        if (keepProjectId && targets.includes($projectState.selectedProjectId ?? '')
+          && !await readProject(() => projectController.selectProject(keepProjectId), 'Failed to open the kept tab.')) return;
+        // Retire the active view first; never load a neighbor that is also closing.
+        const active = $projectState.selectedProjectId;
+        targets.sort((a, b) => Number(b === active) - Number(a === active));
+        for (const projectId of targets) {
+          if (!$projectState.openProjectIds.includes(projectId)) continue;
+          try { await closeTab(projectId, false); }
+          catch (error) {
+            // A failed temporary-CSV deletion restores its tab. Keep it reachable.
+            if (!$projectState.selectedProjectId && $projectState.openProjectIds.includes(projectId)) {
+              await readProject(() => projectController.selectProject(projectId), 'Could not reopen the tab.');
+            }
+            throw error;
+          }
+        }
+      });
+    } catch (error) { showToast(errorMessage(error, 'Could not close the tabs.'), 'error'); }
+    finally { tabCloseBusy = false; }
   };
 
   const handleSummaryUpdate = (event: CustomEvent<{ projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
@@ -284,7 +321,7 @@
       await acceptSave(async () => {
         const result = await extractions.start(intent);
         if (!result) return;
-        if (editsBlocked()) { await backend.deleteProject(result.meta.id); return; }
+        if (!closeReady || close.isBlocked()) { await backend.deleteProject(result.meta.id); return; }
         await projectController.adoptTemporaryProject(result, false);
         showToast(`Extracted CSV ready: ${result.meta.source_file_name || result.meta.name}`);
       });
@@ -339,8 +376,10 @@
 <div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle' || Boolean(deleteCandidate)}>
   <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId}
-    temporaryProjectIds={$projectState.temporaryProjectIds}
-    on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)} />
+    temporaryProjectIds={$projectState.temporaryProjectIds} busy={tabCloseBusy}
+    on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)}
+    on:closeOthers={(event) => void handleCloseTabs(event.detail)}
+    on:closeRight={(event) => void handleCloseTabs(event.detail, true)} on:closeAll={() => void handleCloseTabs(null)} />
 
   {#if sidebarOpen}
     <Sidebar

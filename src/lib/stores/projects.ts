@@ -182,7 +182,7 @@ export function createProjectController(backend: Backend) {
   };
 
   /** Closing a tab only changes this workspace; it never deletes a project. */
-  async function closeProject(projectId: string) {
+  async function closeProject(projectId: string, selectAdjacent = true) {
     const current = get(state);
     const index = current.openProjectIds.indexOf(projectId);
     if (index < 0) return;
@@ -193,7 +193,7 @@ export function createProjectController(backend: Backend) {
     }
     detailGeneration += 1;
     reads.cancelAll();
-    const nextId = openProjectIds[Math.min(index, openProjectIds.length - 1)] ?? null;
+    const nextId = selectAdjacent ? openProjectIds[Math.min(index, openProjectIds.length - 1)] ?? null : null;
     state.update((value) => ({
       ...value, openProjectIds, selectedProjectId: nextId,
       projectDetail: null, isLoadingDetail: !!nextId, detailError: "",
@@ -269,7 +269,7 @@ export function createProjectController(backend: Backend) {
     }
   }
 
-  async function deleteProject(projectId: string, afterClose: () => Promise<void> = async () => {}) {
+  async function deleteProject(projectId: string, afterClose: () => Promise<void> = async () => {}, selectAdjacent = true) {
     if (disposed) return;
     if (deletingProjects.has(projectId)) throw new Error("This project is already being deleted.");
     const before = get(state);
@@ -281,7 +281,7 @@ export function createProjectController(backend: Backend) {
     let closedGeneration = detailGeneration;
     let adjacentLoadFailed = false;
     try {
-      const closing = closeProject(projectId);
+      const closing = closeProject(projectId, selectAdjacent);
       closedGeneration = detailGeneration;
       // closeProject has already removed this tab. A neighbor's failed read
       // must not prevent deleting the intended case; report it separately.
