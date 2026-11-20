@@ -1,5 +1,6 @@
 import { writable } from "svelte/store";
 import type { EditorGroup } from "./condition";
+import type { GroupFilterSnapshot } from "../grouping";
 import {
   emptyHistory,
   goBack as stepBack,
@@ -22,6 +23,7 @@ export function createViewHistory() {
     tree: EditorGroup;
     offset: number;
     nonce: number;
+    groupFilter?: GroupFilterSnapshot;
   } | null>(null);
 
   let history: History = emptyHistory(
@@ -72,10 +74,11 @@ export function createViewHistory() {
   function recordAppliedCondition(
     previousOffset: number,
     tree: EditorGroup,
-    nextOffset: number
+    nextOffset: number,
+    groupFilter: GroupFilterSnapshot | null = null,
   ): void {
     flushOffset();
-    history = pushApplied(history, tree, previousOffset, nextOffset);
+    history = pushApplied(history, tree, previousOffset, nextOffset, groupFilter);
     publish();
   }
 
@@ -97,6 +100,7 @@ export function createViewHistory() {
       tree: entry.condition,
       offset: entry.offset,
       nonce: ++nonce,
+      ...(entry.groupFilter ? { groupFilter: structuredClone(entry.groupFilter) } : {}),
     });
   }
 
@@ -114,6 +118,7 @@ export function createViewHistory() {
       tree: entry.condition,
       offset: entry.offset,
       nonce: ++nonce,
+      ...(entry.groupFilter ? { groupFilter: structuredClone(entry.groupFilter) } : {}),
     });
   }
 

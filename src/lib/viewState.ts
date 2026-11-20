@@ -2,10 +2,12 @@ import type { EditorGroup, EditorNode } from "./stores/condition";
 import type { FlagFilterValue } from "./types";
 import { savedViewFromUnknown } from "./viewStateMapping.ts";
 import type { ColumnDisplayFormat } from "./dateDisplay";
+import type { GroupFilterSnapshot } from "./grouping";
 
 export interface HistoryEntry {
   condition: EditorGroup;
   offset: number;
+  groupFilter?: GroupFilterSnapshot;
 }
 
 export interface History {
@@ -58,20 +60,22 @@ export function pushApplied(
   history: History,
   condition: EditorGroup,
   previousOffset: number,
-  nextOffset: number
+  nextOffset: number,
+  groupFilter: GroupFilterSnapshot | null = null,
 ): History {
   const tree = cloneTree(condition);
+  const provenance = groupFilter ? { groupFilter: structuredClone(groupFilter) } : {};
   const current = history.entries[history.index];
   if (current && structureKey(current.condition) === structureKey(tree)) {
     const entries = history.entries.slice(0, history.index + 1);
-    entries[history.index] = { ...current, condition: tree };
+    entries[history.index] = { condition: tree, offset: current.offset, ...provenance };
     return { entries, index: history.index };
   }
   const entries = history.entries.slice(0, history.index + 1);
   if (entries[history.index]) {
     entries[history.index] = { ...entries[history.index], offset: previousOffset };
   }
-  entries.push({ condition: tree, offset: nextOffset });
+  entries.push({ condition: tree, offset: nextOffset, ...provenance });
   const overflow = entries.length - HISTORY_LIMIT;
   if (overflow > 0) {
     return { entries: entries.slice(overflow), index: entries.length - 1 - overflow };

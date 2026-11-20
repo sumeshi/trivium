@@ -3,7 +3,7 @@
   import { FLAG_FILTER_OPTIONS } from './state';
   import { appendEmptyColumnRule } from '../../appliedFilterSummary';
   import { MAX_GROUP_LEVELS } from '../../grouping';
-  import type { GroupGranularity, GroupSortDirection, GroupSortKey } from '../../grouping';
+  import type { GroupGranularity, GroupPanelState, GroupSortDirection, GroupSortKey } from '../../grouping';
   import type { FlagFilterSelection } from '../../types';
   import { parseFlagFilter, toggleFlagFilter } from '../../flagFilters';
   import { showToast } from '../../utils/toast';
@@ -31,6 +31,8 @@
   export let extractPending: ExtractPending | null = null;
   export let extractError: string | null = null;
   export let extractSession: ExtractPanelState | null = null;
+  export let groupSession: GroupPanelState | null = null;
+  export let groupReady = true;
 
   let toolbarHeight = 0;
   let toolbarEl: HTMLElement;
@@ -66,8 +68,8 @@
   let iocPanel: IocRulesPanel | undefined;
   let groupColumns: string[] = [];
   let groupGranularities: Record<string, GroupGranularity> = {};
-  let groupSortBy: GroupSortKey = "name";
-  let groupSortDirection: GroupSortDirection = "asc";
+  let groupSortBy: GroupSortKey = "count";
+  let groupSortDirection: GroupSortDirection = "desc";
   // Keep small analysis inputs while inactive panels are unmounted. Results
   // and request scopes remain owned by the mounted panel.
   let timelineColumn = "";
@@ -82,14 +84,25 @@
     timelineColumn = timeColumn = statsColumn = "";
     extractColumns = extractSession?.selectedColumns ? [...extractSession.selectedColumns] : null;
     extractScope = extractSession?.scope ?? 'filtered';
+    groupColumns = [...(groupSession?.columns ?? [])];
+    groupGranularities = { ...(groupSession?.granularities ?? {}) };
+    groupSortBy = groupSession?.sortBy ?? 'count';
+    groupSortDirection = groupSession?.sortDirection ?? 'desc';
     if (extractSession?.open) {
       activeTool = 'extract';
       rememberedTools.filters = 'extract';
+    } else if (groupSession?.open) {
+      activeTool = 'groups';
+      rememberedTools.analysis = 'groups';
     }
     statsHistogramMode = "auto";
   }
   export function snapshotExtraction(): ExtractPanelState {
     return { open: activeTool === 'extract', selectedColumns: extractColumns === null ? null : [...extractColumns], scope: extractScope };
+  }
+  export function snapshotGrouping(): GroupPanelState {
+    return { open: activeTool === 'groups', columns: [...groupColumns], granularities: { ...groupGranularities },
+      sortBy: groupSortBy, sortDirection: groupSortDirection, filter: workspace.snapshotGroupFilter() };
   }
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
@@ -442,7 +455,7 @@
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}
-          <GroupingPanel bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities}
+          <GroupingPanel open={groupReady} bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities}
             bind:sortBy={groupSortBy} bind:sortDirection={groupSortDirection} />
         {:else if activeTool === 'time'}
           <TimePanel open={true} bind:column={timeColumn} />

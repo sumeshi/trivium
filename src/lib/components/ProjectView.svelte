@@ -239,6 +239,7 @@
   export function snapshotSession(): WorkspaceSession | null {
     const snapshot = view.snapshotSession();
     if (snapshot) snapshot.extractPanel = filterControls?.snapshotExtraction() ?? session?.extractPanel;
+    if (snapshot) snapshot.groupPanel = filterControls?.snapshotGrouping() ?? session?.groupPanel;
     return snapshot;
   }
 
@@ -386,6 +387,7 @@
 
     const savedRow = saved?.logicalRow ?? saved?.offset ?? 0;
     conditionTree.set(saved ? cloneTree(saved.condition) : emptyTree);
+    workspace.restoreGroupFilter(tabSession?.groupPanel?.filter);
     lastConditionJson = JSON.stringify(get(conditionPayload));
     search.set(saved?.search ?? '');
     searchColumns.set(saved ? [...saved.searchColumns] : []);
@@ -487,6 +489,7 @@
     if ($historyRestore.projectId === $currentProjectId) {
       const previous = JSON.stringify(get(conditionPayload));
       conditionTree.set(cloneTree($historyRestore.tree));
+      workspace.restoreGroupFilter($historyRestore.groupFilter);
       if (previous === JSON.stringify(get(conditionPayload))) {
         applyingHistory = null;
         pendingScrollRow = null;
@@ -520,7 +523,7 @@
       resetScroll = false;
       applyingHistory = null;
     } else if (conditionChanged) {
-      recordAppliedCondition(rowOffset(), get(conditionTree), 0);
+      recordAppliedCondition(rowOffset(), get(conditionTree), 0, workspace.snapshotGroupFilter());
     }
 
     if (searchChanged || flagChanged || bookmarkedChanged || searchColumnsChanged || conditionChanged) {
@@ -816,6 +819,8 @@
   <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
     {extractPending} {extractError}
     extractSession={session?.projectId === projectDetail.project.meta.id ? session.extractPanel ?? null : null}
+    groupSession={session?.projectId === projectDetail.project.meta.id ? session.groupPanel ?? null : null}
+    groupReady={initialized}
     on:extract={(event) => dispatch('extract', event.detail)}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
     on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>

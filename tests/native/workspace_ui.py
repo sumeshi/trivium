@@ -1015,6 +1015,7 @@ def main() -> None:
     selection.add_argument("--review-fixes-only", action="store_true")
     selection.add_argument("--file-drop-only", action="store_true")
     selection.add_argument("--extensions-only", action="store_true")
+    selection.add_argument("--grouping-only", action="store_true")
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
@@ -1075,6 +1076,8 @@ def main() -> None:
                 ("shared patterns and extraction result tabs", lambda: verify_extract(app, data, root, evidence, report)),
                 ("custom themes and managed wallpaper", lambda: verify_appearance(app, data, root, evidence, report)),
             ]:
+                if args.grouping_only and stage not in {"refined imports, scope, grouping and styling", "UTC datetime grouping", "deep rule history scroll restoration"}:
+                    continue
                 if args.extensions_only and stage not in {"project tab close menu", "shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:
                     continue
                 if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:

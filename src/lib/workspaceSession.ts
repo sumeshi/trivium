@@ -3,6 +3,7 @@ import type { ViewState } from "./types";
 import type { History } from "./viewState";
 import { acceptSave } from "./saveDrain.ts";
 import type { ExtractPanelState } from "./extractTypes";
+import type { GroupPanelState } from "./grouping";
 
 /** Inactive tabs retain controls and row IDs, never row data or page caches. */
 export interface WorkspaceSession {
@@ -14,6 +15,7 @@ export interface WorkspaceSession {
   scrollLeft: number;
   writable: boolean;
   extractPanel?: ExtractPanelState;
+  groupPanel?: GroupPanelState;
 }
 
 /** Explicit projection prevents a future caller from retaining page payloads. */
@@ -27,6 +29,7 @@ export function copyWorkspaceSession(session: WorkspaceSession): WorkspaceSessio
     scrollLeft: session.scrollLeft,
     writable: session.writable,
     ...(session.extractPanel ? { extractPanel: structuredClone(session.extractPanel) } : {}),
+    ...(session.groupPanel ? { groupPanel: structuredClone(session.groupPanel) } : {}),
   };
 }
 

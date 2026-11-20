@@ -1,7 +1,8 @@
-import { derived, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import type { Readable } from "svelte/store";
 import type { CompareOp, ConditionNode, GroupTreeNode } from "../types";
-import { groupPathConditions } from "../grouping.ts";
+import { groupPathConditions, MAX_GROUP_LEVELS } from "../grouping.ts";
+import type { GroupFilterSnapshot, GroupSelection } from "../grouping.ts";
 import type { FormatDefinition } from "../formats";
 import { isFormatDefinition, formatDefinitionKey } from "../formats.ts";
 import {
@@ -97,11 +98,24 @@ export function createConditionState(scope: {
   // Only unchanged ranges added by this analysis control can be replaced. A
   // restored tree or a user-edited range becomes an ordinary investigation rule.
   const ranges = new Map<string, { id: string; signature: string }>();
-  let groupFilter: { ids: string[]; signature: string; path: string } | null = null;
+  const groupSelectionState = writable<GroupSelection | null>(null);
+  let groupFilter: GroupFilterSnapshot | null = null;
+  const setGroupFilter = (next: GroupFilterSnapshot | null) => {
+    groupFilter = next;
+    groupSelectionState.set(next?.selection ?? null);
+  };
   const groupSignature = (root: EditorGroup, ids: string[]) => {
     if (root.kind !== "and") return null;
     const nodes = ids.map(id => root.children.find(node => node.id === id));
     return nodes.every(Boolean) ? JSON.stringify(nodes) : null;
+  };
+  const groupPathPresent = (root: EditorGroup, selection: GroupSelection) => {
+    if (root.kind !== "and") return false;
+    const available = new Set(root.children.map(node => JSON.stringify(toNode(node))));
+    return groupPathConditions(selection.columns, selection.path, () => "").every(node => {
+      const condition = toNode(node);
+      return condition !== null && available.has(JSON.stringify(condition));
+    });
   };
   // Moving the three AND rows changes their presentation, not their bounds.
   const signature = (node: EditorNode) => JSON.stringify(node.type === "group"
@@ -111,7 +125,7 @@ export function createConditionState(scope: {
     subscribe: tree.subscribe,
     set(root: EditorGroup): void {
       ranges.clear();
-      groupFilter = null;
+      setGroupFilter(null);
       tree.set(root);
     },
     update(update: (root: EditorGroup) => EditorGroup): void {
@@ -121,7 +135,8 @@ export function createConditionState(scope: {
           const node = next.kind === "and" && next.children.find((child) => child.id === owned.id);
           if (!node || signature(node) !== owned.signature) ranges.delete(source);
         }
-        if (groupFilter && groupSignature(next, groupFilter.ids) !== groupFilter.signature) groupFilter = null;
+        if (groupFilter && (groupSignature(next, groupFilter.ids) !== groupFilter.signature
+          || !groupPathPresent(next, groupFilter.selection))) setGroupFilter(null);
         return next;
       });
     },
@@ -188,7 +203,7 @@ export function createConditionState(scope: {
       const existing = new Set(root.kind === "and" ? ordinary.map(node => JSON.stringify(toNode(node))) : []);
       const added = children.filter(node => !existing.has(JSON.stringify(toNode(node))));
       if (!added.length) {
-        groupFilter = null;
+        setGroupFilter(null);
         return ordinary.length === root.children.length ? root : { ...root, children: ordinary };
       }
       let next: EditorGroup;
@@ -197,7 +212,11 @@ export function createConditionState(scope: {
         next = { ...root, children: root.children.flatMap((node, index) =>
           index === first ? added : ownedIds.has(node.id) ? [] : [node]) };
       } else next = appendConditionsAnd(root, added);
-      groupFilter = { ids: added.map(node => node.id), signature: JSON.stringify(added), path: key };
+      setGroupFilter({ ids: added.map(node => node.id), signature: JSON.stringify(added), path: key,
+        selection: { columns: columns.slice(0, path.length), path: path.map(node => ({
+          label: node.label, value: node.value === null ? null : node.label, count: node.count, children: [],
+          ...(node.range ? { range: { ...node.range } } : {}),
+        })) } });
       return next;
     });
   }
@@ -206,8 +225,25 @@ export function createConditionState(scope: {
   function clearGroupFilter(): void {
     if (!groupFilter) return;
     const ids = new Set(groupFilter.ids);
+    setGroupFilter(null);
     conditionTree.update(root => ({ ...root, children: root.children.filter(node => !ids.has(node.id)) }));
-    groupFilter = null;
+  }
+
+  function snapshotGroupFilter(): GroupFilterSnapshot | null {
+    return groupFilter ? structuredClone(groupFilter) : null;
+  }
+
+  /** Only the unchanged predicates in this tab's restored editor can be reclaimed. */
+  function restoreGroupFilter(snapshot: GroupFilterSnapshot | null | undefined): void {
+    setGroupFilter(null);
+    if (!snapshot || !snapshot.ids.length || !snapshot.selection.path.length || snapshot.selection.path.length > MAX_GROUP_LEVELS
+      || snapshot.selection.path.length !== snapshot.selection.columns.length
+      || groupSignature(get(tree), snapshot.ids) !== snapshot.signature
+      || !groupPathPresent(get(tree), snapshot.selection)) return;
+    const expected = groupPathConditions(snapshot.selection.columns, snapshot.selection.path, () => "");
+    const key = JSON.stringify(expected, (name, value: unknown) => name === "id" ? undefined : value);
+    if (key !== snapshot.path) return;
+    setGroupFilter(structuredClone(snapshot));
   }
 
   /**
@@ -419,7 +455,7 @@ export function createConditionState(scope: {
     return children.length === 0 ? null : children.length === 1 ? children[0] : { kind: "and" as const, children };
   });
 
-  return { conditionTree, filterByValue, filterByValues, filterByGroupPath, clearGroupFilter, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
+  return { conditionTree, groupSelection: { subscribe: groupSelectionState.subscribe }, snapshotGroupFilter, restoreGroupFilter, filterByValue, filterByValues, filterByGroupPath, clearGroupFilter, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
     addFormatCondition, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
     removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }

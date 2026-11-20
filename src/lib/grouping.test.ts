@@ -153,7 +153,7 @@ globalThis.__workspace={backend:writable({groupTree:()=>new Promise((resolve,rej
  projectDetail:writable({project:{meta:{id:'case'}},columns:['timestamp'],column_kinds:{timestamp:'datetime'}}),
  columnLabels:writable(new Map()),conditionTree:writable({type:'group',id:'root',kind:'and',children:[]}),
  appliedFilters:writable({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition:null}),
- goBack(){},canGoBack:writable(false),filterByGroupPath(){},clearGroupFilter(){},
+ groupSelection:writable(null),filterByGroupPath(){},clearGroupFilter(){},
  createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
 const Panel=await compileHeadless('GroupingPanel');
 const panel=await mountHeadless(Panel,{groupColumns:['timestamp'],granularities:{timestamp:'day'}});
@@ -249,6 +249,167 @@ test("editing a group constraint converts it into a user rule that Ungroup prese
   assert.deepEqual(get(state.conditionTree), edited);
 });
 
+test("editing or removing a deduplicated manual predicate retires the full group path without deleting Rules", () => {
+  for (const change of ["edit", "remove"] as const) {
+    const state = createConditionState();
+    state.addFilterCondition("event", "eq", "1");
+    const manualId = get(state.conditionTree).children[0].id;
+    state.filterByGroupPath(["event", "host"], [node("1"), node("alpha")]);
+    const snapshot = state.snapshotGroupFilter()!;
+    assert.equal(snapshot.ids.length, 1, "the matching manual event predicate is not owned by grouping");
+    assert.equal(get(state.groupSelection)?.path[0].label, "1");
+    if (change === "edit") state.patchCondition(manualId, { value: "2" });
+    else state.removeNode(manualId);
+    const manual = structuredClone(get(state.conditionTree));
+    assert.equal(get(state.groupSelection), null, change);
+    assert.equal(state.snapshotGroupFilter(), null, change);
+    state.clearGroupFilter();
+    assert.deepEqual(get(state.conditionTree), manual, "retiring ownership cannot delete manual or formerly managed Rules");
+
+    const restored = createConditionState();
+    restored.conditionTree.set(structuredClone(manual));
+    restored.restoreGroupFilter(snapshot);
+    assert.equal(get(restored.groupSelection), null, "matching owned IDs cannot restore a stale full path");
+    restored.clearGroupFilter();
+    assert.deepEqual(get(restored.conditionTree), manual);
+  }
+});
+
+test("selected group metadata keeps exact context without retaining result branches", () => {
+  const state = createConditionState();
+  const range = { start: "2026-11-19T00:00:00.000000001Z", end: "2026-11-20T00:00:00.000000001Z" };
+  const date = { ...node("2026-11-19", [node("unused result")]), range };
+  const path = [date, node("", [node("another unused result")], null)];
+  state.filterByGroupPath(["created", "host"], path);
+  const selected = get(state.groupSelection)!;
+  assert.deepEqual(selected.columns, ["created", "host"]);
+  assert.deepEqual(selected.path.map(part => part.children), [[], []]);
+  assert.deepEqual(selected.path[0].range, range);
+  assert.notEqual(selected.path[0].range, range);
+  assert.equal(groupDisplayValue(selected.path[1]), "(missing / null)");
+  state.patchCondition(get(state.conditionTree).children[0].id, { value: "manual edit" });
+  assert.equal(get(state.groupSelection), null, "manual edits retire the managed breadcrumb");
+});
+
+test("a tab can restore verified group ownership without changing or reclaiming edited Rules", () => {
+  const original = { kind: "or" as const, children: [
+    { column: "gate", op: "eq" as const, values: ["keep"], negated: false },
+    { column: "gate", op: "eq" as const, values: ["other"], negated: false },
+  ] };
+  const source = createConditionState();
+  source.conditionTree.set(presetCondition(original)!);
+  source.filterByGroupPath(["host", "user"], [node("alpha"), node("alice")]);
+  const savedTree = structuredClone(get(source.conditionTree));
+  const savedFilter = source.snapshotGroupFilter()!;
+  savedFilter.selection.path[0].label = "mutated snapshot";
+  assert.equal(get(source.groupSelection)?.path[0].label, "alpha");
+  const verified = source.snapshotGroupFilter()!;
+  const restored = createConditionState();
+  restored.conditionTree.set(structuredClone(savedTree));
+  const before = get(restored.conditionTree);
+  restored.restoreGroupFilter(verified);
+  assert.equal(get(restored.conditionTree), before, "restoring ownership never mutates investigation Rules");
+  assert.deepEqual(get(restored.groupSelection), get(source.groupSelection));
+  restored.filterByGroupPath(["host"], [node("alpha")]);
+  assert.deepEqual(get(restored.conditionPayload), { kind: "and", children: [original,
+    { column: "host", op: "eq", values: ["alpha"], negated: false },
+  ] });
+  restored.clearGroupFilter();
+  assert.deepEqual(get(restored.conditionPayload), original);
+
+  const changed = createConditionState();
+  changed.conditionTree.set(structuredClone(savedTree));
+  changed.patchCondition(verified.ids[0], { value: "edited after capture" });
+  const edited = structuredClone(get(changed.conditionTree));
+  changed.restoreGroupFilter(verified);
+  assert.equal(get(changed.groupSelection), null);
+  changed.clearGroupFilter();
+  assert.deepEqual(get(changed.conditionTree), edited, "mismatched snapshots cannot claim manual Rules");
+});
+
+test("Ungroup removes one level and owned filter at a time while local Back keeps the hierarchy", () => runSvelteTest(String.raw`
+const {get,derived}=await import('svelte/store');
+const {createConditionState,presetCondition}=await import('./src/lib/stores/condition.ts');
+const conditions=createConditionState();
+const original={kind:'or',children:[{column:'gate',op:'eq',values:['keep'],negated:false},{column:'gate',op:'eq',values:['other'],negated:false}]};
+conditions.conditionTree.set(presetCondition(original));
+const columns=['host','user','event'];
+const path=['alpha','alice','9007199254740993'].map(label=>({label,value:label,count:1,children:[]}));
+const flush=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await tick();}};
+globalThis.__annotations=writable({});
+globalThis.__workspace={...conditions,backend:writable({groupTree:async request=>({columns:request.groupColumns,nodes:[],total:1})}),
+ projectDetail:writable({project:{meta:{id:'case'}},columns,column_kinds:{host:'string',user:'string',event:'int'}}),
+ columnLabels:writable(new Map()),appliedFilters:derived(conditions.conditionPayload,condition=>({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition})),
+ createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
+const Panel=await compileHeadless('GroupingPanel');
+const panel=await mountHeadless(Panel,{groupColumns:[...columns]});
+const state=()=>panel.$capture_state();
+const expected=length=>length?{kind:'and',children:[original,...columns.slice(0,length).map((column,index)=>({column,op:'eq',values:[path[index].label],negated:false}))]}:original;
+try{
+ await flush();assert.equal(state().sortBy,'count');assert.equal(state().sortDirection,'desc');
+ state().applyPath(path);await flush();
+ for(const length of [2,1,0]){
+  state().ungroup();await flush();
+  assert.deepEqual(state().groupColumns,columns.slice(0,length));
+  assert.deepEqual(get(conditions.conditionPayload),expected(length));
+  assert.equal(get(conditions.groupSelection)?.path.length??0,length);
+ }
+ assert.equal(state().tree,null);
+ panel.$set({groupColumns:[...columns]});await flush();state().applyPath(path);await flush();
+ for(const length of [2,1,0]){
+  state().selectPath(length);await flush();
+  assert.deepEqual(state().groupColumns,columns,'local Back must retain configured group levels');
+  assert.deepEqual(get(conditions.conditionPayload),expected(length));
+ }
+ state().applyPath(path);await flush();
+ panel.$destroy();
+ const restored=await mountHeadless(Panel,{groupColumns:[...columns]});await flush();
+ assert.equal(get(conditions.groupSelection).path.length,3,'closing the drawer must not discard the managed path');
+ restored.$capture_state().selectPath(1);await flush();
+ assert.deepEqual(get(conditions.conditionPayload),expected(1));
+ restored.$destroy();
+}finally{conditions.clearGroupFilter();}
+`));
+
+test("history restores exact group Rules on drawer reopen until a later explicit hierarchy change", () => runSvelteTest(String.raw`
+const {get,derived}=await import('svelte/store');
+const {createConditionState,presetCondition}=await import('./src/lib/stores/condition.ts');
+const {createViewHistory}=await import('./src/lib/stores/viewHistory.ts');
+const conditions=createConditionState();
+const original={kind:'or',children:[{column:'gate',op:'eq',values:['keep'],negated:false},{column:'gate',op:'eq',values:['other'],negated:false}]};
+conditions.conditionTree.set(presetCondition(original));
+conditions.addFilterCondition('tenant','eq','manual');
+const manual=structuredClone(get(conditions.conditionPayload));
+const columns=['host','user','event'];
+const path=['alpha','alice','9007199254740993'].map(label=>({label,value:label,count:1,children:[]}));
+const history=createViewHistory();history.setHistoryProject('case');history.resetHistory(get(conditions.conditionTree),0);
+const record=()=>history.recordAppliedCondition(0,get(conditions.conditionTree),0,conditions.snapshotGroupFilter());
+const flush=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await tick();}};
+globalThis.__annotations=writable({});
+globalThis.__workspace={...conditions,backend:writable({groupTree:async request=>({columns:request.groupColumns,nodes:[],total:1})}),
+ projectDetail:writable({project:{meta:{id:'case'}},columns:[...columns,'gate','tenant'],column_kinds:{host:'string',user:'string',event:'int'}}),
+ columnLabels:writable(new Map()),appliedFilters:derived(conditions.conditionPayload,condition=>({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition})),
+ createReadScope:()=>({run:(_key,_api,work)=>work('request'),cancel(){},cancelAll(){},dispose(){}})};
+const Panel=await compileHeadless('GroupingPanel');let panel=await mountHeadless(Panel,{groupColumns:[...columns]});
+try{
+ await flush();panel.$capture_state().applyPath(path);await flush();record();
+ const selected=structuredClone(get(conditions.conditionPayload));
+ panel.$capture_state().ungroup();await flush();record();
+ assert.deepEqual(panel.$capture_state().groupColumns,columns.slice(0,2));
+ history.goBack();const restored=get(history.historyRestore);
+ conditions.conditionTree.set(structuredClone(restored.tree));conditions.restoreGroupFilter(restored.groupFilter);await flush();
+ assert.deepEqual(get(conditions.conditionPayload),selected);
+ panel.$destroy();panel=await mountHeadless(Panel,{groupColumns:columns.slice(0,2)});await flush();
+ assert.deepEqual(get(conditions.conditionPayload),selected,'mounting with shorter configured levels must preserve exact historical Rules');
+ assert.equal(get(conditions.groupSelection).path.length,3);
+ panel.$capture_state().ungroup();await flush();
+ assert.deepEqual(panel.$capture_state().groupColumns,['host']);
+ assert.equal(get(conditions.groupSelection).path.length,1);
+ conditions.clearGroupFilter();await flush();
+ assert.deepEqual(get(conditions.conditionPayload),manual,'only an explicit hierarchy change removes owned suffixes; manual Rules survive');
+}finally{panel.$destroy();}
+`));
+
 test("group selection, Ungroup and hierarchy edits synchronize through the actual panel", () => runSvelteTest(String.raw`
 const {get,derived}=await import('svelte/store');
 const {createConditionState,presetCondition}=await import('./src/lib/stores/condition.ts');
@@ -273,7 +434,7 @@ try{
  for(let i=0;i<5;i++){state().applyPath(path);await flush();}
  assert.equal(requests.length,2,'Repeated clicks must not reload the same group results');
  assert.equal(get(conditions.conditionTree).children.length,2);
- state().clearGrouping();await flush();
+ state().ungroup();await flush();
  assert.deepEqual(get(conditions.conditionPayload),original);
  assert.deepEqual(state().groupColumns,[]);assert.equal(state().tree,null);
  panel.$set({groupColumns:['host']});await flush();state().applyPath(path);await flush();

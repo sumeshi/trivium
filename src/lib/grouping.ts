@@ -8,6 +8,25 @@ export const GROUP_PAGE_SIZE = 100;
 export type GroupGranularity = Wire.GroupGranularity;
 export type GroupSortKey = "name" | "count";
 export type GroupSortDirection = "asc" | "desc";
+export interface GroupSelection {
+  columns: string[];
+  path: GroupTreeNode[];
+}
+export interface GroupFilterSnapshot {
+  ids: string[];
+  signature: string;
+  path: string;
+  selection: GroupSelection;
+}
+/** Small tab controls and owned predicates only; never aggregate result trees. */
+export interface GroupPanelState {
+  open: boolean;
+  columns: string[];
+  granularities: Record<string, GroupGranularity>;
+  sortBy: GroupSortKey;
+  sortDirection: GroupSortDirection;
+  filter: GroupFilterSnapshot | null;
+}
 export const GROUP_GRANULARITIES = [
   ["exact", "Exact"], ["year", "Year (UTC)"], ["month", "Month (UTC)"],
   ["day", "Day (UTC)"], ["hour", "Hour (UTC)"], ["minute", "Minute (UTC)"],

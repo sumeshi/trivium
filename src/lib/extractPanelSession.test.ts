@@ -38,3 +38,52 @@ assert.equal(restored.snapshotExtraction().open,false,'an explicitly closed draw
 restored.$destroy();
 workspace.dispose();
 `));
+
+test('group controls and verified drilldown restore per tab while preserving Extract state', () => runSvelteTest(String.raw`
+const {get}=await import('svelte/store');
+const {createWorkspaceController}=await import('./src/lib/workspaceController.ts');
+document.addEventListener=()=>{};document.removeEventListener=()=>{};
+const workspace=createWorkspaceController();
+const detail=id=>({project:{meta:{id,name:id,total_records:2,hidden_columns:[]}},columns:['host','user'],
+ columns_meta:[],column_kinds:{host:'string',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+workspace.projectDetail.set(detail('source'));
+const path=['alpha','alice'].map(label=>({label,value:label,count:1,children:[]}));
+workspace.filterByGroupPath(['host','user'],path);
+globalThis.__workspace=workspace;
+const Controls=await compileHeadless('FilterControls');
+const groupSession={open:true,columns:['host','user'],granularities:{},sortBy:'count',sortDirection:'desc',filter:workspace.snapshotGroupFilter()};
+const extractSession={open:false,selectedColumns:['user'],scope:'all'};
+const source=await mountHeadless(Controls,{groupSession,extractSession});
+assert.equal(source.$capture_state().activeTool,'groups');
+assert.deepEqual(source.snapshotGrouping(),groupSession);
+assert.deepEqual(source.snapshotExtraction(),extractSession);
+const retained=source.snapshotGrouping();
+retained.columns.push('changed');retained.filter.selection.path[0].label='changed';
+assert.deepEqual(source.snapshotGrouping().columns,['host','user']);
+assert.equal(get(workspace.groupSelection).path[0].label,'alpha');
+const controls=source.snapshotGrouping(),tree=structuredClone(get(workspace.conditionTree));
+source.$destroy();workspace.dispose();
+
+const restoredWorkspace=createWorkspaceController();
+restoredWorkspace.projectDetail.set(detail('source'));
+restoredWorkspace.conditionTree.set(tree);
+restoredWorkspace.restoreGroupFilter(controls.filter);
+globalThis.__workspace=restoredWorkspace;
+const restored=await mountHeadless(Controls,{groupSession:controls,extractSession});
+assert.equal(restored.$capture_state().activeTool,'groups');
+assert.deepEqual(restored.snapshotGrouping(),controls);
+assert.deepEqual(restored.snapshotExtraction(),extractSession);
+restoredWorkspace.filterByGroupPath(['host'],[path[0]]);
+assert.equal(get(restoredWorkspace.groupSelection).path.length,1);
+restored.$destroy();
+restoredWorkspace.dispose();
+
+const otherWorkspace=createWorkspaceController();
+otherWorkspace.projectDetail.set(detail('another'));
+globalThis.__workspace=otherWorkspace;
+const other=await mountHeadless(Controls);
+assert.equal(other.$capture_state().activeTool,null);
+assert.deepEqual(other.snapshotGrouping().columns,[]);
+assert.equal(get(otherWorkspace.groupSelection),null);
+other.$destroy();otherWorkspace.dispose();
+`));

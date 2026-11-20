@@ -45,6 +45,7 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         wait_for(day_groups, lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 9,
             "UTC day buckets include every row and preserve blank/null groups")
         daily = day_groups()
+        assert all(row["column"] == "timestamp" for row in daily), "Calendar values identify their timestamp column"
         assert {(row["label"], row["missing"]): row["count"] for row in daily} == {
             ("2026-11-14", False): 3, ("2026-11-15", False): 2,
             ("", True): 2, ("", False): 1, (" \t ", False): 1,
@@ -80,6 +81,10 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         web.results(2)
         nested = web.command("query_project_rows", {**web.query(), "offset": 0, "limit": 20})
         assert [row["row_index"] for row in nested["rows"]] == [0, 1], nested
+        web.named("Back one group", ".grouping-panel")
+        web.applied(projectId=project_id, condition={"kind": "and", "children": time_conditions})
+        web.results(3)
+        assert web.script("return document.querySelectorAll('[aria-label=\"Group levels\"] li').length;") == 2, "Back removes the nested host filter but retains the exact UTC day and configured levels"
         web.named("Clear all filters")
         web.results(9)
         web.choose('select[aria-label="Group timestamp by"]', "hour")
@@ -113,6 +118,7 @@ def verify_datetime_groups(web, data, root: Path, evidence: Path, report: dict) 
         report["datetime_groups"] = {"timezone": "UTC", "days": daily, "hours": hourly,
             "day_source_ids": [0, 1, 8], "nested_source_ids": [0, 1],
             "datetime_only_granularity": True, "sort_survives_drawer": True,
+            "local_back_retains_exact_calendar_range": True,
             "granularity_survives_drawer_and_reorder": True, "source_timestamp_precision_unchanged": True}
     finally:
         web.close_drawer()

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
+  import { get } from "svelte/store";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
   import { GROUP_GRANULARITIES, GROUP_PAGE_SIZE, groupDisplayValue, groupRowsPage, isMissingGroup, MAX_GROUP_LEVELS, selectedGroupGranularities, sortGroupTree } from "../../grouping";
@@ -10,14 +11,14 @@
   import { annotationVersions } from "./state";
   import { useWorkspace } from "../../workspaceContext";
 
-  const { backend, columnLabels, projectDetail, appliedFilters, filterByGroupPath, clearGroupFilter, createReadScope, goBack, canGoBack } = useWorkspace();
+  const { backend, columnLabels, projectDetail, appliedFilters, filterByGroupPath, clearGroupFilter, groupSelection, createReadScope } = useWorkspace();
   const reads = createReadScope();
   const requests = createLatestRequest();
   export let open = true;
   export let groupColumns: string[] = [];
   export let granularities: Record<string, GroupGranularity> = {};
-  export let sortBy: GroupSortKey = "name";
-  export let sortDirection: GroupSortDirection = "asc";
+  export let sortBy: GroupSortKey = "count";
+  export let sortDirection: GroupSortDirection = "desc";
   let panel: HTMLElement | null = null;
   let pendingColumn = "";
   let tree: GroupTreeResponse | null = null;
@@ -28,6 +29,8 @@
   let lastKey = "";
   let refreshRevision = 0;
   let previousGrouping = "";
+  let previousColumns: string[] = [];
+  let previousGranularities: GroupGranularity[] = [];
 
   onDestroy(() => { reads.dispose(); requests.dispose(); });
 
@@ -43,8 +46,17 @@
   $: selectedGranularities = selectedGroupGranularities(groupColumns, granularities);
   $: groupingKey = JSON.stringify([projectId, groupColumns, selectedGranularities]);
   $: if (groupingKey !== previousGrouping) {
-    if (previousGrouping) clearGroupFilter();
+    const selection = get(groupSelection);
+    if (selection && previousGrouping) {
+      let keep = 0;
+      while (keep < selection.columns.length && selection.columns[keep] === groupColumns[keep]
+        && (previousColumns[keep] !== groupColumns[keep]
+          || previousGranularities[keep] === selectedGranularities[keep])) keep++;
+      if (keep < selection.path.length) selectPath(keep);
+    }
     previousGrouping = groupingKey;
+    previousColumns = [...groupColumns];
+    previousGranularities = [...selectedGranularities];
   }
   $: requestKey = JSON.stringify([projectId, groupColumns, selectedGranularities, annotationRevision, filterKey, refreshRevision]);
   $: if (!open || !$backend || !projectId || groupColumns.length === 0) {
@@ -87,10 +99,14 @@
     if (panel?.isConnected) panel.querySelector<HTMLElement>(`#group-level-${index}`)?.focus({ preventScroll: true });
   }
 
-  function clearGrouping() {
-    clearGroupFilter();
-    groupColumns = [];
-    granularities = {};
+  function ungroup() {
+    const removed = groupColumns.at(-1);
+    groupColumns = groupColumns.slice(0, -1);
+    if (removed) {
+      const next = { ...granularities };
+      delete next[removed];
+      granularities = next;
+    }
     expanded = new Set();
     page = 0;
     error = "";
@@ -149,15 +165,25 @@
     const columns = tree.columns;
     filterByGroupPath(columns, path);
   }
+
+  const pathLabel = (labels: ReadonlyMap<string, string>, selectedColumns: string[], path: GroupTreeNode[]) => path.map((part, index) =>
+    `${labels.get(selectedColumns[index]) ?? selectedColumns[index]}: ${groupDisplayValue(part)}`).join(" / ");
+
+  function selectPath(depth: number) {
+    const selection = get(groupSelection);
+    if (!selection) return;
+    if (depth <= 0) clearGroupFilter();
+    else filterByGroupPath(selection.columns, selection.path.slice(0, depth));
+  }
 </script>
 
 <section class="grouping-panel" aria-label="Nested grouping" bind:this={panel}>
   <div class="group-setup-heading">
     <span class="section-label">Grouping</span>
-    <button type="button" class="text-button" on:click={goBack} disabled={!$canGoBack}
-      aria-label="Back to previous filter" title="Undo the last Rules change">← Back</button>
-    <button type="button" class="text-button" on:click={clearGrouping} disabled={groupColumns.length === 0}
-      aria-label="Clear grouping" title="Remove grouping levels and their filter; keep other Rules">Ungroup</button>
+    <button type="button" class="text-button" on:click={() => selectPath(($groupSelection?.path.length ?? 1) - 1)} disabled={!$groupSelection}
+      aria-label="Back one group" title="Remove the last group filter; keep grouping levels">← Back</button>
+    <button type="button" class="text-button" on:click={ungroup} disabled={groupColumns.length === 0}
+      aria-label="Ungroup last level" title="Remove the last grouping level and its filter">Ungroup</button>
     <button type="button" class="icon-button" on:click={() => refreshRevision += 1}
       disabled={loading || groupColumns.length === 0} title="Recalculate groups" aria-label="Recalculate groups">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" /></svg>
@@ -167,7 +193,7 @@
     <ol class="group-levels" aria-label="Group levels">
       {#each groupColumns as name, index (name)}
         <li data-group-column={name} style={`--level-depth: ${index}`}>
-          <label class="level-label" for={`group-level-${index}`}>{index === 0 ? "Group by" : "Then by"}</label>
+          <span class="level-link" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d={index === 0 ? 'M4 2v6h7m-3-3 3 3-3 3' : 'm5 3 5 5-5 5'} /></svg></span>
           <select class="level-column" id={`group-level-${index}`} aria-label={`Group level ${index + 1} column`}
             value={name} title={$columnLabels.get(name) ?? name}
             on:change={event => replaceColumn(index, event.currentTarget.value)}>
@@ -192,7 +218,6 @@
     </ol>
   {/if}
   <div class="add-level">
-    <label class="level-label" for="group-next-column">{groupColumns.length ? "Then by" : "Group by"}</label>
     <select id="group-next-column" bind:value={pendingColumn} aria-label="Group column" disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS}>
       {#each availableColumns as name}
         <option value={name}>{$columnLabels.get(name) ?? name}</option>
@@ -201,6 +226,21 @@
     <button type="button" class="ghost" on:click={() => groupByColumn(pendingColumn)}
       disabled={!pendingColumn || groupColumns.length >= MAX_GROUP_LEVELS} title="Add a nested group level">Add level</button>
   </div>
+  {#if $groupSelection}
+    <nav class="group-path" aria-label="Selected group path">
+      <button type="button" class="text-button" on:click={() => selectPath(0)} title="Remove group filters; keep other Rules">All groups</button>
+      {#each $groupSelection.path as part, index}
+        <span aria-hidden="true">›</span>
+        <button type="button" class="path-part" on:click={() => selectPath(index + 1)}
+          aria-current={index === $groupSelection.path.length - 1 ? 'step' : undefined}
+          title={`${$columnLabels.get($groupSelection.columns[index]) ?? $groupSelection.columns[index]}: ${groupDisplayValue(part)}`}>
+          <span class="path-column">{$columnLabels.get($groupSelection.columns[index]) ?? $groupSelection.columns[index]}</span>
+          <span aria-hidden="true">›</span>
+          <span>{groupDisplayValue(part)}</span>
+        </button>
+      {/each}
+    </nav>
+  {/if}
   {#if error}<p class="panel-error" role="alert">{error}</p>{/if}
   {#if loading}
     <p class="group-summary" role="status">Grouping current results…</p>
@@ -234,8 +274,8 @@
             </button>
           {:else}<span class="leaf-mark" aria-hidden="true">·</span>{/if}
           <button type="button" class="group-value" on:click={() => applyPath(row.path)}
-            title={`Filter by ${row.path.map(groupDisplayValue).join(" / ")} (${row.node.count.toLocaleString()} rows)`}>
-            <span class="group-value-label">{groupDisplayValue(row.node)}</span><span class="group-count">{row.node.count.toLocaleString()}</span>
+            title={`Filter by ${pathLabel($columnLabels, tree.columns, row.path)} (${row.node.count.toLocaleString()} rows)`}>
+            <span class="group-value-context"><span class="group-value-column">{$columnLabels.get(tree.columns[row.depth]) ?? tree.columns[row.depth]}</span><span aria-hidden="true">›</span><span class="group-value-label">{groupDisplayValue(row.node)}</span></span><span class="group-count">{row.node.count.toLocaleString()}</span>
           </button>
         </div>
       {/each}
@@ -262,11 +302,11 @@
   .add-level .ghost { flex: 0 0 auto; font-size: 11px; }
   .icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); }
   .icon-button:hover:not(:disabled), .text-button:hover:not(:disabled) { color: var(--fg); background: var(--accent-soft); }
-  .icon-button:focus-visible, .expand-group:focus-visible, .group-value:focus-visible, .text-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+  .icon-button:focus-visible, .expand-group:focus-visible, .group-value:focus-visible, .text-button:focus-visible, .path-part:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
   button:disabled { opacity: .4; }
   .group-levels { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
   .group-levels li { display: flex; align-items: center; gap: 5px; min-width: 0; padding-left: calc(5px + min(var(--level-depth), 3) * 5px); border-left: 2px solid var(--border); }
-  .level-label { flex: 0 0 47px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .level-link { display: inline-flex; align-items: center; flex: 0 0 12px; color: var(--muted); }
   .level-column { flex: 1; min-width: 0; width: 0; height: 27px; padding: 0 5px; font-size: 11px; }
   .group-granularity { flex: 0 0 102px; width: 102px; height: 25px; padding: 0 3px; font-size: 10px; }
   .group-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
@@ -284,6 +324,13 @@
   .group-value { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 1; min-width: 0; min-height: 25px; padding: 3px 6px; background: var(--accent-soft); border: 1px solid transparent; border-radius: 3px; color: var(--fg); font-size: 11px; text-align: left; }
   .group-value:hover { border-color: var(--accent-border); }
   .group-value-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .group-value-context { display: flex; flex: 1; align-items: baseline; gap: 5px; min-width: 0; }
+  .group-value-column { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+  .group-path { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; min-width: 0; color: var(--muted); font-size: 10px; }
+  .path-part { display: inline-flex; gap: 4px; align-items: baseline; min-width: 0; max-width: 100%; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--fg); background: var(--surface); font: inherit; }
+  .path-part > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .path-part[aria-current="step"] { border-color: var(--accent-border); }
+  .path-column { color: var(--muted); }
   .group-count { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums; }
   .group-pages { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 10px; color: var(--muted); }
   .group-pages .ghost { font-size: 10px; }
