@@ -237,18 +237,21 @@ test("tab snapshots isolate controls, history and original-ID selections without
     projectId: "a", view: view(), selectedRowIds: [5, 89], selectionSignature: "query-a", scrollLeft: 180,
     history: { index: 0, entries: [{ condition: { type: "group", id: "root", kind: "and", collapsed: false, children: [] }, offset: 299 }] },
     writable: false,
+    extractPanel: { open: true, selectedColumns: ['c1'], scope: 'all' },
   };
   const copied = copyWorkspaceSession({ ...snapshot, rowsCache: new Map([[5, { huge: "unused" }]]) } as WorkspaceSession);
   snapshot.view.search = "edited";
   snapshot.view.columnWidths.c1 = 900;
   snapshot.selectedRowIds.push(999);
   snapshot.history.entries[0].offset = 0;
+  snapshot.extractPanel!.selectedColumns!.push('c2');
   assert.equal(copied.view.search, "keep");
   assert.deepEqual(copied.view.columnWidths, { c1: 200 });
   assert.deepEqual(copied.selectedRowIds, [5, 89]);
   assert.equal(copied.history.entries[0].offset, 299);
   assert.equal(copied.scrollLeft, 180);
   assert.equal(copied.writable, false);
+  assert.deepEqual(copied.extractPanel, { open: true, selectedColumns: ['c1'], scope: 'all' });
   assert.ok(!("rowsCache" in copied));
   assert.ok(!("initial_rows" in copied));
 });

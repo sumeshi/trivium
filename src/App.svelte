@@ -37,7 +37,6 @@
   const canCreateProject = projectController.canCreateProject;
   const extractions = createExtractScan(backend, message => showToast(message, 'error'));
   const extractState = extractions.state;
-  let navigationVersion = 0;
   let stopExtractJobs: UnlistenFn | undefined;
 
   onDestroy(() => {
@@ -158,7 +157,6 @@
 
   const createProject = async () => {
     if (editsBlocked()) return;
-    navigationVersion += 1;
     try {
       await acceptSave(async () => {
         captureActive();
@@ -196,7 +194,6 @@
 
   const deleteProject = async (projectId: string) => {
     if (editsBlocked()) return;
-    navigationVersion += 1;
     if ($extractState.pending?.request.projectId === projectId) extractions.cancel();
     try {
       await acceptSave(async () => {
@@ -230,7 +227,6 @@
 
   const handleRefreshRequest = async () => {
     if (editsBlocked() || !canLeaveProject()) return;
-    navigationVersion += 1;
     try {
       await acceptSave(async () => {
         captureActive();
@@ -245,7 +241,6 @@
 
   const handleSelectProject = async (projectId: string) => {
     if (editsBlocked() || (projectId !== $projectState.selectedProjectId && !canLeaveProject())) return;
-    navigationVersion += 1;
     try {
       await acceptSave(async () => {
         captureActive();
@@ -262,7 +257,6 @@
 
   const handleCloseTab = async (projectId: string) => {
     if (editsBlocked() || (projectId === $projectState.selectedProjectId && !canLeaveProject())) return;
-    navigationVersion += 1;
     try {
       await acceptSave(async () => {
         captureActive();
@@ -285,18 +279,13 @@
 
   const startExtraction = async (intent: ExtractIntent) => {
     if (editsBlocked()) return;
-    const ticket = navigationVersion;
-    const previousProject = $projectState.selectedProjectId;
     try {
       await acceptSave(async () => {
         const result = await extractions.start(intent);
         if (!result) return;
         if (editsBlocked()) { await backend.deleteProject(result.meta.id); return; }
-        const activate = ticket === navigationVersion && previousProject === $projectState.selectedProjectId &&
-          (activeView?.canAutoNavigate() ?? true) && !$projectState.creating;
-        if (activate) { captureActive(); navigationVersion += 1; sidebarOpen = false; }
-        await projectController.adoptTemporaryProject(result, activate);
-        if (!activate) showToast(`Extracted CSV ready: ${result.meta.source_file_name || result.meta.name}`);
+        await projectController.adoptTemporaryProject(result, false);
+        showToast(`Extracted CSV ready: ${result.meta.source_file_name || result.meta.name}`);
       });
     } catch (error) { showToast(errorMessage(error, 'Could not start extraction.'), 'error'); }
   };

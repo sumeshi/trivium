@@ -3,6 +3,11 @@ import type * as Wire from './generated/engine';
 
 export type ExtractPayload = Wire.ExtractPayload;
 export interface ExtractIntent { request: ExtractPayload; sourceName: string }
+export interface ExtractPanelState {
+  open: boolean;
+  selectedColumns: string[] | null;
+  scope: 'all' | 'filtered';
+}
 export interface ExtractPending extends ExtractIntent {
   requestId: string;
   jobId: number | null;

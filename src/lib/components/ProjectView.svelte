@@ -238,7 +238,9 @@
   view.watch();
 
   export function snapshotSession(): WorkspaceSession | null {
-    return view.snapshotSession();
+    const snapshot = view.snapshotSession();
+    if (snapshot) snapshot.extractPanel = filterControls?.snapshotExtraction() ?? session?.extractPanel;
+    return snapshot;
   }
 
   export function unsavedDraftMessage(): string | null {
@@ -814,6 +816,7 @@
 <section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
   <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
     {extractPending} {extractError}
+    extractSession={session?.projectId === projectDetail.project.meta.id ? session.extractPanel ?? null : null}
     on:extract={(event) => dispatch('extract', event.detail)} on:cancelExtract={() => dispatch('cancelExtract')}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
     on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>

@@ -111,18 +111,28 @@ def _scan(web, project_id, values):
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
         lambda value: bool(value and ("result" in value or "error" in value)), "real extraction creates a CSV")
     assert "result" in entry and "error" not in entry, entry
-    active = wait_for(lambda: web.script("return document.querySelector('.project-tabs [role=tab][aria-selected=true]')?.id??null;"),
-        lambda value: bool(value and value.startswith("project-tab-") and value != f"project-tab-{project_id}"),
-        "generated CSV opens in an ordinary file tab")
-    derived_id = active.removeprefix("project-tab-")
-    web.applied(projectId=derived_id); web.results(len(values))
+    result = entry["result"]
+    derived_id = result["meta"]["id"]
+    wait_for(lambda: web.script("return !!document.getElementById(arguments[0]);", f"project-tab-{derived_id}"),
+             bool, "generated CSV opens in a background file tab")
+    assert web.script("return document.querySelector('.project-tabs [role=tab][aria-selected=true]')?.id;") == f"project-tab-{project_id}"
+    assert web.script("return !!document.querySelector('.extract-panel');"), "Extract remains open for another scan"
+    assert not any(item["name"] in ("load_project", "query_project_rows")
+                   and item["request"].get("projectId") == derived_id for item in web.trace()[checkpoint:]), "Background tabs retain metadata without loading row data"
+    return {"id": derived_id, "request": entry["request"], "meta": result["meta"], "expected_values": list(values)}
+
+
+def _open_generated(web, case):
+    derived_id = case["id"]
+    web.tab(derived_id)
+    web.applied(projectId=derived_id); web.results(len(case["expected_values"]))
     detail = web.command("load_project", {"projectId": derived_id}, request=True)
     columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
     assert list(columns) == ["Value", "Count", "Rows"], columns
-    ranked = _ranking(web, values, columns)
+    ranked = _ranking(web, case["expected_values"], columns)
     assert not web.script("return !!document.querySelector('.extract-view');"), "Results reuse the existing table"
     assert web.script("return document.querySelector('.applied-filter-status .temporary-result')?.textContent.includes('Temporary CSV');")
-    return {"id": derived_id, "request": entry["request"], "meta": detail["project"]["meta"], "columns": columns, "values": ranked}
+    case.update({"columns": columns, "values": ranked})
 
 
 def _close_generated(web, case):
@@ -254,18 +264,24 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         generated.append(first)
         assert set(first["request"]["columns"]) == set(columns.values())
         assert first["request"]["search"] == "cohort:keep" and first["request"]["scope"] == "filtered"
-        assert first["values"] == {"10.0.0.1": {"count": 3, "rows": 1},
-            "192.0.2.1": {"count": 1, "rows": 1}, "8.8.8.8": {"count": 1, "rows": 1}, **variants}
         assert {item["meta"]["id"] for item in web.command("list_projects")} == project_ids
         assert Path(first["meta"]["source_path"]).is_file()
         assert web.script("return document.querySelectorAll('[role=tablist] [role=tab][aria-selected=true]').length;") == 1
-        web.tab(project_id); web.results(2)
         assert web.query() == saved_query
-
-        _extract_panel(web)
+        assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "filtered"
         web.choose('[aria-label="Extraction rows"]', "all")
         second = _scan(web, project_id, ["10.0.0.1", "10.0.0.10", "192.0.2.1", "8.8.8.8", *variants])
         generated.append(second)
+        assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "all"
+        assert web.query() == saved_query
+        _open_generated(web, first)
+        assert first["values"] == {"10.0.0.1": {"count": 3, "rows": 1},
+            "192.0.2.1": {"count": 1, "rows": 1}, "8.8.8.8": {"count": 1, "rows": 1}, **variants}
+        web.tab(project_id); web.results(2)
+        assert web.query() == saved_query
+        assert web.script("return !!document.querySelector('.extract-panel');"), "Returning to the source restores Extract"
+        assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "all"
+        _open_generated(web, second)
         assert sum(value["count"] for value in second["values"].values()) == 9
         web.tap(web.node(f'.data-header [data-column-id="{second["columns"]["Count"]}"] .column-sort'))
         web.applied(sortKey=second["columns"]["Count"], sortDirection="asc"); web.results(7)
@@ -287,8 +303,8 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
 
         web.tab(project_id); web.results(2)
         assert web.query() == saved_query
-        _extract_panel(web)
-        web.choose('[aria-label="Extraction rows"]', "all")
+        assert web.script("return !!document.querySelector('.extract-panel');")
+        assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "all"
         web.named("Choose extraction columns", ".extract-panel")
         web.named("Deselect all", ".extract-panel")
         second_column = web.script("return [...document.querySelectorAll('#extraction-column-list label')].find(e=>e.textContent.trim()==='second')?.querySelector('input');")
@@ -296,7 +312,12 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         third = _scan(web, project_id, ["10.0.0.1", "8.8.8.8"])
         generated.append(third)
         assert third["request"]["columns"] == [columns["second"]]
+        _open_generated(web, third)
         assert all(value["count"] == value["rows"] == 1 for value in third["values"].values())
+        web.tab(project_id); web.results(2)
+        assert web.script("return !!document.querySelector('.extract-panel');")
+        assert web.script("return document.querySelector('[aria-label=\"Choose extraction columns\"] span').textContent.trim();") == "Columns: 1 selected"
+        assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "all"
         _close_generated(web, third)
         web.tab(second["id"]); web.results(1)
         assert source.read_bytes() == original
@@ -317,6 +338,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             "all_columns_include_hidden": True, "selected_hidden_column_only": True,
             "adjacent_values_and_cross_column_counts": True, "output_columns": ["Value", "Count", "Rows"],
             "ordinary_csv_tabs": len(generated), "recent_unchanged": True,
+            "successive_background_result_tabs": True, "source_extract_panel_and_inputs_restored": True,
             "ordinary_numeric_sort_and_search": True, "standard_gui_export_complete_csv": True,
             "closed_tab_source_copy_removed": True, "normal_exit_cleans_active_and_inactive_csvs": True,
             "same_profile_restart": True, "source_bytes_unchanged": True,

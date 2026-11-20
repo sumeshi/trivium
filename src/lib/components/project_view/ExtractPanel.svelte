@@ -42,7 +42,7 @@
 </script>
 
 <section class="extract-panel" aria-label="Extract values">
-  <p class="extract-help">Extract matching values from the selected columns into a new tab, grouped by value.<br />
+  <p class="extract-help">Extract matching values into a background tab, grouped by value.<br />
     <strong>Count</strong>: occurrences. <strong>Rows</strong>: source rows containing the value.</p>
   <label class="scope-setting">Rows
     <select aria-label="Extraction rows" bind:value={scope} disabled={Boolean(pending)}>

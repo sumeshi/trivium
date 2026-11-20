@@ -18,7 +18,7 @@
   import TimelinePanel from './TimelinePanel.svelte';
   import ExtractPanel from './ExtractPanel.svelte';
   import IocRulesPanel from './IocRulesPanel.svelte';
-  import type { ExtractPending } from '../../extractTypes';
+  import type { ExtractPanelState, ExtractPending } from '../../extractTypes';
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
@@ -30,6 +30,7 @@
   export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
   export let extractPending: ExtractPending | null = null;
   export let extractError: string | null = null;
+  export let extractSession: ExtractPanelState | null = null;
 
   let toolbarHeight = 0;
   let toolbarEl: HTMLElement;
@@ -79,9 +80,16 @@
   $: if (($projectDetail?.project.meta.id ?? "") !== analysisProjectId) {
     analysisProjectId = $projectDetail?.project.meta.id ?? "";
     timelineColumn = timeColumn = statsColumn = "";
-    extractColumns = null;
-    extractScope = 'filtered';
+    extractColumns = extractSession?.selectedColumns ? [...extractSession.selectedColumns] : null;
+    extractScope = extractSession?.scope ?? 'filtered';
+    if (extractSession?.open) {
+      activeTool = 'extract';
+      rememberedTools.filters = 'extract';
+    }
     statsHistogramMode = "auto";
+  }
+  export function snapshotExtraction(): ExtractPanelState {
+    return { open: activeTool === 'extract', selectedColumns: extractColumns === null ? null : [...extractColumns], scope: extractScope };
   }
   $: activeGroup = tools.find((tool) => tool.id === activeTool)?.group;
   $: categoryTools = tools.filter((tool) => tool.group === activeGroup);
