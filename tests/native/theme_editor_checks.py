@@ -33,6 +33,10 @@ def verify_theme_editor(web, definition: dict, managed: Path, directory: Path,
     expected_id = f"user:{definition['id']}"
     web.named("Edit colors", ".appearance-dialog")
     wait_for(lambda: web.script("return !!document.querySelector('.theme-editor');"), bool, "theme color editor opens")
+    action_sizes = web.script("return [...document.querySelectorAll('.theme-editor .dialog-actions > button')].map(e=>({label:e.textContent.trim(),height:e.getBoundingClientRect().height,font:getComputedStyle(e).fontSize,lineHeight:getComputedStyle(e).lineHeight}));")
+    assert [item["label"] for item in action_sizes] == ["Reset colors", "Cancel editing", "Save theme"], action_sizes
+    assert all(abs(item["height"] - 30) < .5 for item in action_sizes), action_sizes
+    assert len({(item["font"], item["lineHeight"]) for item in action_sizes}) == 1, action_sizes
     web.write('[aria-label="Accent color code"]', "#88bbcc")
     wait_for(lambda: _accent(web), lambda value: value == "#88bbcc", "valid hex previews on the real application")
     assert _read(managed) == original, "Preview must not overwrite the saved theme"
@@ -96,6 +100,7 @@ def verify_theme_editor(web, definition: dict, managed: Path, directory: Path,
     wait_for(lambda: _accent(web), lambda value: value == "#bbaadd", "saved edited theme can be selected again")
     wait_for(lambda: web.script("return !document.querySelector('[aria-label=\"Appearance theme\"]').disabled;"), bool, "custom restore finishes")
     report["theme_editor"] = {"hex_preview_without_persistence": True,
+        "consistent_dialog_action_sizes": action_sizes,
         "invalid_partial_hex_blocks_save": True, "reset_and_cancel_restore": True,
         "composition_escape_retains_draft": True,
         "existing_custom_id_retained": True, "built_in_saved_as_named_copy": True,

@@ -3,6 +3,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared action sizing is opt-in; table and compact in-dialog controls keep
+   their own dimensions. Semantic button colors remain with each dialog. */
+:is([role="dialog"], [role="alertdialog"], .cell-dialog) .dialog-actions > button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 6px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 @layer base {
   :root {
     --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",

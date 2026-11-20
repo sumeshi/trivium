@@ -91,7 +91,7 @@
         : 'Writes data columns only.'}
     </p>
 
-    <div class="cell-dialog-actions export-actions">
+    <div class="cell-dialog-actions export-actions dialog-actions">
       <button type="button" class="ghost" on:click={() => dispatch('close')}>
         Cancel
       </button>

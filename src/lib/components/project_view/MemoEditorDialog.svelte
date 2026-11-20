@@ -262,7 +262,7 @@
       {#if memoError}
         <p class="memo-error">{memoError}</p>
       {/if}
-      <div class="cell-dialog-actions note-actions">
+      <div class="cell-dialog-actions note-actions dialog-actions">
         <button type="button" class="ghost" on:click={closeMemoEditor} disabled={memoSaving}>Cancel</button>
         <button type="button" class="primary" on:click={saveMemo} disabled={memoSaving}>
           {memoSaving ? 'Saving…' : 'Save'}

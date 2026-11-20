@@ -125,7 +125,7 @@
         <select aria-label="Appearance theme" value={$theme} disabled={busy || Boolean(draft)} on:change={chooseTheme}>
           {#each $themeOptions as option}<option value={option.value}>{option.label}</option>{/each}
         </select>
-        <div class="actions">
+        <div class="actions dialog-actions">
           <button disabled={busy || Boolean(draft)} on:click={editColors}>Edit colors</button>
           <button disabled={busy || Boolean(draft)} on:click={importTheme}>Import JSON…</button>
           <button disabled={busy || Boolean(draft)} on:click={exportCurrent}>Export theme…</button>
@@ -147,7 +147,7 @@
               </details>
             </fieldset>
             {#if contrastWarning}<p class="contrast-warning" role="status">{contrastWarning}</p>{/if}
-            <div class="editor-actions">
+            <div class="editor-actions dialog-actions">
               <button disabled={busy} title="Restore the colors from when editing started" on:click={resetColors}>Reset colors</button>
               <span></span>
               <button disabled={busy} on:click={cancelEditing}>Cancel editing</button>
@@ -157,10 +157,9 @@
         {/if}
       </section>
       <section class="settings-section" aria-labelledby="appearance-background-title">
-        <h3 id="appearance-background-title">Table wallpaper</h3>
-        <div class="actions"><button disabled={busy} on:click={chooseWallpaper}>Choose image…</button>
+        <div class="settings-heading"><h3 id="appearance-background-title">Table wallpaper</h3><span>PNG / JPEG / WebP</span></div>
+        <div class="actions dialog-actions"><button disabled={busy} on:click={chooseWallpaper}>Choose image…</button>
           <button disabled={busy || !$wallpaper.image} on:click={() => run(clearWallpaper)}>Remove</button></div>
-        <p>PNG / JPEG / WebP · table body only</p>
         <label class="check"><input type="checkbox" disabled={busy || !$wallpaper.image} checked={$wallpaper.settings.enabled} on:change={event => changeWallpaper({ enabled: event.currentTarget.checked })} />Enable background</label>
         <div class="setting"><label for="wallpaper-strength">Strength</label><output for="wallpaper-strength">{$wallpaper.settings.strength}%</output></div>
         <input id="wallpaper-strength" type="range" min="0" max="100" step="1" disabled={busy || !$wallpaper.image} value={$wallpaper.settings.strength} on:input={event => changeWallpaper({ strength: Number(event.currentTarget.value) })} />
@@ -181,6 +180,8 @@
   .settings-section { display: grid; gap: 8px; padding: 13px 0; }
   .settings-section + .settings-section { border-top: 1px solid var(--border); }
   h3 { margin: 0; font-size: 12px; font-weight: 600; }
+  .settings-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .settings-heading span { color: var(--muted); font-size: 10px; }
   select, button { border: 1px solid var(--border); border-radius: 4px; background: var(--surface-weak); color: var(--fg); padding: 5px 8px; font-size: 12px; }
   select { min-width: 100px; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -194,7 +195,6 @@
   .advanced-colors[open] summary { margin-bottom: 3px; }
   .editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
   .editor-actions span { flex: 1; }
-  .editor-actions button { font-size: 11px; white-space: nowrap; padding: 4px 7px; }
   .editor-actions .primary { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); }
   .contrast-warning { color: var(--warning); }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }

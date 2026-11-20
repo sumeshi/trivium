@@ -155,6 +155,12 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
         _horizontal_to(web, 0)
         assert not web.script("return !!document.querySelector('.wallpaper-layer');"), "Wallpaper is off by default"
         _open(web)
+        wallpaper_heading = web.script("""
+          const heading=document.querySelector('#appearance-background-title'),formats=heading.parentElement.querySelector('span');
+          return {title:heading.textContent.trim(),formats:formats?.textContent.trim(),inline:formats?.getBoundingClientRect().left>=heading.getBoundingClientRect().right,
+            bodyHint:/table body only/i.test(heading.closest('.settings-section').textContent)};
+        """)
+        assert wallpaper_heading == {"title": "Table wallpaper", "formats": "PNG / JPEG / WebP", "inline": True, "bodyHint": False}, wallpaper_heading
         _pick(web, "Import JSON…", theme_source)
         wait_for(lambda: web.script("""
           return {value:document.querySelector('[aria-label="Appearance theme"]').value,

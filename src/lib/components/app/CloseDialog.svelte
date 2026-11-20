@@ -29,7 +29,7 @@
     {#if phase === 'failed' && !startupError}
       <p>Keep the app open to check your changes before trying again.</p>
     {/if}
-    <div class="close-actions">
+    <div class="close-actions dialog-actions">
       {#if !startupError && phase === 'failed'}
         <button type="button" class="ghost" on:click={() => dispatch('keepOpen')}>Keep open</button>
       {/if}
@@ -46,5 +46,4 @@
   h3 { margin: 0 0 10px; font-size: 14px; }
   p { margin: 8px 0; font-size: 12px; line-height: 1.5; }
   .close-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  button { min-height: 30px; padding: 5px 10px; }
 </style>

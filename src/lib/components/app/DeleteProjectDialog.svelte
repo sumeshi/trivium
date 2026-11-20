@@ -36,7 +36,7 @@
     <h3 id="delete-project-title">Delete project?</h3>
     <p id="delete-project-name" class="delete-project-name" title={name}>{name}</p>
     <p id="delete-project-message">Saved data and annotations will be deleted. The source file stays unchanged.</p>
-    <div class="delete-project-actions">
+    <div class="delete-project-actions dialog-actions">
       <button type="button" class="cancel" bind:this={cancelButton} on:click={() => dispatch('cancel')}>Cancel</button>
       <button type="button" class="delete" on:click={() => dispatch('confirm')}>Delete</button>
     </div>
@@ -51,7 +51,7 @@
   .delete-project-name { overflow-wrap: anywhere; font-weight: 600; }
   #delete-project-message { color: var(--muted); }
   .delete-project-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
-  button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; }
+  button { border: 1px solid var(--border); }
   .cancel { background: var(--surface); color: var(--fg); }
   .delete { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); font-weight: 600; }
   button:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 2px; }
