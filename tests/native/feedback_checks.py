@@ -18,6 +18,19 @@ def _settle(web) -> None:
     web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
 
 
+def _valid_value_check(web, kind: str, op: str, value: str, checkpoint: int) -> None:
+    entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
+        if item["name"] == "validate_condition_values" and item["request"].get("kind") == kind
+        and item["request"].get("op") == op and item["request"].get("values") == [value]
+        and ("result" in item or "error" in item)), None), bool, "the real input validator completes")
+    assert "result" in entry and "error" not in entry, entry
+    wait_for(lambda: web.script("""
+      const input=document.querySelector('input[aria-label="Value"]'),check=document.querySelector('.value-check');
+      return input&&input.getAttribute('aria-busy')!=='true'&&input.getAttribute('aria-invalid')!=='true'
+        &&check.textContent===''&&check.getBoundingClientRect().height===0;
+    """), bool, "valid input keeps its helper available without a visible status row")
+
+
 def _horizontal_to(web, target: int) -> None:
     wait_for(lambda: web.script("return !document.querySelector('.drawer-backdrop');"), bool, "horizontal controls unobstructed")
     _settle(web)
@@ -145,8 +158,9 @@ def _column_and_dates(web, data, report) -> None:
     assert accepted["valid"] and accepted["values"][0]["parsedNanos"] == accepted["values"][1]["parsedNanos"], accepted
     invalid = web.command("validate_condition_values", {"kind": "datetime", "op": "ge", "values": ["2026-13-42"]})
     assert not invalid["valid"] and invalid["values"][0]["error"], invalid
+    checkpoint = len(web.trace())
     web.write('input[aria-label="Value"]', offset)
-    wait_for(lambda: web.script("return document.querySelector('.value-check').textContent;"), lambda s: "Timestamp format accepted" in s, "real engine accepts nanoseconds and offset")
+    _valid_value_check(web, "datetime", "ge", offset, checkpoint)
     compact_help = web.script("""
       const input=document.querySelector('input[aria-label="Value"]'),check=document.querySelector('.value-check'),help=document.querySelector('.value-help'),rules=document.querySelector('.rules-help');
       return {checkHeight:check.getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(check).lineHeight),
@@ -154,7 +168,7 @@ def _column_and_dates(web, data, report) -> None:
         described:input.getAttribute('aria-describedby').split(' ').includes(help.id),title:input.title,description:help.textContent,
         extraHint:!!document.querySelector('.engine-hint'),rulesHeight:rules.getBoundingClientRect().height,rulesLineHeight:parseFloat(getComputedStyle(rules).lineHeight)};
     """)
-    assert compact_help["checkHeight"] <= compact_help["lineHeight"] + 1 and not compact_help["extraHint"], compact_help
+    assert compact_help["checkHeight"] == 0 and not compact_help["extraHint"], compact_help
     assert compact_help["helpWidth"] <= 1 and compact_help["helpHeight"] <= 1 and compact_help["described"], compact_help
     assert "9 fractional digits" in compact_help["title"] and compact_help["title"] == compact_help["description"], compact_help
     assert compact_help["rulesHeight"] <= compact_help["rulesLineHeight"] + 1, compact_help

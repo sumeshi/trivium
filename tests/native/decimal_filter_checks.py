@@ -5,7 +5,8 @@ from pathlib import Path
 import uuid
 
 from fixture_cleanup import delete_fixture_project
-from row_navigation import open_project, wait_for
+from feedback_checks import _valid_value_check
+from row_navigation import open_project
 
 
 def verify_decimal_filters(web, data: dict, root: Path, report: dict) -> None:
@@ -28,13 +29,12 @@ def verify_decimal_filters(web, data: dict, root: Path, report: dict) -> None:
         web.script("const e=document.querySelector('input[aria-label=\"Value\"]');e.value='1.5';e.dispatchEvent(new Event('input',{bubbles:true}));")
         checked = []
         for op, expected in [("ge", [1, 2]), ("gt", [2]), ("lt", [0]), ("le", [0, 1])]:
+            checkpoint = len(web.trace())
             web.choose('select[aria-label="Operator"]', op)
             rule = {"column": column, "op": op, "values": ["1.5"], "negated": False}
             web.applied(projectId=owner, condition=rule)
             web.results(len(expected))
-            wait_for(lambda: web.script("return document.querySelector('.value-check')?.textContent??'';"),
-                     lambda text: "Number format accepted." in text,
-                     "decimal comparison passes the actual input validator")
+            _valid_value_check(web, "float", op, "1.5", checkpoint)
             assert not web.script("return document.querySelector('input[aria-label=\"Value\"]').getAttribute('aria-invalid')==='true';")
             rows = web.command("query_project_rows", {**web.query(), "offset": 0, "limit": 10})["rows"]
             assert [row["row_index"] for row in rows] == expected, (op, rows)

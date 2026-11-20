@@ -40,7 +40,7 @@ export function conditionValueHelp(kind: ColumnKind, op: CompareOp, exact = fals
   };
   if (isOrderedCondition(op)) return {
     placeholder: "Number or timestamp",
-    hint: "Ordered comparisons accept exact numbers or timestamps. The engine checks the value below.",
+    hint: "Ordered comparisons accept exact numbers or timestamps.",
   };
   return { placeholder: "Text to match", hint: "Case-insensitive text match; dates and numbers are searched as text." };
 }

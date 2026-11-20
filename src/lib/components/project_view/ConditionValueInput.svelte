@@ -46,17 +46,12 @@
   $: errors = checkedValues.flatMap((value, index) => value.error
     ? [`${checkedValues.length > 1 ? `Value ${index + 1}: ` : ""}${value.error}`] : []);
   $: validationHint = state?.status === "checked" ? state.result.hint : null;
-  $: inputHint = [savedValuesHint ?? help.hint, validationHint && validationHint !== help.hint ? validationHint : null]
-    .filter(Boolean).join("\n");
-  $: accepted = state?.status === "checked" && state.result.valid && (ordered || node.op === "regex");
-  $: acceptedLabel = node.op === "regex" ? "Regular expression accepted."
-    : kind === "datetime" ? "Timestamp format accepted."
-      : kind === "int" || kind === "float" ? "Number format accepted." : "Comparison format accepted.";
-  $: checkMessage = draft ? "Enter text to apply this rule."
+  $: statusHint = draft ? "Enter text to apply this rule."
     : state?.status === "checking" ? "Checking format…"
-      : invalid ? errors.join(" ") || validationHint || "This value is not valid for the comparison."
-        : state?.status === "unavailable" ? "Format check unavailable."
-          : accepted ? acceptedLabel : "";
+      : state?.status === "unavailable" ? "Format check unavailable." : null;
+  $: inputHint = [savedValuesHint ?? help.hint, validationHint && validationHint !== help.hint ? validationHint : null, statusHint]
+    .filter(Boolean).join("\n");
+  $: checkMessage = invalid ? errors.join(" ") || validationHint || "This value is not valid for the comparison." : "";
   $: pickerValue = utcPickerValue(pickedDate, pickedTime);
 
   const setValue = (value: string) => patchCondition(node.id, { value, exact: false });
@@ -82,6 +77,7 @@
       aria-label="Value"
       aria-describedby={`condition-help-${node.id} condition-check-${node.id}`}
       aria-invalid={invalid ? "true" : undefined}
+      aria-busy={state?.status === "checking" ? "true" : undefined}
       data-condition-id={node.id}
       autocomplete="off"
       autocapitalize="off"

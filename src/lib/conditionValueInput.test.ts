@@ -4,6 +4,7 @@ import { conditionValues } from "./stores/condition.ts";
 import { conditionValueHelp, createConditionValueChecker, utcPickerValue } from "./conditionValueInput.ts";
 import type { ConditionValueCheckResult, ConditionValueCheckState } from "./conditionValueInput.ts";
 import type { EditorCondition } from "./stores/condition.ts";
+import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
 
 const row = (patch: Partial<EditorCondition>): EditorCondition => ({
   type: "condition", id: "row", column: "ts", op: "ge", value: "", negated: false, ...patch,
@@ -83,3 +84,42 @@ test("rapid typing checks only the latest value and disposal cancels pending deb
   await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(seen.length, 1);
 });
+
+test("the value control keeps successful checks quiet, help on hover and actual errors visible", () => runSvelteTest(String.raw`
+const projectDetail=writable({project:{meta:{id:'case'}},column_kinds:{timestamp:'datetime',number:'float',text:'string'}});
+const calls=[];
+const backend=writable({validateConditionValues:request=>new Promise((resolve,reject)=>calls.push({request,resolve,reject}))});
+globalThis.__workspace={backend,projectDetail,patchCondition(){}};
+const Control=await compileHeadless('ConditionValueInput');
+const node=(column,op,value)=>({type:'condition',id:'rule',column,op,value,negated:false});
+const control=await mountHeadless(Control,{node:node('timestamp','ge','2026-11-20T00:00:00.123456789Z')});
+const flush=async()=>{await Promise.resolve();await tick();};
+const wait=()=>new Promise(resolve=>setTimeout(resolve,220));
+for(const [column,op,value,hint] of [
+ ['timestamp','ge','2026-11-20T00:00:00.123456789Z','9 fractional digits'],
+ ['number','ge','1.5','decimals and exponents'],
+ ['text','regex','(?i)error','Regular expression (Rust syntax)'],
+]){
+ control.$set({node:node(column,op,value)});await flush();
+ assert.equal(control.$capture_state().checkMessage,'','pending checks must not add a text row');
+ assert.match(control.$capture_state().inputHint,/Checking format/);
+ await wait();
+ calls.at(-1).resolve({valid:true,hint:'Parser detail on hover.',values:[{valid:true,error:null,parsedNanos:null}]});
+ await flush();
+ const state=control.$capture_state();
+ assert.equal(state.checkMessage,'','successful datetime, number and regex checks need no visible acknowledgement');
+ assert.equal(state.invalid,false);
+ assert.ok(state.inputHint.includes(hint));
+ assert.match(state.inputHint,/Parser detail on hover/);
+ assert.doesNotMatch(state.inputHint,/accepted\./);
+}
+control.$set({node:node('timestamp','ge','bad-date')});await flush();await wait();
+calls.at(-1).resolve({valid:false,hint:'Use an ISO timestamp.',values:[{valid:false,error:'Invalid timestamp.',parsedNanos:null}]});
+await flush();
+assert.equal(control.$capture_state().checkMessage,'Invalid timestamp.');
+assert.equal(control.$capture_state().invalid,true);
+control.$set({node:node('text','contains','')});await flush();
+assert.equal(control.$capture_state().checkMessage,'');
+assert.match(control.$capture_state().inputHint,/Enter text to apply this rule/);
+control.$destroy();
+`));
