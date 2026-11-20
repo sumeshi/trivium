@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -26,6 +27,14 @@ def _new_case(web, root: Path, label: str) -> tuple[dict, Path]:
     source.write_text("source_id,message\nr-0000000,synthetic close\n", encoding="utf-8")
     case = web.command("create_project", {"path": str(source)})
     return case, source
+
+
+def _open_case(web, case: dict) -> None:
+    open_project(web, case["meta"]["name"])
+    # Every close fixture has one row. The outgoing case's matching count is
+    # not evidence that this case's query or editable row has loaded.
+    web.applied(projectId=case["meta"]["id"])
+    web.results(1)
 
 
 def _rows(web, owner: str) -> list[dict]:
@@ -72,9 +81,33 @@ def _install_transport(web, holds: list[tuple[str, str]]) -> None:
     """, holds)
 
 
-def _held(web, owner: str, name="update_flag") -> None:
-    wait_for(lambda: web.script("return window.__normalClose.holds.some(h=>h.owner===arguments[0]&&h.name===arguments[1]&&h.ready&&h.release);", owner, name),
-             bool, f"accepted {name} is held before native dispatch")
+def _held(web, owner: str, name="update_flag", *, checkpoint: str) -> None:
+    assert checkpoint in {"inactive flag", "active flag", "export", "picker"}
+    assert name in {"update_flag", "export_project", "plugin:dialog|save"}
+    print(f"CLOSE CHECK: {checkpoint} ({name})", flush=True)
+    observation = {}
+
+    def observed() -> dict:
+        nonlocal observation
+        observation = web.script("""
+          const state=window.__normalClose,owner=arguments[0],name=arguments[1],
+            matching=state?.holds.filter(h=>h.owner===owner&&h.name===name)??[];
+          return {installed:!!state,held:matching.some(h=>h.ready&&!!h.release),
+            matchingHolds:matching.length,readyHolds:matching.filter(h=>h.ready).length,
+            selectedOwner:document.querySelector('[role=tab][aria-selected=true]')?.id==='project-tab-'+owner,
+            loadedRows:document.querySelectorAll('.data-row:not(.loading)').length,
+            matchingEvents:(state?.events??[]).filter(e=>e.owner===owner&&e.name===name).length};
+        """, owner, name)
+        return observation
+
+    try:
+        wait_for(observed, lambda state: state["held"],
+                 f"{checkpoint}: accepted {name} is held before native dispatch")
+    except AssertionError:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            safe = {"checkpoint": checkpoint, "operation": name, **observation}
+            print("::error title=Native close checkpoint::" + json.dumps(safe, sort_keys=True), flush=True)
+        raise
 
 
 def _release(web, owner: str, name="update_flag") -> None:
@@ -86,7 +119,8 @@ def _save_note(web, text=NOTE) -> None:
     web.write('.memo-dialog textarea[aria-label="Note"]', text)
     web.write('.memo-dialog .tag-input', "close-review")
     web.named("Save", ".memo-dialog")
-    assert web.script("return document.querySelector('.memo-dialog textarea')?.disabled;"), "The note was explicitly submitted"
+    wait_for(lambda: web.script("return !!document.querySelector('.memo-dialog textarea')?.disabled;"),
+             bool, "the explicitly submitted note waits on the held save")
 
 
 def _closing(web) -> None:
@@ -106,14 +140,14 @@ def _pending_tabs(app, data: dict, root: Path, report: dict) -> list[tuple[dict,
     first, first_source = _new_case(web, root, "inactive")
     second, second_source = _new_case(web, root, "note")
     a, b = first["meta"]["id"], second["meta"]["id"]
-    open_project(web, first["meta"]["name"]); web.results(1)
+    _open_case(web, first)
     _install_transport(web, [("update_flag", a), ("update_flag", b)])
-    web.named("Safe", ".data-row"); _held(web, a)
+    web.named("Safe", ".data-row"); _held(web, a, checkpoint="inactive flag")
     web.named("Critical", ".data-row")
     web.named(f"Close {first_source.name}")
     assert not web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{a}")
-    open_project(web, second["meta"]["name"]); web.results(1)
-    web.named("Suspicious", ".data-row"); _held(web, b)
+    _open_case(web, second)
+    web.named("Suspicious", ".data-row"); _held(web, b, checkpoint="active flag")
     _save_note(web)
     target = NormalWindowClose(app.application)
     target.request(); _closing(web)
@@ -124,9 +158,9 @@ def _pending_tabs(app, data: dict, root: Path, report: dict) -> list[tuple[dict,
     diagnostic = web.diagnostics()
     _release(web, b)
     web = _restart(app, target, diagnostic)
-    open_project(web, first["meta"]["name"]); web.results(1)
+    _open_case(web, first)
     assert _rows(web, a)[0]["flag"] == "critical"
-    open_project(web, second["meta"]["name"]); web.results(1)
+    _open_case(web, second)
     entry = _rows(web, b)[0]
     assert entry["flag"] == "suspicious" and entry["memo"] == NOTE and entry["tags"] == ["close-review"], entry
     report["normal_close_pending_tabs"] = {"closed_tab_saved": True, "active_flag_and_submitted_note_saved": True,
@@ -138,12 +172,12 @@ def _pending_export(app, root: Path, report: dict) -> tuple[dict, Path]:
     web = app.web
     case, source = _new_case(web, root, "export")
     owner = case["meta"]["id"]
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     destination = root / "normal-close-export.csv"
     _install_transport(web, [("export_project", owner)])
     web.script("window.__normalClose.path=arguments[0];", str(destination))
     web.named("Export rows"); web.named("Export…", ".export-dialog")
-    _held(web, owner, "export_project")
+    _held(web, owner, "export_project", checkpoint="export")
     web.named("Critical", ".data-row")
     _save_note(web)
     target = NormalWindowClose(app.application)
@@ -156,7 +190,7 @@ def _pending_export(app, root: Path, report: dict) -> tuple[dict, Path]:
     with destination.open(encoding="utf-8", newline="") as handle:
         exported = list(csv.DictReader(handle))
     assert len(exported) == 1 and exported[0]["trivium-critical"] == "0" and exported[0]["trivium-memo"] == "", exported
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     entry = _rows(web, owner)[0]
     assert entry["flag"] == "critical" and entry["memo"] == NOTE, entry
     report["normal_close_pending_export"] = {"export_finished_before_later_saves": True,
@@ -169,12 +203,12 @@ def _pending_picker(app, root: Path, report: dict) -> tuple[dict, Path]:
     web = app.web
     case, source = _new_case(web, root, "picker")
     owner = case["meta"]["id"]
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     destination = root / "normal-close-picker.csv"
     _install_transport(web, [("plugin:dialog|save", owner)])
     web.script("window.__normalClose.path=arguments[0];", str(destination))
     web.named("Export rows"); web.named("Export…", ".export-dialog")
-    _held(web, owner, "plugin:dialog|save")
+    _held(web, owner, "plugin:dialog|save", checkpoint="picker")
     assert web.script("return window.__normalClose.events;") == []
     target = NormalWindowClose(app.application)
     target.request(); _closing(web)
@@ -186,7 +220,7 @@ def _pending_picker(app, root: Path, report: dict) -> tuple[dict, Path]:
     with destination.open(encoding="utf-8", newline="") as handle:
         exported = list(csv.DictReader(handle))
     assert len(exported) == 1 and exported[0]["source_id"] == "r-0000000" and exported[0]["trivium-critical"] == "0", exported
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     report["normal_close_pending_picker"] = {"accepted_export_picker_waited_before_backend_enqueue": True,
         "real_csv_written_after_picker_release": True, "process_exited_normally": True,
         "same_profile_restart_verified": True}
@@ -198,7 +232,7 @@ def _failed_save(app, root: Path, report: dict, *, sqlite_failure=False) -> tupl
     case, source = _new_case(web, root, "sqlite-failure" if sqlite_failure else "failure")
     owner = case["meta"]["id"]
     web.command("update_flag", {"projectId": owner, "row_index": 0, "flag": "critical"})
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     database = None
     start = len(web.trace())
     try:
@@ -250,7 +284,7 @@ def _failed_save(app, root: Path, report: dict, *, sqlite_failure=False) -> tupl
     diagnostic = web.diagnostics()
     target.request()
     web = _restart(app, target, diagnostic)
-    open_project(web, case["meta"]["name"]); web.results(1)
+    _open_case(web, case)
     entry = _rows(web, owner)[0]
     assert entry["flag"] == "critical" and not (entry["memo"] or ""), entry
     report["normal_close_sqlite_failure" if sqlite_failure else "normal_close_failure"] = {
