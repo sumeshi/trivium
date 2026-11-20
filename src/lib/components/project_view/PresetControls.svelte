@@ -15,6 +15,7 @@
 
   export let columnWidths: ReadonlyMap<string, number> = new Map();
   export let defaultColumnWidths: ReadonlyMap<string, number> = new Map();
+  export let ready = true;
   const dispatch = createEventDispatcher<{ columnWidths: Record<string, number> }>();
 
   let error = '';
@@ -31,7 +32,7 @@
   };
 
   const savePreset = async () => {
-    if (!$backend || !$projectDetail || busy) {
+    if (!ready || !$backend || !$projectDetail || busy) {
       return;
     }
     const service = $backend, projectId = $projectDetail.project.meta.id;
@@ -47,7 +48,7 @@
       filters: { search: get(search), searchColumns: [...get(searchColumns)],
         flagFilter: get(flagFilter), bookmarkedOnly: get(bookmarkedOnly) },
     });
-    const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
+    const isCurrent = () => ready && !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
     busy = true;
     try {
@@ -79,11 +80,11 @@
   };
 
   const applyPreset = async () => {
-    if (!$backend || !$projectDetail || busy) {
+    if (!ready || !$backend || !$projectDetail || busy) {
       return;
     }
     const service = $backend, projectId = $projectDetail.project.meta.id;
-    const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
+    const isCurrent = () => ready && !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
     busy = true;
     let applied = false;
@@ -128,10 +129,10 @@
   <p class="condition-count preset-description">Saves search, flag / bookmark filters, rules, hidden columns, sort and column layout.</p>
   <div class="condition-toolbar">
     <span class="filter-label">Preset</span>
-    <button type="button" class="ghost" on:click={savePreset} disabled={busy}>
+    <button type="button" class="ghost" on:click={savePreset} disabled={busy || !ready}>
       Save preset file
     </button>
-    <button type="button" class="ghost" on:click={applyPreset} disabled={busy}>
+    <button type="button" class="ghost" on:click={applyPreset} disabled={busy || !ready}>
       Load preset file
     </button>
   </div>

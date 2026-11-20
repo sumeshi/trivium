@@ -465,7 +465,7 @@
         {:else if activeTool === 'timeline'}
           <TimelinePanel open={true} bind:column={timelineColumn} />
         {:else if activeTool === 'presets'}
-          <PresetControls {columnWidths} {defaultColumnWidths} on:columnWidths={(event) => dispatch('columnWidths', event.detail)} />
+          <PresetControls ready={groupReady} {columnWidths} {defaultColumnWidths} on:columnWidths={(event) => dispatch('columnWidths', event.detail)} />
         {:else if activeTool === 'bulk'}
           <BulkControls on:refresh />
         {:else}

@@ -12,6 +12,7 @@ use crate::export::atomic::{validate_destination, write_atomically};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, ProjectMeta};
 use crate::project_io::{read_project_schema_columns, ProjectColumns};
+use crate::search::{is_tag_scope, tokenize_search_query, SearchToken};
 use crate::store::ProjectsStore;
 
 mod file;
@@ -201,6 +202,37 @@ fn resolve_columns(
     preset: &mut PresetFile,
     target: &[ColumnMeta],
 ) -> Result<Vec<String>, AppError> {
+    if let Some(filters) = &preset.filters {
+        for token in tokenize_search_query(&filters.search) {
+            let column = match token {
+                SearchToken::Term {
+                    col: Some(column), ..
+                }
+                | SearchToken::QuotedTerm {
+                    col: Some(column), ..
+                } => column,
+                _ => continue,
+            };
+            if column.is_empty() || is_tag_scope(&column) {
+                continue;
+            }
+            let changed_source = preset
+                .columns
+                .iter()
+                .find(|known| known.id.eq_ignore_ascii_case(&column))
+                .is_some_and(|source| {
+                    target.iter().any(|known| {
+                        known.id.eq_ignore_ascii_case(&column) && known.source != source.source
+                    })
+                });
+            if changed_source {
+                return Err(AppError::Message(format!(
+                    "Preset search column {column} refers to a different source. Use source column names."
+                )));
+            }
+        }
+        validate_qualified_search(&filters.search, target)?;
+    }
     let mut references = preset
         .condition
         .as_ref()
@@ -335,6 +367,9 @@ fn validate_preset(preset: &PresetFile) -> Result<(), AppError> {
             ..QuerySpec::default()
         }
         .validate_filter()?;
+        if !preset.columns.is_empty() {
+            validate_qualified_search(&filters.search, &preset.columns)?;
+        }
     }
     if let Some(order) = &preset.column_order {
         if !unique_columns(order.iter().map(String::as_str).collect()) {
@@ -348,6 +383,39 @@ fn validate_preset(preset: &PresetFile) -> Result<(), AppError> {
                 .any(|width| !width.is_finite() || *width <= 0.0)
         {
             return Err(AppError::Message("Invalid preset column widths.".into()));
+        }
+    }
+    Ok(())
+}
+
+/// Use the query's label resolver and tokenizer; never reinterpret its values.
+/// The resolver leaves unknown scopes unchanged until normal query preparation,
+/// so check those before a preset can replace the current investigation view.
+fn validate_qualified_search(search: &str, columns: &[ColumnMeta]) -> Result<(), AppError> {
+    let mut spec = QuerySpec {
+        search: Some(search.to_string()),
+        ..QuerySpec::default()
+    };
+    spec.resolve_search_labels(columns)?;
+    for token in tokenize_search_query(spec.search.as_deref().unwrap_or_default()) {
+        let column = match token {
+            SearchToken::Term {
+                col: Some(column), ..
+            }
+            | SearchToken::QuotedTerm {
+                col: Some(column), ..
+            } => column,
+            _ => continue,
+        };
+        if !column.is_empty()
+            && !is_tag_scope(&column)
+            && !columns
+                .iter()
+                .any(|known| known.id.eq_ignore_ascii_case(&column))
+        {
+            return Err(AppError::Message(format!(
+                "Unknown preset search column: {column}"
+            )));
         }
     }
     Ok(())

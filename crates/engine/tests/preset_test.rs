@@ -780,3 +780,124 @@ fn search_scope_unknown_ids_and_ambiguous_source_names_cannot_bind_silently() {
     }
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn qualified_search_is_checked_before_replacing_the_preset_file_or_view() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("qualified-search.json");
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    payload.filters = Some(PresetFilters {
+        search: "host:WS01".into(), search_columns: Vec::new(),
+        flag_filter: "all".into(), bookmarked_only: false,
+    });
+    save_preset(&store, payload).unwrap();
+    let original = fs::read(&destination).unwrap();
+    for search in ["missing:word", "-missing:\"two words\"", "host:WS01|missing:WS02"] {
+        let mut payload = save_payload(source, &ids, &destination);
+        payload.allow_overwrite = true;
+        payload.filters = Some(PresetFilters {
+            search: search.into(), search_columns: Vec::new(),
+            flag_filter: "all".into(), bookmarked_only: false,
+        });
+        assert!(String::from(save_preset(&store, payload).unwrap_err())
+            .contains("Unknown preset search column: missing"));
+        assert_eq!(fs::read(&destination).unwrap(), original);
+    }
+    let input = root.join("missing-qualified-column.csv");
+    fs::write(&input, "proc\npowershell\n").unwrap();
+    let missing = create_project(&store, &input);
+    let error = load_preset(&store, load_payload(Some(missing), &destination)).unwrap_err();
+    assert!(String::from(error).contains("Unknown preset search column: host"));
+    let input = root.join("ambiguous-qualified-column.csv");
+    fs::write(&input, "host,host\nleft,right\n").unwrap();
+    let ambiguous = create_project(&store, &input);
+    let error = load_preset(&store, load_payload(Some(ambiguous), &destination)).unwrap_err();
+    assert!(String::from(error).contains("Ambiguous search column: host"));
+    assert_eq!(fs::read(&destination).unwrap(), original);
+    assert!(load_preset(&store, load_payload(Some(target), &destination)).is_ok());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn qualified_source_labels_keep_their_text_and_result_after_schema_reordering() {
+    let (root, store, source, _target, ids) = setup();
+    let input = root.join("reordered-qualified-columns.csv");
+    fs::write(&input, "host,proc\nWS01,powershell\nWS02,cmd\n").unwrap();
+    let target = create_project(&store, &input);
+    let destination = root.join("reordered-qualified-search.json");
+    let search = "proc:powershell|cmd -host:\"WS02\"";
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    payload.filters = Some(PresetFilters {
+        search: search.into(), search_columns: Vec::new(),
+        flag_filter: "all".into(), bookmarked_only: false,
+    });
+    save_preset(&store, payload).unwrap();
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    let filters = loaded.filters.unwrap();
+    assert_eq!(filters.search, search, "preflight must not rewrite entered text");
+    let page = ops::rows::query_project_rows(&store, ops::rows::QueryRowsPayload {
+        project_id: target,
+        spec: ops::rows::QuerySpec { search: Some(filters.search), ..Default::default() },
+        offset: Some(0), limit: Some(10),
+    }).unwrap();
+    assert_eq!(page.total_filtered_rows, 1);
+    assert_eq!(page.rows[0].row_index, 0);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn qualified_search_preflight_keeps_literal_colons_tags_and_metadata_free_files() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("qualified-search-special.json");
+    for search in ["\"missing:literal\"", "@tag:review", "-@tag:*"] {
+        let mut payload = save_payload(source, &ids, &destination);
+        payload.allow_overwrite = true;
+        payload.condition = None;
+        payload.hidden_columns.clear();
+        payload.sort_key = None;
+        payload.filters = Some(PresetFilters {
+            search: search.into(), search_columns: Vec::new(),
+            flag_filter: "all".into(), bookmarked_only: false,
+        });
+        save_preset(&store, payload).unwrap();
+        assert_eq!(load_preset(&store, load_payload(Some(target), &destination))
+            .unwrap().filters.unwrap().search, search);
+    }
+    let legacy = serde_json::json!({"version":1,"hiddenColumns":[],"filters":{
+        "search":"host:WS01", "searchColumns":[],"flagFilter":"all","bookmarkedOnly":false,
+    }});
+    fs::write(&destination, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(load_preset(&store, load_payload(Some(target), &destination))
+        .unwrap().filters.unwrap().search, "host:WS01");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn qualified_internal_ids_cannot_silently_target_another_source_after_reordering() {
+    let (root, store, source, same_schema, ids) = setup();
+    let destination = root.join("qualified-internal-id.json");
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    let search = format!("{}:WS01", ids["host"]);
+    payload.filters = Some(PresetFilters {
+        search: search.clone(), search_columns: Vec::new(),
+        flag_filter: "all".into(), bookmarked_only: false,
+    });
+    save_preset(&store, payload).unwrap();
+    let loaded = load_preset(&store, load_payload(Some(same_schema), &destination)).unwrap();
+    assert_eq!(loaded.filters.unwrap().search, search);
+    let input = root.join("swapped-internal-id.csv");
+    fs::write(&input, "host,proc\nWS01,powershell\n").unwrap();
+    let swapped = create_project(&store, &input);
+    let error = load_preset(&store, load_payload(Some(swapped), &destination)).unwrap_err();
+    assert!(String::from(error).contains("refers to a different source"));
+    let _ = fs::remove_dir_all(root);
+}
