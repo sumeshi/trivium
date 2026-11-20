@@ -45,7 +45,7 @@ const fs=(await import('node:fs/promises')).default;
 const read=fs.readFile;
 fs.readFile=async(...args)=>{
  let source=await read(...args);
- if(String(args[0]).endsWith('/ProjectView.svelte')&&typeof source==='string') source=source.replace("import './project-view.css';",'');
+ if(String(args[0]).replaceAll('\\','/').endsWith('/ProjectView.svelte')&&typeof source==='string') source=source.replace("import './project-view.css';",'');
  return source;
 };
 const {mockIPC,clearMocks}=await import('@tauri-apps/api/mocks');
