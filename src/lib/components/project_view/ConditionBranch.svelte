@@ -5,13 +5,13 @@
   import type { EditorNode } from "../../stores/condition";
   import ConditionValueInput from "./ConditionValueInput.svelte";
   import FormatConditionFields from './FormatConditionFields.svelte';
-  import { formats, formatCatalogError, ensureFormatsLoaded } from '../../patternCatalog';
+  import { formatCatalogError, ensureFormatsLoaded } from '../../patternCatalog';
 
   import { COMPARE_OPS } from '../../stores/condition';
   import { useWorkspace } from "../../workspaceContext";
   const {
     columnLabels, addCondition, addGroup, moveNode, patchCondition, removeNode,
-    setGroupKind, toggleCollapsed, backend, addFormatCondition,
+    setGroupKind, toggleCollapsed, backend, groupRuleIds,
   } = useWorkspace();
 
   export let node: EditorNode;
@@ -20,6 +20,7 @@
   export let index = 0;
   export let siblingCount = 1;
   export let isRoot = false;
+  $: managed = node.type === 'condition' && $groupRuleIds.includes(node.id);
   onMount(() => {
     const service = get(backend);
     if (isRoot && service) void ensureFormatsLoaded(service).catch(() => {});
@@ -55,19 +56,13 @@
           <option value="and">AND</option>
           <option value="or">OR</option>
         </select>
-        <span class="group-description"><span class="group-meaning">{node.kind === "and" ? "Match all" : "Match any"}</span><span class="group-size" title={`Conditions and groups: ${node.children.length}`}>{node.children.length}</span></span>
+        <span class="group-size" title={`Conditions and groups: ${node.children.length}`}>{node.children.length}</span>
         <button type="button" class="group-add" on:click={() => addCondition(node.id, columns[0] ?? "")} aria-label="Add condition" title="Add condition">
           <span aria-hidden="true">＋</span><span>Condition</span>
         </button>
         <button type="button" class="group-add" on:click={() => addGroup(node.id)} aria-label="Add group" title="Add nested AND/OR group">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H4v16h4m8-16h4v16h-4M8 12h8m-4-4v8" /></svg><span>Group</span>
         </button>
-        <select class="add-format" aria-label="Add format condition" value="" title="Add a format condition"
-          on:change={(event) => { const entry = $formats.find(item => item.definition.id === event.currentTarget.value);
-            if (entry) addFormatCondition(node.id, columns.length ? [columns[0]] : [], entry.definition); event.currentTarget.value = ''; }}>
-          <option value="" disabled>＋ Format</option>
-          {#each $formats as entry (entry.definition.id)}<option value={entry.definition.id}>{entry.definition.name}</option>{/each}
-        </select>
         {#if !isRoot}
           <button type="button" class="branch-icon" disabled={index === 0} on:click={() => moveNode(node.id, -1)} aria-label="Move group up" title="Move group up">
             <span aria-hidden="true">↑</span>
@@ -110,6 +105,13 @@
         <button type="button" class="branch-icon" disabled={index >= siblingCount - 1} on:click={() => moveNode(node.id, 1)} aria-label="Move condition down" title="Move condition down"><span aria-hidden="true">↓</span></button>
         <button type="button" class="branch-icon" on:click={() => removeNode(node.id)} aria-label="Remove condition" title="Remove condition"><span aria-hidden="true">×</span></button>
       </div>
+    </div>
+  {:else if managed}
+    <div class="managed-rule" role="group" aria-label="Rule from Groups" data-condition-id={node.id}>
+      <span class="managed-source" title="Managed by Groups. Use Make rule to edit.">Group</span>
+      <span class="managed-column" title={$columnLabels.get(node.column) ?? node.column}>{$columnLabels.get(node.column) ?? node.column}</span>
+      <span class="managed-operator">{COMPARE_OPS.find(op => op.value === node.op)?.label ?? node.op}</span>
+      <span class="managed-value" title={node.value}>{node.value === '' ? '(empty string)' : node.value}</span>
     </div>
   {:else}
     <div class="condition-row">
@@ -163,26 +165,26 @@
 </div>
 
 <style>
-  .add-format { max-width: 100px; min-height: 25px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 10px; }
   .format-load-error { margin: 4px 0; color: var(--danger); font-size: 10px; overflow-wrap: anywhere; }
   .condition-branch { gap: 0; min-width: 0; }
   .condition-group { gap: 5px; min-width: 0; border: 0; padding: 0; }
   .group-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 2px 0; border-bottom: 1px solid var(--border); background: var(--surface-weak); }
-  .group-toolbar select { width: 59px; height: 26px; padding: 0 4px; font-size: 10px; font-weight: 600; color: var(--accent); }
-  .group-toolbar .group-kind { font-size: 11px; font-weight: 700; letter-spacing: .03em; color: var(--fg); border: 1px solid var(--border-strong); background: var(--surface); }
-  .group-description { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 65px; font-size: 10px; color: var(--muted); }
-  .group-meaning { color: var(--fg); }
-  .group-size { min-width: 16px; padding: 0 3px; border-radius: 3px; background: var(--surface); text-align: center; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
+  .group-toolbar .group-kind { width: 60px; min-height: 25px; height: 25px; padding: 0 3px; font-size: 11px; line-height: 1.2; font-weight: 500; color: var(--fg); border: 1px solid var(--border); border-radius: 3px; background: var(--surface); }
+  .group-size { margin-right: auto; min-width: 16px; padding: 0 3px; text-align: center; color: var(--muted); font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
   .group-children { display: flex; flex-direction: column; gap: 3px; margin-left: 4px; padding: 4px 0 4px 8px; border-left: 2px solid var(--border-strong); min-width: 0; }
   .condition-group[data-kind="or"] > .group-children { border-left-style: dashed; }
-  .condition-connector { display: flex; align-items: center; gap: 6px; margin: 1px 0; color: var(--fg); font-size: 10px; line-height: 14px; font-weight: 700; letter-spacing: .03em; }
-  .condition-connector span { min-width: 30px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface-weak); text-align: center; }
+  .condition-connector { display: flex; align-items: center; gap: 6px; margin: 1px 0; color: var(--muted); font-size: 10px; line-height: 12px; font-weight: 400; }
+  .condition-connector span { min-width: 24px; padding: 0 2px; text-align: center; }
   .condition-connector::after { content: ''; flex: 1; height: 1px; background: var(--border); }
   .condition-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 77px; align-items: center; gap: 4px; min-width: 0; }
   .condition-row select, .condition-row input { min-width: 0; width: 100%; height: 27px; padding: 0 6px; font-size: 11px; }
   .condition-row :global(.condition-value-input) { grid-column: 1 / 3; min-width: 0; }
   .condition-not { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 3px; padding-right: 4px; font-size: 10px; color: var(--muted); }
   .condition-not input { width: 12px; height: 12px; }
+  .managed-rule { display: grid; grid-template-columns: auto minmax(45px, .7fr) auto minmax(0, 1fr); align-items: center; gap: 6px; min-height: 27px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-weak); font-size: 11px; }
+  .managed-source { padding: 1px 4px; border: 1px solid var(--accent-border); border-radius: 3px; color: var(--accent); font-size: 10px; }
+  .managed-column, .managed-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .managed-operator { color: var(--muted); }
   .condition-actions { display: flex; align-self: start; gap: 1px; justify-content: flex-end; }
   .branch-icon, .group-add { display: inline-flex; align-items: center; justify-content: center; gap: 3px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 3px; color: var(--muted); background: transparent; font-size: 13px; }
   .branch-icon { flex: 0 0 24px; width: 24px; }

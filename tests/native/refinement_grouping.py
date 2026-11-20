@@ -322,6 +322,23 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.results(3)
         web.close_drawer()
         web.drawer("Conditions")
+        managed = web.script("return [...document.querySelectorAll('.managed-rule')].map(e=>({text:e.textContent,controls:e.querySelectorAll('input,select,button').length}));")
+        assert len(managed) == 1 and managed[0]["controls"] == 0, "Group predicates are identified and read-only until converted"
+        assert "Group" in managed[0]["text"] and "alpha" in managed[0]["text"], managed
+        web.screenshot(evidence / "group-managed-rules.png")
+        connectors = web.script("const control=document.querySelector('.condition-row input[aria-label=\"Value\"]');return [...document.querySelectorAll('.condition-connector')].map(e=>({font:parseFloat(getComputedStyle(e).fontSize),control:parseFloat(getComputedStyle(control).fontSize),weight:Number(getComputedStyle(e).fontWeight)}));")
+        assert connectors and all(item["font"] <= item["control"] and item["weight"] <= 500 for item in connectors), connectors
+        web.named("Open Groups", ".condition-editor")
+        wait_for(lambda: _levels(web), lambda levels: levels == [columns["level1"]], "Rules links to the active group hierarchy")
+        assert web.query()["condition"] == _condition(columns, path[:1], original_or)
+        assert web.script("return !!document.querySelector('nav[aria-label=\"Selected group path\"]');")
+        web.drawer("Conditions")
+        checkpoint = len(web.trace())
+        web.named("Make rule", ".condition-editor")
+        _settle(web)
+        assert not web.script("return !!document.querySelector('.managed-rule,.managed-group-actions');")
+        assert web.query()["condition"] == _condition(columns, path[:1], original_or), "Conversion changes ownership, not matching rows"
+        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] == "query_project_rows"], "Converting the same query needs no new scan"
         value_index = web.script("return [...document.querySelectorAll('.condition-row')].findIndex(e=>e.querySelector('select[aria-label=\"Column\"]').value===arguments[0]);", columns["level1"])
         assert value_index >= 0
         web.write('.condition-row input[aria-label="Value"]', "beta", value_index)
@@ -344,6 +361,8 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
             "global_rules_back_forward_restores_group_ownership": True,
             "breadcrumb_ancestor_shortens_filter_path": True, "current_breadcrumb_does_not_reload": True,
             "all_groups_keeps_configured_hierarchy": True, "manually_edited_rule_survives_ungroup": True,
+            "group_rules_readonly_until_converted": True, "open_groups_from_rules": True,
+            "make_rule_preserves_query_without_rescan": True,
             "ungroup_removes_one_level_and_filter_at_a_time": ungroup_steps,
             "repeated_single_group_does_not_duplicate_or_reload": True, "ungroup_removes_only_group_filter": True,
             "sort_does_not_rescan": True, "non_datetime_granularity_hidden": True,

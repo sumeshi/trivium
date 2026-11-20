@@ -22,7 +22,7 @@
   import { useWorkspace } from "../../workspaceContext";
   const workspace = useWorkspace();
   const {
-    visibleColumns, hiddenColumns, flagFilter, bookmarkedOnly, frozenThrough,
+    visibleColumns, hiddenColumns, flagFilter, bookmarkedOnly,
     isExporting, projectDetail, backend, columnLabels, conditionTree,
   } = workspace;
 
@@ -166,6 +166,10 @@
     await tick();
     groupingPanel?.groupByColumn(columnId);
   }
+  const openManagedGroups = () => {
+    drawerTrigger = document.getElementById('tool-group-analysis') as HTMLButtonElement | null;
+    void selectTool('groups', true);
+  };
   export async function openIocEditor(ruleId?: string): Promise<void> {
     drawerTrigger = document.getElementById('tool-group-annotations') as HTMLButtonElement | null;
     await selectTool('iocs');
@@ -393,9 +397,6 @@
             <button type="button" title="Show every data column" on:click={() => setAllColumns(true)}>Select all</button>
             <button type="button" title="Hide every data column" on:click={() => setAllColumns(false)}>Deselect all</button>
           </div>
-          <button type="button" class="unfreeze-columns" title="Let every data column scroll horizontally"
-            aria-label="Unfreeze data columns" disabled={$frozenThrough === ''}
-            on:click={() => frozenThrough.set('')}>Unfreeze data columns</button>
           <input class="column-search" type="search" aria-label="Find a column" placeholder="Find column"
             bind:value={columnSearch} />
           <ul>
@@ -445,9 +446,9 @@
             on:click={() => void selectTool(tool.id)} on:keydown={(event) => void moveToolTab(event, tool.id)}>{tool.label}</button>
         {/each}
       </div>
-      <div class="analysis-body" id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
+      <div class="analysis-body" class:extract-content={activeTool === 'extract'} id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
         {#if activeTool === 'conditions'}
-          <ConditionEditor />
+          <ConditionEditor on:openGroups={openManagedGroups} />
         {:else if activeTool === 'extract'}
           <ExtractPanel open={true} pending={extractPending} error={extractError}
             bind:selectedColumns={extractColumns} bind:scope={extractScope}
@@ -540,6 +541,7 @@
   }
   .analysis-close:hover { background: var(--surface-weak); color: var(--fg); }
   .analysis-body { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+  .analysis-body.extract-content { display: flex; flex-direction: column; overflow: hidden; }
   .flag-checkbox-option {
     display: flex;
     align-items: center;
@@ -619,6 +621,4 @@
     color: var(--muted);
     font-size: 11px;
   }
-  .unfreeze-columns { width: 100%; margin: 0 0 5px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); font-size: 10.5px; text-align: left; }
-  .unfreeze-columns:hover:not(:disabled) { color: var(--fg); background: var(--surface-weak); }
 </style>

@@ -228,11 +228,13 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         web.named("Choose visible columns")
         web.named("Deselect all", "#visible-column-menu")
         wait_for(lambda: web.state()["headers"], lambda names: not names, "all data headers hidden")
-        web.named("Unfreeze data columns", "#visible-column-menu")
-        _saved(web, data["id"], lambda state: state.get("frozenThrough") == "", "unfreeze remains accessible with all columns hidden")
+        assert not web.script("return !!document.querySelector('#visible-column-menu [aria-label=\"Unfreeze data columns\"]');"), "The visibility picker only controls visibility"
         web.named("Select all", "#visible-column-menu")
         web.named("Done", "#visible-column-menu")
-        checks["all_hidden_unfreeze"] = _prefix(web, [], "showing columns after all-hidden unfreeze does not repin")
+        _prefix(web, [first, hidden, third, boundary], "visibility changes preserve the frozen boundary")
+        _action(web, "timestamp", "Unfreeze data columns")
+        _saved(web, data["id"], lambda state: state.get("frozenThrough") == "", "column context menu persists the unfreeze choice")
+        checks["visibility_and_unfreeze_separate"] = _prefix(web, [], "unfreezing stays available from the column context menu")
         assert web.visible_column_count() == 27
         checks["query_unchanged_by_visibility_and_freeze"] = True
         _oversized_prefix(web, data, evidence, checks)

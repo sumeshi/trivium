@@ -104,6 +104,8 @@ def _ranking(web, values, columns):
 
 
 def _scan(web, project_id, values):
+    if web.script("return !!document.querySelector('#extraction-column-list');"):
+        web.named("Close extraction columns", ".extract-panel")
     checkpoint = len(web.trace())
     existing_tabs = set(web.script("return [...document.querySelectorAll('.project-tabs [role=tab]')].map(e=>e.id);"))
     web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
@@ -259,6 +261,21 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         project_ids = {item["meta"]["id"] for item in web.command("list_projects")}
 
         _extract_panel(web)
+        presentation = web.script("""
+          const panel=document.querySelector('.extract-panel'),body=panel.closest('.analysis-body'),
+            source=panel.querySelector('.scope-setting'),select=source.querySelector('select'),
+            trigger=panel.querySelector('.column-trigger'),search=panel.querySelector('[aria-label="Find an extraction pattern"]'),
+            list=panel.querySelector('.pattern-list'),rect=e=>e.getBoundingClientRect(),padding=parseFloat(getComputedStyle(body).paddingBottom);
+          return {help:panel.querySelector('.extract-help').textContent.trim(),label:source.childNodes[0].textContent.trim(),
+            options:[...select.options].map(e=>e.textContent.trim()),sameRow:Math.abs(rect(select).top-rect(trigger).top)<=1,
+            sourceWidth:rect(select).width,gap:rect(list).top-rect(search).bottom,
+            bottom:rect(list).bottom,expectedBottom:rect(body).bottom-padding,
+            outerScroll:body.scrollHeight>body.clientHeight+1};
+        """)
+        assert presentation["help"] == "Extract matching values into a background tab, grouped by value.", presentation
+        assert presentation["label"] == "From" and presentation["options"] == ["Current results", "All rows"], presentation
+        assert presentation["sameRow"] and presentation["sourceWidth"] <= 140 and presentation["gap"] >= 8, presentation
+        assert abs(presentation["bottom"]-presentation["expectedBottom"]) <= 1 and not presentation["outerScroll"], presentation
         assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "filtered"
         assert web.script("""
           const buttons=[...document.querySelectorAll('.extract-panel .pattern-button')],
@@ -274,6 +291,19 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
           });
         """), "Example captions must fit inside their buttons when the list scrolls"
         web.screenshot(evidence / "extract-pattern-examples.png")
+        before_picker = web.script("const r=document.querySelector('.extract-panel .pattern-list').getBoundingClientRect();return {top:r.top,height:r.height};")
+        web.named("Choose extraction columns", ".extract-panel")
+        picker = web.script("""
+          const menu=document.querySelector('#extraction-column-list'),body=menu.closest('.analysis-body'),
+            m=menu.getBoundingClientRect(),b=body.getBoundingClientRect(),list=document.querySelector('.extract-panel .pattern-list').getBoundingClientRect();
+          return {overlay:getComputedStyle(menu).position,left:m.left,right:m.right,bodyLeft:b.left,bodyRight:b.right,
+            list:{top:list.top,height:list.height}};
+        """)
+        assert picker["overlay"] == "absolute" and picker["list"] == before_picker, picker
+        assert picker["left"] >= picker["bodyLeft"] and picker["right"] <= picker["bodyRight"], picker
+        _key(web, "\ue00c")
+        wait_for(lambda: web.script("return !document.querySelector('#extraction-column-list')&&!!document.querySelector('.extract-panel')&&document.activeElement.getAttribute('aria-label')==='Choose extraction columns';"),
+                 bool, "Escape closes only the extraction column popover and restores its trigger focus")
         web.named("Choose extraction columns", ".extract-panel")
         web.named("Deselect all", ".extract-panel")
         wait_for(lambda: web.script("return document.querySelectorAll('.extract-panel .pattern-button').length;"),
@@ -338,7 +368,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
         assert all(value["count"] == value["rows"] == 1 for value in third["values"].values())
         web.tab(project_id); web.results(2)
         assert web.script("return !!document.querySelector('.extract-panel');")
-        assert web.script("return document.querySelector('[aria-label=\"Choose extraction columns\"] span').textContent.trim();") == "Columns: 1 selected"
+        assert web.script("return document.querySelector('[aria-label=\"Choose extraction columns\"] .column-count').textContent.trim();") == f"1/{len(columns)}"
         assert web.script("return document.querySelector('[aria-label=\"Extraction rows\"]').value;") == "all"
         _close_generated(web, third)
         web.tab(second["id"]); web.results(1)
@@ -356,6 +386,8 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             "subtle_search_expression": True, "example_values_and_custom_markers": True,
             "custom_pattern_save_and_edit": True, "applied_pattern_is_frozen": True,
             "filtered_and_all_row_scopes": True, "zero_columns_disabled": True,
+            "compact_from_and_columns_row": True, "column_popover_preserves_list_layout": True,
+            "column_popover_escape_keeps_extract_open": True, "pattern_list_fills_drawer_height": True,
             "combined_network_formats_keep_distinct_raw_values": True,
             "all_columns_include_hidden": True, "selected_hidden_column_only": True,
             "adjacent_values_and_cross_column_counts": True, "output_columns": ["Value", "Count", "Rows"],

@@ -171,6 +171,15 @@ def verify_condition_buttons(web, evidence: Path, report: dict) -> None:
     web.drawer("Conditions")
     try:
         _settle(web)
+        rules = web.script("""
+          const root=document.querySelector('.condition-editor'),kind=root.querySelector('.group-kind'),s=getComputedStyle(kind);
+          return {help:root.querySelector('.rules-help')?.textContent.trim(),font:parseFloat(s.fontSize),
+            width:kind.getBoundingClientRect().width,oldCount:!!root.querySelector('.condition-count'),
+            oldMeaning:!!root.querySelector('.group-meaning'),toolbarPattern:!!root.querySelector('.group-toolbar .add-format')};
+        """)
+        assert rules["help"] == "Changes apply automatically: show rows matching these rules.", rules
+        assert rules["font"] == 11 and rules["width"] <= 60, rules
+        assert not rules["oldCount"] and not rules["oldMeaning"] and not rules["toolbarPattern"], rules
         buttons = web.script("""
           const root=document.querySelector('.condition-editor .group-toolbar'),c=document.createElement('canvas').getContext('2d');
           return ['Add condition','Add group'].map(name=>{
@@ -201,7 +210,7 @@ def verify_condition_buttons(web, evidence: Path, report: dict) -> None:
         focus = web.script("const e=document.activeElement,s=getComputedStyle(e);return {name:e.getAttribute('aria-label'),visible:e.matches(':focus-visible'),outline:parseFloat(s.outlineWidth)};")
         assert focus["name"] == "Add condition" and focus["visible"] and focus["outline"] >= 2, focus
         web.screenshot(evidence / "condition-add-buttons.png")
-        report["condition_buttons"] = {"buttons": buttons, "keyboard_focus": focus}
+        report["condition_buttons"] = {"buttons": buttons, "keyboard_focus": focus, "compact_rules": rules}
     except Exception:
         web.screenshot(evidence / "condition-buttons-failure.png")
         raise

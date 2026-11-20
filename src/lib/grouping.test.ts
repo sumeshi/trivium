@@ -249,6 +249,53 @@ test("editing a group constraint converts it into a user rule that Ungroup prese
   assert.deepEqual(get(state.conditionTree), edited);
 });
 
+test("managed rule IDs identify only predicates added by Groups and conversion preserves their exact query", () => {
+  const state = createConditionState();
+  state.addFilterCondition("event", "eq", "1");
+  const manualId = get(state.conditionTree).children[0].id;
+  const date = { ...node("2026-11-19"), range: {
+    start: "2026-11-19T00:00:00.000000001Z", end: "2026-11-20T00:00:00.000000001Z",
+  } };
+  state.filterByGroupPath(["event", "created", "host"], [node("1"), date, node("", [], null)]);
+  const owned = state.snapshotGroupFilter()!;
+  assert.deepEqual(get(state.groupRuleIds), owned.ids);
+  assert.equal(get(state.groupRuleIds).includes(manualId), false, "deduplicated manual rules must stay editable");
+  const tree = structuredClone(get(state.conditionTree));
+  const payload = structuredClone(get(state.conditionPayload));
+  state.makeGroupRulesEditable();
+  assert.deepEqual(get(state.groupRuleIds), []);
+  assert.equal(get(state.groupSelection), null);
+  assert.equal(state.snapshotGroupFilter(), null);
+  assert.deepEqual(get(state.conditionTree), tree, "Make rule keeps IDs, nanosecond ranges and null predicates intact");
+  assert.deepEqual(get(state.conditionPayload), payload);
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionTree), tree, "Ungroup cannot remove converted ordinary rules");
+
+  state.filterByGroupPath(["message"], [node("new group")]);
+  state.clearGroupFilter();
+  assert.deepEqual(get(state.conditionTree), tree, "later group navigation still preserves the converted path");
+});
+
+test("editing, deleting or changing the root operator retires managed-rule presentation without deleting other Rules", () => {
+  for (const change of ["edit-owned", "remove-owned", "edit-manual", "remove-manual", "root-or"] as const) {
+    const state = createConditionState();
+    state.addFilterCondition("event", "eq", "1");
+    const manualId = get(state.conditionTree).children[0].id;
+    state.filterByGroupPath(["event", "host"], [node("1"), node("alpha")]);
+    const ownedId = state.snapshotGroupFilter()!.ids[0];
+    if (change === "edit-owned") state.patchCondition(ownedId, { value: "edited host" });
+    else if (change === "remove-owned") state.removeNode(ownedId);
+    else if (change === "edit-manual") state.patchCondition(manualId, { value: "2" });
+    else if (change === "remove-manual") state.removeNode(manualId);
+    else state.setGroupKind(get(state.conditionTree).id, "or");
+    const edited = structuredClone(get(state.conditionTree));
+    assert.deepEqual(get(state.groupRuleIds), [], change);
+    assert.equal(get(state.groupSelection), null, change);
+    state.clearGroupFilter();
+    assert.deepEqual(get(state.conditionTree), edited, `${change}: retiring management cannot remove remaining Rules`);
+  }
+});
+
 test("editing or removing a deduplicated manual predicate retires the full group path without deleting Rules", () => {
   for (const change of ["edit", "remove"] as const) {
     const state = createConditionState();
@@ -310,6 +357,7 @@ test("a tab can restore verified group ownership without changing or reclaiming 
   restored.restoreGroupFilter(verified);
   assert.equal(get(restored.conditionTree), before, "restoring ownership never mutates investigation Rules");
   assert.deepEqual(get(restored.groupSelection), get(source.groupSelection));
+  assert.deepEqual(get(restored.groupRuleIds), verified.ids);
   restored.filterByGroupPath(["host"], [node("alpha")]);
   assert.deepEqual(get(restored.conditionPayload), { kind: "and", children: [original,
     { column: "host", op: "eq", values: ["alpha"], negated: false },
@@ -323,6 +371,7 @@ test("a tab can restore verified group ownership without changing or reclaiming 
   const edited = structuredClone(get(changed.conditionTree));
   changed.restoreGroupFilter(verified);
   assert.equal(get(changed.groupSelection), null);
+  assert.deepEqual(get(changed.groupRuleIds), [], "unverified snapshots cannot make manual Rules read-only");
   changed.clearGroupFilter();
   assert.deepEqual(get(changed.conditionTree), edited, "mismatched snapshots cannot claim manual Rules");
 });

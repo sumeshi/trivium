@@ -123,3 +123,33 @@ assert.equal(control.$capture_state().checkMessage,'');
 assert.match(control.$capture_state().inputHint,/Enter text to apply this rule/);
 control.$destroy();
 `));
+
+test("choosing a pattern beside Value replaces only that rule with its full validated format", () => runSvelteTest(String.raw`
+const {get}=await import('svelte/store');
+const {createConditionState}=await import('./src/lib/stores/condition.ts');
+const {formats}=await import('./src/lib/patternCatalog.ts');
+const conditions=createConditionState();
+conditions.addFilterCondition('host','eq','WS01');
+conditions.addCondition('root','command');
+const rule=get(conditions.conditionTree).children[1];
+conditions.patchCondition(rule.id,{negated:true,value:'old text'});
+const definition={schemaVersion:1,id:'ipv4',name:'IPv4',pattern:'(?P<value>[0-9.]+)',valueGroup:'value',validation:'ipv4-cidr'};
+formats.set([{definition,builtin:true}]);
+globalThis.__workspace={...conditions,backend:writable(null),projectDetail:writable({project:{meta:{id:'case'}},column_kinds:{command:'string'}})};
+const Control=await compileHeadless('ConditionValueInput');
+const control=await mountHeadless(Control,{node:get(conditions.conditionTree).children[1]});
+try{
+ const before=structuredClone(get(conditions.conditionPayload));
+ control.$capture_state().choosePattern('not-in-catalog');
+ assert.deepEqual(get(conditions.conditionPayload),before);
+ control.$capture_state().choosePattern('ipv4');
+ const tree=get(conditions.conditionTree);
+ assert.equal(tree.children[1].id,rule.id,'conversion retains the original rule position and identity');
+ assert.deepEqual(get(conditions.conditionPayload),{kind:'and',children:[
+  {column:'host',op:'eq',values:['WS01'],negated:false},
+  {columns:['command'],format:definition,negated:true},
+ ]});
+ definition.pattern='changed after selection';
+ assert.equal(tree.children[1].format.pattern,'(?P<value>[0-9.]+)','the rule keeps a frozen definition with validation');
+}finally{control.$destroy();formats.set([]);}
+`));

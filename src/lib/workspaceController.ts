@@ -34,6 +34,11 @@ export function createWorkspaceController(onIocsSaved: (projectId: string, entri
     ...state,
     ...conditions,
     ...history,
+    makeGroupRulesEditable() {
+      conditions.makeGroupRulesEditable();
+      // Conversion changes provenance, not the query or its current scroll.
+      history.recordAppliedCondition(0, get(conditions.conditionTree), 0, null);
+    },
     iocEditor,
     onDispose,
     createReadScope() {

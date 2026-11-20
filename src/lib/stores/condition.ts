@@ -99,9 +99,11 @@ export function createConditionState(scope: {
   // restored tree or a user-edited range becomes an ordinary investigation rule.
   const ranges = new Map<string, { id: string; signature: string }>();
   const groupSelectionState = writable<GroupSelection | null>(null);
+  const groupRuleIdsState = writable<readonly string[]>([]);
   let groupFilter: GroupFilterSnapshot | null = null;
   const setGroupFilter = (next: GroupFilterSnapshot | null) => {
     groupFilter = next;
+    groupRuleIdsState.set(next?.ids ?? []);
     groupSelectionState.set(next?.selection ?? null);
   };
   const groupSignature = (root: EditorGroup, ids: string[]) => {
@@ -233,6 +235,11 @@ export function createConditionState(scope: {
     return groupFilter ? structuredClone(groupFilter) : null;
   }
 
+  /** Keep the selected predicates as ordinary editable investigation Rules. */
+  function makeGroupRulesEditable(): void {
+    setGroupFilter(null);
+  }
+
   /** Only the unchanged predicates in this tab's restored editor can be reclaimed. */
   function restoreGroupFilter(snapshot: GroupFilterSnapshot | null | undefined): void {
     setGroupFilter(null);
@@ -330,6 +337,15 @@ export function createConditionState(scope: {
       ...(equals === undefined ? {} : { equals }) };
     edit(root => mapNode(root, node => node.type === "group" && node.id === groupId
       ? { ...node, children: [...node.children, child] } : node) as EditorGroup);
+  }
+
+  /** A pattern selected beside Value replaces that rule at the same position. */
+  function setConditionFormat(id: string, format: FormatDefinition): void {
+    const snapshot = structuredClone(format);
+    edit(root => mapNode(root, node => node.type === "condition" && node.id === id
+      ? { type: "format", id: node.id, columns: node.column ? [node.column] : [],
+          format: snapshot, negated: node.negated }
+      : node) as EditorGroup);
   }
 
   function patchFormatCondition(id: string, patch: Partial<Pick<EditorFormatCondition, "columns" | "format" | "equals" | "negated">>): void {
@@ -455,8 +471,10 @@ export function createConditionState(scope: {
     return children.length === 0 ? null : children.length === 1 ? children[0] : { kind: "and" as const, children };
   });
 
-  return { conditionTree, groupSelection: { subscribe: groupSelectionState.subscribe }, snapshotGroupFilter, restoreGroupFilter, filterByValue, filterByValues, filterByGroupPath, clearGroupFilter, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
-    addFormatCondition, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
+  return { conditionTree, groupSelection: { subscribe: groupSelectionState.subscribe },
+    groupRuleIds: { subscribe: groupRuleIdsState.subscribe }, makeGroupRulesEditable,
+    snapshotGroupFilter, restoreGroupFilter, filterByValue, filterByValues, filterByGroupPath, clearGroupFilter, addFilterCondition, filterByRange, clearRangeFilter, addCondition, addGroup,
+    addFormatCondition, setConditionFormat, patchFormatCondition, patternSnippets, addPatternSnippet, removePatternSnippet,
     removeNode, moveNode, setGroupKind, toggleCollapsed, patchCondition, conditionPayload };
 }
 

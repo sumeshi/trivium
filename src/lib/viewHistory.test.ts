@@ -4,6 +4,7 @@ import { get } from "svelte/store";
 import { createViewHistory } from "./stores/viewHistory.ts";
 import type { EditorGroup } from "./stores/condition.ts";
 import { createConditionState, presetCondition } from "./stores/condition.ts";
+import { createWorkspaceController } from "./workspaceController.ts";
 
 const empty = (): EditorGroup => ({ type: "group", id: "root", kind: "and", collapsed: false, children: [] });
 const filtered = (): EditorGroup => ({ ...empty(), children: [
@@ -84,4 +85,31 @@ test("global Back and Forward restore verified group provenance so Ungroup prese
   assert.equal(get(conditions.groupSelection), null);
   conditions.clearGroupFilter();
   assert.deepEqual(get(conditions.conditionPayload), edited);
+});
+
+test("Make rule retires current history provenance without changing the query or scroll", () => {
+  const workspace = createWorkspaceController();
+  workspace.setHistoryProject("case");
+  workspace.addFilterCondition("gate", "eq", "manual");
+  workspace.resetHistory(get(workspace.conditionTree), 4);
+  workspace.filterByGroupPath(["host"], [{ label: "alpha", value: "alpha", count: 1, children: [] }]);
+  workspace.recordAppliedCondition(4, get(workspace.conditionTree), 0, workspace.snapshotGroupFilter());
+  workspace.rememberOffset(88);
+  const query = structuredClone(get(workspace.conditionPayload));
+  workspace.makeGroupRulesEditable();
+  assert.deepEqual(get(workspace.conditionPayload), query);
+  const history = workspace.snapshotHistory();
+  assert.equal(history.entries.length, 2);
+  assert.equal(history.entries[1].offset, 88);
+  assert.equal(history.entries[1].groupFilter, undefined);
+  for (const navigate of [workspace.goBack, workspace.goForward]) {
+    navigate();
+    const restored = get(workspace.historyRestore)!;
+    workspace.conditionTree.set(structuredClone(restored.tree));
+    workspace.restoreGroupFilter(restored.groupFilter);
+  }
+  assert.equal(get(workspace.groupSelection), null, "Forward must not reclaim converted ordinary rules");
+  workspace.clearGroupFilter();
+  assert.deepEqual(get(workspace.conditionPayload), query);
+  workspace.dispose();
 });

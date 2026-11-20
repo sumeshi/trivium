@@ -7,8 +7,9 @@
   import { conditionValues, isIncompleteTextCondition } from "../../stores/condition";
   import { conditionValueHelp, createConditionValueChecker, isOrderedCondition, utcPickerValue } from "../../conditionValueInput";
   import type { ConditionValueCheckState } from "../../conditionValueInput";
+  import { formats } from "../../patternCatalog";
   import { useWorkspace } from "../../workspaceContext";
-  const { backend, projectDetail, patchCondition } = useWorkspace();
+  const { backend, projectDetail, patchCondition, setConditionFormat } = useWorkspace();
 
   export let node: EditorCondition;
   let state: ConditionValueCheckState | null = null;
@@ -55,6 +56,10 @@
   $: pickerValue = utcPickerValue(pickedDate, pickedTime);
 
   const setValue = (value: string) => patchCondition(node.id, { value, exact: false });
+  const choosePattern = (id: string) => {
+    const entry = get(formats).find(item => item.definition.id === id);
+    if (entry) setConditionFormat(node.id, entry.definition);
+  };
   const insertPicker = () => {
     if (!pickerValue) return;
     setValue(pickerValue);
@@ -83,6 +88,11 @@
       autocapitalize="off"
       spellcheck="false"
     />
+    <select class="value-pattern" aria-label="Choose value pattern" title="Use a pattern for this column" value=""
+      on:change={(event) => { choosePattern(event.currentTarget.value); event.currentTarget.value = ''; }}>
+      <option value="" disabled>Pattern</option>
+      {#each $formats as entry (entry.definition.id)}<option value={entry.definition.id}>{entry.definition.name}</option>{/each}
+    </select>
     {#if kind === "datetime" && ordered}
       <button type="button" class="date-assist" aria-label="Choose UTC date and time" title="Choose a date and time in UTC"
         aria-controls={`condition-picker-${node.id}`} aria-expanded={pickerOpen} on:click={() => { pickerOpen = !pickerOpen; }}>
@@ -108,6 +118,7 @@
   .value-controls { display: flex; gap: 3px; align-items: center; min-width: 0; }
   input.condition-value { flex: 1; min-width: 0; width: 100%; height: 27px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 11px; }
   input.condition-value[aria-invalid="true"] { border-color: var(--danger); }
+  .value-pattern { flex: 0 0 82px; min-width: 0; width: 82px; height: 27px; padding: 0 3px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 11px; }
   .value-help { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   .value-check { margin: 0; font-size: 10px; line-height: 1.45; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .value-check:empty { display: none; }
