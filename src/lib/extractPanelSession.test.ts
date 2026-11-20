@@ -87,3 +87,48 @@ assert.deepEqual(other.snapshotGrouping().columns,[]);
 assert.equal(get(otherWorkspace.groupSelection),null);
 other.$destroy();otherWorkspace.dispose();
 `));
+
+test('Rules and Groups navigation preserves empty or selected state and restores destination focus', () => runSvelteTest(String.raw`
+const {get}=await import('svelte/store');
+const {createWorkspaceController}=await import('./src/lib/workspaceController.ts');
+document.addEventListener=()=>{};document.removeEventListener=()=>{};
+const focused=[];
+const triggers=Object.fromEntries(['filters','analysis'].map(group=>['tool-group-'+group,{isConnected:true,focus:()=>focused.push(group)}]));
+document.getElementById=id=>triggers[id]??null;
+const Controls=await compileHeadless('FilterControls');
+for(const selected of [false,true]){
+ const workspace=createWorkspaceController();
+ workspace.projectDetail.set({project:{meta:{id:'case',name:'case',total_records:2,hidden_columns:[]}},columns:['host','time','user'],
+  columns_meta:[],column_kinds:{host:'string',time:'datetime',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+ workspace.addFilterCondition('user','eq','manual');
+ if(selected)workspace.filterByGroupPath(['host','time'],[
+  {label:'alpha',value:'alpha',count:1,children:[]},
+  {label:'2026-11-20',value:'2026-11-20',count:1,children:[],range:{start:'2026-11-20T00:00:00.000000001Z',end:'2026-11-21T00:00:00.000000001Z'}},
+ ]);
+ const groupSession={open:false,columns:selected?['host','time']:[],granularities:selected?{time:'day'}:{},
+  sortBy:selected?'name':'count',sortDirection:selected?'asc':'desc',filter:workspace.snapshotGroupFilter()};
+ const extractSession={open:false,selectedColumns:['user'],scope:'all'};
+ const originalQuery=structuredClone(get(workspace.conditionPayload));
+ globalThis.__workspace=workspace;
+ const controls=await mountHeadless(Controls,{groupSession,extractSession});
+ controls.$inject_state({drawerEl:{querySelector:selector=>{
+  assert.equal(selector,'[aria-label="Close analysis panel"]');return {focus:()=>focused.push('panel')};
+ }}});
+ try{
+  for(const [tool,category] of [['groups','analysis'],['conditions','filters'],['groups','analysis']]){
+   const start=focused.length;
+   await controls.$capture_state().openRelatedTool(tool);await tick();
+   const state=controls.$capture_state();
+   assert.equal(state.activeTool,tool);assert.equal(state.activeGroup,category);
+   assert.equal(state.rememberedTools[category],tool);
+   assert.equal(state.drawerTrigger,triggers['tool-group-'+category]);
+   assert.deepEqual(controls.snapshotGrouping(),{...groupSession,open:tool==='groups'});
+   assert.deepEqual(controls.snapshotExtraction(),extractSession);
+   assert.deepEqual(get(workspace.conditionPayload),originalQuery,'navigation must not change Rules or the exact selected range');
+   assert.equal(focused[start],'panel','navigation moves focus into the destination drawer');
+   state.closeTool();await tick();
+   assert.equal(focused.at(-1),category,'Close returns focus to the destination toolbar trigger');
+  }
+ }finally{controls.$destroy();workspace.dispose();}
+}
+`));

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from "svelte";
+  import { createEventDispatcher, onDestroy, tick } from "svelte";
   import { get } from "svelte/store";
   import { errorMessage } from "../../errors";
   import { createLatestRequest } from "../../latestRequest";
@@ -12,6 +12,7 @@
   import { useWorkspace } from "../../workspaceContext";
 
   const { backend, columnLabels, projectDetail, appliedFilters, filterByGroupPath, clearGroupFilter, groupSelection, createReadScope } = useWorkspace();
+  const dispatch = createEventDispatcher<{ openFilters: void }>();
   const reads = createReadScope();
   const requests = createLatestRequest();
   export let open = true;
@@ -180,6 +181,8 @@
 <section class="grouping-panel" aria-label="Nested grouping" bind:this={panel}>
   <div class="group-setup-heading">
     <span class="section-label">Grouping</span>
+    <button type="button" class="text-button related-tool" on:click={() => dispatch('openFilters')}
+      title="Open investigation rules">Open Filters</button>
     <button type="button" class="text-button" on:click={() => selectPath(($groupSelection?.path.length ?? 1) - 1)} disabled={!$groupSelection}
       aria-label="Back one group" title="Remove the last group filter; keep grouping levels">← Back</button>
     <button type="button" class="text-button" on:click={ungroup} disabled={groupColumns.length === 0}
@@ -294,7 +297,7 @@
 
 <style>
   .grouping-panel { display: grid; gap: 9px; min-width: 0; }
-  .group-setup-heading { display: flex; align-items: center; gap: 5px; }
+  .group-setup-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
   .section-label { font-weight: 600; color: var(--fg); font-size: 10px; }
   .group-setup-heading > .section-label { flex: 1; }
   .add-level { display: flex; align-items: center; gap: 5px; }
@@ -314,6 +317,7 @@
   .group-sort select { flex: 0 0 auto; width: auto; min-width: 65px; height: 24px; padding: 2px 4px; font-size: 10px; }
   .group-sort .text-button { white-space: nowrap; }
   .text-button { background: transparent; border: 0; padding: 2px 4px; border-radius: 3px; color: var(--muted); font-size: 10px; }
+  .text-button.related-tool { min-height: 25px; padding: 2px 6px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 11px; }
   .panel-error { margin: 0; color: var(--critical); font-size: 11px; }
   .group-tree { display: grid; gap: 2px; min-width: 0; }
   .group-result-heading { display: flex; justify-content: space-between; padding: 0 6px 3px 22px; color: var(--muted); font-size: 10px; }

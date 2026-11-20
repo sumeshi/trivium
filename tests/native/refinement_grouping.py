@@ -107,6 +107,23 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.results(len(records))
         detail = web.command("load_project", {"projectId": project_id}, request=True)
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
+        # Navigation is available before any group or managed rule exists.
+        original_query, checkpoint = web.query(), len(web.trace())
+        web.drawer("Conditions")
+        assert not web.script("return [...document.querySelectorAll('.condition-editor button')].find(e=>e.textContent.trim()==='Open Groups')?.disabled??true;"), "Open Groups is enabled without a selected path"
+        web.named("Open Groups", ".condition-editor")
+        wait_for(lambda: web.script("return document.querySelector('#tool-tab-groups')?.getAttribute('aria-selected');"),
+                 lambda value: value == "true", "empty Rules opens Groups")
+        assert _levels(web) == [] and not _rows(web)
+        assert not web.script("return [...document.querySelectorAll('.grouping-panel button')].find(e=>e.textContent.trim()==='Open Filters')?.disabled??true;"), "Open Filters is enabled without configured levels"
+        web.named("Open Filters", ".grouping-panel")
+        wait_for(lambda: web.script("return document.querySelector('#tool-tab-conditions')?.getAttribute('aria-selected');"),
+                 lambda value: value == "true", "empty Groups opens Filter Rules")
+        _settle(web)
+        assert web.query() == original_query, "Empty navigation changes no query settings"
+        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] in {"query_project_rows", "group_tree"}], "Empty navigation needs no result scan or grouping request"
+        web.close_drawer()
+        assert web.script("return document.activeElement?.id;") == "tool-group-filters", "Closing returns focus to the destination Filter control"
         web.named("Actions for column level1")
         web.named("Group by this column", ".column-context-menu")
         wait_for(lambda: web.script("return document.querySelector('#tool-tab-groups')?.getAttribute('aria-selected');"), lambda value: value == "true", "header action opens Analysis Groups")
@@ -219,8 +236,10 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         assert not web.script("return !!document.querySelector('.group-granularity');"), "Text and integer groups use exact values without a redundant selector"
 
         # Build a real OR in the editor; one matching group member is excluded.
-        web.close_drawer()
-        web.drawer("Conditions")
+        web.named("Open Filters", ".grouping-panel")
+        wait_for(lambda: web.script("return document.querySelector('#tool-tab-conditions')?.getAttribute('aria-selected');"),
+                 lambda value: value == "true", "configured Groups opens Filter Rules without a selected path")
+        assert web.query()["condition"] is None
         web.choose('select[aria-label="Combine conditions"]', "or")
         for index, value in enumerate(("keep", "other")):
             web.named("Add condition", ".condition-editor")
@@ -320,8 +339,10 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         _select_path(web, ["alpha"])
         web.applied(projectId=project_id, condition=_condition(columns, path[:1], original_or))
         web.results(3)
-        web.close_drawer()
-        web.drawer("Conditions")
+        web.named("Open Filters", ".grouping-panel")
+        wait_for(lambda: web.script("return document.querySelector('#tool-tab-conditions')?.getAttribute('aria-selected');"),
+                 lambda value: value == "true", "the selected Groups path opens its Filter Rules")
+        assert web.query()["condition"] == _condition(columns, path[:1], original_or)
         managed = web.script("return [...document.querySelectorAll('.managed-rule')].map(e=>({text:e.textContent,controls:e.querySelectorAll('input,select,button').length}));")
         assert len(managed) == 1 and managed[0]["controls"] == 0, "Group predicates are identified and read-only until converted"
         assert "Group" in managed[0]["text"] and "alpha" in managed[0]["text"], managed
@@ -332,7 +353,9 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         wait_for(lambda: _levels(web), lambda levels: levels == [columns["level1"]], "Rules links to the active group hierarchy")
         assert web.query()["condition"] == _condition(columns, path[:1], original_or)
         assert web.script("return !!document.querySelector('nav[aria-label=\"Selected group path\"]');")
-        web.drawer("Conditions")
+        web.named("Open Filters", ".grouping-panel")
+        wait_for(lambda: web.script("return document.querySelector('#tool-tab-conditions')?.getAttribute('aria-selected');"),
+                 lambda value: value == "true", "reciprocal navigation returns to the unchanged group Rules")
         checkpoint = len(web.trace())
         web.named("Make rule", ".condition-editor")
         _settle(web)
@@ -362,6 +385,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
             "breadcrumb_ancestor_shortens_filter_path": True, "current_breadcrumb_does_not_reload": True,
             "all_groups_keeps_configured_hierarchy": True, "manually_edited_rule_survives_ungroup": True,
             "group_rules_readonly_until_converted": True, "open_groups_from_rules": True,
+            "navigation_permanent_in_empty_state_without_scan": True, "selected_group_rules_roundtrip": True,
             "make_rule_preserves_query_without_rescan": True,
             "ungroup_removes_one_level_and_filter_at_a_time": ungroup_steps,
             "repeated_single_group_does_not_duplicate_or_reload": True, "ungroup_removes_only_group_filter": True,

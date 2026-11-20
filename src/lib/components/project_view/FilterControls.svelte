@@ -166,9 +166,10 @@
     await tick();
     groupingPanel?.groupByColumn(columnId);
   }
-  const openManagedGroups = () => {
-    drawerTrigger = document.getElementById('tool-group-analysis') as HTMLButtonElement | null;
-    void selectTool('groups', true);
+  const openRelatedTool = async (tool: 'conditions' | 'groups') => {
+    const category = tool === 'groups' ? 'analysis' : 'filters';
+    drawerTrigger = document.getElementById(`tool-group-${category}`) as HTMLButtonElement | null;
+    await selectTool(tool, true);
   };
   export async function openIocEditor(ruleId?: string): Promise<void> {
     drawerTrigger = document.getElementById('tool-group-annotations') as HTMLButtonElement | null;
@@ -448,7 +449,7 @@
       </div>
       <div class="analysis-body" class:extract-content={activeTool === 'extract'} id="analysis-tool-content" role="tabpanel" aria-labelledby={`tool-tab-${activeTool}`}>
         {#if activeTool === 'conditions'}
-          <ConditionEditor on:openGroups={openManagedGroups} />
+          <ConditionEditor on:openGroups={() => void openRelatedTool('groups')} />
         {:else if activeTool === 'extract'}
           <ExtractPanel open={true} pending={extractPending} error={extractError}
             bind:selectedColumns={extractColumns} bind:scope={extractScope}
@@ -457,7 +458,8 @@
           <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}
           <GroupingPanel open={groupReady} bind:this={groupingPanel} bind:groupColumns bind:granularities={groupGranularities}
-            bind:sortBy={groupSortBy} bind:sortDirection={groupSortDirection} />
+            bind:sortBy={groupSortBy} bind:sortDirection={groupSortDirection}
+            on:openFilters={() => void openRelatedTool('conditions')} />
         {:else if activeTool === 'time'}
           <TimePanel open={true} bind:column={timeColumn} />
         {:else if activeTool === 'timeline'}
