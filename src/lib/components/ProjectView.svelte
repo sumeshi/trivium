@@ -70,7 +70,6 @@
     notify: { message: string; tone: 'success' | 'error' };
     summary: { projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] };
     extract: ExtractIntent;
-    cancelExtract: void;
     iocsSaved: { projectId: string; entries: LoadProjectResponse['iocs'] };
   }>();
 
@@ -817,7 +816,7 @@
   <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
     {extractPending} {extractError}
     extractSession={session?.projectId === projectDetail.project.meta.id ? session.extractPanel ?? null : null}
-    on:extract={(event) => dispatch('extract', event.detail)} on:cancelExtract={() => dispatch('cancelExtract')}
+    on:extract={(event) => dispatch('extract', event.detail)}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
     on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
 

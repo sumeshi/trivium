@@ -12,6 +12,7 @@
   import ProjectView from './lib/components/ProjectView.svelte';
   import ProjectTabs from './lib/components/app/ProjectTabs.svelte';
   import Toast from './lib/components/app/Toast.svelte';
+  import ExtractionProgress from './lib/components/app/ExtractionProgress.svelte';
   import CloseDialog from './lib/components/app/CloseDialog.svelte';
   import DeleteProjectDialog from './lib/components/app/DeleteProjectDialog.svelte';
   import FileDropOverlay from './lib/components/app/FileDropOverlay.svelte';
@@ -405,7 +406,7 @@
             on:summary={handleSummaryUpdate}
             on:iocsSaved={event => projectController.updateIocs(event.detail.projectId, event.detail.entries)}
             on:notify={handleNotify}
-            on:extract={(event) => void startExtraction(event.detail)} on:cancelExtract={() => extractions.cancel()}
+            on:extract={(event) => void startExtraction(event.detail)}
           />
         </div>
         {/key}
@@ -431,9 +432,13 @@
       on:keepOpen={() => void close.keepOpen()}
       on:retry={() => { if (closeListenerError) void startCloseListener(); else void close.retry(); }} />
   {/if}
-  <Toast />
+  <div class="background-notices">
+    <ExtractionProgress pending={$extractState.pending} on:cancel={() => extractions.cancel()} />
+    <Toast />
+  </div>
 
 <style>
+  .background-notices { position: fixed; right: 20px; bottom: 44px; z-index: 300; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 40px)); pointer-events: none; }
   .project-load-error { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; min-width: 0; }
   .project-load-error h2 { margin: 0; color: var(--fg); font-size: 14px; }
   .project-load-error p { margin: 0; max-width: 48rem; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

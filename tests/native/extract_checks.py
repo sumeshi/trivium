@@ -107,6 +107,17 @@ def _scan(web, project_id, values):
     checkpoint = len(web.trace())
     existing_tabs = set(web.script("return [...document.querySelectorAll('.project-tabs [role=tab]')].map(e=>e.id);"))
     web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
+    _settle(web)
+    web.script("""
+      const bounds=()=>Object.fromEntries([
+        ['search','.extract-panel [aria-label="Find an extraction pattern"]'],
+        ['patterns','.extract-panel .pattern-list'],['table','.virtual-viewport'],['toolbar','.filters']
+      ].map(([name,selector])=>{const r=document.querySelector(selector).getBoundingClientRect();
+        return [name,{top:r.top,left:r.left,width:r.width,height:r.height}];}));
+      const state=window.__extractLayout={samples:[bounds()],bounds,observer:null};
+      state.observer=new MutationObserver(()=>state.samples.push(bounds()));
+      state.observer.observe(document.querySelector('.extract-panel'),{attributes:true,subtree:true,childList:true});
+    """)
     web.named("IPv4-like", ".extract-panel")
     entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
@@ -120,6 +131,15 @@ def _scan(web, project_id, values):
     assert web.script("return !!document.querySelector('.extract-panel');"), "Extract remains open for another scan"
     assert not any(item["name"] in ("load_project", "query_project_rows")
                    and item["request"].get("projectId") == derived_id for item in web.trace()[checkpoint:]), "Background tabs retain metadata without loading row data"
+    _settle(web)
+    layout = web.script("""
+      const s=window.__extractLayout;s.samples.push(s.bounds());s.observer.disconnect();
+      delete window.__extractLayout;return s.samples;
+    """)
+    assert not web.script("return !!document.querySelector('.extract-panel .scan-progress');")
+    assert len(layout) > 1, layout
+    assert all(abs(sample[name][axis] - layout[0][name][axis]) <= 1
+               for sample in layout for name in layout[0] for axis in layout[0][name]), "Extract must not move its controls, toolbar or table"
     detail = web.command("load_project", {"projectId": derived_id}, request=True)
     return {"id": derived_id, "request": entry["request"], "meta": detail["project"]["meta"], "expected_values": list(values)}
 
@@ -341,6 +361,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
             "adjacent_values_and_cross_column_counts": True, "output_columns": ["Value", "Count", "Rows"],
             "ordinary_csv_tabs": len(generated), "recent_unchanged": True,
             "successive_background_result_tabs": True, "source_extract_panel_and_inputs_restored": True,
+            "stable_extract_panel_toolbar_and_table_bounds": True,
             "ordinary_numeric_sort_and_search": True, "standard_gui_export_complete_csv": True,
             "closed_tab_source_copy_removed": True, "normal_exit_cleans_active_and_inactive_csvs": True,
             "same_profile_restart": True, "source_bytes_unchanged": True,
@@ -349,6 +370,7 @@ def verify_extract(app, data, root: Path, evidence: Path, report: dict):
     finally:
         failed = sys.exc_info()[0] is not None
         if web.session:
+            web.script("window.__extractLayout?.observer?.disconnect();delete window.__extractLayout;")
             web.script("window.__extractPicker?.restore();delete window.__extractPicker;")
         if web.session and not failed:
             web.close_drawer()

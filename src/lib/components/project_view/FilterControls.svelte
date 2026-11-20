@@ -438,8 +438,7 @@
         {:else if activeTool === 'extract'}
           <ExtractPanel open={true} pending={extractPending} error={extractError}
             bind:selectedColumns={extractColumns} bind:scope={extractScope}
-            on:extract={(event) => dispatch('extract', event.detail)}
-            on:cancel={() => dispatch('cancelExtract')} />
+            on:extract={(event) => dispatch('extract', event.detail)} />
         {:else if activeTool === 'stats'}
           <StatsPanel open={true} bind:column={statsColumn} bind:histogramMode={statsHistogramMode} />
         {:else if activeTool === 'groups'}

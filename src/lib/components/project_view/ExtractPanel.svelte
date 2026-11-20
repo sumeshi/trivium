@@ -12,7 +12,7 @@
   export let error: string | null = null;
   export let selectedColumns: string[] | null = null;
   export let scope: 'all' | 'filtered' = 'filtered';
-  const dispatch = createEventDispatcher<{ extract: ExtractIntent; cancel: void }>();
+  const dispatch = createEventDispatcher<{ extract: ExtractIntent }>();
   let columnSearch = '';
   let patternSearch = '';
   let columnMenuOpen = false;
@@ -76,14 +76,6 @@
   </div>
   {#if !selected.length}<p class="extract-help">Choose at least one column.</p>{/if}
   {#if scope === 'filtered' && !$queryCountKnown}<p class="extract-help">Wait for the current results before scanning.</p>{/if}
-  {#if pending}
-    <div class="scan-progress" role="status" aria-live="polite">
-      <span>{pending.message} {pending.total === null ? pending.done.toLocaleString() : `${pending.done.toLocaleString()} / ${pending.total.toLocaleString()}`}</span>
-      {#if pending.total !== null && pending.total > 0}<progress value={pending.done} max={pending.total} aria-label="Extraction progress" />{/if}
-      {#if pending.request.projectId !== $projectDetail?.project.meta.id}<small>{pending.sourceName}</small>{/if}
-      <button type="button" on:click={() => dispatch('cancel')}>Cancel</button>
-    </div>
-  {/if}
   {#if error}<p class="extract-error" role="alert">{error}</p>{/if}
   {#if $formatCatalogError}
     <p class="extract-error" role="alert">{$formatCatalogError}</p>
@@ -125,7 +117,5 @@
   .pattern-list { display: flex; flex-direction: column; gap: 5px; max-height: 300px; overflow: auto; }
   .pattern-button { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 7px; text-align: left; }
   .pattern-button > svg { flex: 0 0 14px; }
-  .scan-progress { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 7px; background: var(--surface-weak); border-radius: 4px; }
-  progress { width: 100%; height: 6px; accent-color: var(--accent); }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 </style>
