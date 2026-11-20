@@ -9,6 +9,7 @@ use trivium_engine::condition::{Condition, Group, GroupKind, Node, Op};
 use trivium_engine::error::AppError;
 use trivium_engine::ops;
 use trivium_engine::ops::preset::{load_preset, save_preset, LoadPresetPayload, SavePresetPayload};
+use trivium_engine::ops::preset::PresetFilters;
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::store::ProjectsStore;
 
@@ -102,6 +103,7 @@ fn save_payload(
     destination: &Path,
 ) -> SavePresetPayload {
     SavePresetPayload {
+        filters: None,
         allow_overwrite: false,
         project_id,
         name: Some("Hunt".into()),
@@ -165,6 +167,7 @@ fn preset_reports_unknown_columns_case_insensitively() {
     save_preset(
         &store,
         SavePresetPayload {
+            filters: None,
             allow_overwrite: false,
             project_id: id_a,
             name: None,
@@ -207,6 +210,7 @@ fn preset_without_condition_loads_sort_and_columns() {
     save_preset(
         &store,
         SavePresetPayload {
+            filters: None,
             allow_overwrite: false,
             project_id: id_a,
             name: None,
@@ -297,6 +301,7 @@ fn matching_duplicate_header_schemas_preserve_their_source_positions() {
     save_preset(
         &store,
         SavePresetPayload {
+            filters: None,
             allow_overwrite: false,
             project_id: projects[0],
             name: None,
@@ -482,5 +487,296 @@ fn preset_layout_unknown_ids_and_ambiguous_names_cannot_bind_silently() {
     let ambiguous = create_project(&store, &input);
     let error = load_preset(&store, load_payload(Some(ambiguous), &destination)).unwrap_err();
     assert!(String::from(error).contains("missing or ambiguous: host"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn filter_snapshot_survives_disk_reopen_and_reordered_source_query() {
+    let (root, store, source, _other, ids) = setup();
+    let reordered = root.join("reordered-filters.csv");
+    let original = fs::read_to_string(root.join("a.csv")).unwrap();
+    let mut text = String::from("proc,user,EventID,host\n");
+    for record in original.lines().skip(1) {
+        let values: Vec<_> = record.split(',').collect();
+        text.push_str(&format!(
+            "{},{},{},{}\n",
+            values[3], values[2], values[0], values[1]
+        ));
+    }
+    fs::write(&reordered, text).unwrap();
+    let target = create_project(&store, &reordered);
+    let target_ids = common::column_ids(&store, target);
+    for project_id in [source, target] {
+        for (row_index, flag, bookmarked) in [
+            (0, "safe", true),
+            (1, "safe", true),
+            (2, "critical", true),
+            (4, "critical", false),
+            (6, "suspicious", true),
+            (8, "", true),
+        ] {
+            ops::flags::update_flag(
+                &store,
+                ops::flags::UpdateFlagPayload {
+                    project_id,
+                    row_index,
+                    flag: Some(flag.into()),
+                    memo: Some(Some("<XML>調査, \"quoted\"</XML>\r\n".into())),
+                    tags: Some(vec!["review".into()]),
+                    bookmarked: Some(bookmarked),
+                },
+            )
+            .unwrap();
+        }
+    }
+    let destination = root.join("filter-snapshot.json");
+    let filters = PresetFilters {
+        search: "powershell -\"日本語, <XML>ignored</XML>\"".into(),
+        search_columns: vec![ids["proc"].clone()],
+        flag_filter: "safe|critical".into(),
+        bookmarked_only: true,
+    };
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.filters = Some(filters.clone());
+    save_preset(&store, payload).unwrap();
+    let bytes = fs::read(&destination).unwrap();
+    let file: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(file["filters"], serde_json::to_value(&filters).unwrap());
+    drop(store);
+
+    let reopened = ProjectsStore::new(root.clone()).unwrap();
+    let loaded = load_preset(&reopened, load_payload(Some(target), &destination)).unwrap();
+    let restored = loaded.filters.unwrap();
+    assert_eq!(
+        restored.search, filters.search,
+        "the exact entered search is retained"
+    );
+    assert_ne!(ids["proc"], target_ids["proc"]);
+    assert_eq!(restored.search_columns, vec![target_ids["proc"].clone()]);
+    assert_eq!(restored.flag_filter, "safe|critical");
+    assert!(restored.bookmarked_only);
+    assert!(loaded.unknown_columns.is_empty());
+    let page = ops::rows::query_project_rows(
+        &reopened,
+        ops::rows::QueryRowsPayload {
+            project_id: target,
+            spec: ops::rows::QuerySpec {
+                search: Some(restored.search),
+                search_columns: Some(restored.search_columns),
+                flag_filter: Some(restored.flag_filter),
+                bookmarked_only: Some(restored.bookmarked_only),
+                condition: loaded.condition,
+                sort_key: loaded.sort_key,
+                sort_direction: loaded.sort_direction,
+            },
+            offset: Some(0),
+            limit: Some(20),
+        },
+    )
+    .unwrap();
+    assert_eq!(page.total_filtered_rows, 2);
+    assert_eq!(
+        page.rows
+            .iter()
+            .map(|row| row.row_index)
+            .collect::<Vec<_>>(),
+        vec![2, 0]
+    );
+    assert_eq!(page.rows[0].flag, "critical");
+    assert_eq!(page.rows[1].flag, "safe");
+    assert!(page.rows.iter().all(|row| row.bookmarked));
+    assert_eq!(
+        page.rows[0].memo.as_deref(),
+        Some("<XML>調査, \"quoted\"</XML>\r\n")
+    );
+    assert_eq!(
+        fs::read(&destination).unwrap(),
+        bytes,
+        "loading never rewrites the preset"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn absent_filter_snapshot_and_explicit_default_reset_remain_distinct() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("optional-filters.json");
+    save_preset(&store, save_payload(source, &ids, &destination)).unwrap();
+    let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert!(
+        file.get("filters").is_none(),
+        "legacy saves omit the snapshot rather than clear filters"
+    );
+    assert!(
+        load_preset(&store, load_payload(Some(target), &destination))
+            .unwrap()
+            .filters
+            .is_none()
+    );
+    for version in [1, 2] {
+        let legacy = root.join(format!("legacy-filters-{version}.json"));
+        fs::write(
+            &legacy,
+            serde_json::to_vec(&serde_json::json!({
+                "version": version, "condition": null, "hiddenColumns": [],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(load_preset(&store, load_payload(Some(target), &legacy))
+            .unwrap()
+            .filters
+            .is_none());
+    }
+
+    let defaults = PresetFilters {
+        search: String::new(),
+        search_columns: Vec::new(),
+        flag_filter: "all".into(),
+        bookmarked_only: false,
+    };
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.allow_overwrite = true;
+    payload.filters = Some(defaults.clone());
+    save_preset(&store, payload).unwrap();
+    let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(
+        file["filters"],
+        serde_json::json!({
+            "search": "", "searchColumns": [], "flagFilter": "all", "bookmarkedOnly": false,
+        })
+    );
+    assert_eq!(
+        load_preset(&store, load_payload(Some(target), &destination))
+            .unwrap()
+            .filters,
+        Some(defaults)
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn invalid_filter_snapshots_cannot_overwrite_a_saved_file_or_load() {
+    let (root, store, source, target, ids) = setup();
+    let destination = root.join("valid-filters.json");
+    save_preset(&store, save_payload(source, &ids, &destination)).unwrap();
+    let original = fs::read(&destination).unwrap();
+    let defaults = PresetFilters {
+        search: String::new(),
+        search_columns: Vec::new(),
+        flag_filter: "all".into(),
+        bookmarked_only: false,
+    };
+    for invalid in [
+        PresetFilters {
+            search: "|".into(),
+            ..defaults.clone()
+        },
+        PresetFilters {
+            search: "\"\"".into(),
+            ..defaults.clone()
+        },
+        PresetFilters {
+            flag_filter: "critical|bogus".into(),
+            ..defaults.clone()
+        },
+        PresetFilters {
+            search_columns: vec!["".into()],
+            ..defaults.clone()
+        },
+        PresetFilters {
+            search_columns: vec![" \t ".into()],
+            ..defaults.clone()
+        },
+        PresetFilters {
+            search_columns: vec![ids["proc"].clone(), ids["proc"].to_uppercase()],
+            ..defaults.clone()
+        },
+    ] {
+        let mut payload = save_payload(source, &ids, &destination);
+        payload.allow_overwrite = true;
+        payload.filters = Some(invalid.clone());
+        assert!(save_preset(&store, payload).is_err(), "{invalid:?}");
+        assert_eq!(
+            fs::read(&destination).unwrap(),
+            original,
+            "invalid snapshots must fail before replacement"
+        );
+    }
+    let saved_meta = serde_json::to_value(store.try_find(&target).unwrap().unwrap()).unwrap();
+    for (index, filters) in [
+        serde_json::json!({}),
+        serde_json::json!({"search": null, "searchColumns": [], "flagFilter": "all", "bookmarkedOnly": false}),
+        serde_json::json!({"search": "|", "searchColumns": [], "flagFilter": "all", "bookmarkedOnly": false}),
+        serde_json::json!({"search": "", "searchColumns": [], "flagFilter": "safe|invalid", "bookmarkedOnly": false}),
+        serde_json::json!({"search": "", "searchColumns": [ids["proc"], ids["proc"]], "flagFilter": "all", "bookmarkedOnly": false}),
+    ].into_iter().enumerate() {
+        let path = root.join(format!("invalid-filters-{index}.json"));
+        let bytes = serde_json::to_vec(&serde_json::json!({"version": 2, "hiddenColumns": [], "filters": filters})).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        assert!(load_preset(&store, load_payload(Some(target), &path)).is_err(), "case {index}");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_eq!(serde_json::to_value(store.try_find(&target).unwrap().unwrap()).unwrap(), saved_meta,
+            "rejected loads must not change case settings");
+    }
+    assert_eq!(fs::read(&destination).unwrap(), original);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn search_scope_unknown_ids_and_ambiguous_source_names_cannot_bind_silently() {
+    let (root, store, source, _other, ids) = setup();
+    let destination = root.join("search-scope.json");
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    payload.filters = Some(PresetFilters {
+        search: "needle".into(),
+        search_columns: vec!["c000005".into()],
+        flag_filter: "all".into(),
+        bookmarked_only: false,
+    });
+    save_preset(&store, payload).unwrap();
+    let input = root.join("extra-search-column.csv");
+    fs::write(
+        &input,
+        "EventID,host,user,proc,extra\n1,WS01,alice,cmd,needle\n",
+    )
+    .unwrap();
+    let target = create_project(&store, &input);
+    let loaded = load_preset(&store, load_payload(Some(target), &destination)).unwrap();
+    assert_eq!(loaded.unknown_columns, vec!["c000005"]);
+    assert_eq!(loaded.filters.unwrap().search_columns, vec!["c000005"]);
+
+    let mut payload = save_payload(source, &ids, &destination);
+    payload.allow_overwrite = true;
+    payload.condition = None;
+    payload.hidden_columns.clear();
+    payload.sort_key = None;
+    payload.filters = Some(PresetFilters {
+        search: "WS01".into(),
+        search_columns: vec![ids["host"].clone()],
+        flag_filter: "all".into(),
+        bookmarked_only: false,
+    });
+    save_preset(&store, payload).unwrap();
+    for (name, header, values) in [
+        ("missing", "EventID,other,user,proc", "1,WS01,alice,cmd"),
+        (
+            "ambiguous",
+            "host,proc,user,EventID,host",
+            "WS01,cmd,alice,1,WS02",
+        ),
+    ] {
+        let input = root.join(format!("{name}-search-source.csv"));
+        fs::write(&input, format!("{header}\n{values}\n")).unwrap();
+        let target = create_project(&store, &input);
+        let error = load_preset(&store, load_payload(Some(target), &destination)).unwrap_err();
+        assert!(
+            String::from(error).contains("missing or ambiguous: host"),
+            "{name}"
+        );
+    }
     let _ = fs::remove_dir_all(root);
 }

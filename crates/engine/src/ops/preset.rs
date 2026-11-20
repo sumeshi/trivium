@@ -5,6 +5,7 @@ use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::query::QuerySpec;
 use crate::condition::Node;
 use crate::error::AppError;
 use crate::export::atomic::{validate_destination, write_atomically};
@@ -15,6 +16,16 @@ use crate::store::ProjectsStore;
 
 mod file;
 
+/// Optional on older presets; a present snapshot always describes every filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetFilters {
+    pub search: String,
+    pub search_columns: Vec<String>,
+    pub flag_filter: String,
+    pub bookmarked_only: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PresetFile {
     pub version: u32,
@@ -22,6 +33,8 @@ pub struct PresetFile {
     pub name: Option<String>,
     #[serde(default)]
     pub condition: Option<Node>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filters: Option<PresetFilters>,
     #[serde(default, rename = "hiddenColumns")]
     pub hidden_columns: Vec<String>,
     #[serde(default, rename = "sortKey")]
@@ -52,6 +65,8 @@ pub struct SavePresetPayload {
     pub name: Option<String>,
     #[serde(default)]
     pub condition: Option<Node>,
+    #[serde(default)]
+    pub filters: Option<PresetFilters>,
     #[serde(default, rename = "hiddenColumns")]
     pub hidden_columns: Vec<String>,
     #[serde(default, rename = "sortKey")]
@@ -79,6 +94,8 @@ pub struct LoadPresetPayload {
 pub struct PresetData {
     pub name: Option<String>,
     pub condition: Option<Node>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filters: Option<PresetFilters>,
     #[serde(rename = "hiddenColumns")]
     pub hidden_columns: Vec<String>,
     #[serde(rename = "sortKey")]
@@ -111,6 +128,7 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
         version: 2,
         name: payload.name,
         condition: payload.condition,
+        filters: payload.filters,
         hidden_columns: payload.hidden_columns,
         sort_key: payload.sort_key,
         sort_direction: payload.sort_direction,
@@ -118,7 +136,7 @@ pub fn save_preset(store: &ProjectsStore, payload: SavePresetPayload) -> Result<
         column_widths: payload.column_widths,
         columns: project_columns(store, &meta)?,
     };
-    validate_layout(&preset)?;
+    validate_preset(&preset)?;
     let destination = PathBuf::from(&payload.destination);
     write_atomically(
         &destination,
@@ -142,7 +160,7 @@ pub fn load_preset(
     if !matches!(preset.version, 1 | 2) {
         return Err(AppError::Message("Unsupported preset version.".into()));
     }
-    validate_layout(&preset)?;
+    validate_preset(&preset)?;
 
     let unknown_columns = match payload.project_id {
         Some(id) => {
@@ -158,6 +176,7 @@ pub fn load_preset(
     Ok(PresetData {
         name: preset.name,
         condition: preset.condition,
+        filters: preset.filters,
         hidden_columns: preset.hidden_columns,
         sort_key: preset.sort_key,
         sort_direction: preset.sort_direction,
@@ -188,6 +207,13 @@ fn resolve_columns(
         .map(extract_columns)
         .unwrap_or_default();
     references.extend(preset.hidden_columns.iter().cloned());
+    references.extend(
+        preset
+            .filters
+            .iter()
+            .flat_map(|filters| filters.search_columns.iter())
+            .cloned(),
+    );
     references.extend(preset.sort_key.iter().cloned());
     references.extend(preset.column_order.iter().flatten().cloned());
     references.extend(
@@ -267,6 +293,9 @@ fn resolve_columns(
     for column in &mut preset.hidden_columns {
         remap(column);
     }
+    if let Some(filters) = &mut preset.filters {
+        filters.search_columns.iter_mut().for_each(&remap);
+    }
     if let Some(column) = &mut preset.sort_key {
         remap(column);
     }
@@ -287,13 +316,26 @@ fn resolve_columns(
     Ok(missing)
 }
 
-fn validate_layout(preset: &PresetFile) -> Result<(), AppError> {
+fn validate_preset(preset: &PresetFile) -> Result<(), AppError> {
     let unique_columns = |columns: Vec<&str>| {
         let mut seen = HashSet::new();
         columns
             .into_iter()
             .all(|column| !column.trim().is_empty() && seen.insert(column.to_lowercase()))
     };
+    if let Some(filters) = &preset.filters {
+        if !unique_columns(filters.search_columns.iter().map(String::as_str).collect()) {
+            return Err(AppError::Message("Invalid preset search columns.".into()));
+        }
+        // Reuse the same search and flag parser as query/export/bulk, including
+        // aliases and combinations. A preset must not widen an invalid filter.
+        QuerySpec {
+            search: Some(filters.search.clone()),
+            flag_filter: Some(filters.flag_filter.clone()),
+            ..QuerySpec::default()
+        }
+        .validate_filter()?;
+    }
     if let Some(order) = &preset.column_order {
         if !unique_columns(order.iter().map(String::as_str).collect()) {
             return Err(AppError::Message("Invalid preset column order.".into()));

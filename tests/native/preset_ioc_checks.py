@@ -13,7 +13,7 @@ from feedback_checks import _settle
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
 from runtime import IPC_COMMAND_JS
-from preset_state_checks import verify_preset_state
+from preset_state_checks import verify_preset_state, verify_preset_filter_snapshot
 from cell_ioc_checks import _select_rule, verify_cell_iocs, verify_compact_ioc_list
 from storage_responsiveness_checks import _case_database
 
@@ -132,12 +132,13 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
 
     # Earlier files omit the optional layout fields and must not reset a
     # user's current arrangement. Explicit empty values request defaults.
-    _load_preset(web, plain_path)
+    legacy_path = root / "legacy-layout-preset.json"
+    legacy_path.write_text(json.dumps({key: value for key, value in preset.items()
+        if key not in {"columnOrder", "columnWidths", "filters"}}), encoding="utf-8")
+    _load_preset(web, legacy_path)
     assert _order(web) == custom_order
     assert all(abs(width - custom_width) <= 1 for width in _width(web, ids["host"]).values())
-    reset_path = root / "reset-layout-preset.json"
-    reset_path.write_text(json.dumps({**preset, "columnOrder": [], "columnWidths": {}}), encoding="utf-8")
-    _load_preset(web, reset_path)
+    _load_preset(web, plain_path)
     wait_for(lambda: _order(web), lambda order: order == source_order, "explicit empty order restores source order")
     wait_for(lambda: _width(web, ids["host"]),
              lambda widths: all(abs(width - defaults[ids["host"]]) <= 1 for width in widths.values()),
@@ -150,7 +151,7 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
     assert web.query() == original_query, "Column layout presets do not change the search scope"
     return {"custom_order": custom_order, "changed_widths_only": saved["columnWidths"],
             "save_modify_load_restores_layout": True, "omitted_layout_preserves_current": True,
-            "explicit_empty_layout_resets": True}
+            "new_default_save_restores_source_order_and_widths": True}
 
 
 def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> None:
@@ -189,9 +190,11 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         picker = web.script("return window.__presetIocPicker.calls[0];")
         assert picker["options"]["defaultPath"] == f"trivium-preset-{source.stem}.json", picker
         assert saved["version"] == 2 and [item["source"] for item in saved["columns"]] == ["host", "message", "score"], saved
-        assert "columnOrder" not in saved and "columnWidths" not in saved, "Default layouts need no preset overrides"
+        assert saved["columnOrder"] == [] and saved["columnWidths"] == {}, "New default-layout presets explicitly restore source defaults"
+        assert saved["filters"] == {"search": "", "searchColumns": [], "flagFilter": "all", "bookmarkedOnly": False}
         layout = _layout_presets(web, ids, saved, preset_path, root)
         preset_state = verify_preset_state(web, data, case, source, ids, saved, preset_path, root)
+        filter_snapshot = verify_preset_filter_snapshot(web, data, case, source, ids, saved, preset_path, root)
         # A reference the file cannot identify must not partially replace the view.
         invalid = {**saved, "condition": {"column": "not-known", "op": "eq", "values": ["alpha"], "negated": False},
             "hiddenColumns": [ids["score"]], "sortKey": ids["message"], "sortDirection": "desc"}
@@ -273,6 +276,7 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         report["presets_iocs"] = {"preset_default_name": picker["options"]["defaultPath"], "portable_column_metadata": True,
             "layout": layout,
             "state": preset_state,
+            "filter_snapshot": filter_snapshot,
             "unknown_reference_leaves_view_unchanged": True, "preset_rules_columns_sort_applied": True,
             "ioc_saved_without_annotations": True, "direct_apply_matches_all_rows": 2, "no_visible_preview": True,
             "query_help": help_text,

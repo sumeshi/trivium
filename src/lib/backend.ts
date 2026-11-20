@@ -26,6 +26,7 @@ import type {
   LoadProjectResponse,
   LoadViewStateResult,
   PresetData,
+  PresetFilters,
   QuerySpec,
   TimeAnalysis,
   SurroundingRows,
@@ -142,6 +143,7 @@ export interface SavePresetArgs {
   sortDirection?: "asc" | "desc" | null;
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
+  filters?: PresetFilters;
   destination: string;
   allowOverwrite?: boolean;
 }
@@ -646,6 +648,7 @@ class NativeBackend implements Backend {
         sortDirection: args.sortDirection ?? null,
         ...(args.columnOrder !== undefined ? { columnOrder: args.columnOrder } : {}),
         ...(args.columnWidths !== undefined ? { columnWidths: args.columnWidths } : {}),
+        ...(args.filters !== undefined ? { filters: args.filters } : {}),
         destination: args.destination,
         allowOverwrite: args.allowOverwrite ?? false,
       },

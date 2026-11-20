@@ -14,7 +14,7 @@ function setup() {
   return workspace;
 }
 
-test("a preset restores only documented rules/columns/sort and emits a per-case sort revision", () => {
+test("a legacy preset keeps omitted filters and emits a per-case sort revision", () => {
   const a = setup(), b = setup();
   const condition = { column: "c2", op: "eq" as const, values: ["exact,value"], negated: false };
   const preset = { condition, hiddenColumns: ["c3"], sortKey: "c2", sortDirection: "asc" as const, unknown_columns: [] };
@@ -30,10 +30,32 @@ test("a preset restores only documented rules/columns/sort and emits a per-case 
   a.dispose(); b.dispose();
 });
 
+test("a filter snapshot restores search scope, flags and bookmarks, including explicit resets", () => {
+  const workspace = setup(), other = setup();
+  const preset = { condition: null, hiddenColumns: [], sortKey: null, sortDirection: null,
+    filters: { search: '"日本語, quoted" -noise', searchColumns: ["c2"],
+      flagFilter: "safe|critical" as const, bookmarkedOnly: true }, unknown_columns: [] };
+  applyPresetView(workspace, preset);
+  preset.filters.searchColumns.push("later mutation");
+  assert.equal(get(workspace.search), '"日本語, quoted" -noise');
+  assert.deepEqual(get(workspace.searchColumns), ["c2"]);
+  assert.equal(get(workspace.flagFilter), "safe|critical");
+  assert.equal(get(workspace.bookmarkedOnly), true);
+  assert.equal(get(other.search), "keep current search", "a preset only updates its own case");
+  applyPresetView(workspace, { ...preset, filters: {
+    search: "", searchColumns: [], flagFilter: "all", bookmarkedOnly: false } });
+  assert.equal(get(workspace.search), "");
+  assert.deepEqual(get(workspace.searchColumns), []);
+  assert.equal(get(workspace.flagFilter), "all");
+  assert.equal(get(workspace.bookmarkedOnly), false);
+  workspace.dispose(); other.dispose();
+});
+
 test("a slow preset metadata save cannot overwrite subsequent investigation and column edits", async () => {
   const workspace = setup();
   const preset = { condition: { column: "c2", op: "in" as const, values: ["alice,bob", " carol "], negated: false },
     hiddenColumns: ["c1"], sortKey: "c2", sortDirection: "asc" as const,
+    filters: { search: "beacon", searchColumns: ["c2"], flagFilter: "safe" as const, bookmarkedOnly: true },
     columnOrder: ["c2", "c1"], columnWidths: { c2: 347 }, unknown_columns: [] };
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -45,6 +67,10 @@ test("a slow preset metadata save cannot overwrite subsequent investigation and 
       assert.deepEqual(get(workspace.conditionPayload), preset.condition);
       assert.deepEqual([...get(workspace.hiddenColumns)], ["c1"]);
       assert.deepEqual(get(workspace.columnOrder), ["c2", "c1"]);
+      assert.equal(get(workspace.search), "beacon");
+      assert.deepEqual(get(workspace.searchColumns), ["c2"]);
+      assert.equal(get(workspace.flagFilter), "safe");
+      assert.equal(get(workspace.bookmarkedOnly), true);
       assert.deepEqual(widths, { c2: 347 }, "all view fields must publish before metadata is queued");
       return queueHiddenColumnWrite("preset-latest-edit", columns, async snapshot => {
         writes.push(snapshot); await held; persisted = snapshot;
@@ -55,6 +81,8 @@ test("a slow preset metadata save cannot overwrite subsequent investigation and 
   workspace.hiddenColumns.set(new Set(["c2"]));
   workspace.sortKey.set("c1"); workspace.sortDirection.set("desc");
   workspace.columnOrder.set(["c1", "c2"]); widths = { c1: 400 };
+  workspace.search.set("later search"); workspace.searchColumns.set(["c1"]);
+  workspace.flagFilter.set("critical"); workspace.bookmarkedOnly.set(false);
   const latest = queueHiddenColumnWrite("preset-latest-edit", ["c2"], async snapshot => {
     writes.push(snapshot); persisted = snapshot;
   });
@@ -68,6 +96,10 @@ test("a slow preset metadata save cannot overwrite subsequent investigation and 
   assert.equal(get(workspace.sortKey), "c1"); assert.equal(get(workspace.sortDirection), "desc");
   assert.deepEqual(get(workspace.columnOrder), ["c1", "c2"]);
   assert.deepEqual(widths, { c1: 400 });
+  assert.equal(get(workspace.search), "later search");
+  assert.deepEqual(get(workspace.searchColumns), ["c1"]);
+  assert.equal(get(workspace.flagFilter), "critical");
+  assert.equal(get(workspace.bookmarkedOnly), false);
   workspace.dispose();
 });
 

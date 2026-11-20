@@ -279,6 +279,7 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
             project_id: first.id,
             name: None,
             condition: Some(node),
+            filters: None,
             hidden_columns: vec![],
             sort_key: None,
             sort_direction: None,

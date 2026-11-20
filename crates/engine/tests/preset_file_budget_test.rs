@@ -108,6 +108,7 @@ fn oversized_encoded_output_cannot_replace_a_saved_preset_or_publish_a_new_one()
                 // calculated from the unescaped Rust string length.
                 name: Some("\n".repeat(MAX_BYTES / 2)),
                 condition: None,
+                filters: None,
                 hidden_columns: Vec::new(),
                 sort_key: None,
                 sort_direction: None,

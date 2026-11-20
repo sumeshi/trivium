@@ -10,6 +10,7 @@
   const workspace = useWorkspace();
   const {
     conditionPayload, backend, hiddenColumns, projectDetail, sortDirection, sortKey, columnOrder,
+    search, searchColumns, flagFilter, bookmarkedOnly,
   } = workspace;
 
   export let columnWidths: ReadonlyMap<string, number> = new Map();
@@ -35,12 +36,16 @@
     }
     const service = $backend, projectId = $projectDetail.project.meta.id;
     const sourceName = $projectDetail.project.meta.source_file_name ?? $projectDetail.project.meta.name;
+    const layout = changedPresetLayout($projectDetail.columns, get(columnOrder), columnWidths, defaultColumnWidths);
     const snapshot = structuredClone({
       condition: $conditionPayload,
       hiddenColumns: Array.from(get(hiddenColumns)),
       sortKey: get(sortKey),
       sortDirection: get(sortDirection),
-      ...changedPresetLayout($projectDetail.columns, get(columnOrder), columnWidths, defaultColumnWidths),
+      columnOrder: layout.columnOrder ?? [],
+      columnWidths: layout.columnWidths ?? {},
+      filters: { search: get(search), searchColumns: [...get(searchColumns)],
+        flagFilter: get(flagFilter), bookmarkedOnly: get(bookmarkedOnly) },
     });
     const isCurrent = () => !destroyed && get(workspace.currentProjectId) === projectId;
     clearMessages();
@@ -120,7 +125,7 @@
 </script>
 
 <div class="stats-panel">
-  <p class="condition-count preset-description">Saves rules, hidden columns, sort and changed column order / widths.</p>
+  <p class="condition-count preset-description">Saves search, flag / bookmark filters, rules, hidden columns, sort and column layout.</p>
   <div class="condition-toolbar">
     <span class="filter-label">Preset</span>
     <button type="button" class="ghost" on:click={savePreset} disabled={busy}>

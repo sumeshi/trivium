@@ -32,6 +32,12 @@ export type QuerySpec = { [K in keyof Required<Wire.QuerySpec>]:
 export type IocEntry = Wire.IocEntry & { id?: string };
 export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
 export type ColorRule = Wire.ColorRule;
+export interface PresetFilters {
+  search: string;
+  searchColumns: string[];
+  flagFilter: FlagFilterValue;
+  bookmarkedOnly: boolean;
+}
 export interface PresetData {
   name?: string | null;
   condition?: ConditionNode | null;
@@ -40,6 +46,7 @@ export interface PresetData {
   sortDirection: "asc" | "desc" | null;
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
+  filters?: PresetFilters;
   unknown_columns: string[];
 }
 export type LoadProjectResponse = Omit<Wire.LoadProjectResponse,

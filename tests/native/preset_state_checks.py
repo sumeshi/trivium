@@ -47,6 +47,71 @@ def _saved_values(node: dict) -> list[list[str]]:
     return [values for child in node["children"] for values in _saved_values(child)]
 
 
+def verify_preset_filter_snapshot(web, data: dict, case: dict, source: Path, ids: dict[str, str],
+                                  base: dict, base_path: Path, root: Path) -> dict:
+    from preset_ioc_checks import _load_preset, _picker
+
+    project_id = case["meta"]["id"]
+    web.close_drawer()
+    web.write('input[aria-label="Search rows"]', "beacon")
+    web.named("Choose search columns")
+    web.click(web.script("return [...document.querySelectorAll('#search-column-menu label')].find(e=>e.textContent.trim()==='message').querySelector('input');"))
+    web.named("Done", "#search-column-menu")
+    web.flags(["safe", "none"])
+    web.named("Show bookmarked rows only")
+    expected_filters = {"search": "beacon", "searchColumns": [ids["message"]],
+                        "flagFilter": "safe|none", "bookmarkedOnly": True}
+    web.applied(projectId=project_id, **expected_filters)
+    web.results(1)
+    expected_query = web.query()
+    path = root / "all-filter-state-preset.json"
+    web.drawer("Presets")
+    _picker(web, path)
+    web.named("Save preset file", "#analysis-drawer")
+    wait_for(lambda: web.script("return document.querySelector('#analysis-drawer')?.textContent??'';"),
+             lambda text: "Preset saved." in text and path.is_file(), "GUI filter snapshot is durably written")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["filters"] == expected_filters, saved
+    _load_preset(web, base_path)
+    web.applied(projectId=project_id, **base["filters"])
+    web.results(3)
+    _load_preset(web, path)
+    web.applied(**expected_query)
+    web.results(1)
+    assert web.query() == expected_query
+    assert web.script("return document.querySelector('[aria-label=\"Search rows\"]').value;") == "beacon"
+    assert web.script("return document.querySelector('[aria-label=\"Show bookmarked rows only\"]').getAttribute('aria-pressed');") == "true"
+    wait_for(lambda: web.command("load_view_state", {"projectId": project_id}, request=True)["state"],
+             lambda state: bool(state and all(state.get(key) == value for key, value in expected_filters.items())),
+             "the restored filter state survives normal view autosave")
+    web.close_drawer()
+    web.tab(data["id"])
+    web.named(f"Close {source.name}")
+    open_project(web, case["meta"]["name"])
+    web.applied(**expected_query)
+    web.results(1)
+    assert web.query() == expected_query, "Reopening keeps all restored filter fields"
+    web.drawer("Presets")
+    legacy_path = root / "legacy-without-filters.json"
+    legacy_path.write_text(json.dumps({key: value for key, value in base.items() if key != "filters"}), encoding="utf-8")
+    _load_preset(web, legacy_path)
+    assert web.query() == expected_query, "Older presets leave omitted filters alone"
+    unknown_path = root / "unknown-search-column-preset.json"
+    unknown_path.write_text(json.dumps({**saved, "filters": {**expected_filters, "searchColumns": ["unknown-search-column"]}}), encoding="utf-8")
+    _picker(web, unknown_path)
+    web.named("Load preset file", "#analysis-drawer")
+    wait_for(lambda: web.script("return document.querySelector('#analysis-drawer')?.textContent??'';"),
+             lambda text: "Unknown columns: unknown-search-column" in text,
+             "unknown search scope is rejected before partially applying a preset")
+    assert web.query() == expected_query
+    _load_preset(web, base_path)
+    web.applied(projectId=project_id, **base["filters"])
+    web.results(3)
+    return {"saved_filters": expected_filters, "file_save_load_restore": True,
+            "reopen_retains_restored_filters": True, "legacy_omission_preserves_filters": True,
+            "unknown_search_column_preserves_view": True, "explicit_empty_defaults_reset_filters": True}
+
+
 def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str, str],
                         base: dict, base_path: Path, root: Path) -> dict:
     # Imported here because the caller owns the shared picker helpers.

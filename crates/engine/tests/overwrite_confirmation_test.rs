@@ -81,6 +81,7 @@ fn output(
                 project_id: first,
                 name: None,
                 condition: None,
+                filters: None,
                 hidden_columns: Vec::new(),
                 sort_key: None,
                 sort_direction: None,

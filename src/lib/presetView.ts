@@ -22,10 +22,17 @@ export function changedPresetLayout(
 }
 
 type PresetWorkspace = Pick<WorkspaceController,
-  "conditionTree" | "hiddenColumns" | "sortKey" | "sortDirection" | "sortRevision" | "columnOrder">;
+  "conditionTree" | "hiddenColumns" | "sortKey" | "sortDirection" | "sortRevision" | "columnOrder"
+  | "search" | "searchColumns" | "flagFilter" | "bookmarkedOnly">;
 
 /** Apply exactly the view fields saved by the preset, in this case only. */
 export function applyPresetView(workspace: PresetWorkspace, preset: PresetData): void {
+  if (preset.filters !== undefined) {
+    workspace.search.set(preset.filters.search);
+    workspace.searchColumns.set([...preset.filters.searchColumns]);
+    workspace.flagFilter.set(preset.filters.flagFilter);
+    workspace.bookmarkedOnly.set(preset.filters.bookmarkedOnly);
+  }
   workspace.conditionTree.set(presetCondition(preset.condition) ?? {
     type: "group", id: "root", kind: "and", collapsed: false, children: [],
   });
