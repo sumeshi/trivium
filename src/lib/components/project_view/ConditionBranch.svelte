@@ -46,6 +46,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d={node.collapsed ? "m9 5 7 7-7 7" : "m5 9 7 7 7-7"} /></svg>
         </button>
         <select
+          class="group-kind"
           value={node.kind}
           on:change={(event) => setKind(node.id, event.currentTarget.value)}
           aria-label="Combine conditions"
@@ -54,7 +55,7 @@
           <option value="and">AND</option>
           <option value="or">OR</option>
         </select>
-        <span class="group-description">{node.kind === "and" ? "Match all" : "Match any"}<span class="group-size">{node.children.length}</span></span>
+        <span class="group-description"><span class="group-meaning">{node.kind === "and" ? "Match all" : "Match any"}</span><span class="group-size" title={`Conditions and groups: ${node.children.length}`}>{node.children.length}</span></span>
         <button type="button" class="group-add" on:click={() => addCondition(node.id, columns[0] ?? "")} aria-label="Add condition" title="Add condition">
           <span aria-hidden="true">＋</span><span>Condition</span>
         </button>
@@ -86,9 +87,9 @@
       </div>
       {#if isRoot && $formatCatalogError}<p class="format-load-error" role="alert">{$formatCatalogError}</p>{/if}
       {#if !node.collapsed}
-        <div class="group-children">
+        <div class="group-children" role="group" aria-label={node.kind === "and" ? "All conditions must match" : "Any condition may match"}>
         {#each node.children as child, childIndex (child.id)}
-          {#if childIndex > 0}<span class="condition-connector">{node.kind.toUpperCase()}</span>{/if}
+          {#if childIndex > 0}<div class="condition-connector" data-kind={node.kind} aria-hidden="true"><span>{node.kind.toUpperCase()}</span></div>{/if}
           <svelte:self
             node={child}
             {columns}
@@ -166,12 +167,17 @@
   .format-load-error { margin: 4px 0; color: var(--danger); font-size: 10px; overflow-wrap: anywhere; }
   .condition-branch { gap: 0; min-width: 0; }
   .condition-group { gap: 5px; min-width: 0; border: 0; padding: 0; }
-  .group-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+  .group-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 2px 0; border-bottom: 1px solid var(--border); background: var(--surface-weak); }
   .group-toolbar select { width: 59px; height: 26px; padding: 0 4px; font-size: 10px; font-weight: 600; color: var(--accent); }
+  .group-toolbar .group-kind { font-size: 11px; font-weight: 700; letter-spacing: .03em; color: var(--fg); border: 1px solid var(--border-strong); background: var(--surface); }
   .group-description { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 65px; font-size: 10px; color: var(--muted); }
-  .group-size { font-size: 9px; font-variant-numeric: tabular-nums; }
-  .group-children { display: flex; flex-direction: column; gap: 3px; margin-left: 10px; padding: 3px 0 4px 10px; border-left: 1px solid var(--border-strong); min-width: 0; }
-  .condition-connector { margin: 2px 0; color: var(--accent); font-size: 9px; line-height: 1.3; font-weight: 600; letter-spacing: .04em; }
+  .group-meaning { color: var(--fg); }
+  .group-size { min-width: 16px; padding: 0 3px; border-radius: 3px; background: var(--surface); text-align: center; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
+  .group-children { display: flex; flex-direction: column; gap: 3px; margin-left: 4px; padding: 4px 0 4px 8px; border-left: 2px solid var(--border-strong); min-width: 0; }
+  .condition-group[data-kind="or"] > .group-children { border-left-style: dashed; }
+  .condition-connector { display: flex; align-items: center; gap: 6px; margin: 1px 0; color: var(--fg); font-size: 10px; line-height: 14px; font-weight: 700; letter-spacing: .03em; }
+  .condition-connector span { min-width: 30px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface-weak); text-align: center; }
+  .condition-connector::after { content: ''; flex: 1; height: 1px; background: var(--border); }
   .condition-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 77px; align-items: center; gap: 4px; min-width: 0; }
   .condition-row select, .condition-row input { min-width: 0; width: 100%; height: 27px; padding: 0 6px; font-size: 11px; }
   .condition-row :global(.condition-value-input) { grid-column: 1 / 3; min-width: 0; }
@@ -180,7 +186,7 @@
   .condition-actions { display: flex; align-self: start; gap: 1px; justify-content: flex-end; }
   .branch-icon, .group-add { display: inline-flex; align-items: center; justify-content: center; gap: 3px; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 3px; color: var(--muted); background: transparent; font-size: 13px; }
   .branch-icon { flex: 0 0 24px; width: 24px; }
-  .group-add { flex: 0 0 auto; gap: 4px; padding: 0 6px; border-color: var(--border); background: var(--surface-weak); color: var(--fg); font-size: 10px; white-space: nowrap; }
+  .group-add { flex: 0 0 auto; gap: 4px; padding: 0 6px; border-color: var(--border); background: var(--surface); color: var(--fg); font-size: 10px; white-space: nowrap; }
   .branch-icon:hover:not(:disabled) { border-color: var(--border); color: var(--fg); background: var(--surface-weak); }
   .group-add:hover { border-color: var(--border-strong); background: var(--hover); }
   .branch-icon:focus-visible, .group-add:focus-visible { outline: 1px solid var(--accent-border); outline-offset: 1px; }

@@ -773,6 +773,27 @@ def tab_workspace(web: WorkspaceView, data: dict[str, Any], root: Path, evidence
         web.choose('.condition-row select[aria-label="Operator"]', "eq", index)
     conditions = web.script("return {kinds:[...document.querySelectorAll('select[aria-label=\"Combine conditions\"]')].map(e=>e.value),values:[...document.querySelectorAll('input[aria-label=\"Value\"]')].map(e=>e.value)};")
     assert conditions == {"kinds": ["and", "or"], "values": ["100", "keep", "drop"]}, conditions
+    web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
+    boolean_layout = web.script("""
+      const outer=document.querySelector('.condition-editor .condition-group'),inner=outer.querySelector('.condition-group');
+      return {nestedIndent:inner.getBoundingClientRect().left-outer.getBoundingClientRect().left,
+        groups:[outer,inner].map(group=>{
+          const kind=group.querySelector(':scope>.group-toolbar>.group-kind'),s=getComputedStyle(kind),
+            rail=group.querySelector(':scope>.group-children'),r=getComputedStyle(rail),box=kind.getBoundingClientRect();
+          return {kind:kind.value,font:parseFloat(s.fontSize),weight:Number(s.fontWeight),border:parseFloat(s.borderLeftWidth),
+            reachable:kind.contains(document.elementFromPoint(box.left+box.width/2,box.top+box.height/2)),
+            railWidth:parseFloat(r.borderLeftWidth),railStyle:r.borderLeftStyle,
+            connectors:[...rail.children].filter(e=>e.classList.contains('condition-connector')).map(e=>({
+              kind:e.dataset.kind,text:e.textContent.trim(),weight:Number(getComputedStyle(e).fontWeight)}))};
+        })};
+    """)
+    assert boolean_layout["nestedIndent"] > 0, boolean_layout
+    for group, kind in zip(boolean_layout["groups"], ["and", "or"]):
+        assert group["kind"] == kind and group["reachable"], group
+        assert group["connectors"] and all(item["kind"] == kind and item["text"] == kind.upper()
+                                            for item in group["connectors"]), group
+    web.screenshot(evidence / "filter-and-or.png")
+    report["condition_boolean_layout"] = boolean_layout
     web.close_drawer()
     expected = sum(i >= 100 and i % 5 != 0 for i in range(1, data["total"] + 1))
     web.results(expected)
