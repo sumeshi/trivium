@@ -46,9 +46,10 @@ def _source_display(web, columns: list[dict], first_record: list[str], total: in
     web.named("Close", ".row-detail-dialog")
 
 
-def _export_gui(web, destination: Path) -> None:
+def _export_gui(web, destination: Path, scope: str = "filtered") -> None:
     web.named("Export rows")
     assert web.script("return document.querySelector('.export-annotations input').checked;")
+    web.tap(web.node(f'.export-section input[type="radio"][value="{scope}"]'))
     web.script("window.__annotationRestorePicker.path=arguments[0];", str(destination))
     web.named("Export…", ".export-dialog")
     wait_for(destination.is_file, bool, "GUI export writes the annotated CSV")
@@ -224,6 +225,7 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         web.results(len(records))
         assert next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")["request"]["restore_annotations"] is True
         loaded = web.command("load_project", {"projectId": second_id}, request=True)
+        all_column_ids = [column["id"] for column in loaded["columns_meta"]]
         rows = web.command("query_project_rows", {"projectId": second_id, "offset": 0, "limit": 10})["rows"]
         assert [row["row_index"] for row in rows] == list(range(len(records)))
         for row, current in zip(rows, latest):
@@ -234,12 +236,96 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         _displayed_annotations(web, latest)
         _source_display(web, data_columns, records[0], len(records))
         web.screenshot(evidence / "csv-annotation-second-restore.png")
+
+        # A restored investigation must be durable, not merely visible in the
+        # import response. Keep a filtered, sorted, one-column view, close it,
+        # and reopen from Recent before exporting either result scope.
+        search = "r-0000001|r-0000003"
+        web.write('input[aria-label="Search rows"]', search)
+        web.applied(projectId=second_id, search=search)
+        web.results(2)
+        sort_column = data_columns[0]["id"]
+        for direction in ["asc", "desc"]:
+            web.tap(web.node(f'.column-heading[data-column-id="{sort_column}"] .column-sort'))
+            web.applied(sortKey=sort_column, sortDirection=direction)
+            web.results(2)
+        saved_query = web.query()
+        hidden = web.command("load_project", {"projectId": second_id}, request=True)["hidden_columns"]
+        expected_order = [2, 0]
+        wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));"),
+                 lambda indices: indices == expected_order, "restored CSV follows the filtered descending source order")
+        web.named(f"Close {second.name}")
+        open_project(web, loaded["project"]["meta"]["name"])
+        web.applied(**saved_query)
+        web.results(2)
+        reopened = web.command("load_project", {"projectId": second_id}, request=True)
+        reopened_rows = web.command("query_project_rows", {"projectId": second_id, "offset": 0, "limit": 10})["rows"]
+        assert reopened["columns_meta"] == loaded["columns_meta"]
+        assert reopened["hidden_columns"] == hidden and web.visible_column_count() == 1
+        # List pages intentionally omit hidden fields. Read each full cell via
+        # the detail API to check persistence without changing the saved view.
+        assert len(reopened_rows) == len(rows)
+        for before, after in zip(rows, reopened_rows):
+            assert set(after["cells"]) == {sort_column}, "Reopen preserves the visible-column projection"
+            full_cells = {column: web.command("get_cell", {"projectId": second_id,
+                "rowIndex": after["row_index"], "columnId": column}) for column in all_column_ids}
+            assert {**after, "cells": full_cells} == before, "Closing and reopening retains every annotation and full source cell"
+        assert web.query() == saved_query
+        wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));"),
+                 lambda indices: indices == expected_order, "the reopened investigation retains its filtered descending view")
+
+        scoped_exports = []
+        for scope, original_indices in [("filtered", expected_order), ("selected", [0])]:
+            if scope == "selected":
+                web.tap(web.node('.data-row[data-row-index="0"] input[aria-label="Select row 1"]'))
+                wait_for(lambda: web.state()["selectedIds"], lambda selected: selected == [1],
+                         "the selected export contains only the explicit source row")
+            destination = root / f"annotation-{scope}-{uuid.uuid4().hex[:8]}.csv"
+            checkpoint = len(web.trace())
+            _export_gui(web, destination, scope)
+            calls = [entry for entry in web.trace()[checkpoint:] if entry["name"] == "export_project" and "result" in entry]
+            assert len(calls) == 1 and calls[0]["request"]["scope"] == scope
+            assert calls[0]["request"]["search"] == search and calls[0]["request"]["sortDirection"] == "desc"
+            assert calls[0]["result"]["rows"] == len(original_indices)
+            with destination.open(encoding="utf-8", newline="") as handle:
+                scoped_csv = list(csv.reader(handle))
+            assert [row[-len(fields):] for row in scoped_csv[1:]] == [records[index] for index in original_indices], "CSV scope/order must match the applied query or explicit selection"
+            scoped_exports.append((destination, original_indices))
+
+        # Read both actual saved files back through the GUI. After import the
+        # row IDs are new positions, but annotations must follow source values.
+        restored_scopes = []
+        for destination, original_indices in scoped_exports:
+            web.named("Open project menu")
+            _pick(web, destination)
+            web.tap(web.node('.restore-annotations'))
+            wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
+                     bool, "subset CSV restoration is explicitly enabled")
+            web.named("Import and open", ".workspace-drawer")
+            wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "the exported subset opens as an investigation")
+            restored = next(item for item in web.command("list_projects") if item["meta"].get("source_file_name") == destination.name)
+            restored_id = restored["meta"]["id"]
+            created.append((restored_id, destination.name))
+            web.applied(projectId=restored_id)
+            web.results(len(original_indices))
+            restored_detail = web.command("load_project", {"projectId": restored_id}, request=True)
+            restored_rows = web.command("query_project_rows", {"projectId": restored_id, "offset": 0, "limit": 10})["rows"]
+            restored_columns = restored_detail["columns_meta"][-len(fields):]
+            assert [column["label"] for column in restored_columns] == fields
+            assert [row["row_index"] for row in restored_rows] == list(range(len(original_indices)))
+            assert [[row["cells"][column["id"]]["text"] for column in restored_columns] for row in restored_rows] == [records[index] for index in original_indices]
+            for row, index in zip(restored_rows, original_indices):
+                assert all((row[field] or "" if field in {"flag", "memo"} else row[field]) == value for field, value in latest[index].items()), row
+            _displayed_annotations(web, [latest[index] for index in original_indices])
+            restored_scopes.append({"scope": "filtered" if len(original_indices) == 2 else "selected", "source_rows": original_indices, "exact_annotations": True})
         assert source.read_bytes() == original and exported.read_bytes() == exported_bytes
         report["annotation_restore"] = {"gui_export_import": True, "cases": imported,
             "csv_only_explicit_opt_in": True, "source_files_unchanged": True,
             "first_restored_page_has_no_placeholder_records": True,
             "all_four_flag_states": True, "gui_edit_reexport_restore_uses_latest_annotations": True,
             "actual_table_and_full_record_values_checked": True,
+            "reopened_case_retains_annotations_columns_and_filtered_view": True,
+            "gui_filtered_and_selected_export_restore": restored_scopes,
             "unverified": "Native picker interaction; only selected paths are substituted"}
     finally:
         web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;delete window.__annotationRestoreHoldNextQuery;")

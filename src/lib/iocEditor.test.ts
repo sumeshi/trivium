@@ -80,7 +80,12 @@ test('Save normalizes an owned snapshot and updates definitions without annotati
 });
 
 test('Export includes unsaved definitions while Import replaces the saved baseline without applying them', async () => {
-  const f = fixture();
+  const exact = '  "quoted", C:\\Temp\\証拠\nsecond line  ';
+  const imported: IocEntry[] = [
+    { ...stored, tag: 'query,"調査"', query: 'c1:beacon' },
+    { flag: 'suspicious', tag: 'cell,"証拠"', query: '', cell: { column: 'c1', value: exact } },
+  ];
+  const f = fixture({ importIocs: async () => structuredClone(imported) });
   f.editor.addCell('c1', '');
   assert.equal(await f.editor.exportFile('/export.csv'), true);
   assert.equal(f.editor.hasUnsavedChanges(), true);
@@ -88,9 +93,13 @@ test('Export includes unsaved definitions while Import replaces the saved baseli
     entries: [stored, { flag: 'critical', tag: '', query: '', cell: { column: 'c1', value: '' } }], allowOverwrite: true } });
   assert.deepEqual(f.project.iocs, [stored]);
   assert.equal(await f.editor.importFile('/import.csv'), true);
-  assert.deepEqual(definitions(get(f.editor.state).entries), [{ ...stored, tag: 'imported' }]);
+  assert.deepEqual(definitions(get(f.editor.state).entries), imported);
   assert.equal(f.editor.hasUnsavedChanges(), false);
-  assert.deepEqual(f.saved[0], { projectId: 'case-a', entries: [{ ...stored, tag: 'imported' }] });
+  assert.deepEqual(f.saved[0], { projectId: 'case-a', entries: imported });
+  f.editor.updateCell(get(f.editor.state).entries[1].id!, 'c1', 'changed after restore');
+  f.editor.discard();
+  assert.deepEqual(definitions(get(f.editor.state).entries), imported, 'Discard restores the imported mixed rule baseline and full exact text');
+  assert.deepEqual(f.project.iocs, imported);
   assert.equal(f.changed, 0);
   f.editor.dispose();
 });
