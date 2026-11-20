@@ -40,45 +40,49 @@
 
     <fieldset class="export-section">
       <legend>Rows</legend>
-      <label class="export-option">
-        <input type="radio" value="all" bind:group={scope} />
-        <span>All rows ({snapshot.totalRows})</span>
-      </label>
-      <label class="export-option">
-        <input type="radio" value="filtered" bind:group={scope} />
-        <span>Current results ({snapshot.totalFilteredRows})</span>
-      </label>
-      <label class="export-option" class:disabled={snapshot.selectedCount === 0}>
-        <input
-          type="radio"
-          value="selected"
-          bind:group={scope}
-          disabled={snapshot.selectedCount === 0}
-        />
-        <span>Selected rows ({snapshot.selectedCount})</span>
-      </label>
-      {#if snapshot.selectedCount === 0}
-        <p class="export-hint">
-          Select rows in the table to export an explicit selection.
-        </p>
-      {/if}
+      <div class="export-options">
+        <label class="export-option">
+          <input type="radio" value="all" bind:group={scope} />
+          <span>All rows ({snapshot.totalRows})</span>
+        </label>
+        <label class="export-option">
+          <input type="radio" value="filtered" bind:group={scope} />
+          <span>Current results ({snapshot.totalFilteredRows})</span>
+        </label>
+        <label class="export-option" class:disabled={snapshot.selectedCount === 0}>
+          <input
+            type="radio"
+            value="selected"
+            bind:group={scope}
+            disabled={snapshot.selectedCount === 0}
+          />
+          <span>Selected rows ({snapshot.selectedCount})</span>
+        </label>
+        {#if snapshot.selectedCount === 0}
+          <p class="export-hint">
+            Select rows in the table to export an explicit selection.
+          </p>
+        {/if}
+      </div>
     </fieldset>
 
     <fieldset class="export-section">
       <legend>Columns</legend>
-      <label class="export-option">
-        <input type="radio" value="all" bind:group={columnMode} />
-        <span>All data columns</span>
-      </label>
-      <label class="export-option">
-        <input
-          type="radio"
-          value="visible"
-          bind:group={columnMode}
-          disabled={snapshot.visibleColumns.length === 0}
-        />
-        <span>Visible columns ({snapshot.visibleColumns.length})</span>
-      </label>
+      <div class="export-options">
+        <label class="export-option">
+          <input type="radio" value="all" bind:group={columnMode} />
+          <span>All data columns</span>
+        </label>
+        <label class="export-option">
+          <input
+            type="radio"
+            value="visible"
+            bind:group={columnMode}
+            disabled={snapshot.visibleColumns.length === 0}
+          />
+          <span>Visible columns ({snapshot.visibleColumns.length})</span>
+        </label>
+      </div>
     </fieldset>
 
     <label class="export-option export-annotations">
@@ -104,17 +108,26 @@
 
 <style>
   .export-dialog {
+    /* WebKit shifts fieldset controls on hover when the dialog uses flex sizing. */
+    display: block;
     width: min(520px, 92vw);
+  }
+
+  .export-dialog > :not(:first-child) {
+    margin-top: 16px;
   }
 
   .export-section {
     margin: 0;
     padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .export-options {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
   }
 
   .export-section legend {

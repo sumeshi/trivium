@@ -129,6 +129,34 @@ def _submit_export(web) -> None:
         ? [...dialog.querySelectorAll('button')].find(button=>button.textContent.trim()==='Export…'
             &&!button.disabled&&button.getClientRects().length)??null : null;
     """), bool, "the export dialog has a visible enabled submit button")
+    geometry = web.script("""
+      const button=arguments[0],r=button.getBoundingClientRect();
+      return {before:Object.fromEntries([
+        ['dialog',document.querySelector('.export-dialog')],['button',button]
+      ].map(([name,element])=>{
+        const r=element.getBoundingClientRect();return [name,[r.x,r.y,r.width,r.height]];
+      })),point:{x:Math.round((Math.max(0,r.left)+Math.min(innerWidth,r.right))/2),
+        y:Math.round((Math.max(0,r.top)+Math.min(innerHeight,r.bottom))/2)}};
+    """, button)
+    # Hover must not recalculate fieldset intrinsic sizes and move the button
+    # away from the user's pointer before its press is delivered.
+    web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "native-mouse",
+        "parameters": {"pointerType": "mouse"}, "actions": [
+            {"type": "pointerMove", **geometry["point"], "duration": 0, "origin": "viewport"}]}]})
+    geometry["after"] = web.async_script("""
+      const button=arguments[0],done=arguments[arguments.length-1];
+      requestAnimationFrame(()=>requestAnimationFrame(()=>done(Object.fromEntries([
+        ['dialog',document.querySelector('.export-dialog')],['button',button]
+      ].map(([name,element])=>{
+        const r=element.getBoundingClientRect();return [name,[r.x,r.y,r.width,r.height]];
+      })))));
+    """, button)
+    stable = all(abs(before - after) <= 1
+                 for name in ("dialog", "button")
+                 for before, after in zip(geometry["before"][name], geometry["after"][name]))
+    if not stable and os.environ.get("GITHUB_ACTIONS") == "true":
+        print("::error title=Native export layout::" + json.dumps(geometry, sort_keys=True), flush=True)
+    assert stable, f"The export popup must not move after its controls appear: {geometry}"
     web.tap(button)
     wait_for(lambda: web.script("return !document.querySelector('.export-dialog');"),
              bool, "the real export click submits and dismisses the dialog")
