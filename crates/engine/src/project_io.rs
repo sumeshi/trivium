@@ -156,19 +156,6 @@ pub fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
         .context("failed to read parquet file")
 }
 
-/// Legacy full-frame materialization with cooperative cancellation. Prefer a
-/// projected [`ProjectBatchReader`] for new consumers.
-pub fn read_project_dataframe_with_job(
-    path: &Path,
-    job: &crate::jobs::JobContext,
-) -> Result<DataFrame> {
-    job.check_cancelled()?;
-    PROJECT_DATA_READS.fetch_add(1, Ordering::Relaxed);
-    PROJECT_FULL_READS.fetch_add(1, Ordering::Relaxed);
-    let columns = read_project_schema_columns(path)?;
-    read_project_columns_with_job(path, &columns, job)
-}
-
 /// All column names in the file, including internal storage columns.
 ///
 /// This reads the parquet footer only; it never materializes rows.
