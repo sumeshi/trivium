@@ -96,6 +96,11 @@ def _held(web, owner: str, name="update_flag", *, checkpoint: str) -> None:
             matchingHolds:matching.length,readyHolds:matching.filter(h=>h.ready).length,
             selectedOwner:document.querySelector('[role=tab][aria-selected=true]')?.id==='project-tab-'+owner,
             loadedRows:document.querySelectorAll('.data-row:not(.loading)').length,
+            exportDialogVisible:!!document.querySelector('.export-dialog')?.getClientRects().length,
+            pickerPathPending:!!state&&state.path!==null,pickerCalls:state?.pickers??0,
+            appInert:!!document.querySelector('.app-shell')?.inert,
+            saveFailedToastPresent:/Failed to (save|export)|Export stopped|app is closing/.test(
+              document.querySelector('.toast.error')?.textContent??''),
             matchingEvents:(state?.events??[]).filter(e=>e.owner===owner&&e.name===name).length};
         """, owner, name)
         return observation
@@ -112,6 +117,21 @@ def _held(web, owner: str, name="update_flag", *, checkpoint: str) -> None:
 
 def _release(web, owner: str, name="update_flag") -> None:
     web.script("window.__normalClose.holds.find(h=>h.owner===arguments[0]&&h.name===arguments[1])?.release?.();", owner, name)
+
+
+def _submit_export(web) -> None:
+    web.named("Export rows")
+    # The modal is inserted by that click. Hit-test its laid-out button before
+    # sending a real pointer action, then observe that submission took effect.
+    button = wait_for(lambda: web.script("""
+      const dialog=document.querySelector('.export-dialog');
+      return dialog?.getClientRects().length
+        ? [...dialog.querySelectorAll('button')].find(button=>button.textContent.trim()==='Export…'
+            &&!button.disabled&&button.getClientRects().length)??null : null;
+    """), bool, "the export dialog has a visible enabled submit button")
+    web.tap(button)
+    wait_for(lambda: web.script("return !document.querySelector('.export-dialog');"),
+             bool, "the real export click submits and dismisses the dialog")
 
 
 def _save_note(web, text=NOTE) -> None:
@@ -176,7 +196,7 @@ def _pending_export(app, root: Path, report: dict) -> tuple[dict, Path]:
     destination = root / "normal-close-export.csv"
     _install_transport(web, [("export_project", owner)])
     web.script("window.__normalClose.path=arguments[0];", str(destination))
-    web.named("Export rows"); web.named("Export…", ".export-dialog")
+    _submit_export(web)
     _held(web, owner, "export_project", checkpoint="export")
     web.named("Critical", ".data-row")
     _save_note(web)
@@ -207,7 +227,7 @@ def _pending_picker(app, root: Path, report: dict) -> tuple[dict, Path]:
     destination = root / "normal-close-picker.csv"
     _install_transport(web, [("plugin:dialog|save", owner)])
     web.script("window.__normalClose.path=arguments[0];", str(destination))
-    web.named("Export rows"); web.named("Export…", ".export-dialog")
+    _submit_export(web)
     _held(web, owner, "plugin:dialog|save", checkpoint="picker")
     assert web.script("return window.__normalClose.events;") == []
     target = NormalWindowClose(app.application)
