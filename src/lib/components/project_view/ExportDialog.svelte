@@ -94,6 +94,10 @@
         ? 'Adds independent trivium-* columns. Tags are separate from the note.'
         : 'Writes data columns only.'}
     </p>
+    <p class="export-hint"
+      title="Values starting with =, +, -, or @ can be treated as formulas by spreadsheet software.">
+      CSV preserves original values. Spreadsheet apps may interpret formulas.
+    </p>
 
     <div class="cell-dialog-actions export-actions dialog-actions">
       <button type="button" class="ghost" on:click={() => dispatch('close')}>

@@ -17,6 +17,124 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn spreadsheet_formula_candidates_keep_source_values_and_notes_on_csv_roundtrip() {
+    let root =
+        Fixture(std::env::temp_dir().join(format!("trivium-csv-formulas-{}", Uuid::new_v4())));
+    fs::create_dir_all(&root.0).unwrap();
+    let source = root.0.join("source.csv");
+    let values = [
+        "=1+1",
+        "+SUM(A1:A2)",
+        "-42",
+        "@SUM(1,2)",
+        "\t=1+1",
+        "\r=1+1",
+    ];
+    {
+        let mut writer = csv::Writer::from_path(&source).unwrap();
+        writer.write_record(["=source header"]).unwrap();
+        for value in values {
+            writer.write_record([value]).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+    let source_bytes = fs::read(&source).unwrap();
+    let store = ProjectsStore::new(root.0.clone()).unwrap();
+    let project = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            path: source.to_string_lossy().into(),
+            description: None,
+            delimiter: None,
+            restore_annotations: None,
+        },
+    )
+    .unwrap();
+    for (row_index, value) in values.iter().enumerate() {
+        ops::flags::update_flag(
+            &store,
+            ops::flags::UpdateFlagPayload {
+                project_id: project.meta.id,
+                row_index,
+                flag: None,
+                memo: Some(Some((*value).into())),
+                tags: None,
+                bookmarked: None,
+            },
+        )
+        .unwrap();
+    }
+    for include_annotations in [false, true] {
+        let destination = root.0.join(format!("export-{include_annotations}.csv"));
+        ops::export::export_project(
+            &store,
+            ExportProjectPayload {
+                allow_overwrite: false,
+                project_id: project.meta.id,
+                destination: destination.to_string_lossy().into(),
+                scope: None,
+                spec: QuerySpec::default(),
+                columns: None,
+                row_indices: None,
+                include_annotations: Some(include_annotations),
+            },
+        )
+        .unwrap();
+        let mut reader = csv::Reader::from_path(&destination).unwrap();
+        let header = reader.headers().unwrap().clone();
+        let data = header
+            .iter()
+            .position(|value| value == "=source header")
+            .unwrap();
+        let memo = header.iter().position(|value| value == "trivium-memo");
+        assert_eq!(memo.is_some(), include_annotations);
+        let records: Vec<_> = reader.records().map(Result::unwrap).collect();
+        assert_eq!(records.len(), values.len());
+        for (record, expected) in records.iter().zip(values) {
+            assert_eq!(&record[data], expected);
+            if let Some(memo) = memo {
+                assert_eq!(&record[memo], expected);
+            }
+        }
+        let restored = ops::projects::create_project(
+            &store,
+            CreateProjectPayload {
+                path: destination.to_string_lossy().into(),
+                description: None,
+                delimiter: None,
+                restore_annotations: Some(include_annotations),
+            },
+        )
+        .unwrap();
+        let source_column = &restored
+            .meta
+            .columns
+            .iter()
+            .find(|column| column.source == "=source header")
+            .unwrap()
+            .id;
+        let page = ops::rows::query_project_rows(
+            &store,
+            ops::rows::QueryRowsPayload {
+                project_id: restored.meta.id,
+                spec: QuerySpec::default(),
+                offset: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(page.rows.len(), values.len());
+        for (row, expected) in page.rows.iter().zip(values) {
+            assert_eq!(row.cells[source_column].text.as_deref(), Some(expected));
+            if include_annotations {
+                assert_eq!(row.memo.as_deref(), Some(expected));
+            }
+        }
+    }
+    assert_eq!(fs::read(&source).unwrap(), source_bytes);
+}
+
+#[test]
 fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotation_only() {
     let root =
         Fixture(std::env::temp_dir().join(format!("trivium-output-safety-{}", Uuid::new_v4())));
