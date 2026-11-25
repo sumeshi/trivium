@@ -132,15 +132,18 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
     token = uuid.uuid4().hex[:12]
     theme_id = f"appearance-{token}"
     user_theme = f"user:{theme_id}"
-    theme_source = root / f"{theme_id}.json"
+    directory = _profile_directory(web, root)
+    (directory / "themes").mkdir(exist_ok=True)
+    # These picker-response fixtures use already permitted catalog paths.
+    # Real native picker grants are checked separately from this paint test.
+    theme_source = directory / "themes" / f"{theme_id}-input.json"
     image_source = root / f"{theme_id}.png"
-    exported = root / f"{theme_id}-export.json"
+    exported = directory / "themes" / f"{theme_id}-export.json"
     definition = {"type": "trivium-theme", "version": 1, "id": theme_id, "name": "Appearance test", "base": "dark",
                   "colors": {"accent": "#aabbdd", "bg": "#15191f", "surface": "#202632"}}
     theme_source.write_text(json.dumps(definition), encoding="utf-8")
     theme_bytes = theme_source.read_bytes()
     image_bytes = _png(image_source)
-    directory = _profile_directory(web, root)
     managed_theme = directory / "themes" / f"{theme_id}.json"
     extra_themes: list[Path] = []
     _install_pickers(web)
@@ -200,6 +203,8 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
         paint = assert_planes(web)
         web.screenshot(evidence / "appearance-wallpaper-pinned.png")
         assert theme_source.read_bytes() == theme_bytes and image_source.read_bytes() == image_bytes
+        theme_source.unlink()
+        exported.unlink()
         image_source.unlink()
         wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value == {"version": 2, "enabled": True, "strength": 64}, "simplified background settings reach native storage")
         # Reopen a real v1 preference with contain/off-table settings. The image

@@ -6,11 +6,34 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "fs:default",
-    "fs:allow-write-text-file",
-    "fs:allow-read-text-file",
-    "fs:allow-stat",
-    { "identifier": "fs:scope", "allow": [{ "path": "**" }] },
-    "opener:default"
+    "fs:deny-default",
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPLOCALDATA" },
+        { "path": "$APPLOCALDATA/themes" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [{ "path": "$APPLOCALDATA/themes" }]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "$APPLOCALDATA/theme.json" },
+        { "path": "$APPLOCALDATA/appearance.json" },
+        { "path": "$APPLOCALDATA/table-text-size.json" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$APPLOCALDATA/theme.json" },
+        { "path": "$APPLOCALDATA/appearance.json" },
+        { "path": "$APPLOCALDATA/table-text-size.json" },
+        { "path": "$APPLOCALDATA/themes/*.json" }
+      ]
+    }
   ]
 }

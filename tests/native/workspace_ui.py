@@ -53,6 +53,7 @@ from review_fixes_checks import verify_review_fixes
 from file_drop_checks import verify_file_drop
 from extract_checks import verify_extract
 from appearance_checks import verify_appearance
+from fs_scope_checks import verify_fs_scope
 from tab_menu_checks import verify_tab_close_menu
 from runtime import ApplicationSession, IPC_COMMAND_JS, isolated_environment, native_driver_default, native_workspace, start_driver, stop_driver
 
@@ -1043,6 +1044,7 @@ def main() -> None:
                 ("Recent deletion confirmation and committed rows", lambda: verify_recent_delete(web, data, root, evidence, report)),
                 ("responsive storage writes under SQLite lock", lambda: verify_storage_responsiveness(web, data, root, evidence, report)),
                 ("native content security policy", lambda: verify_content_policy(web, report)),
+                ("scoped native filesystem access", lambda: verify_fs_scope(web, root, report)),
                 ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
                 ("analysis preserves investigation rules", lambda: verify_investigation_filters(web, data, root, evidence, report)),
                 ("multiple-file import options and failure isolation", lambda: verify_import_identity(web, data, root, report)),
@@ -1078,7 +1080,7 @@ def main() -> None:
             ]:
                 if args.grouping_only and stage not in {"refined imports, scope, grouping and styling", "UTC datetime grouping", "deep rule history scroll restoration"}:
                     continue
-                if args.extensions_only and stage not in {"project tab close menu", "shared patterns and extraction result tabs", "custom themes and managed wallpaper"}:
+                if args.extensions_only and stage not in {"project tab close menu", "shared patterns and extraction result tabs", "custom themes and managed wallpaper", "scoped native filesystem access"}:
                     continue
                 if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:
                     continue
@@ -1094,7 +1096,7 @@ def main() -> None:
                     continue
                 if args.ioc_only and stage != "portable presets and explicit IOC application":
                     continue
-                if args.integrity_only and stage not in {"native content security policy", "failed annotation reconciliation", "analysis preserves investigation rules"}:
+                if args.integrity_only and stage not in {"native content security policy", "scoped native filesystem access", "failed annotation reconciliation", "analysis preserves investigation rules"}:
                     continue
                 if args.table_presentation_only and stage not in {"column ordering, widths and ISO display", "table text size without layout changes"}:
                     continue

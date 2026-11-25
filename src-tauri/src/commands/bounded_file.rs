@@ -1,12 +1,14 @@
 //! Small user-selected JSON inputs must be bounded while they are read.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use tauri::Manager;
+use tauri_plugin_fs::FsExt;
 use trivium_engine::source_file::open_regular;
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImportTextKind {
     Theme,
@@ -66,11 +68,47 @@ fn read_text(path: &Path, kind: ImportTextKind) -> Result<String, String> {
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
+fn authorize_import(
+    path: &Path,
+    kind: ImportTextKind,
+    app_data: &Path,
+    selected: impl FnOnce(&Path) -> bool,
+) -> Result<PathBuf, String> {
+    let denied = || "Choose the import file in the file picker first.".to_owned();
+    let path = path.canonicalize().map_err(|_| denied())?;
+    let managed_theme = kind == ImportTextKind::Theme
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        && app_data
+            .canonicalize()
+            .is_ok_and(|directory| path.parent() == Some(directory.join("themes").as_path()));
+    if managed_theme || selected(&path) {
+        Ok(path)
+    } else {
+        Err(denied())
+    }
+}
+
 #[tauri::command]
-pub async fn read_import_text(path: String, kind: ImportTextKind) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || read_text(Path::new(&path), kind))
-        .await
-        .map_err(|error| format!("Import file task failed: {error}"))?
+pub async fn read_import_text(
+    app: tauri::AppHandle,
+    path: String,
+    kind: ImportTextKind,
+) -> Result<String, String> {
+    let app_data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Could not locate theme storage.".to_owned())?;
+    let scope = app.fs_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = authorize_import(Path::new(&path), kind, &app_data, |path| {
+            scope.is_allowed(path)
+        })?;
+        read_text(&path, kind)
+    })
+    .await
+    .map_err(|error| format!("Import file task failed: {error}"))?
 }
 
 #[cfg(test)]
@@ -145,5 +183,70 @@ mod tests {
         let source = CountingReader(&count, Cursor::new(vec![b' '; 4096]));
         assert!(read_limited(source, 64).is_err());
         assert_eq!(count.load(Ordering::SeqCst), 65);
+    }
+
+    #[test]
+    fn text_import_requires_a_selected_file_except_for_managed_theme_profiles() {
+        let directory = Directory::new();
+        let app_data = directory.0.join("managed");
+        let themes = app_data.join("themes");
+        fs::create_dir_all(&themes).unwrap();
+        let profile = themes.join("saved.json");
+        let outside = directory.0.join("unselected.json");
+        fs::write(&profile, "{}").unwrap();
+        fs::write(&outside, "private fixture").unwrap();
+        assert!(authorize_import(&outside, ImportTextKind::Theme, &app_data, |_| false).is_err());
+        assert!(authorize_import(&outside, ImportTextKind::Pattern, &app_data, |_| false).is_err());
+        assert_eq!(
+            authorize_import(&profile, ImportTextKind::Theme, &app_data, |_| false).unwrap(),
+            profile.canonicalize().unwrap()
+        );
+        assert!(authorize_import(&profile, ImportTextKind::Pattern, &app_data, |_| false).is_err());
+        for kind in [ImportTextKind::Theme, ImportTextKind::Pattern] {
+            assert_eq!(
+                authorize_import(&outside, kind, &app_data, |path| {
+                    path == outside.canonicalize().unwrap()
+                })
+                .unwrap(),
+                outside.canonicalize().unwrap()
+            );
+        }
+        let nested = themes.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let nested_profile = nested.join("saved.json");
+        fs::write(&nested_profile, "{}").unwrap();
+        assert!(
+            authorize_import(&nested_profile, ImportTextKind::Theme, &app_data, |_| false).is_err()
+        );
+        let non_json = themes.join("private.txt");
+        fs::write(&non_json, "private fixture").unwrap();
+        assert!(authorize_import(&non_json, ImportTextKind::Theme, &app_data, |_| false).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_theme_import_rejects_symlinks_to_files_and_directories_outside_the_catalog() {
+        use std::os::unix::fs::symlink;
+        let directory = Directory::new();
+        let app_data = directory.0.join("managed");
+        let themes = app_data.join("themes");
+        fs::create_dir_all(&themes).unwrap();
+        let outside = directory.0.join("outside.json");
+        fs::write(&outside, "private fixture").unwrap();
+        let linked_profile = themes.join("linked.json");
+        symlink(&outside, &linked_profile).unwrap();
+        assert!(
+            authorize_import(&linked_profile, ImportTextKind::Theme, &app_data, |_| false).is_err()
+        );
+        fs::remove_file(&linked_profile).unwrap();
+        fs::remove_dir(&themes).unwrap();
+        symlink(&directory.0, &themes).unwrap();
+        assert!(authorize_import(
+            &themes.join("outside.json"),
+            ImportTextKind::Theme,
+            &app_data,
+            |_| false
+        )
+        .is_err());
     }
 }
