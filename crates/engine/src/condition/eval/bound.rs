@@ -4,7 +4,7 @@ use super::{EvalError, GroupKind, PreparedCondition, PreparedFormat, PreparedNod
 use crate::error::AppError;
 
 /// Prepared predicates reference column slots, not per-row maps. `None` is
-/// the already joined unscoped search text; values remain original strings.
+/// the selected search cells (or their joined text for other unscoped ops).
 pub enum BoundNode<'a> {
     Condition {
         condition: &'a PreparedCondition,
@@ -64,7 +64,7 @@ impl BoundNode<'_> {
         joined: Option<&str>,
         tags: &[String],
     ) -> Result<bool, EvalError> {
-        self.eval_with_tags_and_check(cells, joined, tags, &mut || Ok(()))
+        self.eval_with_tags_and_check(cells, cells, joined, tags, &mut || Ok(()))
             .map_err(|error| EvalError {
                 message: error.to_string(),
             })
@@ -73,11 +73,26 @@ impl BoundNode<'_> {
     pub(crate) fn eval_with_tags_and_check(
         &self,
         cells: &[Option<Cow<'_, str>>],
+        unscoped_cells: &[Option<Cow<'_, str>>],
         joined: Option<&str>,
         tags: &[String],
         check: &mut impl FnMut() -> Result<(), AppError>,
     ) -> Result<bool, AppError> {
         match self {
+            Self::Condition {
+                condition,
+                slot: None,
+            } if condition.is_unscoped_contains() => {
+                let mut matched = false;
+                for cell in unscoped_cells {
+                    check()?;
+                    if condition.contains_text(cell.as_deref()) {
+                        matched = true;
+                        break;
+                    }
+                }
+                Ok(condition.negated ^ matched)
+            }
             Self::Condition { condition, slot } => condition
                 .eval_text(match slot {
                     Some(slot) => cells.get(*slot).and_then(Option::as_deref),
@@ -96,7 +111,13 @@ impl BoundNode<'_> {
                 children,
             } => {
                 for child in children {
-                    if !child.eval_with_tags_and_check(cells, joined, tags, check)? {
+                    if !child.eval_with_tags_and_check(
+                        cells,
+                        unscoped_cells,
+                        joined,
+                        tags,
+                        check,
+                    )? {
                         return Ok(false);
                     }
                 }
@@ -107,7 +128,7 @@ impl BoundNode<'_> {
                 children,
             } => {
                 for child in children {
-                    if child.eval_with_tags_and_check(cells, joined, tags, check)? {
+                    if child.eval_with_tags_and_check(cells, unscoped_cells, joined, tags, check)? {
                         return Ok(true);
                     }
                 }
@@ -140,7 +161,7 @@ mod tests {
                 let bound = prepared.bind_columns(&|_| 0);
                 let mut checks = 0;
                 let error = bound
-                    .eval_with_tags_and_check(&cells, None, &[], &mut || {
+                    .eval_with_tags_and_check(&cells, &cells, None, &[], &mut || {
                         checks += 1;
                         if checks == 2 {
                             Err(AppError::Message("Cancelled.".into()))

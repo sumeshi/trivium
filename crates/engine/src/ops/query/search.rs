@@ -20,8 +20,9 @@ const EVAL_BATCH_ROWS: usize = 1024;
 ///
 /// Preparation tokenizes the search string, builds the condition tree, compiles
 /// regexes, and resolves the columns the tree actually reads. Evaluation then
-/// touches only those columns, plus the joined search scope when an unscoped
-/// term exists.
+/// touches only those columns, plus the selected search scope when an unscoped
+/// predicate exists. Contains predicates read individual cells; other
+/// unscoped operations retain their joined-text semantics.
 pub struct PreparedQuery {
     node: Option<PreparedNode>,
     required_columns: Vec<String>,
@@ -73,11 +74,11 @@ impl PreparedQuery {
         };
 
         let mut required_columns = Vec::new();
-        let mut needs_joined_text = false;
+        let mut needs_unscoped_cells = false;
         if let Some(node) = &node {
             for column in node.columns() {
                 if column.is_empty() {
-                    needs_joined_text = true;
+                    needs_unscoped_cells = true;
                     continue;
                 }
                 let actual = resolve_column(column_names, column)?;
@@ -87,12 +88,12 @@ impl PreparedQuery {
             }
         }
 
+        let needs_joined_text = node.as_ref().is_some_and(PreparedNode::needs_joined_text);
         Ok(Self {
             node,
             required_columns,
-            // An unscoped predicate may come from either the search bar or a
-            // condition tree (including one converted from search syntax).
-            join_columns: if needs_joined_text {
+            // Search-bar and structured predicates share the selected scope.
+            join_columns: if needs_unscoped_cells {
                 resolve_columns(column_names, requested_scope.unwrap_or(column_names))?
             } else {
                 Vec::new()
@@ -103,7 +104,7 @@ impl PreparedQuery {
     }
 
     /// Required source columns for both projection and evaluation. Unscoped
-    /// conditions use exactly the same joined scope as search-bar terms.
+    /// conditions use exactly the same selected scope as search-bar terms.
     pub(super) fn projection(&self) -> Vec<String> {
         let mut columns = self.required_columns.clone();
         for column in &self.join_columns {
@@ -173,6 +174,7 @@ impl PreparedQuery {
         let row_count = df.height();
         let mut mask = vec![false; row_count];
         let mut cells = Vec::with_capacity(required_series.len());
+        let mut unscoped_cells = Vec::with_capacity(join_series.len());
         let mut joined = String::new();
         let mut required_counts = vec![0; required_series.len()];
         let mut joined_counts = vec![0; join_series.len()];
@@ -191,14 +193,17 @@ impl PreparedQuery {
                         required_counts[slot] += u64::from(text.is_some());
                         cells.push(text);
                     }
-                    if self.needs_joined_text {
-                        joined.clear();
-                        for (slot, (_, series)) in join_series.iter().enumerate() {
-                            if let Some(text) = series.get(row_idx).ok().and_then(borrow_text) {
-                                joined_counts[slot] += 1;
-                                append_searchable(&mut joined, &text);
+                    unscoped_cells.clear();
+                    joined.clear();
+                    for (slot, (_, series)) in join_series.iter().enumerate() {
+                        let text = series.get(row_idx).ok().and_then(borrow_text);
+                        joined_counts[slot] += u64::from(text.is_some());
+                        if self.needs_joined_text {
+                            if let Some(text) = &text {
+                                append_searchable(&mut joined, text);
                             }
                         }
+                        unscoped_cells.push(text);
                     }
                     let tags = if self.reads_tags {
                         flags
@@ -209,6 +214,7 @@ impl PreparedQuery {
                     };
                     mask[row_idx] = bound.eval_with_tags_and_check(
                         &cells,
+                        &unscoped_cells,
                         self.needs_joined_text.then_some(joined.as_str()),
                         tags,
                         &mut || job.check_cancelled(),

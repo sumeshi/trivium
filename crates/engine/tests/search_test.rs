@@ -262,6 +262,11 @@ fn build_search_mask_boolean_evaluates_operators_and_column_scopes() {
     let cases: Vec<(&str, Vec<bool>)> = vec![
         // Implicit AND
         ("malware beacon", vec![true, false, false]),
+        ("administrator malware", vec![true, false, false]),
+        // Quoted phrases never bridge two source cells.
+        ("\"malware beacon\"", vec![true, false, false]),
+        ("\"administrator malware\"", vec![false, false, false]),
+        ("-\"administrator malware\"", vec![true, true, true]),
         // OR
         ("error|warn", vec![false, true, true]),
         // AND NOT

@@ -7,7 +7,7 @@ pub fn build_search_mask_boolean(
     rpn: &[SearchToken],
     terms: &[(Option<String>, String)],
     searchable_text: &[String],
-    // Optional: per-column searchable texts; when None, falls back to row-wide text
+    // Optional source cells; when absent, the caller's opaque text is one cell.
     per_column: Option<&HashMap<String, Vec<String>>>,
 ) -> Vec<bool> {
     // Precompute per-(col,term) masks
@@ -28,6 +28,13 @@ pub fn build_search_mask_boolean(
                                 mask[i] = true;
                             }
                         }
+                    }
+                }
+            }
+            (None, Some(per_col)) => {
+                for texts in per_col.values() {
+                    for (matched, text) in mask.iter_mut().zip(texts) {
+                        *matched |= !text.is_empty() && text.contains(term);
                     }
                 }
             }

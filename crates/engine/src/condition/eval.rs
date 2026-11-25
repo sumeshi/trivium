@@ -208,12 +208,22 @@ impl PreparedNode {
         }
     }
 
-    /// Column names referenced by this tree. An empty name is the joined
-    /// searchable text.
+    /// Column names referenced by this tree. An empty name is the selected
+    /// search scope: Contains matches one cell, other operations use joined text.
     pub fn columns(&self) -> Vec<&str> {
         let mut columns = Vec::new();
         self.collect_columns(&mut columns);
         columns
+    }
+
+    pub(crate) fn needs_joined_text(&self) -> bool {
+        match self {
+            Self::Condition(condition) => {
+                condition.column.is_empty() && condition.op != Op::Contains
+            }
+            Self::Group(group) => group.children.iter().any(Self::needs_joined_text),
+            Self::Format(_) | Self::Tag(_) => false,
+        }
     }
 
     fn collect_columns<'a>(&'a self, columns: &mut Vec<&'a str>) {
@@ -272,9 +282,11 @@ impl From<EvalError> for AppError {
 ///
 /// This compatibility entry point prepares the tree for each call, so hot
 /// query paths use [`PreparedNode`] instead. Column names match
-/// case-insensitively. An empty column reads the `""` entry, which callers set
-/// to the joined searchable text when they want an unscoped term. Equality and
-/// text operators use the original cell string. Ordered comparisons use exact
+/// case-insensitively. An empty Contains column searches the supplied data
+/// cells without crossing their boundaries. Other empty-column predicates read
+/// the `""` joined-text entry. A legacy map containing only that entry is
+/// treated as one supplied cell because its source boundaries are unavailable.
+/// Equality and text operators use the original cell string. Ordered comparisons use exact
 /// base-ten numbers or parsed datetimes according to each bound. Empty/null,
 /// missing and unparseable source values do not match an ordered predicate;
 /// NOT inverts that result as for any other predicate. Source text is unchanged.
@@ -285,12 +297,33 @@ pub fn eval(node: &Node, row: &HashMap<String, Value>) -> Result<bool, EvalError
 
 impl PreparedCondition {
     fn eval(&self, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
+        if self.is_unscoped_contains() && row.keys().any(|column| !column.is_empty()) {
+            let matched = row.iter().any(|(column, value)| {
+                if column.is_empty() {
+                    return false;
+                }
+                match value {
+                    Value::Null => false,
+                    Value::String(value) => self.contains_text(Some(value)),
+                    other => self.contains_text(Some(&other.to_string())),
+                }
+            });
+            return Ok(self.negated ^ matched);
+        }
         let cell = lookup(row, &self.column).and_then(|value| match value {
             Value::Null => None,
             Value::String(value) => Some(Cow::Borrowed(value.as_str())),
             other => Some(Cow::Owned(other.to_string())),
         });
         self.eval_text(cell.as_deref())
+    }
+
+    pub(super) fn is_unscoped_contains(&self) -> bool {
+        self.column.is_empty() && self.op == Op::Contains
+    }
+
+    pub(super) fn contains_text(&self, cell: Option<&str>) -> bool {
+        text_any(cell, &self.lower_values, Op::Contains)
     }
 
     /// Evaluate the original textual cell without constructing a JSON row.
