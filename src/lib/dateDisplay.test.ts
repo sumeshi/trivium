@@ -19,6 +19,30 @@ test('ISO display preserves nanoseconds and offset instants without changing sou
   }
 });
 
+test('ISO display accepts engine-supported naive timestamp whitespace without altering evidence', () => {
+  for (const date of ['2026-11-14', '2026/11/14']) {
+    for (const separator of ['   ', '\t', '\n', '\r\n', '\v', '\f', ' \t\r\n ', '\u0085', '\u2002']) {
+      const value = cell(`${date}${separator}03:04:05.123456789`), before = structuredClone(value);
+      assert.deepEqual(formatIsoCell(value), { text: '2026-11-14T03:04:05.123456789Z' });
+      assert.deepEqual(value, before);
+    }
+  }
+  for (const source of [
+    '2026-11-14  24:00:00',
+    '2026/02/30   03:04:05',
+    '2026-11-14   03:04',
+    '2026-11-14   3:04:05',
+    '2026-11-14   03:04:05 trailing',
+    '2026-11-14   12:04:05.123456789+09:00',
+    '2026/11/14\t03:04:05Z',
+    '2026-11-14\uFEFF03:04:05',
+  ]) {
+    const result = formatIsoCell(cell(source));
+    assert.ok(result.error, source);
+    assert.equal(result.text, source);
+  }
+});
+
 test('ISO display rejects invalid dates, ambiguous locale dates and truncated previews', () => {
   for (const source of ['2023-02-29', '2024-13-01', '2026-11-14T24:00:00Z', '11/12/2026', '1700000000', '2026-11-14T01:02:03.1234567891Z']) {
     const result = formatIsoCell(cell(source));

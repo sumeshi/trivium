@@ -292,6 +292,27 @@ mod tests {
     }
 
     #[test]
+    fn naive_datetime_whitespace_keeps_exact_nanos_without_relaxing_timezone_syntax() {
+        let precise = parse_datetime_nanos("2026-11-14T03:04:05.123456789Z").unwrap();
+        for date in ["2026-11-14", "2026/11/14"] {
+            for separator in [
+                "   ", "\t", "\n", "\r\n", "\u{000b}", "\u{000c}", " \t\r\n ", "\u{0085}",
+                "\u{2002}",
+            ] {
+                let text = format!("{date}{separator}03:04:05.123456789");
+                assert_eq!(parse_datetime_nanos(&text), Some(precise), "{text:?}");
+            }
+        }
+        for text in [
+            "2026-11-14   12:04:05.123456789+09:00",
+            "2026/11/14\t03:04:05Z",
+            "2026-11-14\u{feff}03:04:05",
+        ] {
+            assert_eq!(parse_datetime_nanos(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
     fn slash_aliases_do_not_guess_ambiguous_or_invalid_dates_and_epochs() {
         for text in [
             "11/14/2026",

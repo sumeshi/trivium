@@ -18,9 +18,11 @@ export function formatIsoCell(cell: Cell | null | undefined): FormattedCell {
   } else if (cell.truncated) {
     result = { text: `${original}…`, error: 'Timestamp preview is truncated.' };
   } else {
-    // Year-first slash dates are unambiguous; locale-dependent dates and epoch
-    // units are deliberately not guessed.
-    const source = original.trim().replace(/^(\d{4})\/(\d{2})\/(\d{2})(?=$|[T ])/, '$1-$2-$3');
+    // Normalize engine-supported year-first dates and naive time separators.
+    // Keep timezone syntax strict; padding is accepted by the naive parser.
+    const source = original.trim()
+      .replace(/^(\d{4})\/(\d{2})\/(\d{2})(?=$|T|\p{White_Space})/u, '$1-$2-$3')
+      .replace(/^(\d{4}-\d{2}-\d{2})\p{White_Space}+(\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?)$/u, '$1T$2');
     const nanos = parseTimelineNanos(source);
     if (nanos === null) result = { text: original, error: 'Unrecognized timestamp.' };
     else {
