@@ -15,16 +15,19 @@ use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECO
 use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 mod annotations;
+mod batch_budget;
 use annotations::flag_entry;
 
 /// Maximum number of records in one import batch. The byte limit can stop a
 /// batch earlier; the row limit keeps narrow tables from growing the batch
 /// bookkeeping without bound.
 pub const DEFAULT_BATCH_ROWS: usize = 50_000;
-/// Approximate payload bytes (cell text plus the `__original` JSON) in one
-/// import batch. This is deliberately a soft limit: one record larger than the
-/// limit still forms a batch of its own, because a record cannot be split.
+/// Retained batch buffers, including cell slots, vector capacity and text.
+/// Parsing, the incoming record and Polars conversion use extra memory. One
+/// oversized record still forms its own batch because it cannot be split.
 pub const DEFAULT_BATCH_BYTES: usize = 8 * 1024 * 1024;
+/// Source columns, excluding one complete leading Trivium annotation block.
+pub const MAX_CSV_COLUMNS: usize = 4_096;
 /// Read buffer for the UTF-16 adapter and the CSV reader. The UTF-16 adapter
 /// reads through `BufReader`, so surrogate pairs and CRLF can cross `read`
 /// calls without changing record boundaries.
@@ -85,6 +88,21 @@ fn invalid_delimiter() -> AppError {
     AppError::Message(
         "Invalid delimiter. Use one ASCII character other than CR, LF, or a double quote.".into(),
     )
+}
+
+fn validate_column_count(headers: &csv::StringRecord) -> Result<(), AppError> {
+    let leading = headers
+        .iter()
+        .take(ANNOTATION_COLUMNS.len())
+        .collect::<Vec<_>>();
+    let annotations = leading_block(&leading).map_or(0, |_| ANNOTATION_COLUMNS.len());
+    let source_columns = headers.len().saturating_sub(annotations);
+    if source_columns > MAX_CSV_COLUMNS {
+        return Err(AppError::Message(format!(
+            "CSV header has {source_columns} data columns; the limit is {MAX_CSV_COLUMNS} (plus a complete leading Trivium annotation block). No columns were discarded."
+        )));
+    }
+    Ok(())
 }
 
 /// Internal column id assigned to a source column by its position.
@@ -164,6 +182,7 @@ pub struct CsvImportSummary {
 /// caller can write the batch and drop it before reading the next one.
 pub struct CsvImporter {
     reader: csv::Reader<Box<dyn Read>>,
+    pending: Option<csv::StringRecord>,
     columns: Vec<ColumnMeta>,
     flag_columns: FlagColumns,
     restore_annotations: bool,
@@ -210,8 +229,8 @@ impl CsvImporter {
             .from_reader(input);
         let headers = reader
             .headers()
-            .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?
-            .clone();
+            .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
+        validate_column_count(headers)?;
         let source_headers: Vec<String> = headers.iter().map(|header| header.to_string()).collect();
         if source_headers.is_empty() {
             return Err(AppError::Message("The CSV data has no columns.".into()));
@@ -239,6 +258,7 @@ impl CsvImporter {
 
         Ok(Self {
             reader,
+            pending: None,
             columns,
             flag_columns,
             restore_annotations: false,
@@ -273,6 +293,7 @@ impl CsvImporter {
 
         let Self {
             reader,
+            pending,
             columns: column_meta,
             flag_columns,
             restore_annotations,
@@ -288,25 +309,28 @@ impl CsvImporter {
         let mut originals: Vec<String> = Vec::new();
         let mut row_ids: Vec<i64> = Vec::new();
         let mut source_records: Vec<i64> = Vec::new();
-        let mut estimated_bytes = 0usize;
+        let mut text_bytes = 0usize;
         let mut batch_rows = 0usize;
         let mut exhausted = false;
 
         {
             let mut records = reader.records();
             loop {
-                let record = match records.next() {
-                    None => {
-                        exhausted = true;
-                        break;
-                    }
-                    Some(Err(err)) => {
-                        return Err(AppError::Message(format!(
-                            "Failed to parse the CSV data: {}",
-                            err
-                        )));
-                    }
-                    Some(Ok(record)) => record,
+                let record = match pending.take() {
+                    Some(record) => record,
+                    None => match records.next() {
+                        None => {
+                            exhausted = true;
+                            break;
+                        }
+                        Some(Err(err)) => {
+                            return Err(AppError::Message(format!(
+                                "Failed to parse the CSV data: {}",
+                                err
+                            )));
+                        }
+                        Some(Ok(record)) => record,
+                    },
                 };
                 if record.len() != column_meta.len() {
                     return Err(AppError::Message(
@@ -314,6 +338,27 @@ impl CsvImporter {
                     ));
                 }
                 let row_index = *rows_read;
+                let values = record.iter().map(str::to_owned).collect::<Vec<_>>();
+                let original_cells: Vec<&str> = record.iter().collect();
+                let original = serde_json::to_string(&original_cells).map_err(|_| {
+                    AppError::Message("Failed to store the original CSV record.".into())
+                })?;
+                let incoming_bytes = values.iter().fold(original.capacity(), |bytes, value| {
+                    bytes.saturating_add(value.capacity())
+                });
+                if batch_rows > 0
+                    && batch_budget::retained_bytes(
+                        &cells,
+                        &originals,
+                        &row_ids,
+                        &source_records,
+                        text_bytes.saturating_add(incoming_bytes),
+                        true,
+                    ) > limits.max_bytes
+                {
+                    *pending = Some(record);
+                    break;
+                }
 
                 // The initial table layout only needs a leading sample. The
                 // full input is never scanned just to size the columns.
@@ -328,15 +373,14 @@ impl CsvImporter {
                     }
                 }
 
-                for (order, cell) in record.iter().enumerate() {
-                    cells[order].push(cell.to_string());
-                    estimated_bytes += cell.len() + 1;
+                for (column, value) in cells.iter_mut().zip(values) {
+                    batch_budget::reserve_next(column)?;
+                    column.push(value);
                 }
-                let original_cells: Vec<&str> = record.iter().collect();
-                let original = serde_json::to_string(&original_cells).map_err(|_| {
-                    AppError::Message("Failed to store the original CSV record.".into())
-                })?;
-                estimated_bytes += original.len() + 8;
+                batch_budget::reserve_next(&mut originals)?;
+                batch_budget::reserve_next(&mut row_ids)?;
+                batch_budget::reserve_next(&mut source_records)?;
+                text_bytes = text_bytes.saturating_add(incoming_bytes);
                 originals.push(original);
                 row_ids.push(row_index as i64);
                 // Physical line of the record's first field. The csv reader
@@ -367,7 +411,7 @@ impl CsvImporter {
 
                 *rows_read += 1;
                 batch_rows += 1;
-                if batch_rows >= limits.max_rows || estimated_bytes >= limits.max_bytes {
+                if batch_rows >= limits.max_rows {
                     break;
                 }
             }
@@ -380,7 +424,7 @@ impl CsvImporter {
             return Ok(None);
         }
 
-        let mut series: Vec<Series> = Vec::with_capacity(column_meta.len() + 2);
+        let mut series: Vec<Series> = Vec::with_capacity(column_meta.len() + 3);
         for (column, values) in column_meta.iter().zip(cells) {
             series.push(Series::new(column.id.as_str(), values));
         }
