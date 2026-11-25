@@ -30,7 +30,7 @@ Let's spend as little time as possible on the trivial stuff.
 
 View CSV, JSON, JSONL, and NDJSON logs in a table, including nested JSON records. Click a cell to inspect the full record without scrolling through all its columns.
 
-JSON imports support up to 4,096 flattened columns. Files exceeding this limit are rejected.
+CSV and JSON imports support up to 4,096 data columns. CSV can also include one leading Trivium annotation block. Wider files are rejected without dropping columns.
 
 Open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
@@ -51,12 +51,12 @@ Use the search box to narrow down results with case-insensitive text matching. I
 | Example | Description |
 | --- | --- |
 | `powershell` | Find rows containing the specified text |
-| `error timeout` | Find rows containing both terms (AND) |
+| `error timeout` | Find rows containing both terms, possibly in different searched columns (AND) |
 | `error\|warn` | Find rows containing either term (OR) |
 | `-test` | Exclude rows containing `test` (NOT) |
 | `EventID:4624` | Find rows containing `4624` in the `EventID` column |
-| `"powershell -enc"` | Find rows containing the quoted phrase |
-| `-"powershell -enc"` | Exclude rows containing the quoted phrase |
+| `"powershell -enc"` | Find the quoted phrase within a single cell |
+| `-"powershell -enc"` | Exclude rows with the quoted phrase within a single cell |
 | `@tag:review` | Find rows tagged with `review` |
 | `@tag:*` | Find rows with any tag |
 
@@ -75,6 +75,8 @@ Built-in pattern definitions live in `definitions/formats/`. Adding a valid JSON
 ### Extract
 
 Open **Filter → Extract**, choose whether to scan all rows or the current results, select the source columns, and then pick a pattern. Trivium opens the extracted values in a temporary CSV tab with **Value**, **Count** (occurrences), and **Rows** (source rows containing the value). Three occurrences in a single row count as **Count: 3 / Rows: 1**. Hidden source columns can also be included.
+
+JSON extraction counts primitive source values once across overlapping parent/child selections. Object keys are excluded.
 
 <img src="assets/screenshots/filter-extract.png" alt="Extract panel with source rows, columns, and patterns" width="720">
 
@@ -109,6 +111,8 @@ Zoom in on periods of high activity, or select a time range to narrow down the t
 Trivium automatically saves each investigation as a local project, including its filters and annotations. Closing a tab does not delete the project; reopen it from **Projects** to continue your investigation.
 
 Export **all rows, the current results, or selected rows** to CSV, optionally including flags, notes, tags, and bookmarks.
+
+CSV exports preserve source values. Spreadsheet software can interpret cells starting with `=`, `+`, `-`, or `@` as formulas; review untrusted exports in a text viewer.
 
 The Save dialog asks for confirmation before replacing an existing file. Automation requests must set `allowOverwrite: true` to overwrite a file.
 
