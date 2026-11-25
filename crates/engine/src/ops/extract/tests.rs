@@ -22,6 +22,8 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 
+mod json;
+
 struct Case {
     store: ProjectsStore,
     root: PathBuf,

@@ -1,5 +1,6 @@
 //! Extract a bounded exact value ranking into an ordinary temporary CSV case.
 mod aggregate;
+mod json;
 mod model;
 mod output;
 mod scan;

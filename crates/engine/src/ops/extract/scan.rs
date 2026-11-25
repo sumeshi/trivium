@@ -8,13 +8,14 @@ use crate::{
         analysis_data::{AnalysisSource, SelectedRows},
         query::QuerySpec,
     },
-    project_io::ProjectBatchReader,
+    project_io::{ProjectBatchReader, INTERNAL_ORIGINAL},
     store::ProjectsStore,
     value_utils::bounded_text::present_text,
 };
 
 use super::{
     aggregate::{limit_error, Accumulator, ExtractValue, Limits},
+    json::JsonSelection,
     ExtractPayload, ExtractScope,
 };
 
@@ -25,6 +26,11 @@ pub(super) struct ExtractedTable {
     pub values: Vec<ExtractValue>,
     pub filename: String,
     pub description: String,
+}
+
+struct ScanColumns<'a> {
+    cells: &'a [String],
+    json: Option<&'a JsonSelection>,
 }
 
 pub(super) fn build(
@@ -58,6 +64,7 @@ pub(super) fn build(
             "Choose each extraction column only once.".into(),
         ));
     }
+    let json = JsonSelection::from_project(&source.meta, &columns, &path, job)?;
     let total_rows = source.target.total_rows;
     let source_rows = source.target.ids.len();
     let name = source
@@ -79,7 +86,10 @@ pub(super) fn build(
     let mut accumulator = Accumulator::new(limits);
     walk(
         &path,
-        &columns,
+        ScanColumns {
+            cells: &columns,
+            json: json.as_ref(),
+        },
         total_rows,
         ids.as_deref().map(Vec::as_slice),
         &matcher,
@@ -135,16 +145,24 @@ fn safe_name(name: &str) -> String {
 
 fn walk(
     path: &Path,
-    columns: &[String],
+    columns: ScanColumns<'_>,
     total_rows: usize,
     ids: Option<&[usize]>,
     matcher: &CompiledFormat,
     accumulator: &mut Accumulator,
     job: &JobContext,
 ) -> Result<(), AppError> {
+    // JSON table columns can contain overlapping serialized parent values.
+    // Read their source record once instead of decoding those duplicate cells.
+    let original = [INTERNAL_ORIGINAL.to_string()];
+    let projection = if columns.json.is_some() {
+        &original[..]
+    } else {
+        columns.cells
+    };
     let mut reader = match ids {
-        Some(ids) => ProjectBatchReader::for_rows(path, columns, ids),
-        None => ProjectBatchReader::open(path, columns),
+        Some(ids) => ProjectBatchReader::for_rows(path, projection, ids),
+        None => ProjectBatchReader::open(path, projection),
     }
     .map_err(AppError::from)?;
     let selected = ids.map(|ids| SelectedRows::new(total_rows, ids));
@@ -153,7 +171,7 @@ fn walk(
     job.report_progress(0, Some(expected as u64), Some("Extracting values".into()));
     while let Some(batch) = reader.next_with_job(job) {
         let batch = batch.map_err(AppError::from)?;
-        let series = columns
+        let series = projection
             .iter()
             .map(|column| batch.frame.column(column))
             .collect::<Result<Vec<_>, _>>()
@@ -169,25 +187,38 @@ fn walk(
             {
                 continue;
             }
-            for series in &series {
-                job.check_cancelled()?;
-                let value = series
+            if let Some(json) = columns.json {
+                let value = series[0]
                     .get(local)
                     .map_err(|error| AppError::Other(error.into()))?;
-                let Some(text) =
-                    present_text(&value, accumulator.available()).map_err(|_| limit_error())?
-                else {
-                    continue;
-                };
-                let transient = match &text {
-                    std::borrow::Cow::Owned(value) => value.capacity(),
-                    _ => 0,
-                };
-                let mut occurrences = matcher.occurrences(&text);
-                while let Some(found) =
-                    occurrences.next_with_check(&mut || job.check_cancelled())?
-                {
-                    accumulator.observe(row, found, transient)?;
+                let text = present_text(&value, accumulator.available())
+                    .map_err(|_| limit_error())?
+                    .ok_or_else(|| AppError::Message(format!(
+                        "JSON extraction source row {} has no stored original record. Reimport this project.",
+                        row + 1
+                    )))?;
+                json.scan(&text, row, matcher, accumulator, job)?;
+            } else {
+                for series in &series {
+                    job.check_cancelled()?;
+                    let value = series
+                        .get(local)
+                        .map_err(|error| AppError::Other(error.into()))?;
+                    let Some(text) =
+                        present_text(&value, accumulator.available()).map_err(|_| limit_error())?
+                    else {
+                        continue;
+                    };
+                    let transient = match &text {
+                        std::borrow::Cow::Owned(value) => value.capacity(),
+                        _ => 0,
+                    };
+                    let mut occurrences = matcher.occurrences(&text);
+                    while let Some(found) =
+                        occurrences.next_with_check(&mut || job.check_cancelled())?
+                    {
+                        accumulator.observe(row, found, transient)?;
+                    }
                 }
             }
             read_rows += 1;
