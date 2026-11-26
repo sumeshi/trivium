@@ -80,16 +80,12 @@
     </header>
 
     <section class="import-panel">
-      <div class="import-heading">
-        <h3>Open data files</h3>
-        <p id="import-formats">CSV / JSON / JSONL / NDJSON</p>
-      </div>
       <button class="button choose-file full" disabled={creating}
-        aria-describedby="import-formats" on:click={() => dispatch('pickCsv')}>
+        on:click={() => dispatch('pickCsv')}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 7h7l2-3h9v16H3V7Z" />
         </svg>
-        {pendingFileName ? 'Choose other files' : 'Choose data files'}
+        Choose files
       </button>
       {#if pendingFileName}
         <div class="pending-file" title={pendingFilePaths.join('\n') || pendingFileName}>
@@ -143,12 +139,12 @@
         </label>
       {/if}
 
-      <ImportOptions options={pendingImportOptions} csv={csvSettingsRelevant} disabled={creating}
-        on:change={(event) => dispatch('importOptionsChange', event.detail)} />
-
       <ImportPreview {backend} path={pendingFilePaths[0] ?? null} delimiter={pendingDelimiter}
         options={pendingImportOptions} disabled={creating} multiple={pendingFilePaths.length > 1}
         on:delimiter={(event) => dispatch('delimiterChange', event.detail)} />
+
+      <ImportOptions options={pendingImportOptions} csv={csvSettingsRelevant} disabled={creating}
+        on:change={(event) => dispatch('importOptionsChange', event.detail)} />
 
       <button
         class="button primary full"
@@ -167,7 +163,6 @@
           {/each}
         </ul>
       {/if}
-      <p class="import-help">Source file is opened read-only.</p>
     </section>
 
     <section class="project-section" aria-label="Recent projects" aria-busy={isLoadingProjects}>
@@ -195,7 +190,6 @@
       {:else if projects.length === 0 && !projectsError}
         <div class="empty-list">
           <p>No projects yet.</p>
-          <p>Import a CSV, JSON, or JSONL file to begin.</p>
         </div>
       {:else if projects.length > 0}
         <ul class="project-list">
@@ -336,8 +330,7 @@
     background: var(--surface-weak);
   }
 
-  .import-heading h3 { margin: 0 0 3px; color: var(--fg); font-size: 12.5px; font-weight: 600; }
-  .import-heading p, .import-help { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+  .import-help { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
 
   .button {
     display: inline-flex;

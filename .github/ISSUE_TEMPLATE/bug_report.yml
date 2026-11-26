@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Trivium version
-      placeholder: 0.3.3
+      placeholder: 0.3.4
     validations:
       required: true
   - type: input

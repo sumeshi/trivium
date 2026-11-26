@@ -68,10 +68,10 @@ def verify_import_refinements(web, data: dict, root: Path, evidence: Path, repor
         web.close_drawer()
         start = web.checkpoint()
         _pick(web, tabbed, csv=True)
-        assert not web.script("return document.querySelector('[aria-label=\"Preview import\"]').checked;"), "Preview is opt-in"
+        assert not web.script("return document.querySelector('.import-preview').open;"), "Preview is opt-in"
         web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
         assert not any(entry["name"] == "preview_import" for entry in web.trace(after=start)), "Disabled preview must not read a file"
-        _set_checkbox(web, "Preview import", True)
+        web.named("Preview import", ".workspace-drawer")
         wait_for(lambda: web.script("return document.querySelector('.preview-table tbody')?.textContent;"),
                  bool, "enabled preview displays actual sampled values")
         wait_for(lambda: web.script("return [...document.querySelectorAll('.delimiter-suggestion')].map(node=>node.textContent.trim());"),
@@ -82,6 +82,16 @@ def verify_import_refinements(web, data: dict, root: Path, evidence: Path, repor
                  lambda value: value == "\t", "explicit suggestion click selects the delimiter")
         wait_for(lambda: web.script("return [...document.querySelectorAll('.preview-table thead th')].map(node=>node.textContent);"),
                  lambda labels: labels == ["name", "value"], "preview reflects the selected tab delimiter")
+        web.named("Preview import", ".workspace-drawer")
+        wait_for(lambda: web.script("return !document.querySelector('.import-preview').open && !document.querySelector('[aria-label=\"Import preview\"]');"),
+                 bool, "collapsing preview removes sampled rows")
+        before_reopen = web.checkpoint()
+        web.named("Preview import", ".workspace-drawer")
+        wait_for(lambda: [entry for entry in web.trace(after=before_reopen)
+                         if entry["name"] == "preview_import" and "result" in entry],
+                 bool, "reopening preview reads the current import settings")
+        wait_for(lambda: web.script("return [...document.querySelectorAll('.preview-table thead th')].map(node=>node.textContent);"),
+                 lambda labels: labels == ["name", "value"], "reopened preview displays the current delimiter")
         web.screenshot(evidence / "import-preview-opt-in.png")
         previewed = _import(web, tabbed, 2, created)
         assert _values(web, previewed) == [["alpha", "00123"], ["beta", "00045"]]
@@ -92,7 +102,7 @@ def verify_import_refinements(web, data: dict, root: Path, evidence: Path, repor
         _close_report(web)
 
         _pick(web, broken, csv=False)
-        assert not web.script("return document.querySelector('[aria-label=\"Preview import\"]').checked;"), "A new drawer starts with preview disabled"
+        assert not web.script("return document.querySelector('.import-preview').open;"), "A new drawer starts with preview disabled"
         _set_checkbox(web, "Recover readable records", True)
         recovered = _import(web, broken, 2, created)
         assert _values(web, recovered) == [["first"], ["last"]]
@@ -133,7 +143,7 @@ def verify_import_refinements(web, data: dict, root: Path, evidence: Path, repor
         assert encoded_report["skippedRecords"] == 1 and encoded_report["importedRecords"] == 2
         assert encoded_report["issues"][0]["sourceRecord"] == 2 and encoded_report["issues"][0]["action"] == "skipped", encoded_report
         assert all(path.read_bytes() == before for path, before in originals.items())
-        report["import_refinements"] = {"preview_default_off_no_reads": True,
+        report["import_refinements"] = {"preview_default_off_no_reads": True, "preview_expands_and_collapses": True,
             "delimiter_suggestion_requires_explicit_click": True, "preview_uses_real_engine": True,
             "actual_import_settings_persist": True, "all_35_diagnostics_exported": True,
             "ui_examples_remain_bounded_at_30": True, "settings_and_report_survive_reopen": True,

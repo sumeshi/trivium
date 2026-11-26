@@ -34,7 +34,7 @@ CSV and JSON imports support up to 4,096 data columns. CSV can also include one 
 
 Imports are strict by default. **Import options** lets you open CSV without a header row, select an encoding, or choose **Recover readable records**. Unicode BOMs are recognized automatically; BOM-less Windows-1252 and Shift JIS require a selection. Recovery retains extra CSV fields, fills missing trailing fields with null, and skips invalid CSV/JSONL records where boundaries are known. A broken JSON array stops at its unreadable remainder. The saved import report shows repair/skip counts and up to 30 issue locations and reasons; the original file and its SHA-256 remain unchanged.
 
-**Preview** is off by default. Enable it to inspect a bounded sample before importing; suggested CSV delimiters are applied only when you choose them. Records are limited to 64MiB while reading, with cancellation checks; JSONL checks both encoded and decoded size. JSONL recovery can also skip invalid UTF-16, UTF-32, or Shift JIS lines without inserting replacement characters.
+**Preview** is collapsed by default. Open it to inspect a bounded sample before importing; suggested CSV delimiters are applied only when you choose them. Records are limited to 64MiB while reading, with cancellation checks; JSONL checks both encoded and decoded size. JSONL recovery can also skip invalid UTF-16, UTF-32, or Shift JIS lines without inserting replacement characters.
 
 The import report records the delimiter, recovery mode, and annotation restoration setting. **Export JSONL** writes its summary and all recorded diagnostics; the screen still shows at most 30 examples.
 

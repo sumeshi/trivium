@@ -13,8 +13,8 @@
   const dispatch = createEventDispatcher<{ delimiter: string }>();
   const preview = createImportPreview(backend);
   const { state } = preview;
-  let enabled = false;
-  $: preview.configure(enabled && !disabled && path ? { path, delimiter, importOptions: options } : null);
+  let expanded = false;
+  $: preview.configure(expanded && !disabled && path ? { path, delimiter, importOptions: options } : null);
   $: fileName = path?.split(/[/\\]/).at(-1) ?? '';
   $: suggestion = $state.result?.suggestedDelimiter;
   const delimiterNames: Record<string, string> = { ',': 'comma', '\t': 'tab', ';': 'semicolon', '|': 'pipe' };
@@ -23,12 +23,10 @@
   onDestroy(() => preview.dispose());
 </script>
 
-<div class="import-preview">
-  <label class="preview-toggle">
-    <input type="checkbox" aria-label="Preview import" bind:checked={enabled} disabled={disabled || !path} />
-    <span>Preview</span>
-  </label>
-  {#if enabled && path}
+<details class="import-preview" bind:open={expanded}>
+  <summary aria-label="Preview import" aria-disabled={disabled || !path}
+    on:click={(event) => { if (disabled || !path) event.preventDefault(); }}>Preview</summary>
+  {#if expanded && path}
     <section aria-label="Import preview" aria-busy={$state.loading}>
       <div class="preview-heading">
         <span title={path}>{multiple ? `First file: ${fileName}` : fileName}</span>
@@ -42,8 +40,6 @@
             Use {delimiterName(suggestion)} delimiter
           </button>
         {/if}
-        <!-- Keep the bounded preview scrollable with the keyboard. -->
-        <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
         <!-- Keyboard focus allows the bounded preview to scroll without a mouse. -->
         <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
         <div class="preview-table" tabindex="0" role="region" aria-label="Preview rows">
@@ -64,11 +60,12 @@
       {/if}
     </section>
   {/if}
-</div>
+</details>
 
 <style>
-  .import-preview { margin: 8px 0 10px; font-size: 11px; }
-  .preview-toggle { display: inline-flex; align-items: center; gap: 7px; }
+  .import-preview { margin: 10px 0; font-size: 11px; }
+  summary { cursor: pointer; padding: 4px 0; }
+  summary[aria-disabled="true"] { color: var(--muted); cursor: default; }
   section { margin-top: 7px; min-width: 0; }
   .preview-heading, .preview-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; }
   .preview-heading { margin-bottom: 5px; }

@@ -85,20 +85,20 @@ test('turning preview off or closing its component cancels work and ignores late
   assert.equal(cancelled, 2);
 });
 
-test('the real preview component starts off and suggestions change delimiter only after explicit selection', () => runSvelteTest(String.raw`
+test('the preview starts collapsed and suggestions require explicit selection', () => runSvelteTest(String.raw`
 const Preview=await compileHeadless('../app/ImportPreview');
 const calls=[];
 const backend={previewImport:async args=>{calls.push(args);return {columns:['a','b'],rows:[['1','2']],encoding:'utf-8',bom:false,truncated:true,suggestedDelimiter:'\t',warnings:[]};},cancelRequest:async()=>0};
 const options={encoding:'auto',hasHeaders:true,recover:false};
 const component=await mountHeadless(Preview,{backend,path:'/logs/a.csv',delimiter:'',options});
 await tick();await new Promise(r=>setImmediate(r));
-assert.equal(component.$capture_state().enabled,false);assert.equal(calls.length,0);
+assert.equal(component.$capture_state().expanded,false);assert.equal(calls.length,0);
 const selected=[];component.$on('delimiter',event=>selected.push(event.detail));
-component.$inject_state({enabled:true});await tick();await new Promise(r=>setImmediate(r));await tick();
+component.$inject_state({expanded:true});await tick();await new Promise(r=>setImmediate(r));await tick();
 assert.equal(calls.length,1);assert.deepEqual(selected,[]);
 component.$capture_state().applySuggestion();assert.deepEqual(selected,['\t']);
 assert.deepEqual(options,{encoding:'auto',hasHeaders:true,recover:false});
-component.$inject_state({enabled:false});await tick();component.$destroy();
+component.$inject_state({expanded:false});await tick();component.$destroy();
 `));
 
 test('report export uses native overwrite approval, reports failures, and never changes saved diagnostics', () => runSvelteTest(String.raw`

@@ -29,9 +29,10 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
     label = web.script("return {text:arguments[0].textContent.trim(),title:arguments[0].title};", recent)
     assert data["sha"] in label["title"] and not label["text"].lower().startswith("sha"), label
     assert data["sha"].startswith(label["text"].rstrip("…")), label
-    formats = web.script("return document.querySelector('#import-formats').textContent.trim();")
-    assert formats == "CSV / JSON / JSONL / NDJSON", formats
-    assert "read-only" in web.script("return document.querySelector('.import-help').textContent;")
+    assert web.script("return document.querySelector('.choose-file').textContent.trim();") == "Choose files"
+    assert not web.script("return !!document.querySelector('.import-heading,#import-formats');"), "Import uses one file chooser"
+    assert not web.script("return [...document.querySelectorAll('.import-help')].some(e=>e.textContent.includes('read-only'));")
+    assert web.script("return document.querySelector('.import-preview').compareDocumentPosition(document.querySelector('.import-options')) & Node.DOCUMENT_POSITION_FOLLOWING;")
     assert not web.script("return !!document.querySelector('[aria-label=\"CSV delimiter\"]');"), "CSV controls stay hidden until CSV is selected"
     web.named("Close workspace menu", ".workspace-drawer")
     wait_for(lambda: web.script("return !document.querySelector('.drawer-backdrop');"), bool, "initial project menu closes")

@@ -34,12 +34,11 @@
         <span>First row contains column names</span>
       </label>
     {/if}
-    <label class="check-option">
+    <label class="check-option" title="Continue past recoverable errors and record repairs or skipped records in the import report.">
       <input type="checkbox" aria-label="Recover readable records" checked={options.recover} {disabled}
         on:change={(event) => update({ recover: event.currentTarget.checked })} />
       <span>Recover readable records</span>
     </label>
-    <p>Strict stops on errors. Recovery records repairs and skipped records in the import report.</p>
   </div>
 </details>
 
@@ -51,5 +50,4 @@
   .encoding-field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
   select { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--fg); font-size: 11px; }
   .check-option { display: flex; align-items: center; gap: 7px; }
-  p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 </style>
