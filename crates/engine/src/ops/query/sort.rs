@@ -51,14 +51,15 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
         return SortKey::Missing;
     };
     // These are comparison keys only. Never rewrite the stored/displayed cell.
-    let text = text.trim().replace([',', '\u{00A0}'], "");
-    if let Ok(integer) = text.parse::<i128>() {
+    let text = text.trim();
+    let numeric_text = text.replace([',', '\u{00A0}'], "");
+    if let Ok(integer) = numeric_text.parse::<i128>() {
         return SortKey::Int(integer);
     }
-    if let Some(number) = ExactNumber::parse(&text) {
+    if let Some(number) = ExactNumber::parse(&numeric_text) {
         return SortKey::Number(Box::new(number));
     }
-    if let Some(nanos) = parse_datetime_nanos(&text) {
+    if let Some(nanos) = parse_datetime_nanos(text) {
         return SortKey::Datetime(i128::from(nanos));
     }
     SortKey::Text(text.to_lowercase())

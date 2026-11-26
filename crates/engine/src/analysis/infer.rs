@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use chrono::NaiveDateTime;
 use polars::prelude::{AnyValue, DataFrame, DataType, Series};
 use serde::{Deserialize, Serialize};
 
@@ -216,48 +215,7 @@ fn looks_integer(text: &str) -> bool {
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }
 
-pub(crate) fn parse_datetime_nanos(text: &str) -> Option<i64> {
-    // Normalize only an unambiguous year-first prefix for parsing. Evidence
-    // remains unchanged; day/month ordering and numeric epochs are not guessed.
-    let bytes = text.as_bytes();
-    let year_first = bytes.len() >= 10
-        && bytes[..4].iter().all(u8::is_ascii_digit)
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
-        && ((bytes[4] == b'/' && bytes[7] == b'/') || (bytes[4] == b'-' && bytes[7] == b'-'));
-    let mut normalized;
-    let text = if year_first && (bytes[4] == b'/' || bytes.get(10) == Some(&b' ')) {
-        normalized = text.to_owned();
-        normalized.replace_range(4..5, "-");
-        normalized.replace_range(7..8, "-");
-        if bytes.get(10) == Some(&b' ') && bytes.get(11).is_some_and(u8::is_ascii_digit) {
-            normalized.replace_range(10..11, "T");
-        }
-        normalized.as_str()
-    } else {
-        text
-    };
-    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(text) {
-        return datetime.timestamp_nanos_opt();
-    }
-    const FORMATS: [&str; 5] = [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-    ];
-    for format in FORMATS {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(text, format) {
-            return dt.and_utc().timestamp_nanos_opt();
-        }
-        if let Ok(date) = chrono::NaiveDate::parse_from_str(text, format) {
-            let dt = date.and_hms_opt(0, 0, 0)?;
-            return dt.and_utc().timestamp_nanos_opt();
-        }
-    }
-    None
-}
+pub(crate) use super::datetime::parse_datetime_nanos;
 
 fn is_datetime(text: &str) -> bool {
     parse_datetime_nanos(text).is_some()
@@ -292,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn naive_datetime_whitespace_keeps_exact_nanos_without_relaxing_timezone_syntax() {
+    fn datetime_whitespace_keeps_exact_nanos_with_explicit_or_omitted_zones() {
         let precise = parse_datetime_nanos("2026-11-14T03:04:05.123456789Z").unwrap();
         for date in ["2026-11-14", "2026/11/14"] {
             for separator in [
@@ -303,13 +261,15 @@ mod tests {
                 assert_eq!(parse_datetime_nanos(&text), Some(precise), "{text:?}");
             }
         }
-        for text in [
-            "2026-11-14   12:04:05.123456789+09:00",
-            "2026/11/14\t03:04:05Z",
-            "2026-11-14\u{feff}03:04:05",
-        ] {
-            assert_eq!(parse_datetime_nanos(text), None, "{text:?}");
-        }
+        assert_eq!(
+            parse_datetime_nanos("2026-11-14   12:04:05.123456789+09:00"),
+            Some(precise)
+        );
+        assert_eq!(
+            parse_datetime_nanos("2026/11/14\t03:04:05Z"),
+            parse_datetime_nanos("2026-11-14T03:04:05Z")
+        );
+        assert_eq!(parse_datetime_nanos("2026-11-14\u{feff}03:04:05"), None);
     }
 
     #[test]
@@ -317,7 +277,7 @@ mod tests {
         for text in [
             "11/14/2026",
             "14/11/2026",
-            "2026/1/14",
+            "2026/0/14",
             "2026/13/14",
             "2026/02/30",
             "1700000000",

@@ -20,7 +20,7 @@ export function conditionValueHelp(kind: ColumnKind, op: CompareOp, exact = fals
   };
   if (isOrderedCondition(op) && kind === "datetime") return {
     placeholder: "2026-11-12T09:30:00.123456789Z",
-    hint: "Timestamp: YYYY-MM-DDTHH:mm:ss[.fraction]Z or ±HH:mm; date-only and YYYY-MM-DD HH:mm:ss also work. No timezone means UTC. Up to 9 fractional digits.",
+    hint: "Year-first date-only or date/time; - / . dates, comma or dot fractions, UTC/GMT and ±HH:mm/±HHmm work. No timezone means UTC. Up to 9 fractional digits.",
   };
   if (isOrderedCondition(op) && (kind === "int" || kind === "float")) return {
     placeholder: kind === "int" ? "e.g. 18446744073709551615" : "e.g. 1.5 or 1e3",

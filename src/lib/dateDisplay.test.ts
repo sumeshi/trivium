@@ -30,16 +30,28 @@ test('ISO display accepts engine-supported naive timestamp whitespace without al
   for (const source of [
     '2026-11-14  24:00:00',
     '2026/02/30   03:04:05',
-    '2026-11-14   03:04',
-    '2026-11-14   3:04:05',
     '2026-11-14   03:04:05 trailing',
-    '2026-11-14   12:04:05.123456789+09:00',
-    '2026/11/14\t03:04:05Z',
     '2026-11-14\uFEFF03:04:05',
   ]) {
     const result = formatIsoCell(cell(source));
     assert.ok(result.error, source);
     assert.equal(result.text, source);
+  }
+});
+
+test('flexible ISO display accepts unambiguous padding, minutes, fractions and explicit time zones', () => {
+  for (const [source, expected] of [
+    ['2026/1/4 3:4:5,123456789 UTC', '2026-01-04T03:04:05.123456789Z'],
+    ['2026.1.4t3:4:5.123456789+0900', '2026-01-03T18:04:05.123456789Z'],
+    ['2026-11-14   03:04', '2026-11-14T03:04:00Z'],
+    ['2026-11-14   3:04:05', '2026-11-14T03:04:05Z'],
+    ['2026-11-14   12:04:05.123456789+09:00', '2026-11-14T03:04:05.123456789Z'],
+    ['2026/11/14\t03:04:05Z', '2026-11-14T03:04:05Z'],
+    ['Sat, 14 Nov 2026 3:4:5,123456789 GMT', '2026-11-14T03:04:05.123456789Z'],
+  ]) {
+    const value = cell(source), before = structuredClone(value);
+    assert.deepEqual(formatIsoCell(value), { text: expected }, source);
+    assert.deepEqual(value, before);
   }
 });
 

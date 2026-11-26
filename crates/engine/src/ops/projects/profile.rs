@@ -14,6 +14,9 @@ use crate::{
 };
 
 const PROFILE_KEY: &str = "column_profile";
+// Type hints are derived from parser semantics as well as Parquet contents.
+// Increment when newly recognized values change column classification.
+const INFERENCE_VERSION: u32 = 1;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Signature {
@@ -43,6 +46,8 @@ impl Signature {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct ColumnProfile {
+    #[serde(default)]
+    inference_version: u32,
     signature: Signature,
     pub kinds: HashMap<String, String>,
     pub widths: HashMap<String, usize>,
@@ -106,6 +111,7 @@ pub(super) fn save_import_profile(
 ) -> Result<(), AppError> {
     let signature = Signature::read(&project_dir.join("data.parquet"), rows, schema)?;
     let profile = ColumnProfile {
+        inference_version: INFERENCE_VERSION,
         signature,
         kinds,
         widths,
@@ -133,6 +139,7 @@ pub(super) fn load_profile(
     let ids = columns.ids();
     let cached = load_setting_bytes(project_dir, PROFILE_KEY).map_err(AppError::from)?;
     let had_profile = cached.is_some();
+    let mut matching_widths = None;
     if let Some(bytes) = cached {
         if let Ok(profile) = serde_json::from_slice::<ColumnProfile>(&bytes) {
             if profile.signature == signature
@@ -140,13 +147,20 @@ pub(super) fn load_profile(
                     .iter()
                     .all(|id| profile.kinds.contains_key(id) && profile.widths.contains_key(id))
             {
-                return Ok(profile);
+                if profile.inference_version == INFERENCE_VERSION {
+                    return Ok(profile);
+                }
+                // The data did not change. Only inferred types are stale;
+                // retain the import-time width sample exactly.
+                matching_widths = Some(profile.widths);
             }
         }
     }
     // Preserve the existing leading-sample width estimate when migrating a
     // legacy project. A changed Parquet signature requires fresh estimates.
-    let cached_widths = if had_profile {
+    let cached_widths = if matching_widths.is_some() {
+        matching_widths
+    } else if had_profile {
         None
     } else {
         load_setting_bytes(project_dir, "column_max_chars")
@@ -166,6 +180,7 @@ pub(super) fn load_profile(
     });
     let mut inferred = KindAccumulator::default();
     let mut reader = ProjectBatchReader::open(&path, &ids).map_err(AppError::from)?;
+    job.report_progress(0, Some(rows as u64), Some("Updating column types".into()));
     while let Some(batch) = reader.next_with_job(job) {
         let batch = batch.map_err(AppError::from)?;
         inferred.observe(&batch.frame, &ids, job)?;
@@ -181,9 +196,15 @@ pub(super) fn load_profile(
             }
             remaining_width_rows -= sample.height();
         }
+        job.report_progress(
+            (batch.offset + batch.frame.height()) as u64,
+            Some(rows as u64),
+            Some("Updating column types".into()),
+        );
     }
     job.check_cancelled()?;
     let profile = ColumnProfile {
+        inference_version: INFERENCE_VERSION,
         signature,
         kinds: inferred.finish(&ids),
         widths,

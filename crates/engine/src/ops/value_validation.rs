@@ -35,7 +35,7 @@ pub struct ConditionValuesValidation {
     pub values: Vec<ConditionValueValidation>,
 }
 
-const DATETIME_HINT: &str = "Use RFC 3339 (2026-11-12T12:34:56.123456789Z or +09:00), YYYY-MM-DD HH:MM:SS[.fraction], or YYYY-MM-DD. An omitted time zone means UTC.";
+const DATETIME_HINT: &str = "Use a year-first date (-, /, or .) with optional time; dot/comma fractions keep up to 9 digits. Z, UTC, GMT, and numeric offsets are supported. An omitted time zone means UTC. Day/month order and numeric epochs are not guessed.";
 
 /// Checks what a condition value means without evaluating or reading rows.
 /// The result is advisory: it does not change existing query semantics.

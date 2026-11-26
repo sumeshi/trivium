@@ -19,7 +19,10 @@ use trivium_engine::{
         CreateProjectPayload, ProjectRequest,
     },
     project_io::{project_full_reads, project_read_stats, reset_project_read_counters},
-    storage::{load_setting, remove_setting, save_setting_bytes},
+    storage::{
+        load_flags, load_setting, load_setting_bytes, remove_setting, save_setting,
+        save_setting_bytes,
+    },
     store::ProjectsStore,
 };
 
@@ -344,4 +347,92 @@ fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() 
     )
     .unwrap();
     assert_eq!(project_read_stats().decoded_rows, 0);
+}
+
+#[test]
+fn stale_parser_profile_refreshes_once_without_changing_widths_or_investigation() {
+    let _guard = guard();
+    for legacy_version in [None, Some(0)] {
+        let fixture = Fixture::new();
+        let store = fixture.store();
+        let path = fixture.0.join("newly-recognized.csv");
+        let source = "Timestamp,message\n2026/1/2 3:04:05,keep\n2026/1/2 4:05:06,later\n";
+        fs::write(&path, source).unwrap();
+        let meta = import(&store, &path);
+        let dir = store.project_dir(&meta.id);
+        let timestamp = &meta.columns[0].id;
+        let message = &meta.columns[1].id;
+
+        let mut old = load_setting(&dir, "column_profile").unwrap().unwrap();
+        let current_version = old["inference_version"].as_u64().unwrap();
+        assert!(current_version > 0);
+        if let Some(version) = legacy_version {
+            old["inference_version"] = serde_json::json!(version);
+        } else {
+            old.as_object_mut().unwrap().remove("inference_version");
+        }
+        old["kinds"][timestamp] = serde_json::json!("string");
+        old["widths"][timestamp] = serde_json::json!(123);
+        old["widths"][message] = serde_json::json!(77);
+        save_setting(&dir, "column_profile", &old).unwrap();
+
+        trivium_engine::ops::flags::update_flag(
+            &store,
+            serde_json::from_value(serde_json::json!({
+                "projectId": meta.id, "row_index": 0, "flag": "critical",
+                "memo": "<CommandLine>whoami</CommandLine>",
+                "tags": ["review"], "bookmarked": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let annotations = load_flags(&store.flags_path(&meta.id)).unwrap();
+        let view = trivium_engine::models::ViewState {
+            search: "keep".into(),
+            column_widths: std::collections::HashMap::from([(timestamp.clone(), 321.0)]),
+            ..Default::default()
+        };
+        save_setting(&dir, "view_state", &serde_json::to_value(view).unwrap()).unwrap();
+        let view_bytes = load_setting_bytes(&dir, "view_state").unwrap();
+        let parquet_before = fs::read(dir.join("data.parquet")).unwrap();
+
+        reset_project_read_counters();
+        let refreshed = load_project_metadata_with_job(
+            &store,
+            ProjectRequest {
+                project_id: meta.id,
+            },
+            &JobContext::none(),
+        )
+        .unwrap();
+        assert_eq!(refreshed.column_kinds[timestamp], "datetime");
+        assert_eq!(refreshed.column_max_chars[timestamp], 123);
+        assert_eq!(refreshed.column_max_chars[message], 77);
+        assert_eq!(project_read_stats().decoded_rows, 2);
+        assert_eq!(project_full_reads(), 0);
+        let saved = load_setting(&dir, "column_profile").unwrap().unwrap();
+        assert_eq!(saved["inference_version"].as_u64(), Some(current_version));
+        assert_eq!(saved["kinds"][timestamp], "datetime");
+        assert_eq!(
+            load_flags(&store.flags_path(&meta.id)).unwrap(),
+            annotations
+        );
+        assert_eq!(load_setting_bytes(&dir, "view_state").unwrap(), view_bytes);
+        assert_eq!(fs::read(dir.join("data.parquet")).unwrap(), parquet_before);
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+
+        reset_project_read_counters();
+        let cached = load_project_metadata_with_job(
+            &store,
+            ProjectRequest {
+                project_id: meta.id,
+            },
+            &JobContext::none(),
+        )
+        .unwrap();
+        assert_eq!(cached.column_kinds, refreshed.column_kinds);
+        assert_eq!(cached.column_max_chars, refreshed.column_max_chars);
+        assert_eq!(project_read_stats().decoded_rows, 0);
+        assert_eq!(project_full_reads(), 0);
+    }
 }

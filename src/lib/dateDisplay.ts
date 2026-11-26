@@ -1,6 +1,7 @@
 import type { Cell } from './types';
 import { displayText } from './ipcValues.ts';
-import { parseTimelineNanos, formatTimelineNanos } from './timelineRange.ts';
+import { formatTimelineNanos } from './timelineRange.ts';
+import { parseSourceTimestampNanos } from './sourceTimestamp.ts';
 
 export type ColumnDisplayFormat = 'iso';
 export interface FormattedCell { text: string; error?: string }
@@ -13,17 +14,12 @@ export function formatIsoCell(cell: Cell | null | undefined): FormattedCell {
   if (previous) return previous;
   const original = displayText(cell);
   let result: FormattedCell;
-  if (cell.kind === 'null' || cell.kind === 'missing' || !original.trim()) {
+  if (cell.kind === 'null' || cell.kind === 'missing' || /^\p{White_Space}*$/u.test(original)) {
     result = { text: original };
   } else if (cell.truncated) {
     result = { text: `${original}…`, error: 'Timestamp preview is truncated.' };
   } else {
-    // Normalize engine-supported year-first dates and naive time separators.
-    // Keep timezone syntax strict; padding is accepted by the naive parser.
-    const source = original.trim()
-      .replace(/^(\d{4})\/(\d{2})\/(\d{2})(?=$|T|\p{White_Space})/u, '$1-$2-$3')
-      .replace(/^(\d{4}-\d{2}-\d{2})\p{White_Space}+(\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?)$/u, '$1T$2');
-    const nanos = parseTimelineNanos(source);
+    const nanos = parseSourceTimestampNanos(original);
     if (nanos === null) result = { text: original, error: 'Unrecognized timestamp.' };
     else {
       const iso = formatTimelineNanos(nanos);
