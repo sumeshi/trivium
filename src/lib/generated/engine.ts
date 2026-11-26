@@ -46,7 +46,21 @@ export type ImportIssue = {
  * Physical CSV/JSONL line or 1-based JSON array element, when known.
  */
 sourceRecord: number | null, action: ImportIssueAction, reason: string, };
-export type ImportReport = { encoding: string, bom: boolean, hasHeaders: boolean | null, sourceRecords: number, importedRecords: number, skippedRecords: number, repairedRecords: number, generatedColumns: number, unreadableTail: boolean, issueCount: number, issues: Array<ImportIssue>, };
+export type ImportReport = { encoding: string, bom: boolean, hasHeaders: boolean | null,
+/**
+ * Actual separator used for CSV; absent on older reports and other formats.
+ */
+delimiter?: string, recover?: boolean, restoreAnnotations?: boolean,
+/**
+ * True only after the complete, streamed diagnostic journal was finalized.
+ */
+fullDiagnostics?: boolean, sourceRecords: number, importedRecords: number, skippedRecords: number, repairedRecords: number, generatedColumns: number, unreadableTail: boolean, issueCount: number, issues: Array<ImportIssue>, };
+export type ImportPreview = { columns: Array<string>, rows: Array<Array<string | null>>, encoding: string, bom: boolean, truncated: boolean, suggestedDelimiter: string | null, warnings: Array<string>, };
+export type ExportImportReportResult = { destination: string, issuesWritten: number,
+/**
+ * Whether every recorded issue is present, independently of source recovery.
+ */
+complete: boolean, };
 export type ColumnMeta = {
 /**
  * Internal column id. `c000001` for the new storage format, the original

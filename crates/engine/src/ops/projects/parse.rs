@@ -4,7 +4,9 @@ use super::profile::KindAccumulator;
 use crate::{
     error::AppError,
     import::{
-        csv, jsonl,
+        csv,
+        diagnostics::IssueSink,
+        jsonl,
         options::{ImportOptions, ImportReport},
     },
     jobs::JobContext,
@@ -21,15 +23,27 @@ pub(super) struct ImportedSource {
     pub report: ImportReport,
 }
 
+pub(super) struct ParseOptions<'a> {
+    pub format: &'a str,
+    pub delimiter: Option<&'a str>,
+    pub restore_annotations: bool,
+    pub options: &'a ImportOptions,
+    pub diagnostics: Option<IssueSink>,
+}
+
 pub(super) fn import_batches(
     source: &Path,
     parquet_path: &Path,
-    format: &str,
-    delimiter: Option<&str>,
-    restore_annotations: bool,
-    options: &ImportOptions,
+    config: ParseOptions<'_>,
     job: &JobContext,
 ) -> Result<ImportedSource, AppError> {
+    let ParseOptions {
+        format,
+        delimiter,
+        restore_annotations,
+        options,
+        diagnostics,
+    } = config;
     if format == "csv" {
         return import_csv(
             source,
@@ -38,6 +52,7 @@ pub(super) fn import_batches(
             restore_annotations,
             options,
             job,
+            diagnostics,
         );
     }
     let format = if format == "json" {
@@ -45,12 +60,13 @@ pub(super) fn import_batches(
     } else {
         jsonl::RecordFormat::JsonLines
     };
-    let importer = jsonl::JsonImporter::open_with_options(
+    let importer = jsonl::JsonImporter::open_with_diagnostics(
         source,
         format,
         jsonl::BatchLimits::default(),
         options,
         job,
+        diagnostics,
     )?;
     let columns = importer.columns().to_vec();
     let mut writer = BatchDataWriter::create(parquet_path, &columns).map_err(AppError::from)?;
@@ -81,13 +97,15 @@ fn import_csv(
     restore_annotations: bool,
     options: &ImportOptions,
     job: &JobContext,
+    diagnostics: Option<IssueSink>,
 ) -> Result<ImportedSource, AppError> {
-    let mut importer = csv::CsvImporter::open_with_options(
+    let mut importer = csv::CsvImporter::open_with_diagnostics(
         source,
         csv::build_delimiter(delimiter)?,
         csv::BatchLimits::default(),
         options,
         job,
+        diagnostics,
     )?
     .with_annotations(restore_annotations);
     let columns = importer.columns().to_vec();

@@ -34,6 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         options::ImportIssueAction,
         options::ImportIssue,
         options::ImportReport,
+        ops::import_preview::ImportPreview,
+        ops::import_report::ExportImportReportResult,
         models::ColumnMeta,
         models::ProjectMeta,
         models::ProjectSummary,

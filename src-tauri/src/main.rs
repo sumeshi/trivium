@@ -57,6 +57,8 @@ fn main() {
             clear_wallpaper,
             read_import_text,
             create_project,
+            preview_import,
+            export_import_report,
             delete_project,
             load_project,
             query_project_rows,

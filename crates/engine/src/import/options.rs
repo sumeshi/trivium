@@ -65,6 +65,20 @@ pub struct ImportReport {
     pub encoding: String,
     pub bom: bool,
     pub has_headers: Option<bool>,
+    /// Actual separator used for CSV; absent on older reports and other formats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delimiter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub recover: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub restore_annotations: Option<bool>,
+    /// True only after the complete, streamed diagnostic journal was finalized.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub full_diagnostics: Option<bool>,
     pub source_records: usize,
     pub imported_records: usize,
     pub skipped_records: usize,

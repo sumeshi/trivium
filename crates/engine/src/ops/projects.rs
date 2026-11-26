@@ -239,21 +239,51 @@ fn create_project_impl(
             "Restoring Trivium annotations requires a header row.".into(),
         ));
     }
-    let prepared = crate::import::text_encoding::prepare_source(
-        &copied.path,
-        &staging.path().join("decoded-source"),
-        options.encoding,
-        job,
+    let prepared = if options.recover && matches!(source_format, "jsonl" | "ndjson") {
+        crate::import::text_encoding::inspect_source(&copied.path, options.encoding, job)?
+    } else {
+        crate::import::text_encoding::prepare_source(
+            &copied.path,
+            &staging.path().join("decoded-source"),
+            options.encoding,
+            job,
+        )?
+    };
+    // A transcoded copy is UTF-8 regardless of the source selection. Raw
+    // recoverable JSONL is instead decoded independently at each safe line.
+    let mut parser_options = options.clone();
+    if prepared.decoded {
+        parser_options.encoding = crate::import::options::TextEncoding::Utf8;
+    }
+    let diagnostics = crate::import::diagnostics::IssueSink::create(
+        &staging.path().join(crate::import::diagnostics::ISSUES_FILE),
     )?;
     let mut imported = parse::import_batches(
         &prepared.path,
         &parquet_path,
-        source_format,
-        payload.delimiter.as_deref(),
-        restore_annotations,
-        &options,
+        parse::ParseOptions {
+            format: source_format,
+            delimiter: payload.delimiter.as_deref(),
+            restore_annotations,
+            options: &parser_options,
+            diagnostics: Some(diagnostics.clone()),
+        },
         job,
     )?;
+    diagnostics.finish(imported.report.issue_count)?;
+    imported.report.full_diagnostics = Some(true);
+    imported.report.delimiter = if source_format == "csv" {
+        Some(
+            char::from(
+                crate::import::csv::build_delimiter(payload.delimiter.as_deref())?.unwrap_or(b','),
+            )
+            .to_string(),
+        )
+    } else {
+        None
+    };
+    imported.report.recover = Some(options.recover);
+    imported.report.restore_annotations = Some(source_format == "csv" && restore_annotations);
     imported.report.encoding = prepared.encoding;
     imported.report.bom = prepared.bom;
     if prepared.decoded {

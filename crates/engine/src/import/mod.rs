@@ -1,13 +1,16 @@
 pub mod csv;
+pub mod diagnostics;
 pub mod json;
 pub mod jsonl;
 pub mod options;
+pub(crate) mod record_limit;
 pub mod text_encoding;
 mod json_source;
 mod strict_json;
 mod utf16;
 
 pub(crate) use strict_json::from_reader as parse_json_value;
+pub(crate) use json_source::{value_to_cell, visit_leaves};
 
 use polars::prelude::{DataFrame, NamedFrom, Series};
 

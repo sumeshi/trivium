@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use polars::prelude::*;
 
 use crate::error::AppError;
+use crate::import::diagnostics::IssueSink;
 use crate::import::json_source::{for_each_record, value_to_cell, visit_fields, visit_leaves};
-use crate::import::options::{ImportOptions, ImportReport};
+use crate::import::options::{ImportOptions, ImportReport, TextEncoding};
 use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
@@ -87,6 +88,7 @@ pub struct JsonImporter {
     column_max_chars: HashMap<String, usize>,
     sample_rows: usize,
     recover: bool,
+    encoding: TextEncoding,
     report: ImportReport,
 }
 
@@ -108,6 +110,17 @@ impl JsonImporter {
         options: &ImportOptions,
         job: &JobContext,
     ) -> Result<Self, AppError> {
+        Self::open_with_diagnostics(path, format, limits, options, job, None)
+    }
+
+    pub fn open_with_diagnostics(
+        path: &Path,
+        format: RecordFormat,
+        limits: BatchLimits,
+        options: &ImportOptions,
+        job: &JobContext,
+        diagnostics: Option<IssueSink>,
+    ) -> Result<Self, AppError> {
         job.check_cancelled()?;
         let metadata = fs::metadata(path)
             .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;
@@ -115,31 +128,39 @@ impl JsonImporter {
         let mut seen: HashMap<String, usize> = HashMap::new();
         let mut rows = 0usize;
 
-        let report = for_each_record(path, format, options.recover, job, |record_no, value| {
-            rows += 1;
-            let mut too_wide = false;
-            visit_leaves(&value, "", &mut |pointer, _| {
-                if !too_wide && !seen.contains_key(&pointer) {
-                    if order.len() == MAX_JSON_COLUMNS {
-                        too_wide = true;
-                        return;
+        let report = for_each_record(
+            path,
+            format,
+            options.recover,
+            options.encoding,
+            job,
+            diagnostics.as_ref(),
+            |record_no, value| {
+                rows += 1;
+                let mut too_wide = false;
+                visit_leaves(&value, "", &mut |pointer, _| {
+                    if !too_wide && !seen.contains_key(&pointer) {
+                        if order.len() == MAX_JSON_COLUMNS {
+                            too_wide = true;
+                            return;
+                        }
+                        seen.insert(pointer.clone(), order.len());
+                        order.push(pointer);
                     }
-                    seen.insert(pointer.clone(), order.len());
-                    order.push(pointer);
-                }
-            });
-            if too_wide {
-                return Err(AppError::Message(format!(
+                });
+                if too_wide {
+                    return Err(AppError::Message(format!(
                     "JSON record {} exceeds the limit of {} flattened columns. No columns were discarded.",
                     record_no, MAX_JSON_COLUMNS
                 )));
-            }
-            if rows.is_multiple_of(PROGRESS_RECORD_INTERVAL) {
-                job.report_progress(rows as u64, None, Some("Scanning JSON".into()));
-            }
-            job.check_cancelled()?;
-            Ok(())
-        })?;
+                }
+                if rows.is_multiple_of(PROGRESS_RECORD_INTERVAL) {
+                    job.report_progress(rows as u64, None, Some("Scanning JSON".into()));
+                }
+                job.check_cancelled()?;
+                Ok(())
+            },
+        )?;
         job.check_cancelled()?;
 
         let columns: Vec<ColumnMeta> = order
@@ -173,6 +194,7 @@ impl JsonImporter {
             column_max_chars,
             sample_rows: COLUMN_WIDTH_SAMPLE_ROWS,
             recover: options.recover,
+            encoding: options.encoding,
             report,
         })
     }
@@ -207,6 +229,7 @@ impl JsonImporter {
             mut column_max_chars,
             sample_rows,
             recover,
+            encoding,
             report,
         } = self;
 
@@ -223,74 +246,82 @@ impl JsonImporter {
         let mut batch = Batch::new(columns.len());
         let mut rows_read = 0usize;
 
-        let second_report = for_each_record(&path, format, recover, job, |record_no, value| {
-            job.check_cancelled()?;
-            let mut cells = Vec::new();
-            let mut parents = ParentCells::new(DEFAULT_BATCH_BYTES);
-            let mut cell_error = None;
-            visit_fields(&value, "", &mut |pointer, field| {
-                if cell_error.is_some() {
-                    return;
-                }
-                if let Some(index) = column_index.get(pointer) {
-                    // These object values were formerly absent from the leaf
-                    // batch. Bound only this additional duplicated text; the
-                    // existing oversized scalar/array record contract stays.
-                    let cell = if matches!(field, serde_json::Value::Object(map) if !map.is_empty())
-                    {
-                        match parents.serialize(field, record_no) {
-                            Ok(text) => Some(text),
-                            Err(error) => {
-                                cell_error = Some(error);
-                                return;
+        let second_report = for_each_record(
+            &path,
+            format,
+            recover,
+            encoding,
+            job,
+            None,
+            |record_no, value| {
+                job.check_cancelled()?;
+                let mut cells = Vec::new();
+                let mut parents = ParentCells::new(DEFAULT_BATCH_BYTES);
+                let mut cell_error = None;
+                visit_fields(&value, "", &mut |pointer, field| {
+                    if cell_error.is_some() {
+                        return;
+                    }
+                    if let Some(index) = column_index.get(pointer) {
+                        // These object values were formerly absent from the leaf
+                        // batch. Bound only this additional duplicated text; the
+                        // existing oversized scalar/array record contract stays.
+                        let cell = if matches!(field, serde_json::Value::Object(map) if !map.is_empty())
+                        {
+                            match parents.serialize(field, record_no) {
+                                Ok(text) => Some(text),
+                                Err(error) => {
+                                    cell_error = Some(error);
+                                    return;
+                                }
                             }
-                        }
-                    } else {
-                        value_to_cell(field)
-                    };
-                    cells.push((*index, cell));
+                        } else {
+                            value_to_cell(field)
+                        };
+                        cells.push((*index, cell));
+                    }
+                });
+                if let Some(error) = cell_error {
+                    return Err(error);
                 }
-            });
-            if let Some(error) = cell_error {
-                return Err(error);
-            }
-            let record = Record {
-                cells,
-                original: value.to_string(),
-                row_id: rows_read as i64,
-                // Physical JSONL line or 1-based JSON array element.
-                source_record: record_no as i64,
-            };
+                let record = Record {
+                    cells,
+                    original: value.to_string(),
+                    row_id: rows_read as i64,
+                    // Physical JSONL line or 1-based JSON array element.
+                    source_record: record_no as i64,
+                };
 
-            // The initial table layout only needs a leading sample, matching
-            // the CSV importer.
-            if rows_read < sample_rows {
-                for (position, text) in &record.cells {
-                    if let (Some(current), Some(text)) = (
-                        column_max_chars.get_mut(&columns[*position].id),
-                        text.as_ref(),
-                    ) {
-                        *current = (*current).max(text.chars().count());
+                // The initial table layout only needs a leading sample, matching
+                // the CSV importer.
+                if rows_read < sample_rows {
+                    for (position, text) in &record.cells {
+                        if let (Some(current), Some(text)) = (
+                            column_max_chars.get_mut(&columns[*position].id),
+                            text.as_ref(),
+                        ) {
+                            *current = (*current).max(text.chars().count());
+                        }
                     }
                 }
-            }
 
-            if batch.len() > 0 && batch.would_exceed(&record, limits.max_bytes) {
-                let frame = batch.take_frame(&columns)?;
-                write(&frame)?;
-                job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
-                job.check_cancelled()?;
-            }
-            batch.push(record)?;
-            rows_read += 1;
-            if batch.len() >= limits.max_rows || batch.allocated_bytes() >= limits.max_bytes {
-                let frame = batch.take_frame(&columns)?;
-                write(&frame)?;
-                job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
-                job.check_cancelled()?;
-            }
-            Ok(())
-        })?;
+                if batch.len() > 0 && batch.would_exceed(&record, limits.max_bytes) {
+                    let frame = batch.take_frame(&columns)?;
+                    write(&frame)?;
+                    job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
+                    job.check_cancelled()?;
+                }
+                batch.push(record)?;
+                rows_read += 1;
+                if batch.len() >= limits.max_rows || batch.allocated_bytes() >= limits.max_bytes {
+                    let frame = batch.take_frame(&columns)?;
+                    write(&frame)?;
+                    job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
+                    job.check_cancelled()?;
+                }
+                Ok(())
+            },
+        )?;
 
         if batch.len() > 0 {
             let frame = batch.take_frame(&columns)?;

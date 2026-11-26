@@ -21,7 +21,7 @@ use crate::{
 };
 
 mod quotes;
-pub(super) use quotes::unclosed_quote;
+pub(super) use quotes::unreadable_tail;
 
 pub(super) struct Prepared {
     pub reader: csv::Reader<Box<dyn Read>>,
@@ -34,6 +34,7 @@ fn open_reader(
     separator: u8,
     limits: BatchLimits,
     options: &ImportOptions,
+    job: &JobContext,
 ) -> Result<csv::Reader<Box<dyn Read>>, AppError> {
     let mut file =
         File::open(path).map_err(|e| AppError::Message(format!("Failed to open file: {e}")))?;
@@ -70,7 +71,8 @@ fn open_reader(
         }
     }
     let input: Box<dyn Read> = Box::new(Cursor::new(prefix[..prefix_len].to_vec()).chain(input));
-    let input: Box<dyn Read> = Box::new(quotes::QuoteCheckedReader::new(input, separator));
+    let input: Box<dyn Read> =
+        Box::new(quotes::QuoteCheckedReader::new(input, separator, job.id()));
     Ok(csv::ReaderBuilder::new()
         .delimiter(separator)
         .has_headers(options.has_headers)
@@ -85,13 +87,14 @@ pub(super) fn prepare(
     limits: BatchLimits,
     options: &ImportOptions,
     job: &JobContext,
+    sink: Option<&crate::import::diagnostics::IssueSink>,
 ) -> Result<Prepared, AppError> {
     job.check_cancelled()?;
     let separator = delimiter.unwrap_or(b',');
     if !valid_delimiter(separator) {
         return Err(invalid_delimiter());
     }
-    let mut reader = open_reader(path, separator, limits, options)?;
+    let mut reader = open_reader(path, separator, limits, options, job)?;
     let mut headers = if options.has_headers || !options.recover {
         reader
             .headers()
@@ -111,7 +114,7 @@ pub(super) fn prepare(
             job.check_cancelled()?;
             let record = match record {
                 Ok(record) => record,
-                Err(error) if unclosed_quote(&error).is_some() => break,
+                Err(error) if unreadable_tail(&error).is_some() => break,
                 Err(error) => {
                     return Err(AppError::Message(format!(
                         "Failed to parse the CSV data: {error}"
@@ -136,7 +139,7 @@ pub(super) fn prepare(
         while headers.len() < width {
             headers.push_field("");
         }
-        reader = open_reader(path, separator, limits, options)?;
+        reader = open_reader(path, separator, limits, options, job)?;
         if options.has_headers {
             reader
                 .headers()
@@ -178,7 +181,10 @@ pub(super) fn prepare(
         })
         .collect();
     if report.generated_columns > 0 {
-        report.issue(
+        let generated_columns = report.generated_columns;
+        crate::import::diagnostics::issue(
+            &mut report,
+            sink,
             if options.has_headers {
                 header_line
             } else {
@@ -187,7 +193,7 @@ pub(super) fn prepare(
             ImportIssueAction::Repaired,
             format!(
                 "Generated names for {} columns; source values were retained.",
-                report.generated_columns
+                generated_columns
             ),
         );
     }

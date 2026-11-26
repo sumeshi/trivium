@@ -12,10 +12,15 @@ use serde::de::{Deserializer as _, SeqAccess, Visitor};
 use serde_json::{Deserializer, Value};
 
 use crate::error::AppError;
-use crate::import::options::ImportReport;
 use crate::import::strict_json::{self, ValueSeed};
+use crate::import::{
+    diagnostics::IssueSink,
+    options::{ImportReport, TextEncoding},
+    record_limit::RecordBudget,
+};
 use crate::jobs::JobContext;
 
+mod lines;
 mod recovery;
 
 /// Record layout of a JSON source. `Json` accepts a single object or one
@@ -82,6 +87,7 @@ struct ArrayVisitor<'a, F> {
     error: &'a mut Option<AppError>,
     element: usize,
     job: &'a JobContext,
+    budget: &'a RecordBudget,
 }
 
 impl<'de, 'a, F> Visitor<'de> for ArrayVisitor<'a, F>
@@ -103,6 +109,7 @@ where
                 *self.error = Some(err);
                 return Err(serde::de::Error::custom("import cancelled"));
             }
+            self.budget.reset();
             let record_no = self.element + 1;
             let value = seq
                 .next_element_seed(ValueSeed::new(format!("/{}", self.element)))
@@ -141,17 +148,22 @@ pub(crate) fn for_each_record<F>(
     path: &Path,
     format: RecordFormat,
     recover: bool,
+    encoding: TextEncoding,
     job: &JobContext,
+    sink: Option<&IssueSink>,
     mut visit: F,
 ) -> Result<ImportReport, AppError>
 where
     F: FnMut(usize, Value) -> Result<(), AppError>,
 {
+    if format == RecordFormat::JsonLines {
+        return lines::for_each_line(path, encoding, recover, job, sink, &mut visit);
+    }
     if recover {
-        return recovery::for_each_record(path, format, job, visit);
+        return recovery::for_each_record(path, job, sink, visit);
     }
     let mut report = ImportReport::default();
-    for_each_strict_record(path, format, job, |record_no, value| {
+    for_each_strict_record(path, job, |record_no, value| {
         visit(record_no, value)?;
         report.source_records += 1;
         report.imported_records += 1;
@@ -160,90 +172,61 @@ where
     Ok(report)
 }
 
-fn for_each_strict_record<F>(
-    path: &Path,
-    format: RecordFormat,
-    job: &JobContext,
-    mut visit: F,
-) -> Result<(), AppError>
+fn for_each_strict_record<F>(path: &Path, job: &JobContext, mut visit: F) -> Result<(), AppError>
 where
     F: FnMut(usize, Value) -> Result<(), AppError>,
 {
     job.check_cancelled()?;
-    match format {
-        RecordFormat::JsonLines => {
-            let file = File::open(path)
-                .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-            let mut reader = BufReader::new(file);
-            strip_utf8_bom(&mut reader)?;
-            for (line_no, line) in reader.lines().enumerate() {
-                job.check_cancelled()?;
-                let line =
-                    line.map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let value = strict_json::from_reader(trimmed.as_bytes()).map_err(|e| {
-                    AppError::Message(format!("Failed to parse JSONL line {}: {}", line_no + 1, e))
-                })?;
-                if !value.is_object() {
-                    return Err(AppError::Message(format!(
-                        "JSONL line {} is not a JSON object.",
-                        line_no + 1
-                    )));
-                }
-                visit(line_no + 1, value)?;
-            }
-            Ok(())
-        }
-        RecordFormat::Json => {
-            let mut reader = BufReader::new(
-                File::open(path)
-                    .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?,
-            );
-            strip_utf8_bom(&mut reader)?;
-            let is_array = starts_with_array(&mut reader)?;
 
-            if is_array {
-                let mut error = None;
-                let mut visit = visit;
-                let visitor = ArrayVisitor {
-                    visit: &mut visit,
-                    error: &mut error,
-                    element: 0,
-                    job,
-                };
-                let mut deserializer = Deserializer::from_reader(reader);
-                let result = deserializer.deserialize_seq(visitor);
-                if let Some(error) = error {
-                    return Err(error);
-                }
-                result.map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
-                deserializer
-                    .end()
-                    .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
-                Ok(())
-            } else {
-                let value = strict_json::from_reader(reader)
-                    .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
-                if !value.is_object() {
-                    return Err(AppError::Message(
-                        "The JSON file must contain an object or an array of objects.".into(),
-                    ));
-                }
-                visit(1, value)
-            }
+    let mut reader = BufReader::new(
+        File::open(path).map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?,
+    );
+    strip_utf8_bom(&mut reader)?;
+    let is_array = starts_with_array(&mut reader, job)?;
+    let budget = RecordBudget::new(job);
+
+    if is_array {
+        let mut error = None;
+        let mut visit = visit;
+        let visitor = ArrayVisitor {
+            visit: &mut visit,
+            error: &mut error,
+            element: 0,
+            job,
+            budget: &budget,
+        };
+        let mut deserializer = Deserializer::from_reader(budget.reader(reader));
+        let result = deserializer.deserialize_seq(visitor);
+        job.check_cancelled()?;
+        if let Some(error) = error {
+            return Err(error);
         }
+        result.map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
+        budget.reset();
+        deserializer
+            .end()
+            .map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
+        Ok(())
+    } else {
+        let value = strict_json::from_reader(budget.reader(reader));
+        job.check_cancelled()?;
+        let value = value.map_err(|e| AppError::Message(format!("Failed to parse JSON: {}", e)))?;
+        if !value.is_object() {
+            return Err(AppError::Message(
+                "The JSON file must contain an object or an array of objects.".into(),
+            ));
+        }
+        visit(1, value)
     }
 }
 
 /// Looks past arbitrarily long leading whitespace without retaining it.
 /// Rewind before parsing so syntax errors keep their original line/column.
-fn starts_with_array(reader: &mut BufReader<File>) -> Result<bool, AppError> {
+fn starts_with_array(reader: &mut BufReader<File>, job: &JobContext) -> Result<bool, AppError> {
     let read_error = |error| AppError::Message(format!("Failed to read file: {}", error));
     let start = reader.stream_position().map_err(read_error)?;
     let is_array = loop {
+        job.check_cancelled()?;
         let buffer = reader.fill_buf().map_err(read_error)?;
         if let Some(byte) = buffer.iter().find(|byte| !byte.is_ascii_whitespace()) {
             break *byte == b'[';

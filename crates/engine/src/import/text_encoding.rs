@@ -31,22 +31,11 @@ pub fn prepare_source(
     job.check_cancelled()?;
     let mut input = crate::source_file::open_regular(source)
         .map_err(|error| failure("open the staged source", error))?;
-    let (marked, skip) =
-        detect_bom(&mut input).map_err(|error| failure("read the source encoding", error))?;
-    let encoding = match (requested, marked) {
-        (TextEncoding::Auto, marked) => marked.unwrap_or(TextEncoding::Utf8),
-        (selected, Some(marked)) if selected != marked => {
-            return Err(AppError::Message(format!(
-                "Selected encoding {} conflicts with the {} byte-order mark. Use Auto or the matching encoding.",
-                label(selected), label(marked)
-            )));
-        }
-        (selected, _) => selected,
-    };
+    let (encoding, skip, bom) = resolve_encoding(&mut input, requested)?;
     let prepared = PreparedSource {
         path: source.to_path_buf(),
         encoding: label(encoding).to_owned(),
-        bom: marked.is_some(),
+        bom,
         decoded: false,
     };
     if encoding == TextEncoding::Utf8 {
@@ -86,6 +75,44 @@ pub fn prepare_source(
         decoded: true,
         ..prepared
     })
+}
+
+/// Inspect a staged JSONL source without decoding the entire file. Selected
+/// recovery decodes its independently bounded physical lines in both passes.
+pub fn inspect_source(
+    source: &Path,
+    requested: TextEncoding,
+    job: &JobContext,
+) -> Result<PreparedSource, AppError> {
+    job.check_cancelled()?;
+    let mut input = crate::source_file::open_regular(source)
+        .map_err(|error| failure("open the staged source", error))?;
+    let (encoding, _, bom) = resolve_encoding(&mut input, requested)?;
+    Ok(PreparedSource {
+        path: source.to_owned(),
+        encoding: label(encoding).to_owned(),
+        bom,
+        decoded: false,
+    })
+}
+
+pub(crate) fn resolve_encoding(
+    input: &mut File,
+    requested: TextEncoding,
+) -> Result<(TextEncoding, u64, bool), AppError> {
+    let (marked, skip) =
+        detect_bom(input).map_err(|error| failure("read the source encoding", error))?;
+    let encoding = match (requested, marked) {
+        (TextEncoding::Auto, marked) => marked.unwrap_or(TextEncoding::Utf8),
+        (selected, Some(marked)) if selected != marked => {
+            return Err(AppError::Message(format!(
+                "Selected encoding {} conflicts with the {} byte-order mark. Use Auto or the matching encoding.",
+                label(selected), label(marked)
+            )));
+        }
+        (selected, _) => selected,
+    };
+    Ok((encoding, skip, marked.is_some()))
 }
 
 struct DecodedCopy(Option<PathBuf>);
@@ -131,7 +158,7 @@ fn detect_bom(input: &mut File) -> io::Result<(Option<TextEncoding>, u64)> {
     Ok(found)
 }
 
-fn label(encoding: TextEncoding) -> &'static str {
+pub(crate) fn label(encoding: TextEncoding) -> &'static str {
     match encoding {
         TextEncoding::Auto => "auto",
         TextEncoding::Utf8 => "utf-8",
@@ -144,7 +171,7 @@ fn label(encoding: TextEncoding) -> &'static str {
     }
 }
 
-fn decoder_encoding(encoding: TextEncoding) -> &'static Encoding {
+pub(crate) fn decoder_encoding(encoding: TextEncoding) -> &'static Encoding {
     match encoding {
         TextEncoding::Utf16Le => encoding_rs::UTF_16LE,
         TextEncoding::Utf16Be => encoding_rs::UTF_16BE,

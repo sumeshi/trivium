@@ -6,6 +6,7 @@ use polars::prelude::*;
 
 use crate::annotation_columns::{leading_block, ANNOTATION_COLUMNS};
 use crate::error::AppError;
+use crate::import::diagnostics::{self, IssueSink};
 use crate::import::empty_frame;
 use crate::import::options::{ImportIssueAction, ImportOptions, ImportReport};
 use crate::jobs::JobContext;
@@ -136,6 +137,7 @@ pub struct CsvImporter {
     restore_annotations: bool,
     recover: bool,
     report: ImportReport,
+    diagnostics: Option<IssueSink>,
     limits: BatchLimits,
     rows_read: usize,
     flags: HashMap<usize, FlagEntry>,
@@ -162,8 +164,20 @@ impl CsvImporter {
         options: &ImportOptions,
         job: &JobContext,
     ) -> Result<Self, AppError> {
+        Self::open_with_diagnostics(path, delimiter, limits, options, job, None)
+    }
+
+    pub fn open_with_diagnostics(
+        path: &Path,
+        delimiter: Option<u8>,
+        limits: BatchLimits,
+        options: &ImportOptions,
+        job: &JobContext,
+        diagnostics: Option<IssueSink>,
+    ) -> Result<Self, AppError> {
         let limits = limits.normalized();
-        let prepared = reader::prepare(path, delimiter, limits, options, job)?;
+        let prepared =
+            reader::prepare(path, delimiter, limits, options, job, diagnostics.as_ref())?;
         let flag_columns = FlagColumns::from_columns(&prepared.columns);
         let column_max_chars = prepared
             .columns
@@ -184,6 +198,7 @@ impl CsvImporter {
             sample_rows: COLUMN_WIDTH_SAMPLE_ROWS,
             finished: false,
             report: prepared.report,
+            diagnostics,
         })
     }
 
@@ -215,6 +230,7 @@ impl CsvImporter {
             restore_annotations,
             recover,
             report,
+            diagnostics,
             limits,
             rows_read,
             flags,
@@ -243,10 +259,13 @@ impl CsvImporter {
                             break;
                         }
                         Some(Err(err)) => {
+                            job.check_cancelled()?;
                             if *recover {
-                                if let Some(line) = reader::unclosed_quote(&err) {
+                                if let Some(line) = reader::unreadable_tail(&err) {
                                     report.unreadable_tail = true;
-                                    report.issue(
+                                    diagnostics::issue(
+                                        report,
+                                        diagnostics.as_ref(),
                                         Some(line),
                                         ImportIssueAction::UnreadableTail,
                                         err.to_string(),
@@ -257,7 +276,9 @@ impl CsvImporter {
                                 if matches!(err.kind(), csv::ErrorKind::Utf8 { .. }) {
                                     report.source_records += 1;
                                     report.skipped_records += 1;
-                                    report.issue(
+                                    diagnostics::issue(
+                                        report,
+                                        diagnostics.as_ref(),
                                         err.position().map(|position| position.line() as usize),
                                         ImportIssueAction::Skipped,
                                         err.to_string(),
@@ -298,7 +319,9 @@ impl CsvImporter {
                         Err(error) if *recover => {
                             report.source_records += 1;
                             report.skipped_records += 1;
-                            report.issue(
+                            diagnostics::issue(
+                                report,
+                                diagnostics.as_ref(),
                                 Some(source_line),
                                 ImportIssueAction::Skipped,
                                 format!("Invalid restored annotation: {error}"),
@@ -375,7 +398,7 @@ impl CsvImporter {
                 report.imported_records += 1;
                 if record.len() < column_meta.len() {
                     report.repaired_records += 1;
-                    report.issue(Some(source_line), ImportIssueAction::Repaired,
+                    diagnostics::issue(report, diagnostics.as_ref(), Some(source_line), ImportIssueAction::Repaired,
                         format!("Record has {} fields; {} missing trailing fields were retained as null.", record.len(), column_meta.len() - record.len()));
                 }
                 *rows_read += 1;

@@ -7,6 +7,8 @@ use super::protocol::Failure;
 const METHODS: &[&str] = &[
     "hello",
     "import",
+    "preview_import",
+    "export_import_report",
     "list",
     "load",
     "query",
@@ -61,6 +63,12 @@ pub(super) fn dispatch(
             encode(result)
         }
         "import" => operation(store, params, ops::projects::create_project),
+        "preview_import" => operation(store, params, |_, payload| {
+            ops::import_preview::preview_import(payload)
+        }),
+        "export_import_report" => {
+            operation(store, params, ops::import_report::export_import_report)
+        }
         "load" => operation(store, params, |store, payload| {
             ops::projects::load_project_metadata_with_job(store, payload, &JobContext::none())
         }),

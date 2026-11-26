@@ -9,6 +9,8 @@ pub mod extract;
 pub mod flags;
 pub mod group;
 pub mod histogram;
+pub mod import_preview;
+pub mod import_report;
 pub mod iocs;
 pub mod preset;
 pub mod projects;
