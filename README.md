@@ -32,6 +32,8 @@ View CSV, JSON, JSONL, and NDJSON logs in a table, including nested JSON records
 
 CSV and JSON imports support up to 4,096 data columns. CSV can also include one leading Trivium annotation block. Wider files are rejected without dropping columns.
 
+Imports are strict by default. **Import options** lets you open CSV without a header row, select an encoding, or choose **Recover readable records**. Unicode BOMs are recognized automatically; BOM-less Windows-1252 and Shift JIS require a selection. Recovery retains extra CSV fields, fills missing trailing fields with null, and skips invalid CSV/JSONL records where boundaries are known. A broken JSON array stops at its unreadable remainder. The saved import report shows repair/skip counts and up to 30 issue locations and reasons; the original file and its SHA-256 remain unchanged.
+
 Open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
 You can also drag and drop files into the window to review the import settings before opening them.

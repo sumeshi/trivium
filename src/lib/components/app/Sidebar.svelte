@@ -2,7 +2,9 @@
   import { createEventDispatcher } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import dayjs from 'dayjs';
-  import type { ProjectSummary } from '../../types';
+  import type { ImportOptions as ImportOptionsData, ProjectSummary } from '../../types';
+  import ImportOptions from './ImportOptions.svelte';
+  import { defaultImportOptions } from '../../importOptions';
   import type { ProjectImportFailure } from '../../stores/projects';
 
   const dispatch = createEventDispatcher();
@@ -17,6 +19,7 @@
   export let pendingFilePaths: string[] = [];
   export let pendingDelimiter: string;
   export let pendingRestoreAnnotations = false;
+  export let pendingImportOptions: ImportOptionsData = defaultImportOptions();
   export let importProgress: { index: number; total: number; fileName: string } | null = null;
   export let importFailures: ProjectImportFailure[] = [];
   export let canCreateProject: boolean;
@@ -131,11 +134,14 @@
       {#if csvSettingsRelevant}
         <label class="restore-annotations" title="Read flags, notes, tags and bookmarks from Trivium's exported CSV columns. Leave off for ordinary source data.">
           <input type="checkbox" aria-label="Restore Trivium annotations"
-            checked={pendingRestoreAnnotations} disabled={creating}
+            checked={pendingRestoreAnnotations} disabled={creating || !pendingImportOptions.hasHeaders}
             on:change={(event) => dispatch('restoreAnnotationsChange', event.currentTarget.checked)} />
           <span>Restore Trivium annotations</span>
         </label>
       {/if}
+
+      <ImportOptions options={pendingImportOptions} csv={csvSettingsRelevant} disabled={creating}
+        on:change={(event) => dispatch('importOptionsChange', event.detail)} />
 
       <button
         class="button primary full"

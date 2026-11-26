@@ -3,6 +3,8 @@
   import type { LoadProjectResponse } from '../../types';
   import { theme, setTheme, themeOptions } from '../../theme';
   import AppearanceDialog from './AppearanceDialog.svelte';
+  import ImportReportDialog from './ImportReportDialog.svelte';
+  import { importNeedsAttention, importReportSummary } from '../../importOptions';
   import { parseTheme } from '../../themeModel';
   import { BUILD_LABEL } from '../../buildInfo';
   import { writeClipboard } from '../../clipboard';
@@ -14,6 +16,7 @@
   let menuEl: HTMLDetailsElement;
   let menuOpen = false;
   let appearanceOpen = false;
+  let importReportOpen = false;
   let copyMessage = '';
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -96,6 +99,15 @@
 
   <div class="header-actions">
     <span class="copy-status" role="status" aria-live="polite">{copyMessage}</span>
+    {#if importNeedsAttention(meta?.import_report) && meta?.import_report}
+      <button type="button" class="import-report-indicator"
+        class:incomplete={meta.import_report.skippedRecords > 0 || meta.import_report.unreadableTail}
+        aria-label="View import report" title={importReportSummary(meta.import_report)}
+        on:click={() => importReportOpen = true}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v6m0 3h.01" /></svg>
+        <span>{importReportSummary(meta.import_report)}</span>
+      </button>
+    {/if}
     <details class="workspace-menu" bind:this={menuEl} bind:open={menuOpen}>
       <summary class="icon-button" aria-label="Workspace options" title="Workspace options" aria-expanded={menuOpen}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -129,6 +141,9 @@
           </div>
         </div>
         <button type="button" class="menu-action" on:click={() => { menuOpen = false; appearanceOpen = true; }}>Appearance…</button>
+        {#if meta?.import_report}
+          <button type="button" class="menu-action" on:click={() => { menuOpen = false; importReportOpen = true; }}>Import report…</button>
+        {/if}
         <button
           type="button"
           class="menu-action"
@@ -162,6 +177,9 @@
 </header>
 
 {#if appearanceOpen}<AppearanceDialog on:close={() => { appearanceOpen = false; menuEl?.querySelector('summary')?.focus(); }} />{/if}
+{#if importReportOpen && meta?.import_report}
+  <ImportReportDialog report={meta.import_report} {fileName} format={meta.source_format} on:close={() => importReportOpen = false} />
+{/if}
 
 <style>
   .app-header {
@@ -185,6 +203,11 @@
   }
   .header-left { flex: 1; }
   .header-actions { flex-shrink: 0; }
+  .import-report-indicator { display: inline-flex; align-items: center; gap: 4px; max-width: 260px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--surface); font-size: 10px; }
+  .import-report-indicator span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .import-report-indicator svg { flex: 0 0 auto; }
+  .import-report-indicator.incomplete { color: var(--warning); }
+  @media (max-width: 700px) { .import-report-indicator { padding: 5px; } .import-report-indicator span { display: none; } }
   .brand-block { min-width: 0; flex: 1; }
   .brand-line { flex-wrap: nowrap; white-space: nowrap; }
   .brand-name { flex: 0 0 auto; font-size: 14px; font-weight: 650; }

@@ -3,6 +3,9 @@ import type * as Wire from "./generated/engine";
 // Wire shapes are generated from Rust. These refinements express UI enums and
 // accept optional fields from older saved projects without changing the wire.
 export type ColumnMeta = Wire.ColumnMeta;
+export type ImportOptions = Wire.ImportOptions;
+export type ImportReport = Wire.ImportReport;
+export type TextEncoding = Wire.TextEncoding;
 type LegacyMetaFields = "description" | "source_sha256" | "source_file_name" |
   "source_format" | "source_size" | "source_path" | "storage_version" | "columns";
 export type ProjectMeta = Omit<Wire.ProjectMeta, LegacyMetaFields> &

@@ -34,6 +34,7 @@ import type {
   ProjectSummary,
   FlagEntry,
   ViewState,
+  ImportOptions,
 } from "./types";
 
 export type { FlagFilterValue } from "./types";
@@ -52,6 +53,7 @@ export interface CreateProjectArgs extends RequestOwned {
   delimiter?: string | null;
   /** Explicitly interpret Trivium's exported CSV columns as annotations. */
   restoreAnnotations?: boolean;
+  importOptions?: ImportOptions;
 }
 
 /** Partial updates preserve omitted fields; explicit memo null clears it. */
@@ -392,6 +394,7 @@ class NativeBackend implements Backend {
         description: args.description ?? null,
         delimiter: args.delimiter ?? null,
         restore_annotations: args.restoreAnnotations === true,
+        ...(args.importOptions ? { importOptions: { ...args.importOptions } } : {}),
       },
     }, args));
   }

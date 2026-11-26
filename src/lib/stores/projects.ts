@@ -2,7 +2,8 @@ import { derived, get, writable } from "svelte/store";
 import { createOwnedRequests } from "../workspaceRequests.ts";
 import { errorMessage } from "../errors.ts";
 import type { Backend } from "../backend";
-import type { IocEntry, LoadProjectResponse, ProjectSummary } from "../types";
+import type { ImportOptions, IocEntry, LoadProjectResponse, ProjectSummary } from "../types";
+import { defaultImportOptions } from "../importOptions.ts";
 
 export interface ProjectsState {
   projects: ProjectSummary[];
@@ -22,6 +23,7 @@ export interface ProjectsState {
   pendingFilePaths: string[];
   pendingDelimiter: string;
   pendingRestoreAnnotations: boolean;
+  pendingImportOptions: ImportOptions;
   importProgress: { index: number; total: number; fileName: string } | null;
   importFailures: ProjectImportFailure[];
 }
@@ -54,6 +56,7 @@ export function createProjectController(backend: Backend) {
     isLoadingProjects: false, deletingProjectIds: [], projectsError: "", isLoadingDetail: false, creating: false,
     projectsLoaded: false, detailError: "", pendingDescription: "", pendingFilePaths: [],
     pendingDelimiter: "", pendingRestoreAnnotations: false,
+    pendingImportOptions: defaultImportOptions(),
     importProgress: null, importFailures: [],
   });
   const canCreateProject = derived(state, ($state) => $state.pendingFilePaths.length > 0);
@@ -68,7 +71,13 @@ export function createProjectController(backend: Backend) {
 
   function setPendingRestoreAnnotations(restore: boolean) {
     state.update((value) => ({ ...value,
-      pendingRestoreAnnotations: restore && value.pendingFilePaths.some(isCsv),
+      pendingRestoreAnnotations: restore && value.pendingImportOptions.hasHeaders && value.pendingFilePaths.some(isCsv),
+    }));
+  }
+
+  function setPendingImportOptions(options: ImportOptions) {
+    state.update((value) => ({ ...value, pendingImportOptions: { ...options },
+      pendingRestoreAnnotations: options.hasHeaders && value.pendingRestoreAnnotations,
     }));
   }
 
@@ -76,6 +85,7 @@ export function createProjectController(backend: Backend) {
     const pendingFilePaths = [...new Set(paths.filter((path) => path.length > 0))];
     state.update((value) => ({
       ...value, pendingFilePaths,
+      pendingImportOptions: defaultImportOptions(),
       pendingRestoreAnnotations: false, importFailures: [],
     }));
   }
@@ -84,6 +94,7 @@ export function createProjectController(backend: Backend) {
     state.update((value) => ({
       ...value, pendingDescription: "", pendingFilePaths: [],
       pendingDelimiter: "", pendingRestoreAnnotations: false, importFailures: [],
+      pendingImportOptions: defaultImportOptions(),
     }));
   }
 
@@ -213,6 +224,7 @@ export function createProjectController(backend: Backend) {
     if (current.creating) throw new Error("Files are already being imported.");
     const navigationAtStart = detailGeneration;
     const paths = [...current.pendingFilePaths];
+    const importOptions = { ...current.pendingImportOptions };
     const result: ProjectImportResult = { imported: [], failures: [] };
     state.update((value) => ({ ...value, creating: true, importFailures: [] }));
     try {
@@ -223,7 +235,8 @@ export function createProjectController(backend: Backend) {
           const summary = await backend.createProject({
             path, description: current.pendingDescription || null,
             delimiter: isCsv(path) ? current.pendingDelimiter : "",
-            restoreAnnotations: current.pendingRestoreAnnotations && isCsv(path),
+            restoreAnnotations: current.pendingRestoreAnnotations && isCsv(path) && importOptions.hasHeaders,
+            importOptions: { ...importOptions, hasHeaders: !isCsv(path) || importOptions.hasHeaders },
           });
           result.imported.push(summary);
           if (disposed) continue;
@@ -249,6 +262,7 @@ export function createProjectController(backend: Backend) {
         const pendingFilePaths = result.failures.map((failure) => failure.path);
         state.update((value) => ({
           ...value, pendingFilePaths,
+          pendingImportOptions: { ...importOptions },
           pendingRestoreAnnotations: current.pendingRestoreAnnotations && pendingFilePaths.some(isCsv),
         }));
       } else resetPending();
@@ -371,6 +385,7 @@ export function createProjectController(backend: Backend) {
       ...value, projects: [], temporaryProjectIds: [], openProjectIds: [], selectedProjectId: null,
       projectDetail: null, isLoadingProjects: false, deletingProjectIds: [], isLoadingDetail: false, detailError: "",
       pendingFilePaths: [], pendingRestoreAnnotations: false,
+      pendingImportOptions: defaultImportOptions(),
       creating: false, importProgress: null, importFailures: [],
     }));
   }
@@ -385,7 +400,7 @@ export function createProjectController(backend: Backend) {
     state: { subscribe: state.subscribe }, canCreateProject, loadProjects, updateIocs,
     loadProjectDetail, selectProject, closeProject, refreshSelected, createProjects,
     deleteProject, adoptTemporaryProject, cleanupTemporaryProjects,
-    setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations,
+    setPendingDescription, setPendingDelimiter, setPendingFiles, setPendingRestoreAnnotations, setPendingImportOptions,
     resetPending, updateSummary,
   };
 }

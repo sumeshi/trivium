@@ -393,12 +393,14 @@
       pendingFilePaths={$projectState.pendingFilePaths}
       pendingDelimiter={$projectState.pendingDelimiter}
       pendingRestoreAnnotations={$projectState.pendingRestoreAnnotations}
+      pendingImportOptions={$projectState.pendingImportOptions}
       importProgress={$projectState.importProgress}
       importFailures={$projectState.importFailures}
       canCreateProject={$canCreateProject}
       on:descriptionChange={(e) => projectController.setPendingDescription(e.detail)}
       on:delimiterChange={(e) => projectController.setPendingDelimiter(e.detail)}
       on:restoreAnnotationsChange={(e) => projectController.setPendingRestoreAnnotations(e.detail)}
+      on:importOptionsChange={(e) => projectController.setPendingImportOptions(e.detail)}
       on:selectProject={(e) => handleSelectProject(e.detail)}
       on:deleteProject={(e) => requestDeleteProject(e.detail)}
       on:pickCsv={pickCsv}

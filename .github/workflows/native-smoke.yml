@@ -88,6 +88,9 @@ jobs:
       - name: Windows annotation transfer and storage checks
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --boundary-only
+      - name: Windows strict and recoverable imports
+        if: runner.os == 'Windows'
+        run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --import-recovery-only
       - name: Windows normal close and saved investigation restart
         if: runner.os == 'Windows'
         run: python tests/native/workspace_ui.py --binary target/debug/trivium-desktop.exe --close-only
