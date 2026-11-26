@@ -8,9 +8,8 @@ mod values;
 
 pub use annotated::histogram_series_annotated;
 pub(crate) use annotated::histogram_series_annotated_with_job;
-use float::FloatBins;
 use integer::IntegerBins;
-use values::{datetime_point, finite, float_point, format_nanos, int_point};
+use values::{datetime_point, format_nanos, int_point};
 
 pub const DEFAULT_BUCKETS: usize = 50;
 /// Keep caller-controlled histogram output bounded, including empty buckets.
@@ -144,24 +143,7 @@ pub(crate) fn histogram_series_ranged_kind(
             }
         }
         ColumnKind::Float => {
-            let values = row_indices
-                .iter()
-                .enumerate()
-                .map(|(position, idx)| {
-                    if position % 1024 == 0 {
-                        job.check_cancelled().map_err(|e| e.to_string())?;
-                    }
-                    Ok(float_point(series, *idx))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            match range {
-                Some((min, max)) => {
-                    let min = parse_float_bound(min)?;
-                    let max = parse_float_bound(max)?;
-                    histogram_f64_range(column, &values, buckets, min, max)
-                }
-                None => histogram_f64(column, &values, buckets),
-            }
+            float::histogram(column, series, row_indices, buckets, range, None, job)
         }
         ColumnKind::Datetime => {
             let points = points(series, row_indices, datetime_point, job)?;
@@ -196,14 +178,6 @@ fn parse_int_bound(text: &str) -> Result<i128, String> {
     text.trim()
         .parse::<i128>()
         .map_err(|_| format!("Invalid range bound: {text}"))
-}
-
-fn parse_float_bound(text: &str) -> Result<f64, String> {
-    let value = text
-        .trim()
-        .parse::<f64>()
-        .map_err(|_| format!("Invalid range bound: {text}"))?;
-    finite(value).ok_or_else(|| format!("Invalid range bound: {text}"))
 }
 
 fn parse_datetime_bound(text: &str) -> Result<i128, String> {
@@ -285,74 +259,6 @@ fn histogram_i128_range(
     Ok(Histogram {
         column: column.to_string(),
         kind: kind.as_str().to_string(),
-        buckets: buckets_out,
-        missing,
-        invalid: 0,
-        outside,
-        full_range: None,
-        auto_focused: false,
-    })
-}
-
-fn histogram_f64(
-    column: &str,
-    points: &[Option<f64>],
-    buckets: usize,
-) -> Result<Histogram, String> {
-    if let (Some(min), Some(max)) = (
-        points.iter().flatten().copied().reduce(f64::min),
-        points.iter().flatten().copied().reduce(f64::max),
-    ) {
-        return histogram_f64_range(column, points, buckets, min, max);
-    }
-    Ok(Histogram {
-        column: column.to_string(),
-        kind: ColumnKind::Float.as_str().to_string(),
-        buckets: empty_buckets(buckets),
-        missing: points.len() as u64,
-        invalid: 0,
-        outside: 0,
-        full_range: None,
-        auto_focused: false,
-    })
-}
-
-fn histogram_f64_range(
-    column: &str,
-    points: &[Option<f64>],
-    buckets: usize,
-    min: f64,
-    max: f64,
-) -> Result<Histogram, String> {
-    let bins = FloatBins::new(min, max, buckets)?;
-    let mut counts = vec![0u64; buckets];
-    let mut missing = 0u64;
-    let mut outside = 0u64;
-    for point in points {
-        let Some(value) = point else {
-            missing += 1;
-            continue;
-        };
-        if let Some(index) = bins.index(*value) {
-            counts[index] += 1;
-        } else {
-            outside += 1;
-        }
-    }
-    let buckets_out = bucket_labels(
-        &counts,
-        buckets,
-        |index| {
-            (
-                bins.edge(index).to_string(),
-                bins.edge(index + 1).to_string(),
-            )
-        },
-        |index| bins.end_inclusive(index),
-    );
-    Ok(Histogram {
-        column: column.to_string(),
-        kind: ColumnKind::Float.as_str().to_string(),
         buckets: buckets_out,
         missing,
         invalid: 0,

@@ -5,8 +5,8 @@ use polars::prelude::Series;
 use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
 use crate::models::FlagEntry;
 
-use super::values::{datetime_point, float_point, format_nanos, int_point};
-use super::{float::FloatBins, integer::IntegerBins};
+use super::integer::IntegerBins;
+use super::values::{datetime_point, format_nanos, int_point};
 use super::{Histogram, HistogramBucket, HistogramFlags, HistogramRangeInfo};
 
 /// Shared histogram with manual flag counts. Initial timeline focus uses a
@@ -63,6 +63,17 @@ pub(crate) fn histogram_series_annotated_with_job(
             job,
         );
     }
+    if kind == ColumnKind::Float {
+        return super::float::histogram(
+            column,
+            series,
+            rows,
+            buckets.max(1),
+            range,
+            Some(flags),
+            job,
+        );
+    }
     let mut result =
         super::histogram_series_ranged_kind(column, series, rows, buckets, range, kind, job)?;
     // The numeric stats view retains its existing bucket calculation. Count
@@ -74,34 +85,16 @@ pub(crate) fn histogram_series_annotated_with_job(
         if !first.start.is_empty() {
             let min = first.start.clone();
             let max = last.end.clone();
-            let int_bins = if result.kind == "int" {
-                Some(IntegerBins::new(
-                    min.parse::<i128>().map_err(|error| error.to_string())?,
-                    max.parse::<i128>().map_err(|error| error.to_string())?,
-                    result.buckets.len(),
-                ))
-            } else {
-                None
-            };
-            let float_bins = if int_bins.is_none() {
-                Some(FloatBins::new(
-                    min.parse::<f64>().map_err(|error| error.to_string())?,
-                    max.parse::<f64>().map_err(|error| error.to_string())?,
-                    result.buckets.len(),
-                )?)
-            } else {
-                None
-            };
+            let bins = IntegerBins::new(
+                min.parse::<i128>().map_err(|error| error.to_string())?,
+                max.parse::<i128>().map_err(|error| error.to_string())?,
+                result.buckets.len(),
+            );
             for (position, row) in rows.iter().enumerate() {
                 if position % 1024 == 0 {
                     job.check_cancelled().map_err(|e| e.to_string())?;
                 }
-                let index = if let Some(bins) = &int_bins {
-                    int_point(series, *row).and_then(|point| bins.index(point))
-                } else {
-                    float_point(series, *row)
-                        .and_then(|point| float_bins.as_ref().expect("numeric bounds").index(point))
-                };
+                let index = int_point(series, *row).and_then(|point| bins.index(point));
                 if let Some(index) = index {
                     add_flag(&mut result.buckets[index].flags, flags.get(row));
                 }
@@ -111,7 +104,7 @@ pub(crate) fn histogram_series_annotated_with_job(
     Ok(result)
 }
 
-fn add_flag(counts: &mut HistogramFlags, entry: Option<&FlagEntry>) {
+pub(super) fn add_flag(counts: &mut HistogramFlags, entry: Option<&FlagEntry>) {
     let value = entry
         .map(|entry| crate::flags::normalize_flag_value(&entry.flag))
         .unwrap_or_default();

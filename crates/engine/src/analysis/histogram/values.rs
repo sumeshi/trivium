@@ -25,28 +25,6 @@ fn canonical_i128(value: &AnyValue) -> Option<i128> {
     (text == parsed.to_string()).then_some(parsed)
 }
 
-pub(super) fn float_point(series: &Series, idx: usize) -> Option<f64> {
-    let value = series.get(idx).ok()?;
-    match value {
-        AnyValue::Null => None,
-        AnyValue::Float32(value) => finite(f64::from(value)),
-        AnyValue::Float64(value) => finite(value),
-        AnyValue::Int8(value) => Some(f64::from(value)),
-        AnyValue::Int16(value) => Some(f64::from(value)),
-        AnyValue::Int32(value) => Some(f64::from(value)),
-        AnyValue::Int64(value) => Some(value as f64),
-        AnyValue::UInt8(value) => Some(f64::from(value)),
-        AnyValue::UInt16(value) => Some(f64::from(value)),
-        AnyValue::UInt32(value) => Some(f64::from(value)),
-        AnyValue::UInt64(value) => Some(value as f64),
-        _ => anyvalue_to_search_string(&value).and_then(|text| finite(text.trim().parse().ok()?)),
-    }
-}
-
-pub(super) fn finite(value: f64) -> Option<f64> {
-    value.is_finite().then_some(value)
-}
-
 pub(super) fn datetime_point(series: &Series, idx: usize) -> Option<i128> {
     let value = series.get(idx).ok()?;
     datetime_value_nanos(&value)
