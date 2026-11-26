@@ -183,9 +183,16 @@ class WorkspaceView(WebView):
     def instrument(self) -> None:
         assert self.script("""
           window.__workspaceErrors=[];window.__workspaceIpc=[];window.__workspaceIpcSequence=0;
+          window.__workspaceIpcErrors=new Map();window.__workspaceIpcLostErrors=0;
           addEventListener('error',e=>window.__workspaceErrors.push(e.message));
           addEventListener('unhandledrejection',e=>window.__workspaceErrors.push(String(e.reason)));
           const original=window.fetch;
+          const failed=(entry,error)=>{
+            entry.error=String(error);
+            const errors=window.__workspaceIpcErrors;
+            if(errors.has(entry.sequence)||errors.size<2000)errors.set(entry.sequence,entry);
+            else window.__workspaceIpcLostErrors++;
+          };
           const wrapped=(input,options,...rest)=>{
 """ + IPC_COMMAND_JS + """
             if(!name||name.startsWith('plugin:')||name==='active_jobs')return original.call(window,input,options,...rest);
@@ -218,7 +225,7 @@ class WorkspaceView(WebView):
                     entry.result=name==='histogram'?structuredClone(value):{count:value?.count,updated:value?.updated,revision:value?.revision,
                       rows:Array.isArray(value?.rows)?value.rows.length:value?.rows,
                       total_rows:value?.total_rows,total_filtered_rows:value?.total_filtered_rows};
-                  }else entry.error=String(value);
+                  }else failed(entry,value);
                   const hold=window.__workspaceHold;
                   if(hold&&!hold.ready&&entry.result&&hold.name===name&&hold.projectId===request.projectId
                     &&(!('search' in hold)||hold.search===request.search)
@@ -229,11 +236,11 @@ class WorkspaceView(WebView):
                   }
                   return value;
                 },error=>{
-                  entry.decode_failed=performance.now();entry.error=String(error);throw error;
+                  entry.decode_failed=performance.now();failed(entry,error);throw error;
                 });
               };
               return response;
-            },error=>{entry.fetch_failed=performance.now();entry.error=String(error);throw error;});
+            },error=>{entry.fetch_failed=performance.now();failed(entry,error);throw error;});
           };
           window.fetch=wrapped;return window.fetch===wrapped;
         """), "Real native IPC instrumentation must be active"
@@ -257,7 +264,13 @@ class WorkspaceView(WebView):
         return self.script("return Number(document.querySelector('[aria-label=\"Choose visible columns\"] .count-chip').textContent.split('/')[0]);")
 
     def diagnostics(self) -> dict[str, Any]:
-        return self.script("return {js_errors:window.__workspaceErrors??[],ipc:window.__workspaceIpc??[]};")
+        return self.script("""
+          const entries=new Map(window.__workspaceIpcErrors);
+          for(const entry of window.__workspaceIpc??[])entries.set(entry.sequence,entry);
+          return {js_errors:window.__workspaceErrors??[],
+            ipc:[...entries.values()].sort((a,b)=>a.sequence-b.sequence),
+            ipc_errors_lost:window.__workspaceIpcLostErrors??0};
+        """)
 
     def state(self) -> dict[str, Any]:
         state = self.view()
@@ -1129,8 +1142,10 @@ def main() -> None:
                 print(f"PASS: {stage}", flush=True)
             stage = "final validation"
             assert report["stages"], "No native checks were selected."
-            assert not any(session["js_errors"] for session in app.sessions + [app.web.diagnostics()])
-            errors = [entry for session in app.sessions + [app.web.diagnostics()] for entry in session["ipc"] if "error" in entry]
+            sessions = app.sessions + [app.web.diagnostics()]
+            assert not any(session.get("ipc_errors_lost", 0) for session in sessions), "Native IPC error history overflowed"
+            assert not any(session["js_errors"] for session in sessions)
+            errors = [entry for session in sessions for entry in session["ipc"] if "error" in entry]
             cancelled = [entry for entry in errors if entry["error"] == "Cancelled." and entry["name"] in HEAVY | {"query_project_rows", "load_project", "locate_project_row", "get_cell", "surrounding_rows", "group_tree", "bulk_preview"}]
             # The feedback scenario deliberately types one invalid timestamp;
             # its query must reject that exact literal rather than coerce it.

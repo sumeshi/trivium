@@ -50,8 +50,34 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
                 return source
         checkpoint = WorkspaceView.checkpoint(Capture())
         trace = WorkspaceView.trace(Capture(), after=0)
+        diagnostics = WorkspaceView.diagnostics(Capture())
         return (f"const checkpoint=new Function({json.dumps(checkpoint)});"
-                f"const trace=after=>new Function({json.dumps(trace)})(after);\n")
+                f"const trace=after=>new Function({json.dumps(trace)})(after);"
+                f"const diagnostics=new Function({json.dumps(diagnostics)});\n")
+
+    def test_workspace_diagnostics_retain_evicted_and_late_errors_without_duplicate_entries(self):
+        self.check(WorkspaceView, self.workspace_cursor_api() + r"""
+value='Cancelled.';status='error';await(await call('query_project_rows')).json();
+assert.equal(diagnostics().ipc.length,1,'The error ledger must not duplicate retained entries');
+window.__workspaceBeforeCommit={name:'update_flag',projectId:'p1',ready:false};
+const pending=call('update_flag');await tick();
+value={};status='ok';for(let i=0;i<2000;i++)await(await call('list_projects')).json();
+assert.equal(window.__workspaceIpc.length,2000);assert.equal(window.__workspaceIpc[0].sequence,3);
+failure=Error('late native transport failure');window.__workspaceBeforeCommit.release();
+await assert.rejects(pending,/late native transport failure/);
+const result=diagnostics(),errors=result.ipc.filter(entry=>'error' in entry);
+assert.equal(result.ipc.length,2002);assert.equal(result.ipc_errors_lost,0);
+assert.deepEqual(errors.map(entry=>[entry.sequence,entry.name]),[[1,'query_project_rows'],[2,'update_flag']]);
+assert.equal(errors[0].error,'Cancelled.');assert.match(errors[1].error,/late native transport failure/);
+""")
+
+    def test_workspace_error_ledger_is_bounded_and_reports_overflow(self):
+        self.check(WorkspaceView, self.workspace_cursor_api() + r"""
+status='error';value='Cancelled.';
+for(let i=0;i<2001;i++)await(await call('query_project_rows')).json();
+assert.equal(window.__workspaceIpcErrors.size,2000);assert.equal(window.__workspaceIpc.length,2000);
+const result=diagnostics();assert.equal(result.ipc.length,2001);assert.equal(result.ipc_errors_lost,1);
+""")
 
     def test_workspace_checkpoints_survive_trace_eviction_and_keep_the_memory_bound(self):
         self.check(WorkspaceView, self.workspace_cursor_api() + r"""

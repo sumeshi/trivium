@@ -19,6 +19,7 @@ from runtime import IPC_COMMAND_JS, native_driver_default, native_workspace
 
 INSTRUMENT = r"""
 window.__workspaceErrors=[];window.__workspaceIpc=[];window.__workspaceIpcSequence=0;window.__TRIVIUM_PERF__={pages:[]};
+window.__workspaceIpcErrors=new Map();window.__workspaceIpcLostErrors=0;
 addEventListener('error',e=>window.__workspaceErrors.push(e.message));
 addEventListener('unhandledrejection',e=>window.__workspaceErrors.push(String(e.reason)));
 const p=window.__renderBenchmark={active:false,frames:[],handlers:[],flushes:[],mutations:0,added:0,removed:0,attributes:0,text:0,childLists:0,queries:[]};
