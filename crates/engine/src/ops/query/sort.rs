@@ -52,11 +52,12 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
     };
     // These are comparison keys only. Never rewrite the stored/displayed cell.
     let text = text.trim();
-    let numeric_text = text.replace([',', '\u{00A0}'], "");
-    if let Ok(integer) = numeric_text.parse::<i128>() {
+    // Share ordered conditions' numeric grammar; punctuation inside source
+    // text must not silently become a different number during sorting.
+    if let Ok(integer) = text.parse::<i128>() {
         return SortKey::Int(integer);
     }
-    if let Some(number) = ExactNumber::parse(&numeric_text) {
+    if let Some(number) = ExactNumber::parse(text) {
         return SortKey::Number(Box::new(number));
     }
     if let Some(nanos) = parse_datetime_nanos(text) {
