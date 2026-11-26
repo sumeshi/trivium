@@ -13,6 +13,9 @@
   let previous: TimeSpan[] | null = null;
   $: sorted = rankedSpans(spans, order);
   $: if (spans !== previous) { previous = spans; visible = 20; }
+
+  const selectSpan = (span: TimeSpan) =>
+    filterByRange(column, span.start_utc, span.end_utc, "time-analysis");
 </script>
 
 <div class="span-list-toolbar">
@@ -33,12 +36,12 @@
           type="button"
           class="span-row"
           title={`Filter ${column}: ${span.start} – ${span.end}; ${kind === "gap" ? `${span.count.toLocaleString()} elapsed seconds` : `${span.count.toLocaleString()} events`}`}
-          on:click={() => filterByRange(column, span.start, span.end, "time-analysis")}
+          on:click={() => selectSpan(span)}
         >
           <span class="span-dates"><span>{compactTimestamp(span.start)}</span><span>{compactTimestamp(span.end)}</span></span>
           <span class="span-measures">
             {#if kind !== "gap"}<strong>{span.count.toLocaleString()} <small>events</small></strong>{/if}
-            <span>{durationLabel(durationNanos(span.start, span.end))}</span>
+            <span>{durationLabel(durationNanos(span))}</span>
           </span>
         </button>
       </li>

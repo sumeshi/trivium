@@ -1,28 +1,26 @@
-import { parseTimelineNanos, shortTimelineLabel } from "./timelineRange.ts";
+import { shortTimelineLabel } from "./timelineRange.ts";
+import type { TimeSpan } from "./types";
 
-/** Display-only shortening: callers retain the original timestamp for filters. */
+/** Display-only shortening of source labels; tooltips retain original timestamps. */
 export const compactTimestamp = shortTimelineLabel;
 
 /** Count-based ranking also ranks gaps, whose count is elapsed whole seconds. */
-export function rankedSpans<T extends { count: number; start?: string; end?: string }>(
+export function rankedSpans<T extends { count: number; duration_nanos: string }>(
   spans: readonly T[], mode: "count" | "duration" | "time" = "count"
 ): T[] {
   if (mode === "time") return [...spans];
   if (mode === "count") return [...spans].sort((left, right) => right.count - left.count);
-  return spans.map(span => ({ span, duration: durationNanos(span.start ?? "", span.end ?? "") ?? -1n }))
+  return spans.map(span => ({ span, duration: durationNanos(span) }))
     .sort((left, right) => left.duration === right.duration ? 0 : left.duration > right.duration ? -1 : 1)
     .map(item => item.span);
 }
 
-/** Derive a duration for display without rounding original nanosecond text. */
-export function durationNanos(start: string, end: string): bigint | null {
-  const first = parseTimelineNanos(start);
-  const last = parseTimelineNanos(end);
-  return first === null || last === null || last < first ? null : last - first;
+/** Consume the engine's exact duration without interpreting source timestamps. */
+export function durationNanos(span: Pick<TimeSpan, "duration_nanos">): bigint {
+  return BigInt(span.duration_nanos);
 }
 
-export function durationLabel(nanos: bigint | null): string {
-  if (nanos === null) return "—";
+export function durationLabel(nanos: bigint): string {
   if (nanos === 0n) return "0s";
   if (nanos < 1_000n) return `${nanos}ns`;
   if (nanos < 1_000_000n) return `${Number(nanos) / 1_000}µs`;

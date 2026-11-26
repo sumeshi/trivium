@@ -159,6 +159,35 @@ fn flexible_dates_share_sort_filter_analysis_bulk_and_export_instants() {
             .sum::<u64>(),
         4
     );
+    let session = &time.sessions[0];
+    // Equal instants retain the analysis's existing text tie-breaker.
+    assert_eq!(session.start, values[2]);
+    assert_eq!(session.end, values[0]);
+    assert_eq!(session.start_utc, "2026-11-14T03:04:05.123456789Z");
+    assert_eq!(session.end_utc, "2026-11-14T03:04:05.123456790Z");
+    assert_eq!(session.duration_nanos, "1");
+    // Use the exact range supplied by analysis, as the UI does. No source
+    // timestamp spelling or browser parser is involved in this drill-down.
+    let drilldown = ops::rows::query_project_rows(
+        &store,
+        serde_json::from_value(json!({
+            "projectId": id, "sortKey": column, "sortDirection": "asc",
+            "condition": {"kind":"and", "children":[
+                {"column": column, "op":"ge", "values":[session.start_utc]},
+                {"column": column, "op":"le", "values":[session.end_utc]}
+            ]}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        drilldown
+            .rows
+            .iter()
+            .map(|row| row.row_index)
+            .collect::<Vec<_>>(),
+        indices
+    );
     let grouped = ops::group::group_tree(
         &store,
         serde_json::from_value(json!({

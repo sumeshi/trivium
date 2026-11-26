@@ -9,8 +9,14 @@ use crate::value_utils::anyvalue_to_search_string;
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct TimeSpan {
+    /// Original endpoint text for display and evidence inspection.
     pub start: String,
     pub end: String,
+    /// Engine-resolved UTC bounds for generated range conditions.
+    pub start_utc: String,
+    pub end_utc: String,
+    /// Exact elapsed nanoseconds as decimal text, including spans wider than i64.
+    pub duration_nanos: String,
     #[ts(type = "number")]
     pub count: u64,
 }
@@ -53,15 +59,17 @@ impl SpanBudget {
     fn push(
         &mut self,
         spans: &mut Vec<TimeSpan>,
-        start: &str,
-        end: &str,
+        start: &Event,
+        end: &Event,
         count: u64,
     ) -> Result<(), String> {
         let bytes = self
             .bytes
-            .saturating_add(start.len())
-            .saturating_add(end.len())
-            .saturating_add(std::mem::size_of::<TimeSpan>() + 64);
+            .saturating_add(start.text.len())
+            .saturating_add(end.text.len())
+            // Two UTC timestamps (at most 30 bytes each), a duration of at
+            // most 20 digits, and overhead for all five string allocations.
+            .saturating_add(std::mem::size_of::<TimeSpan>() + 80 + 5 * 32);
         if self.count == MAX_SPANS || bytes > MAX_SPAN_BYTES {
             return Err(span_limit_error());
         }
@@ -70,8 +78,13 @@ impl SpanBudget {
         self.count += 1;
         self.bytes = bytes;
         spans.push(TimeSpan {
-            start: start.into(),
-            end: end.into(),
+            start: start.text.clone(),
+            end: end.text.clone(),
+            start_utc: chrono::DateTime::from_timestamp_nanos(start.nanos)
+                .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            end_utc: chrono::DateTime::from_timestamp_nanos(end.nanos)
+                .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            duration_nanos: (i128::from(end.nanos) - i128::from(start.nanos)).to_string(),
             count,
         });
         Ok(())
@@ -195,8 +208,8 @@ fn gaps(
         if delta >= minimum {
             budget.push(
                 &mut spans,
-                &pair[0].text,
-                &pair[1].text,
+                &pair[0],
+                &pair[1],
                 (delta / 1_000_000_000) as u64,
             )?;
         }
@@ -283,8 +296,8 @@ fn push_span(
 ) -> Result<(), String> {
     budget.push(
         spans,
-        &events[0].text,
-        &events[events.len() - 1].text,
+        &events[0],
+        &events[events.len() - 1],
         events.len() as u64,
     )
 }
