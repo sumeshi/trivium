@@ -25,6 +25,7 @@ type PageRequest = {
   explicit: boolean;
   running: boolean;
   cancelled: boolean;
+  pageColumns: string[];
   priority: number;
   promise: Promise<void>;
 };
@@ -158,7 +159,8 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     failedPages.delete(page);
     publishError();
     if (!get(workspace.queryCountKnown)) workspace.appliedResultLoading.set(true);
-    const request: PageRequest = { key, page, explicit, running: false, cancelled: false,
+    const pageColumns = [...get(workspace.visibleColumns)];
+    const request: PageRequest = { key, page, explicit, running: false, cancelled: false, pageColumns,
       priority: explicit ? 0 : 1, promise: Promise.resolve() };
     const timing = beginPageTiming(page * PAGE_SIZE, PAGE_SIZE);
     pageRequests.set(key, request);
@@ -168,7 +170,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       flagFilter: filters.flag, bookmarkedOnly: filters.bookmarkedOnly,
       condition: structuredClone(filters.condition), offset: page * PAGE_SIZE, limit: PAGE_SIZE,
       sortKey: get(workspace.sortKey), sortDirection: get(workspace.sortDirection),
-      pageColumns: [...get(workspace.visibleColumns)],
+      pageColumns,
     };
     request.promise = (async () => {
       try {
@@ -306,6 +308,13 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     if (next === projectionKey) return;
     projectionKey = next;
     if (!options.isReady()) return;
+    // Hiding columns, or revealing cells retained from an earlier projection,
+    // does not change any delivered evidence. Future pages capture the new set.
+    const cachedComplete = [...get(workspace.rowsCache).values()]
+      .every(row => columns.every(column => Object.hasOwn(row.cells, column)));
+    const pendingComplete = [...pageRequests.values()]
+      .every(request => columns.every(column => request.pageColumns.includes(column)));
+    if (cachedComplete && pendingComplete) return;
     const page = workspace.currentVisiblePage();
     // Membership, counts, selection and viewport still describe the same
     // query. Only cached cells and in-flight page projections are obsolete.

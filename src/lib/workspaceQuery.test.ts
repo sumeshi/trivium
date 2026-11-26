@@ -400,10 +400,14 @@ test("visibility refreshes every cached page and retires old responses while pre
   assert.equal(calls.length, 5, "reordering the same visible set does not reread evidence");
   workspace.hiddenColumns.set(new Set(["c2"])); await settle();
   workspace.hiddenColumns.set(new Set()); await settle();
+  assert.equal(calls.length, 5, "hide and reveal reuse cells already held by every cached page");
+  workspace.hiddenColumns.set(new Set(["c2"]));
+  const omitted = queries.requestPage(3); await settle();
   assert.deepEqual(calls[5].args.pageColumns, ["c1"]);
+  workspace.hiddenColumns.set(new Set()); await settle();
   assert.deepEqual(calls[6].args.pageColumns, ["c2", "c1"]);
   calls[6].resolve(); await settle();
-  calls[5].reject("Retired hidden projection failed"); await settle();
+  calls[5].reject("Retired hidden projection failed"); await omitted; await settle();
   assert.equal(get(workspace.rowsCache).get(PAGE_SIZE)?.displayCache.c2, "c2 source");
   assert.equal(get(workspace.queryError), null);
   assert.deepEqual(notices, []);
@@ -416,17 +420,40 @@ test("an empty visible projection stays explicit and disposed tabs ignore projec
   await settle(); calls[0].resolve(); await original;
   workspace.hiddenColumns.set(new Set(["c1", "c2"]));
   await settle();
+  assert.equal(calls.length, 1, "hiding all columns leaves the query and existing cells untouched");
+  const hidden = queries.requestPage(1); await settle();
   assert.deepEqual(calls[1].args.pageColumns, [], "all-hidden is distinct from the omitted legacy projection");
   workspace.hiddenColumns.set(new Set());
   await settle();
   assert.deepEqual(calls[2].args.pageColumns, ["c1", "c2"]);
   workspace.dispose();
   calls[2].resolve(); calls[1].reject("Old tab projection failed");
-  await settle();
+  await hidden; await settle();
   assert.equal(get(workspace.rowsCache).size, 0);
   assert.equal(get(workspace.pendingPages).size, 0);
   assert.deepEqual(notices, []);
 });
+
+for (const failed of [false, true]) {
+  test(`visibility preserves an ${failed ? "errored" : "empty"} result until the next requested page`, async () => {
+    const { workspace, queries, calls } = queryStateSetup(["c1", "c2"], ["c2"]);
+    const initial = queries.requestPage(0);
+    await settle();
+    if (failed) calls[0].reject("Invalid search"); else calls[0].resolve(0);
+    await initial;
+    const error = get(workspace.queryError);
+    workspace.hiddenColumns.set(new Set()); await settle();
+    assert.equal(calls.length, 1, "a visibility edit cannot retry a failed query or rerun an empty result");
+    assert.equal(get(workspace.queryError), error);
+    assert.equal(get(workspace.queryCountKnown), !failed);
+    const next = failed ? queries.retryFailedPage() : queries.requestPage(0, true);
+    await settle();
+    assert.deepEqual(calls[1].args.pageColumns, ["c1", "c2"]);
+    calls[1].resolve(); await next;
+    assert.equal(get(workspace.rowsCache).get(0)?.displayCache.c2, "c2 source");
+    workspace.dispose();
+  });
+}
 
 for (const queued of [false, true]) {
   test(`a visibility change preserves an ${queued ? "awaiting-slot" : "in-flight"} original-row Go`, async () => {
