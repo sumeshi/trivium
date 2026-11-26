@@ -1,6 +1,6 @@
-use crate::analysis::infer::parse_datetime_nanos;
+use crate::analysis::temporal::datetime_value_nanos;
 use crate::value_utils::anyvalue_to_search_string;
-use polars::prelude::{AnyValue, Series, TimeUnit};
+use polars::prelude::{AnyValue, Series};
 
 pub(super) fn int_point(series: &Series, idx: usize) -> Option<i128> {
     let value = series.get(idx).ok()?;
@@ -49,23 +49,7 @@ pub(super) fn finite(value: f64) -> Option<f64> {
 
 pub(super) fn datetime_point(series: &Series, idx: usize) -> Option<i128> {
     let value = series.get(idx).ok()?;
-    match value {
-        AnyValue::Null => None,
-        AnyValue::Datetime(value, unit, _) => Some(scale_nanos(value, unit)),
-        AnyValue::Date(days) => Some(i128::from(days) * 86_400 * 1_000_000_000),
-        _ => anyvalue_to_search_string(&value)
-            .and_then(|text| parse_datetime_nanos(text.trim()))
-            .map(i128::from),
-    }
-}
-
-fn scale_nanos(value: i64, unit: TimeUnit) -> i128 {
-    let value = i128::from(value);
-    match unit {
-        TimeUnit::Nanoseconds => value,
-        TimeUnit::Microseconds => value * 1_000,
-        TimeUnit::Milliseconds => value * 1_000_000,
-    }
+    datetime_value_nanos(&value)
 }
 
 pub(super) fn format_nanos(value: i128) -> String {

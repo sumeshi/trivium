@@ -1,8 +1,11 @@
-use polars::prelude::Series;
-use serde_json::Value;
+use chrono::SecondsFormat;
+use polars::prelude::{AnyValue, Series};
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
-use crate::value_utils::anyvalue_to_json;
+use crate::analysis::{
+    infer::{series_kind_for_rows_with_job, ColumnKind},
+    temporal::datetime_value_nanos,
+};
+use crate::value_utils::anyvalue_to_search_string;
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq, ts_rs::TS)]
 pub struct TimeSpan {
@@ -128,11 +131,12 @@ pub(crate) fn analyze_series_with_job(
         if let Some(event) = event_at(series, *idx) {
             events.push(event);
         } else {
-            let present = series
-                .get(*idx)
-                .ok()
-                .and_then(|value| crate::value_utils::anyvalue_to_search_string(&value))
-                .is_some_and(|text| !text.trim().is_empty());
+            let present = series.get(*idx).ok().is_some_and(|value| match value {
+                // Presence does not require formatting an out-of-range
+                // native datetime. Time-of-day alone has no calendar date.
+                AnyValue::Date(_) | AnyValue::Datetime(_, _, _) | AnyValue::Time(_) => true,
+                _ => anyvalue_to_search_string(&value).is_some_and(|text| !text.trim().is_empty()),
+            });
             if present {
                 invalid += 1;
             } else {
@@ -161,14 +165,17 @@ pub(crate) fn analyze_series_with_job(
 
 fn event_at(series: &Series, idx: usize) -> Option<Event> {
     let value = series.get(idx).ok()?;
-    let json = anyvalue_to_json(&value);
-    let text = match json {
-        Value::Null => return None,
-        Value::String(text) => text,
-        Value::Number(number) => number.to_string(),
-        other => other.to_string(),
+    // Keep this analysis's existing i64 nanosecond range. Native date/unit
+    // scaling is exact and never inferred from a numeric string.
+    let nanos = i64::try_from(datetime_value_nanos(&value)?).ok()?;
+    let text = match value {
+        AnyValue::Date(_) => chrono::DateTime::from_timestamp_nanos(nanos)
+            .format("%Y-%m-%d")
+            .to_string(),
+        AnyValue::Datetime(_, _, _) => chrono::DateTime::from_timestamp_nanos(nanos)
+            .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+        _ => anyvalue_to_search_string(&value)?,
     };
-    let nanos = parse_datetime_nanos(text.trim())?;
     Some(Event { nanos, text })
 }
 
