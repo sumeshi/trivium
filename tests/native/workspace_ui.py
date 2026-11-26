@@ -609,6 +609,10 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     assert web.script("return !document.querySelector('.rare-section').open;")
     web.choose('select[aria-label="Stats column"]', data["columns"]["score"])
     wait_for(lambda: web.script("return document.querySelectorAll('.column-histogram rect').length;"), lambda value: value > 0, "numeric SVG histogram")
+    web.choose('select[aria-label="Stats column"]', data["columns"]["cohort"])
+    wait_for(lambda: web.script("return !document.querySelector('.column-histogram');"), bool, "text column retires the numeric histogram")
+    web.choose('select[aria-label="Stats column"]', data["columns"]["score"])
+    wait_for(lambda: web.script("return document.querySelectorAll('.column-histogram rect').length;"), lambda value: value > 0, "returning to the numeric column restores its histogram")
     web.drawer("Time analysis")
     wait_for(lambda: web.script("return !!document.querySelector('.time-panel .time-section');"), bool, "time gaps/sessions/bursts")
     assert web.script("return document.querySelector('select[aria-label=\"Sort gaps\"]').value;") == "duration"

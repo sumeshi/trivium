@@ -54,8 +54,10 @@
   $: if (!numeric) {
     reads.cancel("histogram");
     histogramRequests.invalidate();
+    lastHistogramKey = "";
     histogram = null;
     histogramError = "";
+    histogramLoading = false;
   }
 
   const loadStats = async (
