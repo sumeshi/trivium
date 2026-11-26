@@ -591,7 +591,7 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     web.write('input[aria-label="Find a column"]', "col_27")
     web.click(web.element('#visible-column-menu li input'))
     web.named("Done", "#visible-column-menu")
-    web.horizontal(100000)
+    web.horizontal(web.script("const e=document.querySelector('.virtual-viewport');return e.scrollWidth-e.clientWidth-e.scrollLeft;"))
     revealed = wait_for(lambda: web.script("const cell=document.querySelector('.data-row:not(.loading) [data-column-id=\"'+arguments[0]+'\"] .cell-text');return cell?{row:Number(cell.closest('.data-row').dataset.rowIndex),text:cell.textContent.trim()}:null;", reveal_column),
                         lambda value: bool(value and value["text"] and value["text"] != "Loading…"),
                         "revealed column displays its source value after reopening")
@@ -599,7 +599,7 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     assert revealed["text"] == original_cell["text"], (revealed, original_cell)
     assert web.state()["selectedIds"] == selected_before_reveal
     assert web.query() == before, (before, web.query())
-    web.horizontal(-100000)
+    web.horizontal(-web.state()["scrollLeft"])
     assert not any(entry["name"] == "create_project" for entry in web.trace(after=checkpoint)), "Reload must not reimport the source"
     assert data["sha"] in web.script("return document.querySelector('[aria-label=\"Copy full SHA-256\"]').title;")
     web.write('input[aria-label="Search rows"]', "")
