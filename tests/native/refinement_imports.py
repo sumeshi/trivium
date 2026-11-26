@@ -189,6 +189,6 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
         for source in source_paths:
             source.unlink(missing_ok=True)
     report["import_identity"] = {"header_full_source_path": True, "recent_short_hash_without_prefix": label,
-        "formats": formats, "read_only_notice": True, "cases": checks,
+        "file_picker_label": "Choose files", "preview_before_import_options": True, "cases": checks,
         "cancel_preserves_selection_and_options": cancelled_selection, "mixed_batch": batch_check,
         "unverified": "Native OS file-picker interaction; its selected-path response alone is substituted"}
