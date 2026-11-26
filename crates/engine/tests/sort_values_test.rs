@@ -4,11 +4,113 @@ use std::fs;
 
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::projects::{create_project, CreateProjectPayload};
-use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
+use trivium_engine::ops::rows::{
+    locate_project_row, query_project_rows, LocateRowPayload, QueryRowsPayload, QuerySpec,
+};
 use trivium_engine::store::ProjectsStore;
 use uuid::Uuid;
 
 mod common;
+
+#[test]
+fn internal_sort_ids_ignore_case_across_pages_location_and_export() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("values.csv");
+    fs::write(&source, "value\n2\n1\n1\n").unwrap();
+    let store = ProjectsStore::new(root.path().join("cases")).unwrap();
+    let project = create_project(
+        &store,
+        CreateProjectPayload {
+            import_options: None,
+            path: source.to_string_lossy().into_owned(),
+            description: None,
+            delimiter: None,
+            restore_annotations: None,
+        },
+    )
+    .unwrap()
+    .meta
+    .id;
+    let column = common::id(&common::column_ids(&store, project), "value");
+    let uppercase = column.to_ascii_uppercase();
+    assert_ne!(uppercase, column);
+    for (direction, expected, first_position) in
+        [("asc", vec![1, 2, 0], 2), ("desc", vec![0, 1, 2], 0)]
+    {
+        let spec = QuerySpec {
+            sort_key: Some(uppercase.clone()),
+            sort_direction: Some(direction.into()),
+            ..Default::default()
+        };
+        let page = query_project_rows(
+            &store,
+            QueryRowsPayload {
+                project_id: project,
+                spec: spec.clone(),
+                offset: None,
+                limit: Some(100),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            page.rows
+                .iter()
+                .map(|row| row.row_index)
+                .collect::<Vec<_>>(),
+            expected,
+            "{direction}: uppercase internal ID must retain the requested sort"
+        );
+        let middle = query_project_rows(
+            &store,
+            QueryRowsPayload {
+                project_id: project,
+                spec: spec.clone(),
+                offset: Some(1),
+                limit: Some(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(middle.rows.len(), 1);
+        assert_eq!(middle.rows[0].row_index, expected[1]);
+        let location = locate_project_row(
+            &store,
+            LocateRowPayload {
+                project_id: project,
+                row_index: 0,
+                spec: spec.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(location.position, Some(first_position));
+        assert_eq!(location.total_filtered_rows, 3);
+
+        let destination = root.path().join(format!("uppercase-{direction}.csv"));
+        export_project(
+            &store,
+            ExportProjectPayload {
+                allow_overwrite: false,
+                project_id: project,
+                destination: destination.to_string_lossy().into_owned(),
+                scope: Some("filtered".into()),
+                spec,
+                columns: Some(vec![column.clone()]),
+                row_indices: None,
+                include_annotations: Some(false),
+            },
+        )
+        .unwrap();
+        let values = ["2", "1", "1"];
+        let exported = csv::Reader::from_path(destination)
+            .unwrap()
+            .records()
+            .map(|record| record.unwrap().get(0).unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            exported,
+            expected.iter().map(|&row| values[row]).collect::<Vec<_>>()
+        );
+    }
+}
 
 #[test]
 fn exact_numeric_and_datetime_sort_survive_reopen_and_export_original_spellings() {

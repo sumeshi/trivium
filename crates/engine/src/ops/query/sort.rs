@@ -102,7 +102,14 @@ pub fn sort_row_indices(
     let Some(sort_key) = sort_key else {
         return Ok(indices);
     };
-    let Ok(series) = df.column(sort_key) else {
+    // Projection already resolves internal IDs case-insensitively. Resolve
+    // the same column here, while preserving exact names for legacy tables
+    // that can contain both `Value` and `value`.
+    let Some(series) = df.column(sort_key).ok().or_else(|| {
+        df.get_columns()
+            .iter()
+            .find(|series| series.name().eq_ignore_ascii_case(sort_key))
+    }) else {
         return Ok(indices);
     };
     // Query targets already arrive in source order. Normalize only an unusual
@@ -321,6 +328,33 @@ mod tests {
             assert_eq!(
                 sort_row_indices(&frame, selected.clone(), key, None, &JobContext::none()).unwrap(),
                 selected
+            );
+        }
+    }
+
+    #[test]
+    fn case_insensitive_sort_lookup_prefers_an_exact_source_name() {
+        let frame = DataFrame::new(vec![
+            Series::new("Value", [2_i64, 1, 1]),
+            Series::new("value", [1_i64, 2, 3]),
+        ])
+        .unwrap();
+        for (key, expected) in [
+            ("value", vec![0, 1, 2]),
+            ("Value", vec![1, 2, 0]),
+            ("VALUE", vec![1, 2, 0]),
+        ] {
+            assert_eq!(
+                sort_row_indices(
+                    &frame,
+                    vec![0, 1, 2],
+                    Some(key),
+                    Some("asc"),
+                    &JobContext::none(),
+                )
+                .unwrap(),
+                expected,
+                "{key}"
             );
         }
     }
