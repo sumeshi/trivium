@@ -34,6 +34,7 @@ fn counters_are_json_numbers_and_evidence_values_remain_exact_strings() {
             kind: "string".into(),
             truncated: false,
             length: Some(text.chars().count()),
+            datetime_nanos: None,
         };
         assert_eq!(serde_json::to_value(cell).unwrap()["text"], text);
     }

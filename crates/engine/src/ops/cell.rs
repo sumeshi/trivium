@@ -4,7 +4,7 @@
 //! operation with the project id, original row id, and column id to obtain the
 //! untruncated value without reading the whole frame.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -30,24 +30,7 @@ pub struct GetCellPayload {
 
 /// Full cell value. The shape matches the list `Cell` DTO so the frontend can
 /// reuse its display/copy rules; `text` is never truncated here.
-#[derive(Debug, Clone, Serialize)]
-pub struct GetCellResponse {
-    pub text: Option<String>,
-    pub kind: String,
-    pub truncated: bool,
-    pub length: Option<usize>,
-}
-
-impl From<Cell> for GetCellResponse {
-    fn from(cell: Cell) -> Self {
-        Self {
-            text: cell.text,
-            kind: cell.kind,
-            truncated: cell.truncated,
-            length: cell.length,
-        }
-    }
-}
+pub type GetCellResponse = Cell;
 
 /// Reads one cell with its full text.
 ///
@@ -115,5 +98,5 @@ pub fn get_cell_with_job(
     let original = original_record_at(&df, 0);
     let cell = cell_columns.build_full(&payload.column_id, &value, original.as_ref());
     job.check_cancelled()?;
-    Ok(cell.into())
+    Ok(cell)
 }

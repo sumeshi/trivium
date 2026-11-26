@@ -21,6 +21,8 @@ def verify_datetime_flex(web, data: dict, root: Path, evidence: Path, report: di
         ("2026/1/4 3:4:5,000000001 UTC", "2026-01-04T03:04:05.000000001Z"),
         ("2026/11/14 03:05:05,123456790 UTC", "2026-11-14T03:05:05.12345679Z"),
         ("14 Nov 2026 12:15:05.123456791 +0900", "2026-11-14T03:15:05.123456791Z"),
+        ("\u2002" * 80 + "2026/11/14 03:15:05,123456792 UTC" + "\t" * 80, "2026-11-14T03:15:05.123456792Z"),
+        (" " * 300 + "2026-11-14T03:15:05.123456793Z" + " " * 20, "2026-11-14T03:15:05.123456793Z"),
     ]
     source = root / f"datetime-flex-{uuid.uuid4().hex[:8]}.csv"
     with source.open("w", encoding="utf-8", newline="") as handle:
@@ -44,10 +46,12 @@ def verify_datetime_flex(web, data: dict, root: Path, evidence: Path, report: di
         for index, (value, _) in enumerate(values):
             cell = web.command("get_cell", {"projectId": project_id, "rowIndex": index, "columnId": column})
             assert cell["text"] == value, cell
+            checked = web.command("validate_condition_values", {"kind": "datetime", "op": "ge", "values": [value]})
+            assert cell["datetime_nanos"] == checked["values"][0]["parsedNanos"], cell
 
         web.tap(web.node(f'.data-header [data-column-id="{column}"] .column-sort'))
         web.applied(sortKey=column, sortDirection="asc")
-        expected_order = [4, 3, 0, 2, 1, 5, 6]
+        expected_order = [4, 3, 0, 2, 1, 5, 6, 7, 8]
         wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row:not(.loading)')].map(e=>Number(e.dataset.rowIndex));"),
                  lambda order: order == expected_order,
                  "table sorting compares instants and preserves source order for equal timestamps")
@@ -65,7 +69,13 @@ def verify_datetime_flex(web, data: dict, root: Path, evidence: Path, report: di
         filtered = web.command("query_project_rows", {"projectId": project_id, "condition": condition,
             "sortKey": column, "sortDirection": "asc", "offset": 0, "limit": 20})
         assert [row["row_index"] for row in filtered["rows"]] == [0, 2], filtered
-        assert [row["cells"][column]["text"] for row in ordered["rows"]] == [values[index][0] for index in expected_order]
+        for row, index in zip(ordered["rows"], expected_order):
+            cell, original_value = row["cells"][column], values[index][0]
+            assert cell["length"] == len(original_value), cell
+            if cell["truncated"]:
+                assert len(cell["text"]) < len(original_value) and original_value.startswith(cell["text"]), cell
+            else:
+                assert cell["text"] == original_value, cell
 
         web.drawer("Time analysis")
         web.choose('select[aria-label="Time column"]', column)
@@ -115,7 +125,7 @@ def verify_datetime_flex(web, data: dict, root: Path, evidence: Path, report: di
             "iso_display_exact": True, "raw_cells_unchanged": True, "chronological_source_ids": expected_order,
             "one_nanosecond_range_source_ids": [0, 2], "source_hash_and_bytes_preserved": True,
             "engine_normalized_time_ranges": True, "longest_gap_source_ids": [5, 6], "gap_durations": gaps,
-            "constant_timeline_actual_pointer_selection": True}
+            "constant_timeline_actual_pointer_selection": True, "full_and_truncated_padding_use_engine_keys": True}
     finally:
         web.script("window.__recoveryPicker?.restore();delete window.__recoveryPicker;")
         web.close_drawer()

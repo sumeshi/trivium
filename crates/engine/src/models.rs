@@ -165,7 +165,7 @@ impl Default for ViewState {
 /// source Parquet data is never truncated. `get_cell` returns the full text in
 /// the same shape with `truncated = false`.
 ///
-/// `kind` is the column-level type. Integers are always passed as decimal
+/// `kind` describes the source cell type. Integers are always passed as decimal
 /// strings, so a long integer never travels through a JavaScript `Number`.
 #[derive(Debug, Clone, Serialize, PartialEq, ts_rs::TS)]
 pub struct Cell {
@@ -180,6 +180,10 @@ pub struct Cell {
     /// Original character count. `None` for null/missing.
     #[serde(default)]
     pub length: Option<usize>,
+    /// Exact engine-recognized instant; source text remains unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub datetime_nanos: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]

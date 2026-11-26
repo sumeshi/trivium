@@ -4,7 +4,9 @@ use std::sync::{Mutex, OnceLock};
 use polars::prelude::{AnyValue, DataFrame};
 use serde_json::Value;
 
-use crate::analysis::{infer_column_kinds, ColumnKind};
+use crate::analysis::{
+    infer::parse_datetime_nanos, infer_column_kinds, temporal::datetime_value_nanos, ColumnKind,
+};
 use crate::models::{Cell, ColumnMeta};
 use crate::project_io::INTERNAL_ORIGINAL;
 
@@ -185,11 +187,21 @@ pub fn build_full_cell(
             let length = text.chars().count();
             let kind = original_json_kind(original, source)
                 .unwrap_or_else(|| anyvalue_kind(value, column_kind));
+            let nanos = match value {
+                AnyValue::Date(_) | AnyValue::Datetime(_, _, _) => {
+                    datetime_value_nanos(value).and_then(|nanos| i64::try_from(nanos).ok())
+                }
+                AnyValue::Time(_) => None,
+                // Reuse the already-materialized text. Recognition is per
+                // value so page and full-cell responses agree in mixed columns.
+                _ => parse_datetime_nanos(text.trim()),
+            };
             Cell {
                 text: Some(text),
                 kind: kind.to_string(),
                 truncated: false,
                 length: Some(length),
+                datetime_nanos: nanos.map(|nanos| nanos.to_string()),
             }
         }
         None => Cell {
@@ -197,6 +209,7 @@ pub fn build_full_cell(
             kind: null_cell_kind(original, source).to_string(),
             truncated: false,
             length: None,
+            datetime_nanos: None,
         },
     }
 }

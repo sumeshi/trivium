@@ -40,6 +40,24 @@ test("estimatePageBytes counts the rendered cell strings", () => {
   assert.ok(bytes >= 20_000);
 });
 
+test("page estimates count exact datetime metadata once per retained cell", () => {
+  const source = { text: "preview", kind: "string" as const, truncated: true };
+  const row = { ...rowWithText("preview"), cells: { first: source, second: source, ordinary: source } };
+  const initial = estimatePageBytes([row]);
+  const datetimeRow = {
+    ...row,
+    cells: {
+      first: { ...source, datetime_nanos: "1794625445123456789" },
+      second: { ...source, datetime_nanos: "-9223372036854775808" },
+      ordinary: source,
+    },
+  };
+  const retainedNanosBytes = 19 + 20;
+  assert.equal(estimatePageBytes([datetimeRow]), initial + retainedNanosBytes);
+  assert.deepEqual(selectEvictions(new Map([[0, { at: 1, bytes: estimatePageBytes([datetimeRow]) }]]),
+    0, 5, initial + retainedNanosBytes - 1), [0], "datetime metadata participates in the page byte bound");
+});
+
 test("page estimates include notes and tags independently of source cells", () => {
   const row = rowWithText("source");
   const initial = estimatePageBytes([row]);

@@ -131,7 +131,11 @@ truncated: boolean,
 /**
  * Original character count. `None` for null/missing.
  */
-length: number | null, };
+length: number | null,
+/**
+ * Exact engine-recognized instant; source text remains unchanged.
+ */
+datetime_nanos?: string, };
 export type ProjectRow = { row_index: number,
 /**
  * Exact per-column cell DTOs. This is the only row-value map; display,

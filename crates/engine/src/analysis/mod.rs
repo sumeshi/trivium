@@ -5,7 +5,7 @@ pub mod group_time;
 pub mod histogram;
 pub mod infer;
 pub mod stats;
-mod temporal;
+pub(crate) mod temporal;
 pub mod time;
 
 pub use dupes::matching_row_indices;
