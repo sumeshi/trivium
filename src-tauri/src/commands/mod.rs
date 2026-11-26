@@ -23,6 +23,7 @@ mod rules;
 mod stats;
 mod storage_worker;
 mod surround;
+mod themes;
 mod time;
 mod value_validation;
 mod view;
@@ -58,6 +59,7 @@ pub use rows::{locate_project_row, query_project_rows};
 pub use rules::{color_rules, save_color_rules};
 pub use stats::column_stats;
 pub use surround::surrounding_rows;
+pub use themes::save_theme_profile;
 pub use time::time_analysis;
 pub use view::{load_view_state, save_view_state};
 

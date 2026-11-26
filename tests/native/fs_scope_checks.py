@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import uuid
 
@@ -25,6 +26,14 @@ def _write(web, path: Path, text: str) -> dict:
         {headers:{path:encodeURIComponent(arguments[0]),options:'{}'}})
         .then(()=>done({ok:true}),error=>done({ok:false,denied:/forbidden|not allowed/i.test(String(error))}));
     """, str(path), text)
+
+
+def _save_profile(web, profile_id: str, text: str) -> dict:
+    return web.async_script("""
+      const done=arguments[arguments.length-1];
+      window.__TAURI_INTERNALS__.invoke('save_theme_profile',{id:arguments[0],text:arguments[1]})
+        .then(()=>done({ok:true}),error=>done({ok:false,error:String(error)}));
+    """, profile_id, text)
 
 
 def _import(web, path: Path, kind: str, report: dict) -> dict:
@@ -62,7 +71,8 @@ def verify_fs_scope(web, root: Path, report: dict) -> None:
     preference = directory / "table-text-size.json"
     old_preference = preference.read_bytes() if preference.exists() else None
     sentinel = '{"private":"not selected"}'
-    profile_text = '{"catalog":"allowed"}'
+    profile_text = json.dumps({"type": "trivium-theme", "version": 1, "id": profile.stem,
+                               "name": "Boundary fixture", "base": "dark", "colors": {}})
     try:
         nested.mkdir()
         for path in (nested_profile, non_json):
@@ -85,7 +95,9 @@ def verify_fs_scope(web, root: Path, report: dict) -> None:
         assert _write(web, preference, "100") == {"ok": True}
         assert preference.read_text(encoding="utf-8") == "100"
 
-        assert _write(web, profile, profile_text) == {"ok": True}
+        assert _write(web, profile, profile_text) == {"ok": False, "denied": True}
+        assert not profile.exists()
+        assert _save_profile(web, profile.stem, profile_text) == {"ok": True}
         assert profile.read_text(encoding="utf-8") == profile_text
         assert _read(web, profile) == {"ok": False, "denied": True}
         assert _import(web, profile, "theme", report) == {"ok": True, "text": profile_text}
@@ -120,7 +132,8 @@ def verify_fs_scope(web, root: Path, report: dict) -> None:
             native_pickers = True
         report["fs_scope"] = {"unselected_reads_and_writes_denied": True,
             "unrelated_app_data_denied": True, "unselected_bounded_import_denied": True,
-            "preference_read_write": True, "managed_theme_write_and_bounded_read": True,
+            "preference_read_write": True, "managed_theme_atomic_write_and_bounded_read": True,
+            "managed_theme_generic_write_denied": True,
             "managed_theme_is_not_pattern_import_permission": True,
             "nested_and_non_json_theme_paths_denied": True,
             "symlink_escape_denied": symlink_checked,

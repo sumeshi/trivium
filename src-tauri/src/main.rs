@@ -56,6 +56,7 @@ fn main() {
             load_wallpaper,
             clear_wallpaper,
             read_import_text,
+            save_theme_profile,
             create_project,
             preview_import,
             export_import_report,

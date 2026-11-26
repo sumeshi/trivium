@@ -31,8 +31,7 @@
       "allow": [
         { "path": "$APPLOCALDATA/theme.json" },
         { "path": "$APPLOCALDATA/appearance.json" },
-        { "path": "$APPLOCALDATA/table-text-size.json" },
-        { "path": "$APPLOCALDATA/themes/*.json" }
+        { "path": "$APPLOCALDATA/table-text-size.json" }
       ]
     }
   ]

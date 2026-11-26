@@ -71,5 +71,6 @@ fn patch(flag: &str) -> AnnotationPatch {
     }
 }
 
+mod atomic_files;
 mod migrations;
 mod mutations;

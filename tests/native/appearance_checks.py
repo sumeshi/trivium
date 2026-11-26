@@ -138,7 +138,17 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
     # Real native picker grants are checked separately from this paint test.
     theme_source = directory / "themes" / f"{theme_id}-input.json"
     image_source = root / f"{theme_id}.png"
-    exported = directory / "themes" / f"{theme_id}-export.json"
+    # The substituted Save reply grants no filesystem permission. Use an
+    # already authorized, isolated preference path and restore its exact bytes
+    # immediately; real picker grants are checked by fs_scope_checks.
+    exported = directory / "table-text-size.json"
+    previous_export_target = exported.read_bytes() if exported.exists() else None
+
+    def restore_export_target() -> None:
+        if previous_export_target is None:
+            exported.unlink(missing_ok=True)
+        else:
+            exported.write_bytes(previous_export_target)
     definition = {"type": "trivium-theme", "version": 1, "id": theme_id, "name": "Appearance test", "base": "dark",
                   "colors": {"accent": "#aabbdd", "bg": "#15191f", "surface": "#202632"}}
     theme_source.write_text(json.dumps(definition), encoding="utf-8")
@@ -173,6 +183,7 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
         saved_theme = verify_theme_editor(web, definition, managed_theme, directory, extra_themes, report)
         _pick(web, "Export theme…", exported, save=True)
         wait_for(lambda: _saved(exported), lambda value: value == saved_theme, "exported theme preserves its stable ID and edited palette")
+        restore_export_target()
         _pick(web, "Choose image…", image_source)
         wait_for(lambda: web.script("return !!document.querySelector('.wallpaper-layer');"), bool, "managed native wallpaper becomes visible")
         wait_for(lambda: web.script("return document.querySelector('.appearance-dialog .actions button').disabled;"), lambda disabled: disabled is False, "native image operation finishes")
@@ -204,7 +215,6 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
         web.screenshot(evidence / "appearance-wallpaper-pinned.png")
         assert theme_source.read_bytes() == theme_bytes and image_source.read_bytes() == image_bytes
         theme_source.unlink()
-        exported.unlink()
         image_source.unlink()
         wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value == {"version": 2, "enabled": True, "strength": 64}, "simplified background settings reach native storage")
         # Reopen a real v1 preference with contain/off-table settings. The image
@@ -264,5 +274,6 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
             if restored:
                 raise
         finally:
-            for source in (theme_source, image_source, exported):
+            restore_export_target()
+            for source in (theme_source, image_source):
                 source.unlink(missing_ok=True)

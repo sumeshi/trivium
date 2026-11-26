@@ -67,7 +67,7 @@ TOOLS = {"Conditions": "conditions", "Extract": "extract", "Column stats": "stat
 HEAVY = {"column_stats", "histogram", "time_analysis", "group_tree", "extract_values"}
 IPC_COMMANDS = frozenset({
     "list_formats", "validate_format", "save_format", "delete_format", "extract_values",
-    "import_wallpaper", "load_wallpaper", "clear_wallpaper",
+    "import_wallpaper", "load_wallpaper", "clear_wallpaper", "save_theme_profile",
     "list_projects", "create_project", "delete_project", "load_project", "query_project_rows",
     "locate_project_row", "get_cell", "cancel_job", "cancel_request_jobs", "active_jobs",
     "save_iocs", "import_iocs", "export_iocs", "update_flag", "set_hidden_columns", "export_project",

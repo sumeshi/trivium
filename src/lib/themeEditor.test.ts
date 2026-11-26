@@ -15,14 +15,16 @@ function deferred() {
 
 async function environment(run: (f: {
   files: Map<string, string>; cache: Map<string, string>; styles: Map<string, string>; attrs: Map<string, string>;
-  writes: string[]; hold: (value: Promise<void> | null) => void; fail: (value: boolean) => void;
+  writes: string[]; hold: (value: Promise<void> | null) => void;
+  fail: (value: boolean | ((destination: string) => boolean)) => void;
   holdRead: (path: string, value: Promise<void>) => void;
 }) => Promise<void>) {
   reopenSaveAdmission(); await flushAllSaves().catch(() => {});
   const previous = new Map(["window", "document", "localStorage"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const files = new Map<string, string>(), cache = new Map<string, string>(), styles = new Map<string, string>(), attrs = new Map<string, string>();
   const writes: string[] = [], reads = new Map<string, Promise<void>>();
-  let gate: Promise<void> | null = null, fail = false;
+  let gate: Promise<void> | null = null;
+  let fail: boolean | ((destination: string) => boolean) = false;
   Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: {
     setAttribute: (key: string, value: string) => attrs.set(key, value),
     style: { setProperty: (key: string, value: string) => styles.set(key, value), removeProperty: (key: string) => styles.delete(key) },
@@ -43,11 +45,13 @@ async function environment(run: (f: {
         const text = files.get(path) ?? "";
         return command === "read_import_text" ? text : [...new TextEncoder().encode(text)];
       }
-      if (command === "plugin:fs|write_text_file") {
-        const destination = decodeURIComponent(options?.headers?.path ?? "");
+      if (command === "plugin:fs|write_text_file" || command === "save_theme_profile") {
+        const profile = args as { id: string; text: string };
+        const destination = command === "save_theme_profile" ? `/managed/themes/${profile.id}.json`
+          : decodeURIComponent(options?.headers?.path ?? "");
         writes.push(destination); await gate;
-        if (fail) throw new Error("Theme disk failure");
-        files.set(destination, new TextDecoder().decode(args as Uint8Array)); return;
+        if (typeof fail === "function" ? fail(destination) : fail) throw new Error("Theme disk failure");
+        files.set(destination, command === "save_theme_profile" ? profile.text : new TextDecoder().decode(args as Uint8Array)); return;
       }
       throw new Error(`Unexpected theme operation: ${command}`);
     },
@@ -175,6 +179,42 @@ test("failed saves retain the current palette and never register a draft as a sa
     await assert.rejects(preview.save(draft), /Theme disk failure/);
     assert.equal(get(theme), "dark"); assert.equal(getUserTheme("user:editor-failed-copy"), null);
     preview.cancel(); assert.equal(f.styles.size, 0);
+    await assert.rejects(flushAllSaves(), /save or export failed/);
+  });
+});
+
+test("a failed replacement retains the saved profile and its selected palette", async () => {
+  await environment(async f => {
+    await setTheme("dark");
+    const draft = createThemeDraft("dark", "editor-preserved-copy");
+    const first = beginThemePreview(); await first.save(draft);
+    const path = "/managed/themes/editor-preserved-copy.json", original = f.files.get(path);
+    const editing = withPreviewColor(createThemeDraft(get(theme), "unused"), "accent", "#654321");
+    f.fail(true);
+    const preview = beginThemePreview(); preview.apply(editing);
+    await assert.rejects(preview.save(editing), /Theme disk failure/);
+    preview.cancel();
+    assert.equal(f.files.get(path), original);
+    assert.equal(getUserTheme(get(theme))?.colors.accent, draft.colors.accent);
+    assert.equal(f.styles.get("--accent"), draft.colors.accent);
+    await assert.rejects(flushAllSaves(), /save or export failed/);
+  });
+});
+
+test("a preference-only failure reports the committed profile and keeps its palette consistent", async () => {
+  await environment(async f => {
+    await setTheme("dark");
+    const draft = createThemeDraft("dark", "editor-preference-failure");
+    await beginThemePreview().save(draft);
+    const changed = withPreviewColor(draft, "accent", "#654321");
+    f.fail(destination => destination === "/managed/theme.json");
+    const preview = beginThemePreview(); preview.apply(changed);
+    await assert.rejects(preview.save(changed), /Theme saved, but its selection preference could not be stored/);
+    assert.equal(JSON.parse(f.files.get("/managed/themes/editor-preference-failure.json")!).colors.accent, "#654321");
+    assert.equal(getUserTheme(get(theme))?.colors.accent, "#654321");
+    assert.equal(f.styles.get("--accent"), "#654321");
+    preview.cancel();
+    assert.equal(f.styles.get("--accent"), "#654321", "Cancel cannot paint a stale definition over the committed profile");
     await assert.rejects(flushAllSaves(), /save or export failed/);
   });
 });

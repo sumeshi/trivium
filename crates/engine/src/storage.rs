@@ -51,12 +51,20 @@ pub fn save_color_rules(project_dir: &Path, rules: &[ColorRule]) -> Result<()> {
 /// External files (for example user-selected IOC exports) still use atomic IO.
 /// Project settings use their SQLite transaction instead.
 pub fn write_file_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    write_file_atomic_with(path, data, |temporary, bytes| fs::write(temporary, bytes))
+}
+
+fn write_file_atomic_with(
+    path: &Path,
+    data: &[u8],
+    write: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>,
+) -> Result<()> {
     let temp = path.with_extension(format!(
         "tmp.{}.{}",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
-    let result = fs::write(&temp, data)
+    let result = write(&temp, data)
         .with_context(|| format!("failed to write temporary file {temp:?}"))
         .and_then(|_| {
             fs::rename(&temp, path).with_context(|| format!("failed to replace {path:?}"))

@@ -107,9 +107,11 @@ async function environment(run: (f: { files: Map<string, string>; cache: Map<str
         const bytes = await handleRead(path, [...new TextEncoder().encode(files.get(path) ?? "")]);
         return command === "read_import_text" ? new TextDecoder().decode(Uint8Array.from(bytes)) : bytes;
       }
-      if (command === "plugin:fs|write_text_file") {
-        const path = decodeURIComponent(options?.headers?.path ?? "");
-        const text = new TextDecoder().decode(args as Uint8Array);
+      if (command === "plugin:fs|write_text_file" || command === "save_theme_profile") {
+        const profile = args as { id: string; text: string };
+        const path = command === "save_theme_profile" ? `/managed/themes/${profile.id}.json`
+          : decodeURIComponent(options?.headers?.path ?? "");
+        const text = command === "save_theme_profile" ? profile.text : new TextDecoder().decode(args as Uint8Array);
         writes.push({ path, text }); await hold;
         if (fail) throw new Error("Appearance disk failure");
         files.set(path, text); return;

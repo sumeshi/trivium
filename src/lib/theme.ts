@@ -1,4 +1,5 @@
 import { mkdir, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { get, writable } from "svelte/store";
 import { createThemePreference, DEFAULT_THEME, EDITABLE_THEME_COLORS, getUserTheme, parseSavedTheme,
@@ -126,15 +127,21 @@ async function storeUserTheme(definition: UserTheme, selectionRevision: number, 
     if (!files.some(entry => entry.name === filename) && files.length >= MAX_USER_THEMES) {
       throw new Error(`The theme folder already contains ${MAX_USER_THEMES} theme files. Replace an existing theme to import another.`);
     }
-    await writeTextFile(await join(directory, filename), JSON.stringify(definition, null, 2));
+    await invoke("save_theme_profile", { id: definition.id, text: JSON.stringify(definition, null, 2) });
+    // The profile is committed even if storing its selection later fails.
+    addCatalogTheme(definition);
     // A different theme chosen during the write owns the selection, even if
     // this accepted save/import still completes its catalog entry.
     if (maySelect()) {
-      await writeTextFile(await join(await appLocalDataDir(), "theme.json"), preference);
+      try {
+        await writeTextFile(await join(await appLocalDataDir(), "theme.json"), preference);
+      } catch {
+        if (maySelect() && get(theme) === value) applyThemeAttr(value);
+        throw new Error("Theme saved, but its selection preference could not be stored.");
+      }
       selected = maySelect();
     }
   });
-  addCatalogTheme(definition);
   if (selected && maySelect()) {
     themeRevision += 1;
     lastSelectedWrite = intent;
