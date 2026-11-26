@@ -568,6 +568,16 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     web.click(sha)
     copy = wait_for(lambda: web.script("return document.querySelector('.copy-status')?.textContent;"), bool, "SHA copy result")
     assert copy == "SHA-256 copied", copy
+    # Reopen a page that was actually materialized without this source column.
+    # Its later reveal must retrieve evidence cells, not leave loading slots.
+    reveal_column = data["columns"]["col_27"]
+    web.named("Choose visible columns")
+    web.write('input[aria-label="Find a column"]', "col_27")
+    web.click(web.element('#visible-column-menu li input'))
+    web.named("Done", "#visible-column-menu")
+    wait_for(lambda: web.command("load_view_state", {"projectId": data["id"]}, request=True)["state"],
+             lambda state: bool(state and reveal_column in state.get("hiddenColumns", [])),
+             "hidden column is included in the saved view before reopening")
     data["source"].rename(root / "original-source-moved.csv")
     checkpoint = web.checkpoint()
     web.named("Workspace options")
@@ -575,6 +585,21 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     wait_for(lambda: next((entry for entry in reversed(web.trace(after=checkpoint)) if entry["name"] == "load_project" and entry["request"].get("projectId") == data["id"] and "result" in entry), None), bool, "saved project actually reloads")
     web.refreshed(checkpoint)
     web.results(expected)
+    assert reveal_column not in web.script("return [...document.querySelectorAll('.data-header [data-column-id]')].map(e=>e.dataset.columnId);")
+    selected_before_reveal = web.state()["selectedIds"]
+    web.named("Choose visible columns")
+    web.write('input[aria-label="Find a column"]', "col_27")
+    web.click(web.element('#visible-column-menu li input'))
+    web.named("Done", "#visible-column-menu")
+    web.horizontal(100000)
+    revealed = wait_for(lambda: web.script("const cell=document.querySelector('.data-row:not(.loading) [data-column-id=\"'+arguments[0]+'\"] .cell-text');return cell?{row:Number(cell.closest('.data-row').dataset.rowIndex),text:cell.textContent.trim()}:null;", reveal_column),
+                        lambda value: bool(value and value["text"] and value["text"] != "Loading…"),
+                        "revealed column displays its source value after reopening")
+    original_cell = web.command("get_cell", {"projectId": data["id"], "rowIndex": revealed["row"], "columnId": reveal_column})
+    assert revealed["text"] == original_cell["text"], (revealed, original_cell)
+    assert web.state()["selectedIds"] == selected_before_reveal
+    assert web.query() == before, (before, web.query())
+    web.horizontal(-100000)
     assert not any(entry["name"] == "create_project" for entry in web.trace(after=checkpoint)), "Reload must not reimport the source"
     assert data["sha"] in web.script("return document.querySelector('[aria-label=\"Copy full SHA-256\"]').title;")
     web.write('input[aria-label="Search rows"]', "")
@@ -598,7 +623,7 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     web.horizontal(-focused["body"])
     report["columns_header"] = {"columns": 27, "hidden_all_then_restored": True, "search_preserved": True, "sha_copy": copy, "reload_without_source": True,
                                 "actual_header_sort_clicks": ["source_id", "score", "cohort", "timestamp"], "actual_horizontal_scroll_sync": horizontal,
-                                "keyboard_last_column": focused}
+                                "keyboard_last_column": focused, "reopened_hidden_column_source_cell": revealed}
 
 
 def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: dict[str, Any]) -> None:

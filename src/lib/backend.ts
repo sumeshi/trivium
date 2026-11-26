@@ -237,6 +237,8 @@ export interface QueryProjectRowsArgs extends QuerySpec, RequestOwned {
   projectId: string;
   offset?: number;
   limit?: number;
+  /** Materialized cells only; independent of search scope and saved visibility. */
+  pageColumns?: string[];
 }
 
 export interface LocateProjectRowArgs extends QuerySpec, RequestOwned {
@@ -256,12 +258,7 @@ export interface GetCellArgs extends RequestOwned {
 }
 
 /** Full cell value from `getCell`; `text` is never a list preview. */
-export interface GetCellResult {
-  text: string | null;
-  kind: CellKind;
-  truncated: boolean;
-  length: number | null;
-}
+export type GetCellResult = Omit<Wire.Cell, "kind"> & { kind: CellKind };
 
 export interface GroupTreeArgs extends RequestOwned {
   projectId: string;
@@ -528,6 +525,7 @@ class NativeBackend implements Backend {
     args: QueryProjectRowsArgs
   ): Promise<QueryProjectRowsResponse> {
     return invokeOwned("query_project_rows", {
+      pageColumns: args.pageColumns,
       payload: {
         projectId: args.projectId,
         search: args.search,

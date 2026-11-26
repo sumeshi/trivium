@@ -38,8 +38,12 @@ type SlotWaiter = {
 export function createWorkspaceQuery(workspace: WorkspaceController, options: QueryOptions) {
   const reads = workspace.createReadScope();
   let disposed = false;
+  // Membership changes invalidate navigation; presentation changes retire pages only.
   let revision = 0;
+  let pageEpoch = 0;
   let signature = "";
+  let projectionProject: string | null = null;
+  let projectionKey = "";
   let slots = 2;
   const waiters: SlotWaiter[] = [];
   const pageRequests = new Map<string, PageRequest>();
@@ -88,16 +92,19 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
   const signatureFor = (filters: AppliedFilters) =>
     JSON.stringify([normalizeSearchText(filters.search), filters.flag, filters.bookmarkedOnly, effectiveSearchColumns(filters.search, filters.searchColumns),
       get(workspace.sortKey), get(workspace.sortDirection), filters.condition]);
-  const resetCache = () => {
+  const clearPages = () => {
     workspace.rowsCache.set(new Map());
     workspace.positionToRowIndex.set(new Map());
     workspace.pendingPages.set(new Set());
     workspace.loadedPages.set(new Set());
     workspace.resetPageCache();
-    workspace.totalRows.set(get(workspace.projectDetail)?.project.meta.total_records ?? 0);
-    workspace.queryCountKnown.set(false);
     failedPages.clear();
     publishError();
+  };
+  const resetCache = () => {
+    clearPages();
+    workspace.totalRows.set(get(workspace.projectDetail)?.project.meta.total_records ?? 0);
+    workspace.queryCountKnown.set(false);
     workspace.flaggedCount.set(0);
     workspace.filteredFlaggedCount.set(0);
   };
@@ -107,14 +114,22 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     searchColumns: effectiveSearchColumns(filters.search, filters.searchColumns),
     condition: structuredClone(filters.condition),
   });
-  const initialize = (filters: AppliedFilters) => {
-    reads.cancelAll();
-    for (const waiter of waiters.splice(0)) waiter.resolve(false);
+  const retirePageReads = () => {
+    pageEpoch += 1;
+    for (const request of pageRequests.values()) reads.cancel(request.key);
+    discardStaleWaiters();
     pageRequests.clear();
     wantedPages.clear();
     previousStart = null;
     direction = 1;
+  };
+  const initialize = (filters: AppliedFilters) => {
     revision += 1;
+    reads.cancelAll();
+    retirePageReads();
+    for (const waiter of waiters.splice(0)) waiter.resolve(false);
+    projectionProject = get(workspace.currentProjectId);
+    projectionKey = JSON.stringify([...get(workspace.visibleColumns)].sort());
     const applied = normalize(filters);
     signature = signatureFor(applied);
     resetCache();
@@ -128,9 +143,9 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     const page = Math.max(0, Math.floor(pageIndex));
     const projectId = detail.project.meta.id;
     const generation = get(workspace.viewGeneration);
-    const requestRevision = revision;
-    const key = workspace.pendingPageKey(generation, requestRevision, page);
-    const isCurrent = () => !disposed && revision === requestRevision &&
+    const requestEpoch = pageEpoch;
+    const key = workspace.pendingPageKey(generation, requestEpoch, page);
+    const isCurrent = () => !disposed && pageEpoch === requestEpoch &&
       generation === get(workspace.viewGeneration) && projectId === get(workspace.currentProjectId);
     const existing = pageRequests.get(key);
     if (existing) {
@@ -153,6 +168,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       flagFilter: filters.flag, bookmarkedOnly: filters.bookmarkedOnly,
       condition: structuredClone(filters.condition), offset: page * PAGE_SIZE, limit: PAGE_SIZE,
       sortKey: get(workspace.sortKey), sortDirection: get(workspace.sortDirection),
+      pageColumns: [...get(workspace.visibleColumns)],
     };
     request.promise = (async () => {
       try {
@@ -244,7 +260,7 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
     }
     discardStaleWaiters();
     for (const page of [...visible, ...prefetch]) {
-      const key = workspace.pendingPageKey(get(workspace.viewGeneration), revision, page);
+      const key = workspace.pendingPageKey(get(workspace.viewGeneration), pageEpoch, page);
       const priority = visible.includes(page) ? 1 : 2 + prefetch.indexOf(page);
       const pending = pageRequests.get(key);
       if (pending) {
@@ -282,9 +298,25 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
   const stopAnnotationRefresh = workspace.annotationRefreshRequested.subscribe((sequence) => {
     if (sequence > 0 && !disposed && options.isReady()) void requestPage(workspace.currentVisiblePage(), true);
   });
+  const stopProjectionRefresh = workspace.visibleColumns.subscribe(columns => {
+    const projectId = get(workspace.currentProjectId);
+    if (disposed || !projectId || projectId !== projectionProject) return;
+    // Display order does not change which cells a page contains.
+    const next = JSON.stringify([...columns].sort());
+    if (next === projectionKey) return;
+    projectionKey = next;
+    if (!options.isReady()) return;
+    const page = workspace.currentVisiblePage();
+    // Membership, counts, selection and viewport still describe the same
+    // query. Only cached cells and in-flight page projections are obsolete.
+    retirePageReads();
+    clearPages();
+    void requestPage(page, true);
+  });
   const dispose = () => {
     if (disposed) return;
     stopAnnotationRefresh();
+    stopProjectionRefresh();
     disposed = true;
     revision += 1;
     reads.dispose();

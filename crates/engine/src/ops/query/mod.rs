@@ -91,7 +91,19 @@ pub fn query_project_rows(
 /// original row ids. Search and sort run only when the cache misses.
 pub fn query_project_rows_with_job(
     store: &ProjectsStore,
+    payload: QueryRowsPayload,
+    job: &JobContext,
+) -> Result<QueryRowsResponse, AppError> {
+    query_project_rows_with_projection(store, payload, None, job)
+}
+
+/// Page materialization is independent of the query population and persisted
+/// view preferences. `None` uses stored visibility; `Some` is the current UI's
+/// explicit projection, including an empty list when all columns are hidden.
+pub fn query_project_rows_with_projection(
+    store: &ProjectsStore,
     mut payload: QueryRowsPayload,
+    page_columns: Option<&[String]>,
     job: &JobContext,
 ) -> Result<QueryRowsResponse, AppError> {
     job.check_cancelled()?;
@@ -122,18 +134,41 @@ pub fn query_project_rows_with_job(
     // per-cell JSON type.
     let needs_original = has_original && meta.source_format.as_deref() != Some("csv");
     let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema_columns);
+    let known_columns: std::collections::HashSet<&str> =
+        columns.iter().map(String::as_str).collect();
+    let requested = page_columns
+        .map(|names| {
+            let mut requested = std::collections::HashSet::new();
+            for name in names {
+                if !known_columns.contains(name.as_str()) {
+                    return Err(AppError::Message(format!("Unknown page column: {name:?}.")));
+                }
+                if !requested.insert(name.as_str()) {
+                    return Err(AppError::Message(format!(
+                        "Duplicate page column: {name:?}."
+                    )));
+                }
+            }
+            Ok(requested)
+        })
+        .transpose()?;
     // Hidden columns are presentation-only. The page captures the visible
     // columns, then `__original` (for missing/null cell kinds) and `__rowid`
     // (to keep a non-empty projection when every data column is hidden).
     let visible_columns: Vec<ColumnMeta> = project_columns
         .columns()
         .iter()
-        .filter(|column| schema_columns.iter().any(|name| name == &column.id))
+        .filter(|column| known_columns.contains(column.id.as_str()))
         .filter(|column| {
-            !meta
-                .hidden_columns
-                .iter()
-                .any(|hidden| hidden == &column.id)
+            requested.as_ref().map_or_else(
+                || {
+                    !meta
+                        .hidden_columns
+                        .iter()
+                        .any(|hidden| hidden == &column.id)
+                },
+                |requested| requested.contains(column.id.as_str()),
+            )
         })
         .cloned()
         .collect();

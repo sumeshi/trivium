@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
-import type { Backend, QueryProjectRowsArgs, QueryProjectRowsResponse } from "./backend.ts";
+import type { Backend, LocateProjectRowResponse, QueryProjectRowsArgs, QueryProjectRowsResponse } from "./backend.ts";
 import type { LoadProjectResponse } from "./types.ts";
 import { PAGE_SIZE } from "./components/project_view/state.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 import { createWorkspaceQuery } from "./workspaceQuery.ts";
+import { createWorkspaceNavigation } from "./workspaceNavigation.ts";
 import { markAnnotationsChanged, forgetAnnotationVersion } from "./annotationVersions.ts";
 
 const TOTAL = PAGE_SIZE * 100;
@@ -183,26 +184,28 @@ test("a stale annotation prefetch yields its slot to the current visible page in
   forgetAnnotationVersion("queue-test");
 });
 
-function queryStateSetup() {
+function queryStateSetup(columns = ["c1"], hiddenColumns: string[] = []) {
   const calls: Array<{ args: QueryProjectRowsArgs; resolve: (count?: number) => void; reject: (message: string) => void }> = [];
-  const notices: string[] = [];
+  const notices: string[] = [], cancelled: string[] = [];
   const workspace = createWorkspaceController();
   workspace.currentProjectId.set("query-state");
   workspace.projectDetail.set({ project: { meta: { id: "query-state", total_records: TOTAL } },
-    columns: ["c1"], columns_meta: [], hidden_columns: [], initial_rows: [] } as unknown as LoadProjectResponse);
+    columns, columns_meta: [], hidden_columns: hiddenColumns, initial_rows: [] } as unknown as LoadProjectResponse);
+  workspace.hiddenColumns.set(new Set(hiddenColumns));
   const backend = { queryProjectRows: (args: QueryProjectRowsArgs) => new Promise<QueryProjectRowsResponse>((resolve, reject) => {
     calls.push({ args, reject: message => reject(new Error(message)), resolve: (count = TOTAL) => {
       const offset = args.offset ?? 0;
-      resolve({ offset, rows: count > offset ? [{ row_index: offset, cells: { c1: { kind: "string", text: args.search || "source" } },
+      resolve({ offset, rows: count > offset ? [{ row_index: offset, cells: Object.fromEntries((args.pageColumns ?? columns)
+        .map(column => [column, { kind: "string", text: column === "c1" ? args.search || "source" : column + " source" }])),
         flag: "", memo: "", tags: [], bookmarked: false }] : [], total_rows: TOTAL,
         total_filtered_rows: count, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 });
     } });
-  }), cancelRequest: async () => 1 } as unknown as Backend;
+  }), cancelRequest: async (requestId: string) => { cancelled.push(requestId); return 1; } } as unknown as Backend;
   const queries = createWorkspaceQuery(workspace, { backend, isReady: () => true,
     restoreViewport: async () => {}, scopeChanged: () => {}, summary: () => {}, notify: message => notices.push(message) });
   const filters = (search = "") => ({ search, flag: "all" as const, bookmarkedOnly: false, searchColumns: [], condition: null });
   queries.initialize(filters());
-  return { workspace, queries, calls, notices, filters };
+  return { workspace, queries, backend, calls, notices, cancelled, filters };
 }
 
 function queryPayload(args: QueryProjectRowsArgs) {
@@ -350,3 +353,126 @@ test("changing a failed query clears its error and establishes a fresh pending r
   assert.equal(get(workspace.queryError), null);
   workspace.dispose();
 });
+
+test("visibility refreshes every cached page and retires old responses while preserving the applied investigation", async () => {
+  const { workspace, queries, calls, notices, cancelled, filters } = queryStateSetup(["c1", "c2"], ["c2"]);
+  queries.initialize({ ...filters("needle"), searchColumns: ["c2"] });
+  const first = queries.requestPage(0);
+  await settle(); calls[0].resolve(); await first;
+  const offscreen = queries.requestPage(2);
+  await settle(); calls[1].resolve(); await offscreen;
+  const old = queries.requestPage(1);
+  await settle();
+  workspace.viewportHeight.set(160);
+  workspace.scrollTop.set(PAGE_SIZE * get(workspace.rowHeight));
+  workspace.scrollLeft.set(170);
+  workspace.toggleRowSelection(0);
+  const signature = queries.signature, revision = queries.revision;
+  const applied = get(workspace.appliedFilters), top = get(workspace.scrollTop);
+  workspace.hiddenColumns.set(new Set());
+  await settle();
+  assert.equal(queries.revision, revision, "presentation changes keep the membership revision used by navigation");
+  assert.ok(cancelled.length > 0);
+  assert.equal(queries.signature, signature);
+  assert.equal(get(workspace.appliedFilters), applied);
+  assert.equal(get(workspace.queryCountKnown), true);
+  assert.equal(get(workspace.totalFilteredRows), TOTAL);
+  assert.deepEqual([...get(workspace.selectedRowIds)], [0]);
+  assert.equal(get(workspace.scrollTop), top);
+  assert.equal(get(workspace.scrollLeft), 170);
+  assert.equal(get(workspace.rowsCache).size, 0, "offscreen pages with omitted cells must also be dropped");
+  assert.equal(get(workspace.loadedPages).size, 0);
+  assert.deepEqual(calls[3].args.pageColumns, ["c1", "c2"]);
+  assert.equal(calls[3].args.offset, PAGE_SIZE, "the viewport page reloads instead of returning to the first page");
+  assert.equal(calls[3].args.search, "needle");
+  assert.deepEqual(calls[3].args.searchColumns, ["c2"], "search scope is independent of page projection");
+  calls[3].resolve(); await settle();
+  calls[2].resolve(); await old;
+  assert.equal(get(workspace.rowsCache).get(PAGE_SIZE)?.displayCache.c2, "c2 source", "the old omitted-column response cannot overwrite new cells");
+  assert.deepEqual([...get(workspace.loadedPages)], [1]);
+  const revisited = queries.requestPage(2);
+  await settle();
+  assert.deepEqual(calls[4].args.pageColumns, ["c1", "c2"]);
+  calls[4].resolve(); await revisited;
+  assert.equal(get(workspace.rowsCache).get(PAGE_SIZE * 2)?.displayCache.c2, "c2 source");
+  workspace.columnOrder.set(["c2", "c1"]);
+  await settle();
+  assert.equal(calls.length, 5, "reordering the same visible set does not reread evidence");
+  workspace.hiddenColumns.set(new Set(["c2"])); await settle();
+  workspace.hiddenColumns.set(new Set()); await settle();
+  assert.deepEqual(calls[5].args.pageColumns, ["c1"]);
+  assert.deepEqual(calls[6].args.pageColumns, ["c2", "c1"]);
+  calls[6].resolve(); await settle();
+  calls[5].reject("Retired hidden projection failed"); await settle();
+  assert.equal(get(workspace.rowsCache).get(PAGE_SIZE)?.displayCache.c2, "c2 source");
+  assert.equal(get(workspace.queryError), null);
+  assert.deepEqual(notices, []);
+  workspace.dispose();
+});
+
+test("an empty visible projection stays explicit and disposed tabs ignore projection responses", async () => {
+  const { workspace, queries, calls, notices } = queryStateSetup(["c1", "c2"]);
+  const original = queries.requestPage(0);
+  await settle(); calls[0].resolve(); await original;
+  workspace.hiddenColumns.set(new Set(["c1", "c2"]));
+  await settle();
+  assert.deepEqual(calls[1].args.pageColumns, [], "all-hidden is distinct from the omitted legacy projection");
+  workspace.hiddenColumns.set(new Set());
+  await settle();
+  assert.deepEqual(calls[2].args.pageColumns, ["c1", "c2"]);
+  workspace.dispose();
+  calls[2].resolve(); calls[1].reject("Old tab projection failed");
+  await settle();
+  assert.equal(get(workspace.rowsCache).size, 0);
+  assert.equal(get(workspace.pendingPages).size, 0);
+  assert.deepEqual(notices, []);
+});
+
+for (const queued of [false, true]) {
+  test(`a visibility change preserves an ${queued ? "awaiting-slot" : "in-flight"} original-row Go`, async () => {
+    const { workspace, queries, backend, calls, notices, cancelled } = queryStateSetup(["c1", "c2"], ["c2"]);
+    const initial = queries.requestPage(0);
+    await settle(); calls[0].resolve(); await initial;
+    workspace.viewportHeight.set(160);
+    let lookupId = "";
+    let resolveLocate!: (result: LocateProjectRowResponse) => void;
+    const locating = new Promise<LocateProjectRowResponse>(resolve => { resolveLocate = resolve; });
+    backend.locateProjectRow = args => { lookupId = args.requestId!; return locating; };
+    const navigation = createWorkspaceNavigation(workspace, queries, {
+      backend, isReady: () => true, isFilterPending: () => false, beforeScroll: () => {},
+      notify: message => notices.push(message),
+    });
+    const blocked: Promise<void>[] = [];
+    if (queued) {
+      blocked.push(queries.requestPage(1), queries.requestPage(2));
+      await settle();
+    }
+    const position = PAGE_SIZE * 4;
+    const moving = navigation.jumpToEnteredRow(position + 1);
+    await settle();
+    if (!queued) {
+      assert.ok(lookupId);
+      blocked.push(queries.requestPage(1));
+      await settle();
+    } else assert.equal(lookupId, "", "both native slots are occupied by page reads");
+    const revision = queries.revision;
+    workspace.hiddenColumns.set(new Set());
+    await settle();
+    assert.equal(queries.revision, revision);
+    assert.equal(get(navigation.locatingRow), true, "presentation changes do not discard the requested navigation");
+    if (queued) {
+      calls[1].resolve(); await blocked[0]; await settle();
+      assert.ok(lookupId, "the preserved Go waiter takes the next released slot");
+    }
+    assert.ok(!cancelled.includes(lookupId), "only obsolete page read IDs are cancelled");
+    resolveLocate({ position, total_rows: TOTAL, total_filtered_rows: TOTAL });
+    await moving;
+    assert.ok(navigation.rowOffset() > 0 && navigation.rowOffset() <= position, "the original Go scrolls to the located evidence");
+    assert.equal(get(navigation.locatingRow), false);
+    assert.ok(!cancelled.includes(lookupId));
+    assert.deepEqual(notices, []);
+    workspace.dispose();
+    for (const call of calls) call.resolve();
+    await Promise.all(blocked); await settle();
+  });
+}

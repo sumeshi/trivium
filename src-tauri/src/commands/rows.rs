@@ -17,11 +17,17 @@ pub async fn query_project_rows(
     state: State<'_, AppState>,
     payload: QueryRowsPayload,
     request_id: Option<String>,
+    page_columns: Option<Vec<String>>,
 ) -> Result<QueryRowsResponse, String> {
     let store = state.projects.clone();
     let project_id = Some(payload.project_id);
     run_job_with_request(app, JobKind::Query, project_id, request_id, move |job| {
-        ops::rows::query_project_rows_with_job(&store, payload, &job)
+        ops::rows::query_project_rows_with_projection(
+            &store,
+            payload,
+            page_columns.as_deref(),
+            &job,
+        )
     })
     .await
 }
