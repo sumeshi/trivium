@@ -132,9 +132,9 @@ fn cancelling_a_drain_retains_failures_from_still_running_work() {
 
 #[test]
 fn storage_runs_off_caller_thread_and_is_independent_of_heavy_job_admission() {
-    use trivium_engine::jobs::{try_begin_job, JobKind, MAX_CONCURRENT_JOBS};
+    use trivium_engine::jobs::{queue_job, JobKind, MAX_CONCURRENT_JOBS};
     let jobs: Vec<_> = (0..MAX_CONCURRENT_JOBS)
-        .map(|_| try_begin_job(JobKind::Query, None).unwrap())
+        .map(|_| queue_job(JobKind::Query, None).unwrap())
         .collect();
     let pool = StorageWorker::new(2, 8).unwrap();
     let caller = thread::current().id();
