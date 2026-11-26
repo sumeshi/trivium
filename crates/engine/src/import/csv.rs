@@ -131,6 +131,7 @@ pub struct CsvImportSummary {
 /// caller can write the batch and drop it before reading the next one.
 pub struct CsvImporter {
     reader: csv::Reader<Box<dyn Read>>,
+    positions: reader::PhysicalPositions,
     pending: Option<csv::StringRecord>,
     columns: Vec<ColumnMeta>,
     flag_columns: FlagColumns,
@@ -186,6 +187,7 @@ impl CsvImporter {
             .collect();
         Ok(Self {
             reader: prepared.reader,
+            positions: prepared.positions,
             pending: None,
             columns: prepared.columns,
             flag_columns,
@@ -224,6 +226,7 @@ impl CsvImporter {
 
         let Self {
             reader,
+            positions,
             pending,
             columns: column_meta,
             flag_columns,
@@ -279,16 +282,16 @@ impl CsvImporter {
                                     diagnostics::issue(
                                         report,
                                         diagnostics.as_ref(),
-                                        err.position().map(|position| position.line() as usize),
+                                        Some(positions.line(err.position())?),
                                         ImportIssueAction::Skipped,
-                                        err.to_string(),
+                                        positions.error(&err),
                                     );
                                     continue;
                                 }
                             }
                             return Err(AppError::Message(format!(
                                 "Failed to parse the CSV data: {}",
-                                err
+                                positions.error(&err)
                             )));
                         }
                         Some(Ok(record)) => record,
@@ -302,17 +305,7 @@ impl CsvImporter {
                     ));
                 }
                 let row_index = *rows_read;
-                let source_line = record
-                    .position()
-                    .map(|position| position.line() as usize)
-                    .unwrap_or(
-                        row_index
-                            + if report.has_headers == Some(false) {
-                                1
-                            } else {
-                                2
-                            },
-                    );
+                let source_line = positions.line(record.position())?;
                 let annotation = if *restore_annotations && flag_columns.any() {
                     match flag_entry(*flag_columns, &record) {
                         Ok(entry) => entry,

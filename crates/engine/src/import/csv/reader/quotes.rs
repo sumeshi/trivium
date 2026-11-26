@@ -1,5 +1,6 @@
 //! The CSV crate accepts an open quoted field at EOF. Recovery must identify
 //! that unknown tail instead of fabricating a final merged record.
+use super::positions::PhysicalPositions;
 use crate::{
     import::record_limit::{
         check_job, limit_error, RecordTooLarge, CHECKPOINT_BYTES, MAX_RECORD_BYTES,
@@ -14,11 +15,12 @@ use std::{
 #[derive(Debug)]
 struct UnclosedQuote {
     line: usize,
+    record_line: usize,
 }
 
 impl fmt::Display for UnclosedQuote {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Unterminated quoted CSV field starting on line {}; the remaining record boundary is unknown.", self.line)
+        write!(f, "Unterminated quoted CSV field starting on line {} (record starting on line {}); the remaining record boundary is unknown.", self.line, self.record_line)
     }
 }
 impl std::error::Error for UnclosedQuote {}
@@ -30,7 +32,7 @@ pub(crate) fn unreadable_tail(error: &csv::Error) -> Option<usize> {
     let error = error.get_ref()?;
     error
         .downcast_ref::<UnclosedQuote>()
-        .map(|error| error.line)
+        .map(|error| error.record_line)
         .or_else(|| {
             error
                 .downcast_ref::<RecordTooLarge>()
@@ -60,14 +62,32 @@ pub(super) struct QuoteCheckedReader<R> {
     job: Option<JobId>,
     pending: Option<io::Error>,
     stopped: bool,
+    positions: PhysicalPositions,
+    active_record: bool,
 }
 
 impl<R: Read> QuoteCheckedReader<R> {
-    pub(super) fn new(inner: R, separator: u8, job: Option<JobId>) -> Self {
-        Self::with_limit(inner, separator, job, MAX_RECORD_BYTES)
+    pub(super) fn new(
+        inner: R,
+        separator: u8,
+        job: Option<JobId>,
+        positions: PhysicalPositions,
+    ) -> Self {
+        Self::with_positions_limit(inner, separator, job, MAX_RECORD_BYTES, positions)
     }
 
+    #[cfg(test)]
     fn with_limit(inner: R, separator: u8, job: Option<JobId>, limit: usize) -> Self {
+        Self::with_positions_limit(inner, separator, job, limit, PhysicalPositions::default())
+    }
+
+    fn with_positions_limit(
+        inner: R,
+        separator: u8,
+        job: Option<JobId>,
+        limit: usize,
+        positions: PhysicalPositions,
+    ) -> Self {
         Self {
             inner,
             separator,
@@ -83,6 +103,8 @@ impl<R: Read> QuoteCheckedReader<R> {
             job,
             pending: None,
             stopped: false,
+            positions,
+            active_record: false,
         }
     }
 
@@ -92,13 +114,12 @@ impl<R: Read> QuoteCheckedReader<R> {
                 self.bom_prefix += 1;
                 return Ok(());
             }
-            if self.bom_prefix > 0 {
-                self.state = State::Plain;
-                self.record_bytes += self.bom_prefix;
-            }
-            self.bom_prefix = 3;
+            self.finish_prefix();
         }
         let newline = matches!(byte, b'\r' | b'\n');
+        if !newline && !self.active_record {
+            self.start_record();
+        }
         let record_end = newline && !matches!(self.state, State::Quoted);
         if byte == self.separator && !matches!(self.state, State::Quoted) {
             let maximum =
@@ -140,8 +161,24 @@ impl<R: Read> QuoteCheckedReader<R> {
             self.record_bytes = 0;
             self.record_line = self.line;
             self.record_fields = 1;
+            self.active_record = false;
         }
         Ok(())
+    }
+
+    fn start_record(&mut self) {
+        self.active_record = true;
+        self.record_line = self.line;
+        self.positions.start(self.line);
+    }
+
+    fn finish_prefix(&mut self) {
+        if (1..3).contains(&self.bom_prefix) {
+            self.state = State::Plain;
+            self.record_bytes += self.bom_prefix;
+            self.start_record();
+        }
+        self.bom_prefix = 3;
     }
 }
 
@@ -160,11 +197,15 @@ impl<R: Read> Read for QuoteCheckedReader<R> {
         check_job(self.job)?;
         let amount = buffer.len().min(CHECKPOINT_BYTES);
         let read = self.inner.read(&mut buffer[..amount])?;
+        if read == 0 {
+            self.finish_prefix();
+        }
         if read == 0 && matches!(self.state, State::Quoted) {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 UnclosedQuote {
                     line: self.quote_line,
+                    record_line: self.record_line,
                 },
             ));
         }
@@ -241,7 +282,12 @@ mod tests {
         let maximum = super::super::super::MAX_CSV_COLUMNS
             + crate::annotation_columns::ANNOTATION_COLUMNS.len();
         let source = vec![b','; maximum];
-        let input = QuoteCheckedReader::new(Cursor::new(source), b',', None);
+        let input = QuoteCheckedReader::new(
+            Cursor::new(source),
+            b',',
+            None,
+            PhysicalPositions::default(),
+        );
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(false)
             .from_reader(input);

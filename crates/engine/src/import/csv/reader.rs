@@ -20,13 +20,16 @@ use crate::{
     models::ColumnMeta,
 };
 
+mod positions;
 mod quotes;
+pub(super) use positions::PhysicalPositions;
 pub(super) use quotes::unreadable_tail;
 
 pub(super) struct Prepared {
     pub reader: csv::Reader<Box<dyn Read>>,
     pub columns: Vec<ColumnMeta>,
     pub report: ImportReport,
+    pub positions: PhysicalPositions,
 }
 
 fn open_reader(
@@ -35,7 +38,7 @@ fn open_reader(
     limits: BatchLimits,
     options: &ImportOptions,
     job: &JobContext,
-) -> Result<csv::Reader<Box<dyn Read>>, AppError> {
+) -> Result<(csv::Reader<Box<dyn Read>>, PhysicalPositions), AppError> {
     let mut file =
         File::open(path).map_err(|e| AppError::Message(format!("Failed to open file: {e}")))?;
     let (encoding, skip) = detect_bom(&mut file)
@@ -71,14 +74,20 @@ fn open_reader(
         }
     }
     let input: Box<dyn Read> = Box::new(Cursor::new(prefix[..prefix_len].to_vec()).chain(input));
-    let input: Box<dyn Read> =
-        Box::new(quotes::QuoteCheckedReader::new(input, separator, job.id()));
-    Ok(csv::ReaderBuilder::new()
+    let positions = PhysicalPositions::default();
+    let input: Box<dyn Read> = Box::new(quotes::QuoteCheckedReader::new(
+        input,
+        separator,
+        job.id(),
+        positions.clone(),
+    ));
+    let reader = csv::ReaderBuilder::new()
         .delimiter(separator)
         .has_headers(options.has_headers)
         .flexible(options.recover)
         .buffer_capacity(limits.read_buffer.max(4))
-        .from_reader(input))
+        .from_reader(input);
+    Ok((reader, positions))
 }
 
 pub(super) fn prepare(
@@ -94,18 +103,27 @@ pub(super) fn prepare(
     if !valid_delimiter(separator) {
         return Err(invalid_delimiter());
     }
-    let mut reader = open_reader(path, separator, limits, options, job)?;
+    let (mut reader, mut positions) = open_reader(path, separator, limits, options, job)?;
     let mut headers = if options.has_headers || !options.recover {
         reader
             .headers()
-            .map_err(|e| AppError::Message(format!("Failed to parse the CSV header: {e}")))?
+            .map_err(|e| {
+                AppError::Message(format!(
+                    "Failed to parse the CSV header: {}",
+                    positions.error(&e)
+                ))
+            })?
             .clone()
     } else {
         csv::StringRecord::new()
     };
     validate_column_count(&headers)?;
     let original_width = headers.len();
-    let header_line = headers.position().map(|position| position.line() as usize);
+    let header_line = if headers.is_empty() {
+        None
+    } else {
+        Some(positions.line(headers.position())?)
+    };
     if options.recover {
         let mut width = original_width;
         // A complete leading annotation block keeps the same allowance as the
@@ -117,14 +135,12 @@ pub(super) fn prepare(
                 Err(error) if unreadable_tail(&error).is_some() => break,
                 Err(error) => {
                     return Err(AppError::Message(format!(
-                        "Failed to parse the CSV data: {error}"
+                        "Failed to parse the CSV data: {}",
+                        positions.error(&error)
                     )))
                 }
             };
-            let location = format!(
-                "CSV record at line {}",
-                record.position().map_or(1, csv::Position::line)
-            );
+            let location = format!("CSV record at line {}", positions.line(record.position())?);
             validate_record_width(&headers, record.len(), &location)?;
             if record
                 .iter()
@@ -139,11 +155,17 @@ pub(super) fn prepare(
         while headers.len() < width {
             headers.push_field("");
         }
-        reader = open_reader(path, separator, limits, options, job)?;
+        (reader, positions) = open_reader(path, separator, limits, options, job)?;
         if options.has_headers {
-            reader
-                .headers()
-                .map_err(|e| AppError::Message(format!("Failed to parse the CSV header: {e}")))?;
+            reader.headers().map_err(|e| {
+                AppError::Message(format!(
+                    "Failed to parse the CSV header: {}",
+                    positions.error(&e)
+                ))
+            })?;
+            if !headers.is_empty() {
+                positions.line(headers.position())?;
+            }
         }
     }
     if headers.is_empty() {
@@ -201,5 +223,6 @@ pub(super) fn prepare(
         reader,
         columns,
         report,
+        positions,
     })
 }
