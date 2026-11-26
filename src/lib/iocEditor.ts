@@ -1,7 +1,7 @@
 import { get, writable } from 'svelte/store';
 import type { Backend } from './backend';
 import type { IocEntry, LoadProjectResponse } from './types';
-import { createCellIocEntry, iocBulkArgs, iocEntryError, normalizeIocFlag, prepareIocEntries } from './iocRules.ts';
+import { createCellIocEntry, iocBulkArgs, iocEntryError, prepareIocEntries } from './iocRules.ts';
 import { errorMessage } from './errors.ts';
 import { acceptSave } from './saveDrain.ts';
 
@@ -28,7 +28,7 @@ export function createIocEditor(options: EditorOptions) {
   let baseline: IocEntry[] = [];
   const definitions = (entries: readonly IocEntry[]) => entries.map(({ id: _, ...entry }) => structuredClone(entry));
   const withIds = (entries: readonly IocEntry[]) => definitions(entries).map(entry => ({ ...entry,
-    flag: normalizeIocFlag(entry.flag), id: crypto.randomUUID() }));
+    flag: entry.flag, id: crypto.randomUUID() }));
   const publishEntries = (entries: IocEntry[]) => state.update(current => ({ ...current, entries, error: '', notice: '' }));
   const editable = () => !disposed && !get(state).busy;
   const report = (error: unknown) => state.update(current => ({ ...current, error: errorMessage(error), notice: '' }));
@@ -96,7 +96,7 @@ export function createIocEditor(options: EditorOptions) {
     update(id: string, field: 'flag' | 'tag' | 'query', value: string) {
       if (!editable()) return;
       publishEntries(get(state).entries.map(entry => entry.id !== id ? entry
-        : { ...entry, [field]: field === 'flag' ? normalizeIocFlag(value) : value }));
+        : { ...entry, [field]: value }));
     },
     updateCell(id: string, column: string, value: string) {
       if (!editable()) return;

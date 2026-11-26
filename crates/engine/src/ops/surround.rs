@@ -80,7 +80,7 @@ pub fn surrounding_rows_with_job(
     if payload.row_index >= reader.total_rows() {
         return Err(AppError::Message("Row not found.".into()));
     }
-    let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema);
+    let project_columns = ProjectColumns::from_meta(&meta);
     let mut timed = Vec::new();
     let mut kind = None;
     let mut inferred = KindFlags::default();
@@ -147,7 +147,7 @@ pub fn surrounding_rows_with_job(
     job.check_cancelled()?;
     let selected_frame = read_page_rows_dataframe_with_job(&parquet_path, &schema, &selected, job)
         .map_err(AppError::from)?;
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
+    let flags = load_flags(&store.database_path(&meta.id)).map_err(AppError::from)?;
     let mut rows = Vec::with_capacity(selected.len());
     for (batch, ids) in selected
         .chunks(crate::project_io::PROJECT_BATCH_ROWS)

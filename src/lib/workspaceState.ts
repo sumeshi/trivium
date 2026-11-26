@@ -22,7 +22,7 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   /**
    * Maps internal column ids to display labels. Data values, sort keys,
    * conditions and search scopes keep using the id; only display code reads
-   * this map. Legacy projects map every id to its own name.
+   * this map.
    */
   const columnLabels = derived(projectDetail, (detail) => {
     const labels = new Map<string, string>();

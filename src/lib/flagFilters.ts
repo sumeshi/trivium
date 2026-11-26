@@ -1,6 +1,6 @@
 import type { FlagFilterSelection, FlagFilterValue } from "./types";
 
-/** Stable wire order; `none` is the legacy token for an unflagged row. */
+/** Stable wire order; `none` selects unflagged rows. */
 export const FLAG_FILTER_VALUES: readonly FlagFilterSelection[] = [
   "safe", "suspicious", "critical", "none",
 ];
@@ -8,14 +8,13 @@ export const FLAG_FILTER_VALUES: readonly FlagFilterSelection[] = [
 /** Null means an unknown saved value; [] means no restriction. */
 export function parseFlagFilter(value: unknown): FlagFilterSelection[] | null {
   if (typeof value !== "string") return null;
-  const text = value.trim();
-  if (text === "all" || text === "") return [];
-  if (text === "priority") return ["suspicious", "critical"];
-  const tokens = text.split("|").map((token) => token.trim());
+  if (value === "all") return [];
+  const tokens = value.split("|");
   if (tokens.some((token) => !FLAG_FILTER_VALUES.includes(token as FlagFilterSelection))) {
     return null;
   }
-  return FLAG_FILTER_VALUES.filter((value) => tokens.includes(value));
+  const selected = FLAG_FILTER_VALUES.filter((flag) => tokens.includes(flag));
+  return selected.join("|") === value ? selected : null;
 }
 
 export function isFlagFilterValue(value: unknown): value is FlagFilterValue {

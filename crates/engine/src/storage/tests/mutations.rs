@@ -65,7 +65,11 @@ fn concurrent_partial_patches_preserve_unmentioned_fields() {
 fn durable_undo_survives_reopen_and_preserves_unrelated_edits() {
     if let Some(path) = std::env::var_os("TRIVIUM_TEST_UNDO_CASE") {
         assert_eq!(
-            undo_bulk_patch(&PathBuf::from(path).join("flags.json"), &JobContext::none()).unwrap(),
+            undo_bulk_patch(
+                &project_database_path(&PathBuf::from(path)),
+                &JobContext::none()
+            )
+            .unwrap(),
             2
         );
         return;
@@ -152,7 +156,7 @@ fn cancelling_after_a_batch_rolls_back_annotations_revision_and_undo() {
         &JobContext::none(),
     )
     .unwrap();
-    let guard = jobs::try_begin_job(JobKind::Mutation, None).unwrap();
+    let guard = jobs::queue_job(JobKind::Mutation, None).unwrap();
     let context = JobContext::with_job(
         guard,
         Some(Arc::new(|progress| {
@@ -179,15 +183,15 @@ fn cancelling_after_a_batch_rolls_back_annotations_revision_and_undo() {
 }
 
 #[test]
-fn settings_migrate_once_and_guarded_saves_preserve_unreadable_bytes() {
+fn guarded_setting_saves_preserve_unreadable_sqlite_bytes() {
     let fixture = Fixture::new();
-    let legacy = b"not json";
-    fs::write(fixture.path().join("view_state.json"), legacy).unwrap();
+    let unreadable = b"not json";
+    save_setting_bytes(fixture.path(), "view_state", unreadable).unwrap();
     assert_eq!(
         load_setting_bytes(fixture.path(), "view_state")
             .unwrap()
             .unwrap(),
-        legacy
+        unreadable
     );
     assert!(
         save_setting_bytes_checked(fixture.path(), "view_state", b"{}", |old| {
@@ -200,11 +204,7 @@ fn settings_migrate_once_and_guarded_saves_preserve_unreadable_bytes() {
         load_setting_bytes(fixture.path(), "view_state")
             .unwrap()
             .unwrap(),
-        legacy
-    );
-    assert_eq!(
-        fs::read(fixture.path().join("view_state.json")).unwrap(),
-        legacy
+        unreadable
     );
     save_setting(
         fixture.path(),
@@ -232,11 +232,11 @@ fn inactive_cases_retain_no_database_handles() {
     for index in 0..32 {
         let case = fixture.path().join(index.to_string());
         save_setting(&case, "profile", &serde_json::json!({"index": index})).unwrap();
-        patch_flag_atomic(&case.join("flags.json"), 1, &patch("safe")).unwrap();
+        patch_flag_atomic(&project_database_path(&case), 1, &patch("safe")).unwrap();
         let moved = fixture.path().join(format!("moved-{index}"));
         fs::rename(&case, &moved).unwrap();
         assert_eq!(
-            load_flag(&moved.join("flags.json"), 1)
+            load_flag(&project_database_path(&moved), 1)
                 .unwrap()
                 .unwrap()
                 .flag,
@@ -275,23 +275,19 @@ fn unknown_flags_are_unflagged_without_losing_raw_annotations() {
         )
         .unwrap()
     };
-    assert_eq!(update("✗").flagged_records, 1);
-    // Seed a legacy value through raw storage; new public annotation writes
+    assert_eq!(update("safe").flagged_records, 1);
+    // Seed an unknown value through raw storage; public annotation writes
     // reject unknown flags before reaching this layer.
-    let changed = patch_flag_atomic(
-        &store.flags_path(&id),
-        0,
-        &patch("unrecognized legacy label"),
-    )
-    .unwrap();
+    let changed =
+        patch_flag_atomic(&store.database_path(&id), 0, &patch("unrecognized label")).unwrap();
     assert_eq!(changed.flagged_records, 0);
     let reopened = ProjectsStore::new(fixture.path().into()).unwrap();
     assert_eq!(reopened.try_find(&id).unwrap().unwrap().flagged_records, 0);
-    let (flags, count, version) = load_page_flag_snapshot(&reopened.flags_path(&id), &[0]).unwrap();
+    let (flags, count, version) = load_page_flag_snapshot(&reopened.database_path(&id), &[0]).unwrap();
     assert_eq!(count, 0);
     assert_eq!(version, changed.revision);
     let annotation = flags.get(&0).unwrap();
-    assert_eq!(annotation.flag, "unrecognized legacy label");
+    assert_eq!(annotation.flag, "unrecognized label");
     assert_eq!(annotation.memo.as_deref(), Some("keep note"));
 }
 
@@ -427,7 +423,7 @@ fn cancelling_an_unchanged_bulk_scan_preserves_the_old_undo() {
     )
     .unwrap();
     let before = load_flag_snapshot(&fixture.flags()).unwrap();
-    let guard = jobs::try_begin_job(JobKind::Mutation, None).unwrap();
+    let guard = jobs::queue_job(JobKind::Mutation, None).unwrap();
     let context = JobContext::with_job(
         guard,
         Some(Arc::new(|progress| {

@@ -111,7 +111,7 @@ fn resolve_bulk_target(
                 &[]
             };
             let (flags, total_flagged, revision) =
-                load_page_flag_snapshot(&store.flags_path(&payload.project_id), selected)
+                load_page_flag_snapshot(&store.database_path(&payload.project_id), selected)
                     .map_err(AppError::from)?;
             let annotated = if payload.target == "all" {
                 total_flagged
@@ -182,7 +182,7 @@ pub fn bulk_update_with_job(
     }
     job.check_cancelled()?;
     let updated = apply_bulk_patch(
-        &store.flags_path(&payload.project_id),
+        &store.database_path(&payload.project_id),
         &target.ids,
         &payload.patch,
         target.revision,
@@ -210,6 +210,6 @@ pub fn bulk_undo_with_job(
         return Err(AppError::Message("Project not found.".into()));
     }
     let updated =
-        undo_bulk_patch(&store.flags_path(&payload.project_id), job).map_err(AppError::from)?;
+        undo_bulk_patch(&store.database_path(&payload.project_id), job).map_err(AppError::from)?;
     Ok(BulkApplied { updated })
 }

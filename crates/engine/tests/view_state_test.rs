@@ -152,18 +152,62 @@ fn broken_view_state_does_not_block_project_or_annotations() {
     .expect("failed to annotate row");
     assert!(flags.entry.is_some());
 
-    save_setting_bytes(&store.project_dir(&id), "view_state", b"{ this is not json")
+    let unreadable = b"{ this is not json";
+    save_setting_bytes(&store.project_dir(&id), "view_state", unreadable)
         .expect("inject malformed canonical view state");
 
     assert!(load(&store, id).is_none());
     assert_eq!(load_status(&store, id), "unreadable");
+    assert!(save_view_state(
+        &store,
+        SaveViewStatePayload { project_id: id, state: sample_state() },
+    ).is_err());
+    assert_eq!(load_setting_bytes(&store.project_dir(&id), "view_state").unwrap().unwrap(), unreadable);
     let loaded = projects::load_project(&store, ProjectRequest { project_id: id })
         .expect("a broken view state must not block loading the project");
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     assert_eq!(loaded.project.meta.total_records, 6);
-    assert_eq!(loaded.initial_rows.len(), 6);
-    assert_eq!(loaded.initial_rows[0].flag, "safe");
-    assert_eq!(loaded.initial_rows[0].memo.as_deref(), Some("keep me"));
-    assert!(loaded.initial_rows[0].bookmarked);
+    assert_eq!(loaded_rows.len(), 6);
+    assert_eq!(loaded_rows[0].flag, "safe");
+    assert_eq!(loaded_rows[0].memo.as_deref(), Some("keep me"));
+    assert!(loaded_rows[0].bookmarked);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn older_or_unversioned_saved_view_state_is_unreadable_and_preserved() {
+    let (root, store, id, _) = setup();
+    let directory = store.project_dir(&id);
+    for value in [json!({"version": 0, "search": "old"}), json!({"search": "unknown"})] {
+        let content = serde_json::to_vec(&value).unwrap();
+        save_setting_bytes(&directory, "view_state", &content).unwrap();
+        assert!(load(&store, id).is_none());
+        assert_eq!(load_status(&store, id), "unreadable");
+        assert!(save_view_state(
+            &store,
+            SaveViewStatePayload { project_id: id, state: sample_state() },
+        ).is_err());
+        assert_eq!(load_setting_bytes(&directory, "view_state").unwrap().unwrap(), content);
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn unsupported_save_versions_leave_the_current_view_unchanged() {
+    let (root, store, id, _) = setup();
+    let original = sample_state();
+    save(&store, id, &original);
+    for version in [0, VIEW_STATE_VERSION + 1] {
+        let mut unsupported = original.clone();
+        unsupported.version = version;
+        unsupported.search = "cannot replace current state".into();
+        assert!(save_view_state(
+            &store,
+            SaveViewStatePayload { project_id: id, state: unsupported },
+        ).is_err());
+        assert_eq!(load(&store, id), Some(original.clone()));
+    }
     let _ = fs::remove_dir_all(root);
 }
 
@@ -192,7 +236,7 @@ fn newer_view_state_is_ignored_and_not_overwritten() {
     )
     .expect_err("an older version must not overwrite a newer view state");
     assert!(
-        error.to_string().contains("newer version"),
+        error.to_string().contains("unsupported version"),
         "unexpected error: {error}"
     );
     let after = load_setting_bytes(&project_dir, "view_state")
@@ -203,7 +247,7 @@ fn newer_view_state_is_ignored_and_not_overwritten() {
 }
 
 #[test]
-fn atomic_save_replaces_canonical_content_without_legacy_sidecars() {
+fn atomic_save_replaces_the_sqlite_setting() {
     let (root, store, id, _) = setup();
     let mut first = sample_state();
     first.search = "first".to_string();
@@ -276,35 +320,6 @@ fn failed_save_keeps_existing_canonical_view_state() {
 }
 
 #[test]
-fn legacy_view_state_migrates_once_and_preserves_the_source_file() {
-    let (root, store, id, _) = setup();
-    let path = store.project_dir(&id).join("view_state.json");
-    let original = sample_state();
-    let bytes = serde_json::to_vec(&original).unwrap();
-    fs::write(&path, &bytes).expect("write legacy view");
-    assert_eq!(load(&store, id).expect("migrated view"), original);
-    assert_eq!(fs::read(&path).unwrap(), bytes);
-
-    let mut changed = original.clone();
-    changed.search = "canonical changes".to_string();
-    save(&store, id, &changed);
-    assert_eq!(load(&store, id).unwrap(), changed);
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        bytes,
-        "migration source must remain untouched"
-    );
-    drop(store);
-    let reopened = ProjectsStore::new(root.clone()).unwrap();
-    assert_eq!(
-        load(&reopened, id).unwrap(),
-        changed,
-        "legacy sidecar must not replace canonical edits"
-    );
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
 fn projects_keep_independent_view_state() {
     let (root, store, id_a, id_b) = setup();
     let mut state_a = sample_state();
@@ -348,7 +363,7 @@ fn deleting_a_project_removes_its_view_state() {
 #[test]
 fn column_ids_are_stable_for_saved_widths() {
     // Saved widths and search scopes use the same internal column ids as query
-    // and sort keys; this guards a legacy-name regression.
+    // and sort keys.
     let (root, store, id, _) = setup();
     let ids = common::column_ids(&store, id);
     let host = common::id(&ids, "host");
@@ -366,11 +381,11 @@ fn column_ids_are_stable_for_saved_widths() {
 }
 
 #[test]
-fn frozen_boundary_and_explicit_unfreeze_round_trip_without_changing_legacy_default() {
+fn frozen_boundary_and_explicit_unfreeze_round_trip_with_an_optional_default() {
     let (root, store, id_a, id_b) = setup();
-    let legacy: ViewState = serde_json::from_value(json!({"version": 1})).unwrap();
-    assert_eq!(legacy.frozen_through, None);
-    assert!(serde_json::to_value(&legacy)
+    let defaults: ViewState = serde_json::from_value(json!({"version": VIEW_STATE_VERSION})).unwrap();
+    assert_eq!(defaults.frozen_through, None);
+    assert!(serde_json::to_value(&defaults)
         .unwrap()
         .get("frozenThrough")
         .is_none());

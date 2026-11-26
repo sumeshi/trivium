@@ -101,7 +101,7 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     // every value.
     assert!(
         response["rows"][0].get("data").is_none(),
-        "page rows must not serialize the full compatibility data map"
+        "page rows carry one cell-preview map"
     );
 
     assert_eq!(cell(0, "/big"), cell_json(Some("9007199254740993"), "int"));
@@ -144,12 +144,16 @@ fn ipc_cells_keep_exact_long_integers_and_distinguish_null_missing_and_empty() {
     assert_eq!(cell(0, "/missing"), cell_json(None, "missing"));
     assert_eq!(cell(1, "/missing"), cell_json(Some("present"), "string"));
 
-    // The load path materializes the same cells for the initial page.
+    // A separate page query preserves the same cell representations.
     let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load");
-    let loaded_json = serde_json::to_value(&loaded.initial_rows).expect("serialize rows");
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
+    let loaded_json = serde_json::to_value(&loaded_rows).expect("serialize rows");
     let big = ids.get("/big").expect("big column");
     assert_eq!(
         loaded_json[0]["cells"][big],
         cell_json(Some("9007199254740993"), "int")
     );
 }
+
+mod common;

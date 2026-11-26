@@ -65,7 +65,7 @@ pub fn update_flag(
     }
 
     patch_flag_atomic(
-        &store.flags_path(&payload.project_id),
+        &store.database_path(&payload.project_id),
         payload.row_index,
         &patch,
     )

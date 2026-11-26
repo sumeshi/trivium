@@ -16,7 +16,7 @@ function deferred<T = void>() {
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 const baseline: FlagEntry = { flag: "", memo: "Sender: <alice@example.org>", tags: ["review"], bookmarked: true };
 function row(id = 2, entry = baseline): ProjectRow {
-  return { row_index: id, cells: { c1: { kind: "string", text: String(id) } }, ...entry };
+  return { color: null, row_index: id, cells: { c1: { truncated: false, length: Array.from(String(id)).length,  kind: "string", text: String(id) } }, ...entry };
 }
 function setup(id: string, entries = new Map([[2, { ...baseline }]])) {
   const errors: string[] = [];

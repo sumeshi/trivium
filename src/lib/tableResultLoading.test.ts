@@ -9,7 +9,7 @@ const {normalizeRow}=await import('./src/lib/components/project_view/state.ts');
 const workspace=createWorkspaceController();
 globalThis.__workspace=workspace;
 workspace.projectDetail.set({project:{meta:{id:'restored-csv',total_records:5}},columns:['message'],columns_meta:[],
- hidden_columns:[],column_max_chars:{},column_kinds:{message:'string'},iocs:[],initial_rows:[]});
+ hidden_columns:[],column_max_chars:{},column_kinds:{message:'string'},iocs:[],});
 workspace.currentProjectId.set('restored-csv');
 workspace.totalRows.set(5);workspace.totalFilteredRows.set(5);workspace.viewportHeight.set(160);
 workspace.queryCountKnown.set(false);workspace.appliedResultLoading.set(true);
@@ -72,7 +72,7 @@ for(const action of ['toggle','show-all','save-failure','restored-view']){
    annotated_total:0,annotated_filtered:0,annotation_revision:0};}};
  const detail={project:{meta:{id:'hidden-'+action,name:'source.csv',source_file_name:'source.csv',total_records:1,flagged_records:0}},
   columns:['c1','c2'],columns_meta:[],column_kinds:{c1:'string',c2:'string'},column_max_chars:{},
-  hidden_columns:['c2'],iocs:[],initial_rows:[],color_rules:[]};
+  hidden_columns:['c2'],iocs:[],color_rules:[]};
  const project=await mountHeadless(Project,{projectDetail:detail,backend:api});
  await settle();
  const workspace=project.$capture_state().workspace;

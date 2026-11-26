@@ -16,9 +16,9 @@ function intent(id = 'case-a'): ExtractIntent {
     format: { schemaVersion: 1, id: 'ipv4', name: 'IPv4', pattern: '[0-9.]+' } } };
 }
 function summary(id: string): ProjectSummary {
-  return { meta: { id, name: 'Extract IPv4', source_file_name: 'Extract IPv4.csv',
+  return { meta: { description: null, source_sha256: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: 'Extract IPv4', source_file_name: 'Extract IPv4.csv',
     created_at: '2026-11-16', total_records: 4, flagged_records: 0,
-    ioc_applied_records: 0, hidden_columns: [] } };
+    hidden_columns: [] } };
 }
 function backend(overrides: Partial<ExtractBackend> = {}): ExtractBackend {
   return { extractValues: async () => summary('generated-csv'),

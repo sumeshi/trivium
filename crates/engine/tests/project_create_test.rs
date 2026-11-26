@@ -47,7 +47,7 @@ fn entries(path: &Path) -> Vec<PathBuf> {
 
 fn assert_no_import_leftovers(root: &Path, store: &ProjectsStore) {
     assert!(
-        store.all().is_empty(),
+        store.try_all().unwrap().is_empty(),
         "a failed import must not register a project"
     );
     assert!(
@@ -158,40 +158,6 @@ fn successful_import_records_source_metadata_and_zero_based_row_ids() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn corrupt_legacy_registry_reports_failure_and_preserves_original_and_backup() {
-    let root = temp_root();
-    fs::write(root.join("projects.json"), b"{ this is not json").expect("write corrupt registry");
-
-    let error = match ProjectsStore::new(root.clone()) {
-        Ok(_) => panic!("an unreadable registry must not be presented as an empty workspace"),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("unreadable"),
-        "unexpected error: {error}"
-    );
-    assert_eq!(
-        fs::read(root.join("projects.json")).unwrap(),
-        b"{ this is not json"
-    );
-    let backup_exists = entries(&root).iter().any(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("projects.json.corrupt."))
-    });
-    assert!(backup_exists, "the damaged registry must be preserved");
-    for backup in entries(&root).into_iter().filter(|path| {
-        path.file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("projects.json.corrupt.")
-    }) {
-        assert_eq!(fs::read(backup).unwrap(), b"{ this is not json");
-    }
-
-    let _ = fs::remove_dir_all(root);
-}
 
 #[test]
 fn constructor_defers_canonical_corruption_to_checked_listing_without_changing_files() {
@@ -206,8 +172,8 @@ fn constructor_defers_canonical_corruption_to_checked_listing_without_changing_f
     let corrupt = b"synthetic invalid SQLite database";
     fs::write(&database, corrupt).unwrap();
 
-    // No legacy registry is present: constructing the workspace must not
-    // inspect every saved database before the native window can become ready.
+    // Constructing the workspace must not inspect every saved database
+    // before the native window can become ready.
     let reopened = ProjectsStore::new(root.clone())
         .expect("canonical case validation belongs to checked listing");
     assert_eq!(fs::read(&database).unwrap(), corrupt);
@@ -413,7 +379,7 @@ fn the_same_input_can_be_imported_again() {
     let second = create_project(&store, payload(&path)).expect("second create failed");
 
     assert_ne!(first.meta.id, second.meta.id);
-    assert_eq!(store.all().len(), 2);
+    assert_eq!(store.try_all().unwrap().len(), 2);
     assert_eq!(first.meta.source_sha256, second.meta.source_sha256);
     assert_eq!(first.meta.source_format.as_deref(), Some("jsonl"));
     assert_eq!(second.meta.source_format.as_deref(), Some("jsonl"));

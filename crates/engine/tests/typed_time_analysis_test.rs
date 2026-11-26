@@ -6,7 +6,7 @@ use polars::prelude::{DataFrame, DataType, NamedFrom, Series, TimeUnit};
 use serde_json::json;
 use trivium_engine::{
     analysis::{analyze_series, histogram::histogram_series_annotated},
-    models::ProjectMeta,
+    models::{ColumnMeta, ProjectMeta},
     ops,
     project_io::{read_project_dataframe, write_project_dataframe},
     store::ProjectsStore,
@@ -164,11 +164,25 @@ fn calendarless_time_and_out_of_range_native_values_are_invalid_without_formatti
 }
 
 fn saved_case(store: &ProjectsStore, mut series: Series) -> Uuid {
-    series.rename("Timestamp");
+    series.rename("c000001");
+    let rows = series.len();
+    let originals = (0..rows)
+        .map(|row| {
+            let value = series.get(row).unwrap();
+            json!({"Timestamp": trivium_engine::value_utils::anyvalue_to_search_string(&value)})
+                .to_string()
+        })
+        .collect::<Vec<_>>();
     let id = Uuid::new_v4();
     let directory = store.project_dir(&id);
     fs::create_dir_all(&directory).unwrap();
-    let mut frame = DataFrame::new(vec![series]).unwrap();
+    let mut frame = DataFrame::new(vec![
+        series,
+        Series::new("__original", originals),
+        Series::new("__rowid", (0..rows as i64).collect::<Vec<_>>()),
+        Series::new("__trivium_source_record", (1..=rows as i64).collect::<Vec<_>>()),
+    ])
+    .unwrap();
     write_project_dataframe(&directory.join("data.parquet"), &mut frame).unwrap();
     store
         .insert(ProjectMeta {
@@ -178,7 +192,6 @@ fn saved_case(store: &ProjectsStore, mut series: Series) -> Uuid {
             created_at: Utc::now(),
             total_records: frame.height(),
             flagged_records: 0,
-            ioc_applied_records: 0,
             source_sha256: None,
             source_file_name: None,
             source_format: None,
@@ -186,8 +199,13 @@ fn saved_case(store: &ProjectsStore, mut series: Series) -> Uuid {
             source_path: None,
             import_report: None,
             hidden_columns: vec![],
-            storage_version: 0,
-            columns: vec![],
+            storage_version: 2,
+            columns: vec![ColumnMeta {
+                id: "c000001".into(),
+                label: "Timestamp".into(),
+                source: "/Timestamp".into(),
+                order: 0,
+            }],
         })
         .unwrap();
     id
@@ -216,7 +234,7 @@ fn typed_parquet_analysis_survives_reopen_without_changing_stored_units() {
     drop(store);
     let store = ProjectsStore::new(cases).unwrap();
     for (id, dtype, before) in saved {
-        let params = json!({"projectId":id,"column":"Timestamp","gapSeconds":1,"sessionMinutes":1,"burstWindowSeconds":120,"burstMin":2,"buckets":3});
+        let params = json!({"projectId":id,"column":"c000001","gapSeconds":1,"sessionMinutes":1,"burstWindowSeconds":120,"burstMin":2,"buckets":3});
         let analysis =
             ops::time::time_analysis(&store, serde_json::from_value(params.clone()).unwrap())
                 .unwrap();
@@ -240,7 +258,7 @@ fn typed_parquet_analysis_survives_reopen_without_changing_stored_units() {
         assert_eq!(
             read_project_dataframe(&path)
                 .unwrap()
-                .column("Timestamp")
+                .column("c000001")
                 .unwrap()
                 .dtype(),
             &dtype
@@ -263,7 +281,7 @@ fn modern_source_strings_keep_their_spelling_and_numeric_text_is_not_an_epoch() 
     );
     let result = ops::time::time_analysis(
         &store,
-        serde_json::from_value(json!({"projectId":id,"column":"Timestamp","asDatetime":true}))
+        serde_json::from_value(json!({"projectId":id,"column":"c000001","asDatetime":true}))
             .unwrap(),
     )
     .unwrap();

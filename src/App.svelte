@@ -311,7 +311,7 @@
     finally { tabCloseBusy = false; }
   };
 
-  const handleSummaryUpdate = (event: CustomEvent<{ projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] }>) => {
+  const handleSummaryUpdate = (event: CustomEvent<{ projectId: string; flagged: number; hiddenColumns: string[] }>) => {
     projectController.updateSummary(event.detail);
   };
 

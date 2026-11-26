@@ -1,10 +1,7 @@
 //! Hiding every source column must retain row identities and annotations.
-use std::fs::{self, File};
+use std::fs;
 
-use polars::prelude::*;
-use serde_json::json;
 use trivium_engine::{
-    models::ProjectMeta,
     ops::{
         flags::{set_hidden_columns, update_flag, HiddenColumnsPayload, UpdateFlagPayload},
         projects::{create_project, CreateProjectPayload},
@@ -93,31 +90,6 @@ fn verify_all_hidden(store: &ProjectsStore, id: Uuid, message: &str, value: &str
     }
 }
 
-#[test]
-fn legacy_parquet_without_internal_anchors_can_hide_every_source_column() {
-    let root = tempfile::tempdir().unwrap();
-    let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
-    let id = Uuid::new_v4();
-    let directory = store.project_dir(&id);
-    fs::create_dir_all(&directory).unwrap();
-    let mut frame = DataFrame::new(vec![
-        Series::new("message", ["first", "needle", "last"]),
-        Series::new("value", [1_i64, 2, 3]),
-    ])
-    .unwrap();
-    ParquetWriter::new(File::create(directory.join("data.parquet")).unwrap())
-        .finish(&mut frame)
-        .unwrap();
-    let meta: ProjectMeta = serde_json::from_value(json!({
-        "id": id, "name": "legacy", "description": null,
-        "created_at": "2026-11-19T00:00:00Z", "total_records": 3,
-        "flagged_records": 0, "ioc_applied_records": 0, "hidden_columns": [],
-        "storage_version": 0, "columns": []
-    }))
-    .unwrap();
-    store.insert(meta).unwrap();
-    verify_all_hidden(&store, id, "message", "value");
-}
 
 #[test]
 fn imported_cases_can_hide_every_column_without_losing_annotation_controls() {

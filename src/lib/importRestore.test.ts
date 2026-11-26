@@ -9,10 +9,10 @@ import { createProjectController } from "./stores/projects.ts";
 
 function fixture() {
   const args: CreateProjectArgs[] = [];
-  const summary = { meta: { id: "imported", name: "imported", source_file_name: "export.csv",
-    created_at: "2026-11-15", total_records: 2, flagged_records: 1, ioc_applied_records: 0, hidden_columns: [] } } satisfies ProjectSummary;
+  const summary = { meta: { description: null, source_sha256: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id: "imported", name: "imported", source_file_name: "export.csv",
+    created_at: "2026-11-15", total_records: 2, flagged_records: 1, hidden_columns: [] } } satisfies ProjectSummary;
   const detail = { project: summary, columns: [], columns_meta: [], column_max_chars: {}, column_kinds: {},
-    color_rules: [], iocs: [], hidden_columns: [], initial_rows: [] } satisfies LoadProjectResponse;
+    color_rules: [], iocs: [], hidden_columns: [],  } satisfies LoadProjectResponse;
   let fail = false;
   const backend: Partial<Backend> = {
     createProject: async (payload: CreateProjectArgs) => {

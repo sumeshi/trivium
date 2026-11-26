@@ -41,6 +41,10 @@ fn mixed_json_parents_do_not_duplicate_a_source_url_in_json_or_jsonl() {
             "mixed.jsonl",
             "{\"payload\":\"legacy\"}\n{\"payload\":{\"url\":\"https://example.test\"}}\n",
         ),
+        (
+            "mixed.ndjson",
+            "{\"payload\":\"legacy\"}\n{\"payload\":{\"url\":\"https://example.test\"}}\n",
+        ),
     ] {
         let case = Case::new(name, source);
         assert_eq!(
@@ -175,32 +179,26 @@ fn csv_headers_that_look_like_json_paths_are_still_independent_cells() {
 }
 
 #[test]
-fn missing_format_metadata_distinguishes_json_objects_from_csv_array_originals() {
-    for (name, source, expected) in [
+fn missing_or_unsupported_source_formats_reject_extraction_without_creating_a_case() {
+    for (name, source) in [
         (
-            "legacy.json",
+            "source.json",
             r#"[{"payload":"legacy"},{"payload":{"ip":"10.0.0.1"}}]"#,
-            "1",
         ),
-        (
-            "legacy.csv",
-            "/payload,/payload/ip\n10.0.0.1,10.0.0.1\n",
-            "2",
-        ),
+        ("source.csv", "/payload,/payload/ip\n10.0.0.1,10.0.0.1\n"),
     ] {
         let case = Case::new(name, source);
-        crate::storage::update_project_meta(&case.store.project_dir(&case.id), |meta| {
-            meta.source_format = None;
-            meta.source_file_name = None;
-            meta.source_path = None;
-        })
-        .unwrap();
-        let result =
-            extract_values(&case.store, all_columns(&case, None), &JobContext::none()).unwrap();
-        assert_eq!(
-            case.values(&result),
-            vec![record("10.0.0.1", expected, "1")]
-        );
+        for format in [None, Some("xml")] {
+            crate::storage::update_project_meta(&case.store.project_dir(&case.id), |meta| {
+                meta.source_format = format.map(str::to_owned);
+            })
+            .unwrap();
+            let error = extract_values(&case.store, all_columns(&case, None), &JobContext::none())
+                .unwrap_err();
+            assert!(error.to_string().contains("source format"));
+            assert_eq!(case.store.try_all().unwrap().len(), 1);
+            case.assert_no_generation_files();
+        }
     }
 }
 

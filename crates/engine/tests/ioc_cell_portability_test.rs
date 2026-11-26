@@ -98,7 +98,7 @@ impl Fixture {
         let path = self.store.project_dir(&id);
         (
             load_setting_bytes(&path, "iocs").unwrap().unwrap(),
-            serde_json::to_value(load_flags(&self.store.flags_path(&id)).unwrap()).unwrap(),
+            serde_json::to_value(load_flags(&self.store.database_path(&id)).unwrap()).unwrap(),
             project_revision(&path).unwrap(),
         )
     }

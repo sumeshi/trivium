@@ -11,12 +11,12 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use trivium_engine::{
     annotation::AnnotationPatch,
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     models::ProjectMeta,
     ops::{
         bulk::{bulk_preview, bulk_update, BulkAnnotatePayload},
         flags::{update_flag, UpdateFlagPayload},
-        projects::{load_project_metadata_with_job, ProjectRequest},
+        projects::{load_project_with_job, ProjectRequest},
         rows::{
             clear_result_cache, query_project_rows, query_project_rows_with_job, QueryRowsPayload,
             QueryRowsResponse, QuerySpec,
@@ -112,7 +112,7 @@ fn cancel_search(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> Result<()>
     let mut outcomes = Vec::new();
     measure("query_cancel_delayed", trials(), || {
         clear_result_cache();
-        let guard = try_begin_job(JobKind::Query, Some(id))?;
+        let guard = queue_job(JobKind::Query, Some(id))?;
         let job_id = guard.id();
         let context = JobContext::with_job(guard, None);
         let timer = thread::spawn(move || {
@@ -260,7 +260,7 @@ pub fn annotated_project(
     page_details("query_annotation_recount", &response)?;
     measure("reopen_annotated_metadata", trials(), || {
         let fresh = ProjectsStore::new(root.to_path_buf())?;
-        load_project_metadata_with_job(
+        load_project_with_job(
             &fresh,
             ProjectRequest { project_id: id },
             &JobContext::none(),

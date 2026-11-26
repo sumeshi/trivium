@@ -41,20 +41,20 @@ test('one row expands only clicked and visible unresolved fields, with at most t
   });
   const bigint = '18446744073709551615';
   const nanos = '2026-11-12T00:00:00.123456789Z';
-  loader.load(target, ['bigint', 'nanos', 'wide', 'legacy', 'focus'], {
+  loader.load(target, ['bigint', 'nanos', 'wide', 'focus'], {
     bigint: source(bigint), nanos: source(nanos), wide: source('preview…', true),
-    legacy: { text: 'old preview', kind: 'string' }, focus: source('focus preview', true),
+    focus: source('focus preview', true),
   });
   assert.deepEqual(calls, ['focus']);
   assert.equal(fields.get('wide')?.state, 'idle');
-  loader.setVisible(['wide', 'legacy']);
+  loader.setVisible(['wide']);
   assert.deepEqual(calls, ['focus', 'wide']);
   assert.equal(loaded(fields, 'bigint').text, bigint);
   assert.equal(loaded(fields, 'nanos').text, nanos);
   const exact = 'very long "quoted" value\n' + 'x'.repeat(1024);
   pending.get('focus')!.resolve(full(exact)); await turn();
-  assert.deepEqual(calls, ['focus', 'wide', 'legacy']);
-  pending.get('wide')!.resolve(full('all wide text')); pending.get('legacy')!.resolve(full('all legacy text'));
+  assert.deepEqual(calls, ['focus', 'wide']);
+  pending.get('wide')!.resolve(full('all wide text'));
   await turn();
   assert.equal(peak, 2);
   assert.equal(loaded(fields, 'focus').text, exact);
@@ -106,28 +106,7 @@ test('exact clicked and visible cells reuse their original text without any read
   loader.dispose();
 });
 
-test('legacy column names retain exact full details, copy and filter values without reads', () => {
-  let fields: ReadonlyMap<string, DetailField> = new Map();
-  const loader = createRowDetails({
-    cancel() {}, changed(next) { fields = next; },
-    read() { throw new Error('Complete legacy cells must not be fetched again.'); },
-  });
-  const cells = JSON.parse(`{
-    "__proto__":{"text":"18446744073709551615","kind":"int","truncated":false},
-    "constructor":{"text":"2026-11-18T00:00:00.123456789Z","kind":"string","truncated":false},
-    "toString":{"text":"","kind":"string","truncated":false}
-  }`);
-  const columns = Object.keys(cells);
-  loader.load({ ...target, columnId: columns[0] }, columns, cells);
-  loader.setVisible(columns);
-  for (const column of columns) {
-    const value = loaded(fields, column);
-    assert.equal(value.text, cells[column].text);
-    assert.equal(detailCopyValue(value), cells[column].text);
-    assert.equal(detailFilterValue(value), cells[column].text);
-  }
-  loader.dispose();
-});
+
 
 test('switching or closing a row cancels reads, clears full values, and rejects late replies', async () => {
   let fields: ReadonlyMap<string, DetailField> = new Map();

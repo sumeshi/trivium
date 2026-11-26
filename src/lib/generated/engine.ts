@@ -63,8 +63,7 @@ export type ExportImportReportResult = { destination: string, issuesWritten: num
 complete: boolean, };
 export type ColumnMeta = {
 /**
- * Internal column id. `c000001` for the new storage format, the original
- * column name for legacy projects.
+ * Internal column id, such as `c000001`.
  */
 id: string,
 /**
@@ -79,10 +78,9 @@ source: string,
  * Column order in the source.
  */
 order: number, };
-export type ProjectMeta = { id: string, name: string, description: string | null, created_at: string, total_records: number, flagged_records: number, ioc_applied_records: number, source_sha256: string | null,
+export type ProjectMeta = { id: string, name: string, description: string | null, created_at: string, total_records: number, flagged_records: number, source_sha256: string | null,
 /**
- * Original file name as selected by the user. Legacy projects and
- * hand-built fixtures have none.
+ * Original file name as selected by the user.
  */
 source_file_name: string | null,
 /**
@@ -95,16 +93,15 @@ source_format: string | null,
 source_size: number | null,
 /**
  * Absolute path of the evidence file as it was when the project was
- * created. Export refuses to overwrite this file. Legacy projects and
- * hand-built fixtures have none.
+ * created. Export refuses to overwrite this file.
  */
 source_path: string | null,
 /**
- * Decoding choices and recovery diagnostics. Absent for older cases.
+ * Decoding choices and recovery diagnostics for imported data.
  */
 import_report?: ImportReport, hidden_columns: Array<string>,
 /**
- * 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
+ * Version 2 stores internal column ids and the original record.
  */
 storage_version: number, columns: Array<ColumnMeta>, };
 export type ProjectSummary = { meta: ProjectMeta, };
@@ -156,21 +153,20 @@ export type IocCellMatch = { column: string, value: string, };
 export type IocEntry = { flag: string, tag: string, query: string, cell?: IocCellMatch, };
 export type LoadProjectResponse = { project: ProjectSummary,
 /**
- * Data column ids in source order. For legacy projects these are the
- * original column names.
+ * Data column ids in source order.
  */
 columns: Array<string>,
 /**
  * Display and source metadata for `columns`.
  */
-columns_meta: Array<ColumnMeta>, hidden_columns: Array<string>, column_max_chars: { [key in string]?: number }, column_kinds: { [key in string]?: string }, iocs: Array<IocEntry>, color_rules: Array<ColorRule>, initial_rows: Array<ProjectRow>, };
+columns_meta: Array<ColumnMeta>, hidden_columns: Array<string>, column_max_chars: { [key in string]?: number }, column_kinds: { [key in string]?: string }, iocs: Array<IocEntry>, color_rules: Array<ColorRule>, };
 export type FlagEntry = { flag: string, memo: string | null,
 /**
- * User-defined tags. serde's default keeps entries written before F19 readable.
+ * User-defined tags.
  */
 tags: Array<string>,
 /**
- * Independent bookmark flag. Old entries deserialize as `false`.
+ * Independent bookmark flag.
  */
 bookmarked: boolean, };
 export type UpdateFlagResponse = {

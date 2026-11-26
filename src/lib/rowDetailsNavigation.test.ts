@@ -5,7 +5,7 @@ import type { DetailNavigationState, DetailResultScope } from './rowDetailsNavig
 import type { LocateProjectRowResponse, QueryProjectRowsResponse } from './backend';
 import type { ProjectRow } from './types';
 
-const row = (id: number): ProjectRow => ({ row_index: id, cells: {}, flag: '', tags: [], bookmarked: false });
+const row = (id: number): ProjectRow => ({ memo: null, color: null,  row_index: id, cells: {}, flag: '', tags: [], bookmarked: false });
 const result = (position: number, id: number, total = 3): QueryProjectRowsResponse => ({
   offset: position, rows: [row(id)], total_rows: 100, total_filtered_rows: total,
   annotated_total: 0, annotated_filtered: 0, annotation_revision: 0,

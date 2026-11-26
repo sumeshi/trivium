@@ -5,7 +5,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use trivium_engine::error::AppError;
-use trivium_engine::jobs::{request_cancel, try_begin_job, JobContext, JobKind};
+use trivium_engine::jobs::{queue_job, request_cancel, JobContext, JobKind};
 use trivium_engine::ops::export::{export_project_with_job, ExportProjectPayload};
 use trivium_engine::ops::rows::{
     query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec,
@@ -223,7 +223,7 @@ pub fn timed_cancel(
     id: uuid::Uuid,
     mut job: impl FnMut(&JobContext) -> Result<(), AppError>,
 ) -> Result<(), AppError> {
-    let guard = try_begin_job(kind, Some(id))?;
+    let guard = queue_job(kind, Some(id))?;
     request_cancel(guard.id());
     let context = JobContext::with_job(guard, None);
     let started = Instant::now();

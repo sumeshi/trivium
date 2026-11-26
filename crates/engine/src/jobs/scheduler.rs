@@ -64,7 +64,6 @@ impl Registry {
         &mut self,
         kind: JobKind,
         project_id: Option<Uuid>,
-        running: bool,
         request_id: Option<String>,
     ) -> JobGuard {
         let info = JobInfo {
@@ -82,7 +81,7 @@ impl Registry {
                 info: info.clone(),
                 cancelled: cancelled.clone(),
                 notify: notify.clone(),
-                running,
+                running: false,
             },
         );
         JobGuard {
@@ -143,17 +142,6 @@ fn wake_all(notifications: Vec<Arc<Notify>>) {
     }
 }
 
-/// Legacy immediate admission for direct callers; desktop commands use queue_job.
-pub fn try_begin_job(kind: JobKind, project_id: Option<Uuid>) -> Result<JobGuard, AppError> {
-    let mut state = registry().lock();
-    if state.running() >= MAX_CONCURRENT_JOBS {
-        return Err(AppError::Message(
-            "Too many long-running operations. Wait for one to finish.".into(),
-        ));
-    }
-    Ok(state.insert(kind, project_id, true, None))
-}
-
 /// Registers a cancellable request before it waits for a CPU/memory permit.
 /// A full bounded queue is reported explicitly instead of growing indefinitely.
 pub fn queue_job(kind: JobKind, project_id: Option<Uuid>) -> Result<JobGuard, AppError> {
@@ -187,7 +175,7 @@ pub fn queue_job_with_request(
                 "The operation queue is full. Wait for an operation to finish.".into(),
             ));
         }
-        let guard = state.insert(kind, project_id, false, request_id);
+        let guard = state.insert(kind, project_id, request_id);
         let wake = state.admit();
         (guard, wake)
     };

@@ -37,10 +37,10 @@ test("hidden prefix columns and a hidden boundary keep source identity without w
   assert.equal(allPrefixHidden.offsets.size, 0); assert.equal(allPrefixHidden.width, annotations);
 });
 
-test("missing legacy state freezes the first visible column while explicit unfreeze freezes no data", () => {
+test("the default freezes the first visible column while explicit unfreeze freezes no data", () => {
   const visible = ["host", "TimeCreated", "message"];
-  const legacy = frozenColumnLayout(columns, visible, [120, 210, 260], undefined, annotations);
-  assert.deepEqual([...legacy.offsets], [["host", annotations]]);
+  const defaultLayout = frozenColumnLayout(columns, visible, [120, 210, 260], undefined, annotations);
+  assert.deepEqual([...defaultLayout.offsets], [["host", annotations]]);
   const unfreeze = frozenColumnLayout(columns, visible, [120, 210, 260], "", annotations);
   assert.equal(unfreeze.width, annotations); assert.equal(unfreeze.offsets.size, 0);
   const empty = frozenColumnLayout(columns, [], [], undefined, annotations);
@@ -60,9 +60,9 @@ test("keyboard focus reveals nonfrozen columns beside the whole prefix and prese
   assert.equal(back, 0, "a scrolling column hidden behind frozen cells returns to their right edge");
 });
 
-test("wire/view parsing preserves explicit unfreeze and hidden boundaries, defaults old files, and warns on unknown ids", () => {
-  const old = viewStateToSavedView(saved(), columns)!;
-  assert.equal(Object.hasOwn(old, "frozenThrough"), false);
+test("wire/view parsing preserves explicit unfreeze and hidden boundaries, defaults, and warns on unknown ids", () => {
+  const defaultView = viewStateToSavedView(saved(), columns)!;
+  assert.equal(Object.hasOwn(defaultView, "frozenThrough"), false);
   for (const boundary of ["", "TimeCreated"]) {
     const source = { ...saved(), hiddenColumns: ["TimeCreated"], frozenThrough: boundary };
     const restored = viewStateToSavedView(source, columns)!;
@@ -72,7 +72,7 @@ test("wire/view parsing preserves explicit unfreeze and hidden boundaries, defau
   const unknown = { ...saved(), frozenThrough: "removed-column" };
   assert.equal(viewStateToSavedView(unknown, columns)?.frozenThrough, undefined);
   assert.deepEqual(viewStateWarnings(unknown, columns), ["frozen column removed-column"]);
-  assert.equal(savedViewFromUnknown({ ...saved(), frozenThrough: 100 }, columns)?.frozenThrough, undefined);
+  assert.equal(savedViewFromUnknown({ ...saved(), frozenThrough: 100 }, columns), null);
 });
 
 test("per-case pin state survives save/reload and tab copies without changing filters or presets", async () => {
@@ -80,10 +80,10 @@ test("per-case pin state survives save/reload and tab copies without changing fi
   const backend = { saveViewState: async ({ state }: { state: ViewState }) => { writes.push(structuredClone(state)); },
     loadViewState: async (): Promise<LoadViewStateResult> => ({ status: "ok", state: writes.at(-1)! }) } as unknown as Backend;
   const detail: LoadProjectResponse = {
-    project: { meta: { id: "pin-case", name: "pin-case", created_at: "2026-11-12", total_records: 100,
-      flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } },
+    project: { meta: { description: null, source_sha256: null, source_file_name: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id: "pin-case", name: "pin-case", created_at: "2026-11-12", total_records: 100,
+      flagged_records: 0, hidden_columns: [] } },
     columns, columns_meta: [], hidden_columns: [], column_max_chars: {}, column_kinds: {},
-    iocs: [], color_rules: [], initial_rows: [],
+    iocs: [], color_rules: [],
   };
   const workspace = createWorkspaceController();
   workspace.currentProjectId.set("pin-case"); workspace.projectDetail.set(detail);
@@ -107,7 +107,7 @@ test("per-case pin state survives save/reload and tab copies without changing fi
   assert.equal(restoredTab?.frozenThrough, "TimeCreated");
   workspace.frozenThrough.set("TimeCreated");
   applyPresetView(workspace, { condition: null, hiddenColumns: [], sortKey: null, sortDirection: null, unknown_columns: [] });
-  assert.equal(get(workspace.frozenThrough), "TimeCreated", "old presets preserve this new case preference");
+  assert.equal(get(workspace.frozenThrough), "TimeCreated", "partial presets preserve this case preference");
   assert.equal(get(workspace.search), "keep query"); assert.deepEqual(get(workspace.searchColumns), ["message"]);
   workspace.dispose(); replacement.dispose();
 });

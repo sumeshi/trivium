@@ -279,14 +279,6 @@ fn create_project_records_source_sha256() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn legacy_project_meta_json_loads_without_sha256() {
-    use trivium_engine::models::ProjectMeta;
-
-    let json = r#"{"id":"0f8f1f7e-6f10-4f6a-9f8a-0f8f1f7e6f10","name":"old","description":null,"created_at":"2024-01-01T00:00:00Z","total_records":3,"flagged_records":0,"ioc_applied_records":0,"hidden_columns":[]}"#;
-    let meta: ProjectMeta = serde_json::from_str(json).expect("legacy meta failed to parse");
-    assert_eq!(meta.source_sha256, None, "legacy meta must default to no digest");
-}
 
 #[test]
 fn utf16_le_fixture_imports_same_as_ascii() {

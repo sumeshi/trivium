@@ -45,7 +45,7 @@ const settle=async()=>{for(let step=0;step<24;step++){await Promise.resolve();aw
   return {offset:args.offset,rows:records(args.offset),total_rows:276,total_filtered_rows:276,annotated_total:0,annotated_filtered:0,annotation_revision:0};
  }};
  const workspace=createWorkspaceController();globalThis.__workspace=workspace;
- workspace.projectDetail.set({project:{meta:{id:'bootstrap',total_records:276}},columns:['c1'],columns_meta:[],column_max_chars:{c1:4},column_kinds:{c1:'string'},iocs:[],hidden_columns:[],initial_rows:[]});
+ workspace.projectDetail.set({project:{meta:{id:'bootstrap',total_records:276}},columns:['c1'],columns_meta:[],column_max_chars:{c1:4},column_kinds:{c1:'string'},iocs:[],hidden_columns:[],});
  workspace.currentProjectId.set('bootstrap');workspace.backend.set(api);workspace.viewportHeight.set(800);
  const queries=createWorkspaceQuery(workspace,{backend:api,isReady:()=>true,restoreViewport:async()=>{},scopeChanged(){},summary(){},notify(){}});
  queries.initialize(filters(''));workspace.totalFilteredRows.set(276);workspace.queryCountKnown.set(true);
@@ -70,7 +70,7 @@ for(const succeeds of [false,true]){
    total_rows:276,total_filtered_rows:276,annotated_total:0,annotated_filtered:0,annotation_revision:succeeds?1:0};
  }};
  const workspace=createWorkspaceController();globalThis.__workspace=workspace;
- workspace.projectDetail.set({project:{meta:{id:'case',total_records:276}},columns:['c1'],columns_meta:[],column_max_chars:{c1:4},column_kinds:{c1:'string'},iocs:[],hidden_columns:[],initial_rows:[]});
+ workspace.projectDetail.set({project:{meta:{id:'case',total_records:276}},columns:['c1'],columns_meta:[],column_max_chars:{c1:4},column_kinds:{c1:'string'},iocs:[],hidden_columns:[],});
  workspace.currentProjectId.set('case');workspace.backend.set(api);
  const queries=createWorkspaceQuery(workspace,{backend:api,isReady:()=>true,restoreViewport:async()=>{},scopeChanged(){},summary(){},notify(){}});
  queries.initialize({search:'',searchColumns:[],flag:'all',bookmarkedOnly:false,condition:null});

@@ -1,5 +1,5 @@
 //! Explicit CSV annotation restoration; ordinary imports keep these as data.
-use crate::annotation_columns::{leading_block, TagFormat, ANNOTATION_COLUMNS};
+use crate::annotation_columns::{leading_block, ANNOTATION_COLUMNS};
 use crate::models::ColumnMeta;
 use crate::{error::AppError, models::FlagEntry};
 
@@ -58,24 +58,12 @@ pub(super) fn flag_entry(
         .and_then(|column| record.get(column))
         .filter(|text| !text.is_empty())
         .map(str::to_string);
-    // The explicit JSON column wins, including [] (which clears legacy tags).
-    // Never guess JSON syntax inside an old semicolon-separated tag cell.
     let tags = if let Some(column) = columns.tags_json {
         serde_json::from_str::<Vec<String>>(record.get(column).unwrap_or_default()).map_err(
             |e| AppError::Message(format!("Invalid trivium-tags-json annotation: {}", e)),
         )?
     } else {
-        columns
-            .tags
-            .and_then(|column| record.get(column))
-            .map(|text| {
-                text.split(';')
-                    .map(str::trim)
-                    .filter(|tag| !tag.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
+        Vec::new()
     };
     if flag.is_empty() && memo_value.is_none() && tags.is_empty() && !bookmarked {
         return Ok(None);
@@ -95,7 +83,6 @@ pub(super) struct FlagColumns {
     suspicious: Option<usize>,
     critical: Option<usize>,
     memo: Option<usize>,
-    tags: Option<usize>,
     tags_json: Option<usize>,
     bookmarked: Option<usize>,
 }
@@ -114,14 +101,13 @@ impl FlagColumns {
                 .iter()
                 .map(|column| column.source.as_str())
                 .collect::<Vec<_>>();
-            if let Some(tags) = leading_block(&headers) {
+            if leading_block(&headers).is_some() {
                 return Self {
                     safe: Some(block[0].order),
                     suspicious: Some(block[1].order),
                     critical: Some(block[2].order),
                     memo: Some(block[3].order),
-                    tags: matches!(tags, TagFormat::Legacy).then_some(block[4].order),
-                    tags_json: matches!(tags, TagFormat::Json).then_some(block[4].order),
+                    tags_json: Some(block[4].order),
                     bookmarked: Some(block[5].order),
                 };
             }
@@ -131,7 +117,6 @@ impl FlagColumns {
             suspicious: Self::find(columns, "trivium-suspicious"),
             critical: Self::find(columns, "trivium-critical"),
             memo: Self::find(columns, "trivium-memo"),
-            tags: Self::find(columns, "trivium-tags"),
             tags_json: Self::find(columns, "trivium-tags-json"),
             bookmarked: Self::find(columns, "trivium-bookmarked"),
         }
@@ -142,7 +127,6 @@ impl FlagColumns {
             || self.suspicious.is_some()
             || self.critical.is_some()
             || self.memo.is_some()
-            || self.tags.is_some()
             || self.tags_json.is_some()
             || self.bookmarked.is_some()
     }

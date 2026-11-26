@@ -193,7 +193,7 @@ fn maximum_width_annotated_exports_open_normally_and_restore_annotations() {
     for restore in [false, true] {
         let restored = create_project(&store, payload(&output, restore)).unwrap();
         assert_eq!(restored.meta.total_records, 1);
-        let flags = load_flags(&store.flags_path(&restored.meta.id)).unwrap();
+        let flags = load_flags(&store.database_path(&restored.meta.id)).unwrap();
         if restore {
             assert_eq!(flags[&0].flag, "critical");
             assert_eq!(

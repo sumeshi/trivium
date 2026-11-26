@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use trivium_engine::{
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind, ProgressFn},
+    jobs::{queue_job, request_cancel, JobContext, JobKind, ProgressFn},
     ops::{
         self,
         diff::DiffProjectsPayload,
@@ -75,7 +75,7 @@ impl Drop for Fixture {
 }
 
 fn cancel_after_first_batch() -> JobContext {
-    let guard = try_begin_job(JobKind::Analysis, None).unwrap();
+    let guard = queue_job(JobKind::Analysis, None).unwrap();
     let emit: ProgressFn = Arc::new(|progress| {
         assert!(progress.done > 0);
         request_cancel(progress.id);

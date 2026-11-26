@@ -113,23 +113,7 @@ export type MemoEditorTarget = {
 
 export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
   if (!f) return "";
-  const lower = f.trim().toLowerCase();
-  if (lower === "safe" || lower === "suspicious" || lower === "critical") {
-    return lower;
-  }
-  return "";
-}
-
-export function mapStoredFlag(
-  flag: string | null | undefined
-): FlagSymbol | "" {
-  const normalized = normalizeFlag(flag);
-  if (normalized) return normalized;
-  const trimmed = flag?.trim();
-  if (!trimmed) return "";
-  if (trimmed === "◯") return "safe";
-  if (trimmed === "?") return "suspicious";
-  if (trimmed === "✗") return "critical";
+  if (f === "safe" || f === "suspicious" || f === "critical") return f;
   return "";
 }
 
@@ -137,7 +121,7 @@ export function normalizeRow(incoming: ProjectRow): CachedRow {
   const { displayCache, previewCache } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
-    flag: mapStoredFlag(incoming.flag) || "",
+    flag: normalizeFlag(incoming.flag) || "",
     memo: incoming.memo ?? "",
     displayCache,
     previewCache,
@@ -155,7 +139,7 @@ export function applyAnnotationEntry(
   const memo = entry?.memo ?? "";
   return {
     ...row,
-    flag: mapStoredFlag(entry?.flag),
+    flag: normalizeFlag(entry?.flag),
     memo,
     tags: entry?.tags ?? [],
     bookmarked: entry?.bookmarked ?? false,

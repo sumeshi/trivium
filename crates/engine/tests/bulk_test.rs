@@ -158,7 +158,7 @@ fn query_flags(store: &ProjectsStore, id: Uuid) -> Vec<(String, Option<String>)>
 }
 
 fn flagged(store: &ProjectsStore, id: Uuid) -> usize {
-    store.find(&id).expect("meta missing").flagged_records
+    store.try_find(&id).unwrap().expect("meta missing").flagged_records
 }
 
 fn undo(store: &ProjectsStore, id: Uuid) -> usize {
@@ -210,7 +210,7 @@ fn annotations(store: &ProjectsStore, id: Uuid) -> Vec<Annotations> {
 
 /// Counts flagged rows directly from the annotation database.
 fn flagged_from_db(store: &ProjectsStore, id: Uuid) -> usize {
-    load_flags(&store.project_dir(&id).join("flags.json"))
+    load_flags(&store.database_path(&id))
         .expect("failed to load flags")
         .values()
         .filter(|entry| !entry.flag.trim().is_empty())
@@ -369,7 +369,7 @@ fn bulk_selection_dedupes_and_rejects_out_of_range() {
 }
 
 #[test]
-fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
+fn bulk_update_preserves_unapplied_ioc_definitions_and_undo_restores_user_flags() {
     let (root, store, id, _ids) = setup(true);
 
     // A saved IOC definition does not flag or tag any row by itself.
@@ -391,12 +391,6 @@ fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
         assert_eq!(flag, "safe", "user flag must apply on row {index}");
         assert_eq!(memo, &None, "row {index} must not gain an IOC tag");
     }
-    assert_eq!(
-        store.find(&id).expect("meta missing").ioc_applied_records,
-        0,
-        "bulk_update must not recalculate ioc_applied_records"
-    );
-
     assert_eq!(undo(&store, id), 12);
     let restored = query_flags(&store, id);
     for (index, (flag, _)) in restored.iter().enumerate() {
@@ -408,7 +402,7 @@ fn bulk_update_ignores_legacy_iocs_and_undo_restores_user_flags() {
 }
 
 #[test]
-fn bulk_clear_does_not_reveal_legacy_ioc_flags() {
+fn bulk_clear_leaves_rows_unflagged_with_saved_ioc_definitions() {
     let (root, store, id, _ids) = setup(true);
 
     bulk_update(
@@ -716,8 +710,8 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
         },
     )
     .unwrap();
-    let flags_path = store.flags_path(&id);
-    let before = serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap();
+    let database_path = store.database_path(&id);
+    let before = serde_json::to_value(load_flags(&database_path).unwrap()).unwrap();
     let rule = IocEntry {
         flag: "critical".into(),
         tag: "logon-fail".into(),
@@ -736,7 +730,7 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
         .unwrap()
         .remove(0);
     assert_eq!(
-        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        serde_json::to_value(load_flags(&database_path).unwrap()).unwrap(),
         before,
         "saving rules must not annotate rows"
     );
@@ -745,7 +739,7 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
     let preview = bulk_preview(&store, args.clone()).unwrap();
     assert_eq!(preview.count, 4);
     assert_eq!(
-        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        serde_json::to_value(load_flags(&database_path).unwrap()).unwrap(),
         before,
         "preview must leave every annotation unchanged"
     );
@@ -757,7 +751,7 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
         .to_string()
         .contains("preview again"));
     assert_eq!(
-        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        serde_json::to_value(load_flags(&database_path).unwrap()).unwrap(),
         before
     );
     assert_eq!(bulk_update(&store, args).unwrap().updated, 4);
@@ -775,14 +769,10 @@ fn saved_ioc_rule_uses_preview_apply_and_durable_undo_without_overwriting_other_
             .count(),
         4
     );
-    assert_eq!(
-        store.find(&id).unwrap().ioc_applied_records,
-        0,
-        "explicit annotation does not revive the old computed IOC overlay"
-    );
+    assert_eq!(store.try_find(&id).unwrap().unwrap().flagged_records, 4);
     assert_eq!(undo(&store, id), 4);
     assert_eq!(
-        serde_json::to_value(load_flags(&flags_path).unwrap()).unwrap(),
+        serde_json::to_value(load_flags(&database_path).unwrap()).unwrap(),
         before
     );
     fs::remove_dir_all(root).unwrap();
@@ -803,7 +793,7 @@ fn exporting_unsaved_ioc_rules_preserves_saved_rules_and_requires_source_overwri
     for path in [
         source.clone(),
         store.project_dir(&id).join("data.parquet"),
-        store.flags_path(&id),
+        store.database_path(&id),
     ] {
         let before = fs::read(&path).ok();
         let error = export_iocs(

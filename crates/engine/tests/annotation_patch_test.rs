@@ -108,7 +108,7 @@ fn bulk(
 }
 
 fn stored(store: &ProjectsStore, id: Uuid, row_index: usize) -> Option<FlagEntry> {
-    load_flags(&store.project_dir(&id).join("flags.json"))
+    load_flags(&store.database_path(&id))
         .expect("failed to load flags")
         .get(&row_index)
         .cloned()
@@ -326,7 +326,9 @@ fn note_text_survives_update_reopen_query_export_and_restore() {
         let reopened = ProjectsStore::new(root.clone()).expect("reopen project store");
         let loaded = load_project(&reopened, ProjectRequest { project_id: id })
             .expect("load reopened project");
-        assert_eq!(loaded.initial_rows[0].memo.as_deref(), Some(*note));
+
+        let loaded_rows = common::rows(&reopened, loaded.project.meta.id);
+        assert_eq!(loaded_rows[0].memo.as_deref(), Some(*note));
         let rows = query_project_rows(
             &reopened,
             QueryRowsPayload {
@@ -388,3 +390,5 @@ fn note_text_survives_update_reopen_query_export_and_restore() {
     assert_eq!(stored(&store, id, 0), None);
     let _ = fs::remove_dir_all(root);
 }
+
+mod common;

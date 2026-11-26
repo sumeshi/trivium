@@ -1,7 +1,4 @@
-//! T08a: new storage format with internal column ids and original records.
-//!
-//! The importer still writes the legacy format until T08b, so the new format
-//! fixture is built by hand here.
+//! Current project storage preserves column identities and original records.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,7 +14,8 @@ use trivium_engine::ops::export::{export_project, ExportProjectPayload};
 use trivium_engine::ops::projects::{load_project, ProjectRequest};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::project_io::{
-    is_internal_column_for_version, read_original_records, write_project_dataframe,
+    is_internal_column, read_original_records, validate_project_storage, write_project_dataframe,
+    ProjectColumns,
 };
 use trivium_engine::store::ProjectsStore;
 
@@ -38,7 +36,7 @@ fn column(id: &str, label: &str, source: &str, order: usize) -> ColumnMeta {
     }
 }
 
-fn create_new_format_project(root: &Path) -> (ProjectsStore, Uuid) {
+fn create_project_fixture(root: &Path) -> (ProjectsStore, Uuid) {
     let store = ProjectsStore::new(root.to_path_buf()).expect("failed to create store");
     let id = Uuid::new_v4();
     let project_dir = store.project_dir(&id);
@@ -69,11 +67,12 @@ fn create_new_format_project(root: &Path) -> (ProjectsStore, Uuid) {
         // c000003, so metadata must keep it as ordinary data.
         Series::new("c000003", &["reserved-a", "reserved-b", "reserved-c"]),
         Series::new("__rowid", &[0_i64, 1, 2]),
+        Series::new("__trivium_source_record", &[1_i64, 2, 3]),
         Series::new("__original", originals),
     ])
-    .expect("failed to build new format frame");
+    .expect("failed to build project frame");
     write_project_dataframe(&project_dir.join("data.parquet"), &mut df)
-        .expect("failed to write new format parquet");
+        .expect("failed to write project parquet");
 
     let meta = ProjectMeta {
         import_report: None,
@@ -83,7 +82,6 @@ fn create_new_format_project(root: &Path) -> (ProjectsStore, Uuid) {
         created_at: Utc::now(),
         total_records: 3,
         flagged_records: 0,
-        ioc_applied_records: 0,
         source_sha256: None,
         source_file_name: None,
         source_format: None,
@@ -126,9 +124,11 @@ fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> trivium_engine::op
 #[test]
 fn load_returns_metadata_and_hides_internal_columns() {
     let root = temp_root();
-    let (store, id) = create_new_format_project(&root);
+    let (store, id) = create_project_fixture(&root);
 
     let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load failed");
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     assert_eq!(loaded.columns, vec!["c000001", "c000002", "c000003"]);
     assert_eq!(
         loaded.columns_meta,
@@ -150,11 +150,8 @@ fn load_returns_metadata_and_hides_internal_columns() {
     assert!(!loaded.column_kinds.contains_key("__original"));
     assert!(!loaded.column_max_chars.contains_key("__rowid"));
     assert!(!loaded.column_max_chars.contains_key("__original"));
-    assert_eq!(
-        common::cell_text(&loaded.initial_rows[0], "c000001"),
-        Some("alpha")
-    );
-    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
+    assert_eq!(common::cell_text(&loaded_rows[0], "c000001"), Some("alpha"));
+    assert!(!loaded_rows[0].cells.contains_key("__original"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -162,7 +159,7 @@ fn load_returns_metadata_and_hides_internal_columns() {
 #[test]
 fn same_label_columns_are_addressed_by_id() {
     let root = temp_root();
-    let (store, id) = create_new_format_project(&root);
+    let (store, id) = create_project_fixture(&root);
 
     let first = query(
         &store,
@@ -231,7 +228,7 @@ fn same_label_columns_are_addressed_by_id() {
 #[test]
 fn original_records_preserve_types_nulls_and_missing_keys() {
     let root = temp_root();
-    let (store, id) = create_new_format_project(&root);
+    let (store, id) = create_project_fixture(&root);
 
     let records = read_original_records(&store.project_dir(&id)).expect("original records failed");
     assert_eq!(records.len(), 3);
@@ -267,7 +264,7 @@ fn original_records_preserve_types_nulls_and_missing_keys() {
 #[test]
 fn export_uses_labels_and_excludes_ids_and_internal_columns() {
     let root = temp_root();
-    let (store, id) = create_new_format_project(&root);
+    let (store, id) = create_project_fixture(&root);
     let destination = root.join("export.csv");
 
     export_project(
@@ -318,81 +315,31 @@ fn export_uses_labels_and_excludes_ids_and_internal_columns() {
 
     let _ = fs::remove_dir_all(root);
 }
-
 #[test]
-fn legacy_project_loads_with_synthesized_column_metadata() {
+fn unsupported_storage_versions_are_rejected() {
     let root = temp_root();
-    let store = ProjectsStore::new(root.clone()).expect("failed to create store");
-    let id = Uuid::new_v4();
-    let project_dir = store.project_dir(&id);
-    fs::create_dir_all(&project_dir).expect("failed to create project dir");
-
-    // Version 0 stores the original column names as frame columns and has no
-    // column metadata. New imports never write this shape any more.
-    let mut df = DataFrame::new(vec![
-        Series::new("name", &["alpha", "beta"]),
-        Series::new("count", &[1_i64, 2]),
-        Series::new("__rowid", &[0_i64, 1]),
-    ])
-    .expect("failed to build legacy frame");
-    write_project_dataframe(&project_dir.join("data.parquet"), &mut df)
-        .expect("failed to write legacy parquet");
-    store
-        .insert(ProjectMeta {
-            import_report: None,
-            id,
-            name: "legacy".to_string(),
-            description: None,
-            created_at: Utc::now(),
-            total_records: 2,
-            flagged_records: 0,
-            ioc_applied_records: 0,
-            source_sha256: None,
-            source_file_name: None,
-            source_format: None,
-            source_size: None,
-            source_path: None,
-            hidden_columns: Vec::new(),
-            storage_version: 0,
-            columns: Vec::new(),
-        })
-        .expect("failed to insert legacy metadata");
-
-    let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load failed");
-    assert_eq!(loaded.columns, vec!["name", "count"]);
-    assert_eq!(
-        loaded.columns_meta,
-        vec![
-            column("name", "name", "name", 0),
-            column("count", "count", "count", 1)
-        ]
-    );
-
-    // Legacy conditions keep referring to the original column name.
-    let rows = query(
-        &store,
-        id,
-        QuerySpec {
-            condition: Some(condition("name", "alpha")),
-            ..Default::default()
-        },
-    );
-    assert_eq!(rows.total_filtered_rows, 1);
-
+    let (store, id) = create_project_fixture(&root);
+    let mut meta = store.try_find(&id).unwrap().unwrap();
+    validate_project_storage(&meta).unwrap();
+    for version in [0, 1, 3] {
+        meta.storage_version = version;
+        let error = validate_project_storage(&meta).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Unsupported project storage version"));
+    }
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn source_record_names_are_internal_only_for_the_new_storage_format() {
-    // The transitional T12 name is internal for version 2 projects but stays a
-    // data column in an old project that genuinely used that header.
-    assert!(!is_internal_column_for_version("__source_record", 0));
-    assert!(is_internal_column_for_version("__source_record", 2));
-    assert!(is_internal_column_for_version(
-        "__trivium_source_record",
-        2
-    ));
-    // The original internal names are reserved in every version.
-    assert!(is_internal_column_for_version("__rowid", 0));
-    assert!(is_internal_column_for_version("__original", 0));
+fn column_mapping_uses_only_recorded_metadata() {
+    let root = temp_root();
+    let (store, id) = create_project_fixture(&root);
+    let mut meta = store.try_find(&id).unwrap().unwrap();
+    meta.columns.clear();
+    assert!(ProjectColumns::from_meta(&meta).columns().is_empty());
+    for name in ["__rowid", "__original", "__trivium_source_record"] {
+        assert!(is_internal_column(name));
+    }
+    let _ = fs::remove_dir_all(root);
 }

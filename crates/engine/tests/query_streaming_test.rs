@@ -10,7 +10,7 @@ use trivium_engine::{
     annotation::AnnotationPatch,
     condition::{Condition, Node, Op},
     import::csv::DEFAULT_BATCH_ROWS,
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     ops::{
         self,
         bulk::BulkAnnotatePayload,
@@ -207,7 +207,7 @@ fn streaming_search_matches_full_frame_across_batch_boundaries_and_annotation_re
     let frame =
         read_project_dataframe(&fixture.store.project_dir(&fixture.id).join("data.parquet"))
             .unwrap();
-    let flags = load_flags(&fixture.store.flags_path(&fixture.id)).unwrap();
+    let flags = load_flags(&fixture.store.database_path(&fixture.id)).unwrap();
     let all_columns = fixture.columns.values().cloned().collect::<Vec<_>>();
     let cohort = common::id(&fixture.columns, "cohort");
     for spec in [
@@ -328,7 +328,7 @@ fn cancellation_after_decoding_never_publishes_a_partial_streamed_result() {
     };
     clear_result_cache();
     reset_project_read_counters();
-    let guard = try_begin_job(JobKind::Query, Some(fixture.id)).unwrap();
+    let guard = queue_job(JobKind::Query, Some(fixture.id)).unwrap();
     let job_id = guard.id();
     let context = JobContext::with_job(guard, None);
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));

@@ -17,7 +17,7 @@ const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 fn write_padded(path: &Path, size: usize) {
     let mut file = File::create(path).unwrap();
-    let json = r#"{"version":1,"name":"Legacy 雪"}"#.as_bytes();
+    let json = r#"{"version":2,"name":"調査 雪"}"#.as_bytes();
     file.write_all(json).unwrap();
     io::copy(
         &mut io::repeat(b' ').take((size - json.len()) as u64),
@@ -39,20 +39,21 @@ fn load(store: &ProjectsStore, path: &Path) -> Result<String, String> {
 }
 
 #[test]
-fn unicode_v1_v2_presets_accept_only_one_file_prefix_utf8_bom() {
+fn unicode_presets_accept_only_one_file_prefix_utf8_bom() {
     let root = tempfile::tempdir().unwrap();
     let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
     let path = root.path().join("windows-editor.json");
-    for version in [1, 2] {
+    {
+        let version = 2;
         let text = format!("\u{feff}\n{{\"version\":{version},\"name\":\"調査\u{feff}保存\"}}");
         fs::write(&path, &text).unwrap();
         assert_eq!(load(&store, &path).unwrap(), "調査\u{feff}保存");
         assert_eq!(fs::read_to_string(&path).unwrap(), text);
     }
     for text in [
-        "\u{feff}\u{feff}{\"version\":1,\"name\":\"Double prefix\"}",
-        " \u{feff}{\"version\":1,\"name\":\"After whitespace\"}",
-        "{\"version\":1,\"name\":\"Trailing\"}\u{feff}",
+        "\u{feff}\u{feff}{\"version\":2,\"name\":\"Double prefix\"}",
+        " \u{feff}{\"version\":2,\"name\":\"After whitespace\"}",
+        "{\"version\":2,\"name\":\"Trailing\"}\u{feff}",
     ] {
         fs::write(&path, text).unwrap();
         assert!(load(&store, &path)
@@ -63,12 +64,12 @@ fn unicode_v1_v2_presets_accept_only_one_file_prefix_utf8_bom() {
 }
 
 #[test]
-fn exact_limit_legacy_presets_load_but_larger_valid_json_is_rejected_and_left_unchanged() {
+fn exact_limit_current_presets_load_but_larger_valid_json_is_rejected_and_left_unchanged() {
     let root = tempfile::tempdir().unwrap();
     let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
     let path = root.path().join("selected-log.json");
     write_padded(&path, MAX_BYTES);
-    assert_eq!(load(&store, &path).unwrap(), "Legacy 雪");
+    assert_eq!(load(&store, &path).unwrap(), "調査 雪");
     write_padded(&path, MAX_BYTES + 1);
     let before = fs::metadata(&path).unwrap();
     assert!(load(&store, &path).unwrap_err().contains("32 MiB"));
@@ -97,7 +98,7 @@ fn oversized_encoded_output_cannot_replace_a_saved_preset_or_publish_a_new_one()
     )
     .unwrap();
     let previous = root.path().join("saved.json");
-    let saved = b"{\"version\":1,\"name\":\"Saved investigation\"}";
+    let saved = b"{\"version\":2,\"name\":\"Saved investigation\"}";
     fs::write(&previous, saved).unwrap();
     let new = root.path().join("new.json");
     for path in [&previous, &new] {

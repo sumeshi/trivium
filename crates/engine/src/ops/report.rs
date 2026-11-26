@@ -26,8 +26,7 @@ pub struct BuildReportPayload {
     pub project_id: Uuid,
     #[serde(default)]
     pub search: Option<String>,
-    /// Display columns. For old callers this also remains the search scope
-    /// when `searchColumns` is omitted.
+    /// Columns included in the report, independent of the search scope.
     #[serde(default)]
     pub columns: Option<Vec<String>>,
     #[serde(default, rename = "searchColumns")]
@@ -70,10 +69,7 @@ pub fn build_report_with_job(
 ) -> Result<ReportMeta, AppError> {
     let spec = QuerySpec {
         search: payload.search.clone(),
-        search_columns: payload
-            .search_columns
-            .clone()
-            .or_else(|| payload.columns.clone()),
+        search_columns: payload.search_columns.clone(),
         condition: payload.condition.clone(),
         flag_filter: payload.flag_filter.clone(),
         bookmarked_only: payload.bookmarked_only,

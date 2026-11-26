@@ -8,9 +8,7 @@ use trivium_engine::{
     ops::{
         export::{export_project, ExportProjectPayload},
         flags::{update_flag, UpdateFlagPayload},
-        projects::{
-            create_project, delete_project, load_project, CreateProjectPayload, ProjectRequest,
-        },
+        projects::{create_project, delete_project, CreateProjectPayload, ProjectRequest},
         rows::{clear_result_cache, query_project_rows, QueryRowsPayload, QuerySpec},
         stats::{column_stats, ColumnStatsPayload},
     },
@@ -126,12 +124,6 @@ fn run_fixture(fixture: &str) -> Result<()> {
     );
     scenarios::isolated_searches(&root, id)?;
     let column = |source: &str| scenarios::source_column(&meta, source);
-    measure("reopen_compat_250", trials(), || {
-        let fresh = ProjectsStore::new(root.clone())?;
-        let response = load_project(&fresh, ProjectRequest { project_id: id })?;
-        assert_eq!(response.initial_rows.len(), PAGE.min(meta.total_records));
-        Ok(())
-    })?;
     measure("reopen_metadata", trials(), || {
         let fresh = ProjectsStore::new(root.clone())?;
         instrumentation::metadata_open(&fresh, id)

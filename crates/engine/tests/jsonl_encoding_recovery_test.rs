@@ -87,7 +87,7 @@ fn unicode_jsonl_recovers_an_invalid_middle_line_without_shifting_source_positio
         ));
         fs::write(&source, &bytes).unwrap();
         assert!(create_project(&store, payload(&source, TextEncoding::Auto, false)).is_err());
-        assert!(store.all().is_empty());
+        assert!(store.try_all().unwrap().is_empty());
         let project = create_project(&store, payload(&source, TextEncoding::Auto, true)).unwrap();
         assert_eq!(project.meta.total_records, 2);
         assert_eq!(
@@ -233,7 +233,7 @@ fn complete_unit_decode_failures_do_not_turn_into_successful_empty_cases() {
         error.to_string().contains("No readable JSON records"),
         "{error}"
     );
-    assert!(store.all().is_empty());
+    assert!(store.try_all().unwrap().is_empty());
     assert_eq!(fs::read_dir(store.staging_root()).unwrap().count(), 0);
 }
 

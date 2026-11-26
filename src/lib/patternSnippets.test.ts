@@ -7,7 +7,7 @@ import { emptyHistory, pushApplied, goBack } from "./viewState.ts";
 import { savedViewFromUnknown } from "./viewStateMapping.ts";
 import { describeCondition, clearFilterInputs } from "./appliedFilterSummary.ts";
 import type { FormatDefinition } from "./formats.ts";
-import { formatDefinitionKey, parseFormatDefinition } from "./formats.ts";
+import { formatDefinitionKey, isFormatDefinition, parseFormatDefinition } from "./formats.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 import type { LoadProjectResponse } from "./types.ts";
 
@@ -26,8 +26,8 @@ test("pattern identity and saved snapshots include their optional validation", (
   state.addPatternSnippet(checked);
   assert.equal(get(state.patternSnippets).length, 2);
   const tree = get(state.conditionTree);
-  const saved = savedViewFromUnknown(JSON.parse(JSON.stringify({ condition: tree, search: "", searchColumns: [],
-    flagFilter: "all", sortKey: null, sortDirection: "asc", hiddenColumns: [], columnWidths: {}, offset: 0 })), ["host", "command", "hidden"]);
+  const saved = savedViewFromUnknown(JSON.parse(JSON.stringify({ version: 1, condition: tree, search: "", searchColumns: [],
+    flagFilter: "all", bookmarkedOnly: false, sortKey: null, sortDirection: "asc", hiddenColumns: [], columnWidths: {}, logicalRow: 0 })), ["host", "command", "hidden"]);
   assert.ok(saved);
   assert.deepEqual(saved.condition.snippets, tree.snippets);
 });
@@ -110,8 +110,8 @@ test("saved views and history preserve selected pattern definitions and their re
   const next = pushApplied(history, after, 7, 0);
   assert.equal(next.index, 1);
   assert.deepEqual(goBack(next)?.entries[0].condition, before);
-  const saved = savedViewFromUnknown(JSON.parse(JSON.stringify({ condition: after, search: "error", searchColumns: ["command"],
-    flagFilter: "all", sortKey: null, sortDirection: "asc", hiddenColumns: [], columnWidths: {}, offset: 0 })), ["host", "command", "hidden"]);
+  const saved = savedViewFromUnknown(JSON.parse(JSON.stringify({ version: 1, condition: after, search: "error", searchColumns: ["command"],
+    flagFilter: "all", bookmarkedOnly: false, sortKey: null, sortDirection: "asc", hiddenColumns: [], columnWidths: {}, logicalRow: 0 })), ["host", "command", "hidden"]);
   assert.ok(saved);
   assert.deepEqual(saved.condition.snippets, after.snippets);
   assert.equal(savedViewFromUnknown({ ...saved, condition: { ...saved.condition,
@@ -154,14 +154,13 @@ test("definition parsing validates structure while retaining literal expressions
   assert.throws(() => parseFormatDefinition({ ...ipv4, examples: [{ text: "test", values: [42] }] }), /Invalid pattern/);
 });
 
-test("older pattern metadata neither changes matching identity nor returns in a parsed definition", () => {
-  const previous = { ...ipv4, classifier: { kind: "ipv4-cidr", default: "Public",
-    rules: [{ cidr: "10.0.0.0/8", label: "Private" }] } };
-  const parsed = parseFormatDefinition(JSON.parse(JSON.stringify(previous)));
-  assert.deepEqual(parsed, ipv4);
-  assert.equal(formatDefinitionKey(previous), formatDefinitionKey(ipv4));
-  const { state } = fixture();
-  state.addPatternSnippet(previous);
-  state.addPatternSnippet(ipv4);
-  assert.equal(get(state.patternSnippets).length, 1);
+test("pattern definitions reject unsupported properties instead of discarding metadata", () => {
+  for (const property of ["classifier", "classification"]) {
+    const unsupported = { ...ipv4, [property]: { kind: "ipv4-cidr", default: "Public",
+      rules: [{ cidr: "10.0.0.0/8", label: "Private" }] } };
+    assert.equal(isFormatDefinition(unsupported), false);
+    assert.throws(() => parseFormatDefinition(JSON.parse(JSON.stringify(unsupported))), /Invalid pattern/);
+  }
+  assert.throws(() => parseFormatDefinition({ ...ipv4,
+    examples: [{ text: "test", values: ["test"], classification: "Public" }] }), /Invalid pattern/);
 });

@@ -217,11 +217,7 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
         theme_source.unlink()
         image_source.unlink()
         wait_for(lambda: _saved(directory / "appearance.json"), lambda value: value == {"version": 2, "enabled": True, "strength": 64}, "simplified background settings reach native storage")
-        # Reopen a real v1 preference with contain/off-table settings. The image
-        # copy remains owned by the app; only its old layout choices are retired.
         web.script("localStorage.removeItem('trivium:wallpaper');")
-        (directory / "appearance.json").write_text(json.dumps({"version": 1, "enabled": True,
-            "fit": "contain", "strength": 64, "behindTable": False}), encoding="utf-8")
         diagnostic = web.diagnostics()
         target = NormalWindowClose(app.application)
         target.request()
@@ -245,7 +241,7 @@ def verify_appearance(app, data: dict, root: Path, evidence: Path, report: dict)
             "actual_css_override": True, "managed_image_dimensions": decoded, "original_source_removed_before_restart": True,
             "normal_close_and_restart": True, "native_settings_restored": True,
             "shared_table_background_layers": paint["layers"], "slider_image_style_reassignments": 0,
-            "legacy_preferences_migrate_to_body_cover": True, "source_files_unchanged": True,
+            "source_files_unchanged": True,
             "unverified": "Native OS picker interaction; only selected-path responses are substituted"}
     finally:
         # Only the isolated profile's uniquely named custom theme is removed.

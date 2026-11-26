@@ -15,15 +15,14 @@ impl FlagFilterMask {
     const ALL: Self = Self(u8::MAX);
 
     pub(super) fn parse(filter: Option<&str>) -> Result<Self, AppError> {
-        let filter = filter.unwrap_or("all").trim();
-        match filter {
-            "" | "all" => return Ok(Self::ALL),
-            "priority" => return Ok(Self(2 | 4)),
-            _ => {}
+        let filter = filter.unwrap_or("all");
+        if filter == "all" {
+            return Ok(Self::ALL);
         }
         let mut mask = 0;
+        let mut previous = 0;
         for token in filter.split('|') {
-            mask |= match token.trim() {
+            let population = match token {
                 "safe" => 1,
                 "suspicious" => 2,
                 "critical" => 4,
@@ -34,6 +33,13 @@ impl FlagFilterMask {
                     )))
                 }
             };
+            if population <= previous {
+                return Err(AppError::Message(format!(
+                    "Invalid flag filter value: {filter:?}. Select each flag once in canonical order."
+                )));
+            }
+            mask |= population;
+            previous = population;
         }
         Ok(Self(mask))
     }
@@ -43,17 +49,13 @@ impl FlagFilterMask {
     }
 }
 
-/// Match the persisted aliases without allocating a normalized String.
+/// Match canonical persisted flags without allocating a String.
 pub(super) fn flag_population(flag: &str) -> u8 {
-    let flag = flag.trim();
-    if flag.eq_ignore_ascii_case("safe") || flag == "◯" {
-        1
-    } else if flag.eq_ignore_ascii_case("suspicious") || flag == "?" {
-        2
-    } else if flag.eq_ignore_ascii_case("critical") || flag == "✗" {
-        4
-    } else {
-        8
+    match flag {
+        "safe" => 1,
+        "suspicious" => 2,
+        "critical" => 4,
+        _ => 8,
     }
 }
 

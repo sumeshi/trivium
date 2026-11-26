@@ -12,7 +12,7 @@ const MIB = 1024 * 1024;
 const MAX_BYTES = 16 * MIB;
 
 function rowWithText(text: string): CachedRow {
-  return {
+  return { color: null,
     row_index: 0,
 
     cells: {},
@@ -41,7 +41,7 @@ test("estimatePageBytes counts the rendered cell strings", () => {
 });
 
 test("page estimates count exact datetime metadata once per retained cell", () => {
-  const source = { text: "preview", kind: "string" as const, truncated: true };
+  const source = { length: Array.from("preview").length,  text: "preview", kind: "string" as const, truncated: true };
   const row = { ...rowWithText("preview"), cells: { first: source, second: source, ordinary: source } };
   const initial = estimatePageBytes([row]);
   const datetimeRow = {

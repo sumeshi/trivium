@@ -35,16 +35,7 @@ pub(super) fn prefix(
 
     html.push_str("<section class=\"meta\"><h2>Project</h2><ul>");
     push_stat_li(&mut html, "Total rows", &meta.total_records.to_string());
-    push_stat_li(
-        &mut html,
-        "Annotated rows",
-        &meta.flagged_records.to_string(),
-    );
-    push_stat_li(
-        &mut html,
-        "IOC applied rows",
-        &meta.ioc_applied_records.to_string(),
-    );
+    push_stat_li(&mut html, "Flagged rows", &meta.flagged_records.to_string());
     html.push_str("</ul></section>\n");
 
     html.push_str("<section class=\"filter\"><h2>Filter</h2>");

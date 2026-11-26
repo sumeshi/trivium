@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use trivium_engine::condition::{Condition, Group, GroupKind, Node, Op};
-use trivium_engine::error::AppError;
 use trivium_engine::ops;
 use trivium_engine::ops::preset::{load_preset, save_preset, LoadPresetPayload, SavePresetPayload};
 use trivium_engine::ops::preset::PresetFilters;
@@ -193,12 +192,14 @@ fn preset_reports_unknown_columns_case_insensitively() {
 fn preset_rejects_unsupported_version() {
     let (root, store, _id_a, id_b, _ids) = setup();
     let destination = root.join("preset.json");
-    fs::write(&destination, r#"{"version":99,"hiddenColumns":[]}"#).expect("failed to write");
-    let error = load_preset(&store, load_payload(Some(id_b), &destination))
-        .expect_err("unknown versions must fail");
-    match error {
-        AppError::Message(message) => assert_eq!(message, "Unsupported preset version."),
-        other => panic!("unexpected error: {other:?}"),
+    for version in [1, 99] {
+        let json = serde_json::json!({"version": version, "hiddenColumns": []});
+        let original = serde_json::to_vec(&json).unwrap();
+        fs::write(&destination, &original).unwrap();
+        let error = load_preset(&store, load_payload(Some(id_b), &destination))
+            .expect_err("unsupported versions must fail");
+        assert_eq!(error.to_string(), "Unsupported preset version.");
+        assert_eq!(fs::read(&destination).unwrap(), original);
     }
 
     let _ = fs::remove_dir_all(root);
@@ -324,26 +325,6 @@ fn matching_duplicate_header_schemas_preserve_their_source_positions() {
 }
 
 #[test]
-fn old_presets_still_load_by_internal_source_position() {
-    let (root, store, _id_a, id_b, ids) = setup();
-    let destination = root.join("old-preset.json");
-    fs::write(
-        &destination,
-        serde_json::to_vec(&serde_json::json!({
-            "version": 1, "condition": nested_condition(&ids),
-            "hiddenColumns": [ids["host"]], "sortKey": ids["EventID"], "sortDirection": "desc",
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let loaded = load_preset(&store, load_payload(Some(id_b), &destination)).unwrap();
-    assert_eq!(loaded.condition, Some(nested_condition(&ids)));
-    assert_eq!(loaded.hidden_columns, vec![ids["host"].clone()]);
-    assert_eq!(loaded.sort_key, Some(ids["EventID"].clone()));
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
 fn an_unmapped_id_never_silently_binds_to_an_extra_target_column() {
     let (root, store, id_a, _id_b, ids) = setup();
     let destination = root.join("preset.json");
@@ -451,7 +432,7 @@ fn invalid_preset_layout_is_rejected_before_replacing_a_file_or_applying() {
         serde_json::json!({"columnWidths": {ids["host"].clone(): 0}}),
         serde_json::json!({"columnWidths": {"": 200}}),
     ] {
-        let mut file = serde_json::json!({"version": 1, "hiddenColumns": []});
+        let mut file = serde_json::json!({"version": 2, "hiddenColumns": []});
         file.as_object_mut()
             .unwrap()
             .extend(layout.as_object().unwrap().clone());
@@ -606,7 +587,7 @@ fn absent_filter_snapshot_and_explicit_default_reset_remain_distinct() {
     let file: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
     assert!(
         file.get("filters").is_none(),
-        "legacy saves omit the snapshot rather than clear filters"
+        "partial saves omit the filter snapshot"
     );
     assert!(
         load_preset(&store, load_payload(Some(target), &destination))
@@ -614,22 +595,6 @@ fn absent_filter_snapshot_and_explicit_default_reset_remain_distinct() {
             .filters
             .is_none()
     );
-    for version in [1, 2] {
-        let legacy = root.join(format!("legacy-filters-{version}.json"));
-        fs::write(
-            &legacy,
-            serde_json::to_vec(&serde_json::json!({
-                "version": version, "condition": null, "hiddenColumns": [],
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        assert!(load_preset(&store, load_payload(Some(target), &legacy))
-            .unwrap()
-            .filters
-            .is_none());
-    }
-
     let defaults = PresetFilters {
         search: String::new(),
         search_columns: Vec::new(),
@@ -853,7 +818,7 @@ fn qualified_source_labels_keep_their_text_and_result_after_schema_reordering() 
 }
 
 #[test]
-fn qualified_search_preflight_keeps_literal_colons_tags_and_metadata_free_files() {
+fn qualified_search_preflight_keeps_literal_colons_and_tags() {
     let (root, store, source, target, ids) = setup();
     let destination = root.join("qualified-search-special.json");
     for search in ["\"missing:literal\"", "@tag:review", "-@tag:*"] {
@@ -870,12 +835,6 @@ fn qualified_search_preflight_keeps_literal_colons_tags_and_metadata_free_files(
         assert_eq!(load_preset(&store, load_payload(Some(target), &destination))
             .unwrap().filters.unwrap().search, search);
     }
-    let legacy = serde_json::json!({"version":1,"hiddenColumns":[],"filters":{
-        "search":"host:WS01", "searchColumns":[],"flagFilter":"all","bookmarkedOnly":false,
-    }});
-    fs::write(&destination, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    assert_eq!(load_preset(&store, load_payload(Some(target), &destination))
-        .unwrap().filters.unwrap().search, "host:WS01");
     let _ = fs::remove_dir_all(root);
 }
 

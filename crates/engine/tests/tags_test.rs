@@ -1,5 +1,5 @@
 //! F19: user tags and bookmarks across storage, update_flag, bulk, query,
-//! export, and the legacy flags.json migration path.
+//! export, and annotation storage.
 
 use std::fs;
 use std::path::PathBuf;
@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use trivium_engine::annotation::AnnotationPatch;
-use trivium_engine::models::FlagEntry;
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{
     bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
@@ -19,7 +18,6 @@ use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::report::{build_report, BuildReportPayload};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QueryRowsResponse, QuerySpec};
 use trivium_engine::ops::time::TimeAnalysisPayload;
-use trivium_engine::storage::{load_flags, upsert_flag};
 use trivium_engine::store::ProjectsStore;
 
 mod common;
@@ -110,43 +108,6 @@ fn update(
         },
     )
     .expect("update_flag failed")
-}
-
-#[test]
-fn legacy_flags_json_loads_and_keeps_tags() {
-    let root = std::env::temp_dir().join(format!("trivium-tags-legacy-{}", Uuid::new_v4()));
-    let project_dir = root.join("project");
-    fs::create_dir_all(&project_dir).expect("failed to create project dir");
-    let flags_path = project_dir.join("flags.json");
-    // Old on-disk shape: no tags/bookmarked keys at all.
-    fs::write(&flags_path, r#"{"0":{"flag":"safe","memo":"hello"}}"#)
-        .expect("failed to write legacy flags");
-
-    let flags = load_flags(&flags_path).expect("legacy load failed");
-    let entry = flags.get(&0).expect("legacy entry missing");
-    assert_eq!(entry.flag, "safe");
-    assert_eq!(entry.memo.as_deref(), Some("hello"));
-    assert!(entry.tags.is_empty(), "tags must default to empty");
-    assert!(!entry.bookmarked, "bookmarked must default to false");
-
-    upsert_flag(
-        &flags_path,
-        0,
-        &FlagEntry {
-            flag: "safe".to_string(),
-            memo: Some("hello".to_string()),
-            tags: vec!["pc".to_string(), "gpu".to_string()],
-            bookmarked: true,
-        },
-    )
-    .expect("upsert failed");
-
-    let reloaded = load_flags(&flags_path).expect("reload failed");
-    let entry = reloaded.get(&0).expect("reloaded entry missing");
-    assert_eq!(entry.tags, vec!["pc".to_string(), "gpu".to_string()]);
-    assert!(entry.bookmarked);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -269,7 +230,6 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
         GroupTreePayload {
             project_id: id,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -289,7 +249,6 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             column: event_id,
             buckets: 4,
             search: None,
-            columns: None,
             search_columns: None,
             flag_filter: None,
             bookmarked_only: None,
@@ -315,7 +274,6 @@ fn bookmarked_only_filters_query_but_not_other_analyses() {
             burst_window_seconds: 60,
             burst_min: 10,
             search: None,
-            columns: None,
             search_columns: None,
             flag_filter: None,
             bookmarked_only: None,

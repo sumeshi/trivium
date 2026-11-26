@@ -17,7 +17,7 @@ use crate::{
     jobs::JobContext,
     models::FlagEntry,
     project_io::{
-        is_internal_column_for_version, read_project_columns_with_job, read_project_row_count,
+        is_internal_column, read_project_columns_with_job, read_project_row_count,
         read_project_schema_columns, record_column_read_projection, INTERNAL_ROW_ID,
     },
     storage::load_flag_snapshot,
@@ -57,11 +57,11 @@ pub fn resolve_project_target(
     let total_rows = read_project_row_count(&path).map_err(AppError::from)?;
     let columns: Vec<String> = schema
         .iter()
-        .filter(|name| !is_internal_column_for_version(name, meta.storage_version))
+        .filter(|name| !is_internal_column(name))
         .cloned()
         .collect();
     let (flags, revision) =
-        load_flag_snapshot(&store.flags_path(&project_id)).map_err(AppError::from)?;
+        load_flag_snapshot(&store.database_path(&project_id)).map_err(AppError::from)?;
     let flags = Arc::new(flags);
     let annotated_total = flags
         .iter()

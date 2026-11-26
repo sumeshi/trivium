@@ -199,7 +199,7 @@ fn annotation_filters_miss_after_an_annotation_update() {
     let (root, store, id) = setup_project();
 
     let priority = QuerySpec {
-        flag_filter: Some("priority".to_string()),
+        flag_filter: Some("suspicious|critical".to_string()),
         ..Default::default()
     };
     let before = query(&store, id, priority.clone(), 0, PAGE);
@@ -347,7 +347,7 @@ fn undo_invalidates_a_flag_filtered_result() {
     let (root, store, id) = setup_project();
 
     let priority = QuerySpec {
-        flag_filter: Some("priority".to_string()),
+        flag_filter: Some("suspicious|critical".to_string()),
         ..Default::default()
     };
     let before = query(&store, id, priority.clone(), 0, PAGE);

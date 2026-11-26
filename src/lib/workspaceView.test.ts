@@ -14,9 +14,9 @@ function deferred<T>() {
   return { promise, resolve };
 }
 function detail(id: string): LoadProjectResponse {
-  return { project: { meta: { id, name: id, created_at: "2026", total_records: 5199, flagged_records: 0,
-    ioc_applied_records: 0, hidden_columns: [] } }, columns: ["c1"], columns_meta: [], column_max_chars: {},
-    column_kinds: {}, color_rules: [], iocs: [], hidden_columns: [], initial_rows: [] };
+  return { project: { meta: { description: null, source_sha256: null, source_file_name: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: id, created_at: "2026", total_records: 5199, flagged_records: 0,
+    hidden_columns: [] } }, columns: ["c1"], columns_meta: [], column_max_chars: {},
+    column_kinds: {}, color_rules: [], iocs: [], hidden_columns: [],  };
 }
 function saved(search = "restored"): ViewState {
   return { version: 1, search, searchColumns: ["c1"], flagFilter: "critical", bookmarkedOnly: true,
@@ -49,8 +49,8 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   workspace.selectedRowIds.set(new Set([2, 4567]));
   workspace.columnOrder.set(['c1']);
   workspace.columnFormats.set({ c1: 'iso' });
-  workspace.registerLoadedPage(0, 0, [normalizeRow({ row_index: 2,
-    cells: { c1: { kind: "string", text: "never retain this row" } }, flag: "", memo: "", tags: [], bookmarked: false })]);
+  workspace.registerLoadedPage(0, 0, [normalizeRow({ color: null,  row_index: 2,
+    cells: { c1: { truncated: false, length: Array.from("never retain this row").length,  kind: "string", text: "never retain this row" } }, flag: "", memo: "", tags: [], bookmarked: false })]);
   const snapshot = view.snapshotSession()!;
   const saving = view.flushPersist("view-test");
   workspace.dispose();
@@ -90,6 +90,8 @@ test("unreadable, invalid or newer saved views are never replaced by default set
     { status: "unreadable", state: null },
     { status: "newer", state: saved() },
     { status: "ok", state: { ...saved(), condition: { bad: true } } },
+    { status: "ok", state: { ...saved(), version: 0 } },
+    { status: "ok", state: { ...saved(), version: 2 } },
   ] satisfies LoadViewStateResult[]) {
     const { workspace, view, writes, notices } = setup({ loadViewState: async () => result });
     await view.loadSavedView(detail("view-test"), null, () => true);
@@ -122,7 +124,11 @@ test("unsupported saved settings survive idle saves, close flushes and tab resto
     const state = setup({ loadViewState: async () => ({ state: stored, status: "ok" }) }, id);
     state.view.watch();
     const restored = await state.view.loadSavedView(detail(id), null, () => true);
-    assert.ok(restored, "safe fields can still be used to open the investigation");
+    const malformed = fields.flagFilter !== undefined || fields.sortDirection !== undefined
+      || fields.columnFormats !== undefined || fields.noteColumnWidth !== undefined
+      || Object.values(fields.columnWidths ?? {}).some(width => width <= 0);
+    if (malformed) assert.equal(restored, null);
+    else assert.ok(restored, "valid current fields still open when some column references are unavailable");
     state.workspace.search.set("a temporary session query");
     state.view.schedulePersist();
     t.mock.timers.tick(1000);
@@ -130,7 +136,7 @@ test("unsupported saved settings survive idle saves, close flushes and tab resto
     await state.view.flushPersist(id, false, true);
     assert.deepEqual(state.writes, [], "neither autosave nor the final close flush may replace unsupported data");
     assert.equal(JSON.stringify(stored), original);
-    assert.match(state.notices.join(" "), /without overwriting the saved view/);
+    assert.match(state.notices.join(" "), /not overwrite|without overwriting/);
     const snapshot = state.view.snapshotSession()!;
     assert.equal(snapshot.writable, false);
     state.workspace.dispose();
@@ -151,12 +157,12 @@ test("protecting unsupported view settings still allows annotations to be saved"
     loadViewState: async () => ({ state: { ...saved(), flagFilter: "future-value" as never }, status: "ok" }),
     updateFlag: async args => {
       annotations.push(String(args.memo));
-      return { entry: { flag: "", memo: args.memo, tags: [], bookmarked: false }, revision: 1, flaggedRecords: 0 };
+      return { entry: { flag: "", memo: args.memo ?? null, tags: [], bookmarked: false }, revision: 1, flaggedRecords: 0 };
     },
   }, id);
   state.workspace.backend.set(state.backend);
   await state.view.loadSavedView(detail(id), null, () => true);
-  const row = normalizeRow({ row_index: 2, cells: { c1: { kind: "string", text: "evidence" } },
+  const row = normalizeRow({ color: null,  row_index: 2, cells: { c1: { truncated: false, length: Array.from("evidence").length,  kind: "string", text: "evidence" } },
     flag: "", memo: "", tags: [], bookmarked: false });
   state.workspace.registerLoadedPage(0, 0, [row]);
   assert.equal(await state.workspace.saveAnnotation(id, row, { memo: "finding" }), true);

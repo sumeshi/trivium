@@ -29,9 +29,9 @@ use crate::{
     jobs::JobContext,
     models::{ColumnMeta, ProjectRow},
     project_io::{
-        is_internal_column_for_version, read_page_dataframe_with_job,
-        read_page_rows_dataframe_with_job, read_project_row_count, read_project_schema_columns,
-        ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
+        is_internal_column, read_page_dataframe_with_job, read_page_rows_dataframe_with_job,
+        read_project_row_count, read_project_schema_columns, ProjectColumns, INTERNAL_ORIGINAL,
+        INTERNAL_ROW_ID,
     },
     storage::load_page_flag_snapshot,
     store::ProjectsStore,
@@ -123,17 +123,15 @@ pub fn query_project_rows_with_projection(
     let total_rows = read_project_row_count(&parquet_path).map_err(AppError::from)?;
     let columns: Vec<String> = schema_columns
         .iter()
-        .filter(|name| !is_internal_column_for_version(name, meta.storage_version))
+        .filter(|name| !is_internal_column(name))
         .cloned()
         .collect();
-    let has_row_id = schema_columns.iter().any(|name| name == INTERNAL_ROW_ID);
-    let has_original = schema_columns.iter().any(|name| name == INTERNAL_ORIGINAL);
     // CSV originals are arrays of source strings and CSV cells are never null,
     // so the page does not need `__original` to classify them. JSON pages do:
     // the original object separates null from a missing key and carries the
     // per-cell JSON type.
-    let needs_original = has_original && meta.source_format.as_deref() != Some("csv");
-    let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema_columns);
+    let needs_original = meta.source_format.as_deref() != Some("csv");
+    let project_columns = ProjectColumns::from_meta(&meta);
     let known_columns: std::collections::HashSet<&str> =
         columns.iter().map(String::as_str).collect();
     let requested = page_columns
@@ -173,7 +171,7 @@ pub fn query_project_rows_with_projection(
         .cloned()
         .collect();
 
-    let flags_path = store.flags_path(&meta.id);
+    let database_path = store.database_path(&meta.id);
     let color_rules = load_page_color_rules(&project_dir);
     let mut page_projection: Vec<String> = visible_columns
         .iter()
@@ -194,16 +192,7 @@ pub fn query_project_rows_with_projection(
             }
         });
     }
-    if has_row_id {
-        page_projection.push(INTERNAL_ROW_ID.to_string());
-    }
-    // Legacy files can have no internal columns. Keep their row count when
-    // every source column is hidden; the anchor never becomes a visible cell.
-    if page_projection.is_empty() {
-        if let Some(column) = columns.first() {
-            page_projection.push(column.clone());
-        }
-    }
+    page_projection.push(INTERNAL_ROW_ID.to_string());
 
     let offset = payload.offset.unwrap_or(0);
     let limit = payload.limit.unwrap_or(DEFAULT_PAGE_SIZE).max(1);
@@ -220,7 +209,7 @@ pub fn query_project_rows_with_projection(
                 .map_err(AppError::from)?;
 
         let (page_flags, annotated_total, page_revision) =
-            load_page_flag_snapshot(&flags_path, &row_ids).map_err(AppError::from)?;
+            load_page_flag_snapshot(&database_path, &row_ids).map_err(AppError::from)?;
 
         job.check_cancelled()?;
         job.report_progress(2, Some(3), Some("Building page".into()));
@@ -266,7 +255,7 @@ pub fn query_project_rows_with_projection(
             .copied()
             .collect();
         let (page_flags, annotated_total, page_revision) =
-            load_page_flag_snapshot(&flags_path, &row_ids).map_err(AppError::from)?;
+            load_page_flag_snapshot(&database_path, &row_ids).map_err(AppError::from)?;
         // A concurrent annotation edit must not combine old membership/counts
         // with new page flags. The shared snapshot resolver handles that case.
         let membership_current = !result_cache::spec_depends_on_annotations(&payload.spec)

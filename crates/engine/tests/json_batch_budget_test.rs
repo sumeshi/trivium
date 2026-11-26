@@ -5,7 +5,7 @@ use polars::prelude::AnyValue;
 use serde_json::{json, Value};
 use trivium_engine::{
     import::jsonl::{BatchLimits, JsonImporter, RecordFormat, MAX_JSON_COLUMNS},
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     ops::projects::{create_project, CreateProjectPayload},
     project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD},
     store::ProjectsStore,
@@ -160,7 +160,7 @@ fn excessive_column_union_is_rejected_without_registering_or_leaving_staging() {
             MAX_JSON_COLUMNS
         )
     );
-    assert!(store.all().is_empty());
+    assert!(store.try_all().unwrap().is_empty());
     assert!(fs::read_dir(store.staging_root()).unwrap().next().is_none());
     assert_eq!(fs::read_to_string(&source).unwrap(), contents);
     // A rejected import must not poison a subsequent import into the same store.
@@ -248,7 +248,7 @@ fn one_oversized_record_is_alone_and_budget_flushes_observe_cancellation() {
     assert_eq!(heights, [1, 2]);
 
     let _lock = JOB_LOCK.lock().unwrap();
-    let guard = try_begin_job(JobKind::Import, None).unwrap();
+    let guard = queue_job(JobKind::Import, None).unwrap();
     let id = guard.id();
     let job = JobContext::with_job(guard, None);
     let importer = JsonImporter::open(&source, RecordFormat::JsonLines, limits, &job).unwrap();

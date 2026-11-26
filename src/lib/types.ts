@@ -1,28 +1,22 @@
 import type * as Wire from "./generated/engine";
 
-// Wire shapes are generated from Rust. These refinements express UI enums and
-// accept optional fields from older saved projects without changing the wire.
+// Wire shapes are generated from Rust; refinements express UI enums.
 export type ColumnMeta = Wire.ColumnMeta;
 export type ImportOptions = Wire.ImportOptions;
 export type ImportReport = Wire.ImportReport;
 export type ImportPreview = Wire.ImportPreview;
 export type TextEncoding = Wire.TextEncoding;
-type LegacyMetaFields = "description" | "source_sha256" | "source_file_name" |
-  "source_format" | "source_size" | "source_path" | "storage_version" | "columns";
-export type ProjectMeta = Omit<Wire.ProjectMeta, LegacyMetaFields> &
-  Partial<Pick<Wire.ProjectMeta, LegacyMetaFields>>;
+export type ProjectMeta = Wire.ProjectMeta;
 export type ProjectSummary = Omit<Wire.ProjectSummary, "meta"> & { meta: ProjectMeta };
 export type FlagSymbol = "safe" | "suspicious" | "critical";
 export type CellKind = "string" | "int" | "float" | "bool" | "array" | "object" | "null" | "missing";
 /** Source integers and timestamps stay in text, never JavaScript Number. */
-export type Cell = Omit<Wire.Cell, "kind" | "truncated" | "length"> &
-  Partial<Pick<Wire.Cell, "truncated" | "length">> & { kind: CellKind };
-export type ProjectRow = Omit<Wire.ProjectRow, "cells" | "memo" | "color"> &
-  Partial<Pick<Wire.ProjectRow, "memo" | "color">> & { cells: Record<string, Cell> };
-export type FlagEntry = Omit<Wire.FlagEntry, "memo"> & Partial<Pick<Wire.FlagEntry, "memo">>;
+export type Cell = Omit<Wire.Cell, "kind"> & { kind: CellKind };
+export type ProjectRow = Omit<Wire.ProjectRow, "cells"> & { cells: Record<string, Cell> };
+export type FlagEntry = Wire.FlagEntry;
 export type FlagFilterSelection = FlagSymbol | "none";
-/** Legacy single values remain readable; new combinations are pipe-separated. */
-export type FlagFilterValue = "all" | "priority" | FlagFilterSelection |
+/** Multiple selected flags use canonical pipe-separated tokens. */
+export type FlagFilterValue = "all" | FlagFilterSelection |
   `${FlagFilterSelection}|${string}`;
 export type CompareOp = Wire.Op;
 export type ConditionLeaf = Wire.Condition;
@@ -32,7 +26,7 @@ export type ConditionNode = Wire.Node;
 export type QuerySpec = { [K in keyof Required<Wire.QuerySpec>]:
   K extends "condition" | "sortKey" ? Wire.QuerySpec[K] : NonNullable<Wire.QuerySpec[K]>
 } & { flagFilter: FlagFilterValue; sortDirection: "asc" | "desc" };
-/** Unknown stored IOC flags stay visible until the user corrects them. */
+/** Invalid stored IOC flags stay visible until the user corrects them. */
 export type IocEntry = Wire.IocEntry & { id?: string };
 export type ColumnKind = "null" | "int" | "float" | "datetime" | "string";
 export type ColorRule = Wire.ColorRule;
@@ -54,12 +48,11 @@ export interface PresetData {
   unknown_columns: string[];
 }
 export type LoadProjectResponse = Omit<Wire.LoadProjectResponse,
-  "project" | "column_max_chars" | "column_kinds" | "iocs" | "initial_rows"> & {
+  "project" | "column_max_chars" | "column_kinds" | "iocs"> & {
   project: ProjectSummary;
   column_max_chars: Record<string, number>;
   column_kinds: Record<string, ColumnKind>;
   iocs: IocEntry[];
-  initial_rows: ProjectRow[];
 };
 export type ViewState = Omit<Wire.ViewState,
   "condition" | "flagFilter" | "sortDirection" | "columnWidths"> & {

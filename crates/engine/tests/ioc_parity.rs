@@ -1,9 +1,7 @@
-//! Query/export parity for user annotations after automatic IOC removal (T25).
+//! Query/export parity for saved annotations and unapplied IOC definitions.
 //!
-//! Saving IOC definitions must not change row flags, memos, or the stored
-//! `ioc_applied_records` count. The query path, the export path, and the
-//! project load path all show user annotations only. The IOC evaluation module
-//! remains for an explicit future operation; it is not called here.
+//! Saving IOC definitions must not change row flags or memos. Query, export,
+//! and project load all show saved annotations until a rule is explicitly applied.
 
 use std::fs;
 use std::path::PathBuf;
@@ -23,7 +21,7 @@ use trivium_engine::store::ProjectsStore;
 mod common;
 
 // 10 rows: rows 0..4 are EventID 4624 (alice), rows 5..9 are 4625 (bob).
-// The legacy IOC below matches every 4625 row.
+// The IOC below matches every 4625 row.
 fn write_fixture(root: &std::path::Path) -> PathBuf {
     let path = root.join("parity.csv");
     let mut body = String::from("ts,EventID,host,user,proc\n");
@@ -64,7 +62,7 @@ fn setup() -> (PathBuf, ProjectsStore, uuid::Uuid) {
     let ids = common::column_ids(&store, summary.meta.id);
 
     // User flags: row 0 (no IOC match), row 5 "safe" (IOC match), and row 6
-    // memo-only. The legacy IOC matches every 4625 row (5..9).
+    // memo-only. The IOC matches every 4625 row (5..9).
     for (row_index, flag, memo) in [
         (0usize, "suspicious", None),
         (5usize, "safe", None),
@@ -168,17 +166,15 @@ fn export_flags(destination: &std::path::Path) -> Vec<(String, String)> {
 fn query_export_and_load_show_user_annotations_only() {
     let (root, store, id) = setup();
 
-    // The stored legacy count is not recalculated when IOC definitions change.
-    let meta = store.find(&id).expect("meta missing");
-    assert_eq!(meta.ioc_applied_records, 0);
-
     // Project load returns the definitions, but opening the project leaves
     // every row without an automatic flag or tag.
     let loaded = ops::projects::load_project(&store, ProjectRequest { project_id: id })
         .expect("load failed");
-    assert_eq!(loaded.iocs.len(), 1, "legacy IOC definitions are kept");
-    assert_eq!(loaded.project.meta.ioc_applied_records, 0);
-    for row in &loaded.initial_rows {
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
+    assert_eq!(loaded.iocs.len(), 1, "IOC definitions are kept");
+    assert_eq!(loaded.project.meta.flagged_records, 2);
+    for row in &loaded_rows {
         let expected = match row.row_index {
             0 => "suspicious",
             5 => "safe",

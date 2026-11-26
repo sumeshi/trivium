@@ -1,5 +1,5 @@
 //! Every flag selection must identify the same original rows for review,
-//! aggregation, export and bulk annotations, including the legacy API values.
+//! aggregation, export and bulk annotations.
 
 use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
 
@@ -211,7 +211,7 @@ impl Fixture {
             bulk_update(&self.store, apply).unwrap().updated,
             expected.len()
         );
-        let flags = load_flags(&self.store.flags_path(&self.project)).unwrap();
+        let flags = load_flags(&self.store.database_path(&self.project)).unwrap();
         let mut annotated: Vec<usize> = flags
             .iter()
             .filter(|(_, annotation)| annotation.memo.as_deref() == Some(marker.as_str()))
@@ -257,22 +257,10 @@ fn all_sixteen_flag_selections_share_query_stats_histogram_export_and_bulk_targe
 }
 
 #[test]
-fn legacy_filters_keep_their_compatible_meaning() {
-    let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new();
-    fixture.assert_population("priority", &[6, 5, 2, 1]);
-    fixture.assert_population("none", &[7, 3]);
-    fixture.assert_population(" critical | none | critical ", &[7, 6, 3, 2]);
-    for filter in ["", "all"] {
-        fixture.assert_population(filter, &[7, 6, 5, 4, 3, 2, 1, 0]);
-    }
-}
-
-#[test]
 fn malformed_filters_are_rejected_before_query_export_analysis_or_bulk_can_expand_targets() {
     let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new();
-    let snapshot = load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap();
+    let snapshot = load_flag_snapshot(&fixture.store.database_path(&fixture.project)).unwrap();
     let destination = fixture.root.join("invalid-filter.csv");
     for filter in [
         "future",
@@ -281,6 +269,12 @@ fn malformed_filters_are_rejected_before_query_export_analysis_or_bulk_can_expan
         "safe|",
         "safe|all",
         "safe|priority",
+        "priority",
+        "",
+        " critical ",
+        "safe|safe",
+        "none|safe",
+        " critical | none | critical ",
     ] {
         let spec = QuerySpec {
             flag_filter: Some(filter.into()),
@@ -381,7 +375,7 @@ fn malformed_filters_are_rejected_before_query_export_analysis_or_bulk_can_expan
             }
         }
         assert_eq!(
-            load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap(),
+            load_flag_snapshot(&fixture.store.database_path(&fixture.project)).unwrap(),
             snapshot
         );
     }
@@ -391,11 +385,7 @@ fn malformed_filters_are_rejected_before_query_export_analysis_or_bulk_can_expan
 fn selecting_every_flag_keeps_the_source_order_page_and_lookup_fast_paths() {
     let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new();
-    for filter in [
-        "all",
-        "safe|suspicious|critical|none",
-        "none|critical|safe|suspicious",
-    ] {
+    for filter in ["all", "safe|suspicious|critical|none"] {
         reset_project_read_counters();
         reset_resolve_count();
         let spec = QuerySpec {

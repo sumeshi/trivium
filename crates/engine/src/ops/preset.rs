@@ -11,13 +11,13 @@ use crate::error::AppError;
 use crate::export::atomic::{validate_destination, write_atomically};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, ProjectMeta};
-use crate::project_io::{read_project_schema_columns, ProjectColumns};
+use crate::project_io::ProjectColumns;
 use crate::search::{is_tag_scope, tokenize_search_query, SearchToken};
 use crate::store::ProjectsStore;
 
 mod file;
 
-/// Optional on older presets; a present snapshot always describes every filter.
+/// A filter snapshot describes every filter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetFilters {
@@ -158,7 +158,7 @@ pub fn load_preset(
     let mut preset: PresetFile = serde_json::from_slice(json)
         .with_context(|| format!("failed to parse preset {}", payload.source))
         .map_err(AppError::from)?;
-    if !matches!(preset.version, 1 | 2) {
+    if preset.version != 2 {
         return Err(AppError::Message("Unsupported preset version.".into()));
     }
     validate_preset(&preset)?;
@@ -192,10 +192,7 @@ fn project_columns(store: &ProjectsStore, meta: &ProjectMeta) -> Result<Vec<Colu
     if !parquet_path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
-    let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-    Ok(ProjectColumns::from_meta_and_names(meta, &schema)
-        .columns()
-        .to_vec())
+    Ok(ProjectColumns::from_meta(meta).columns().to_vec())
 }
 
 fn resolve_columns(
@@ -261,11 +258,10 @@ fn resolve_columns(
         .map(|column| &column.source)
         .eq(target.iter().map(|column| &column.source));
     let mut ids = HashSet::new();
-    if preset.version == 2
-        && preset
-            .columns
-            .iter()
-            .any(|column| !ids.insert(column.id.to_lowercase()))
+    if preset
+        .columns
+        .iter()
+        .any(|column| !ids.insert(column.id.to_lowercase()))
     {
         return Err(AppError::Message("Invalid preset column mapping.".into()));
     }
@@ -273,13 +269,7 @@ fn resolve_columns(
     let mut missing = Vec::new();
     for reference in references {
         let key = reference.to_lowercase();
-        let resolved = if preset.version == 1 {
-            // Old presets use source positions, as before.
-            target
-                .iter()
-                .find(|column| column.id == reference)
-                .or_else(|| target.iter().find(|column| column.id.to_lowercase() == key))
-        } else if let Some(index) = preset
+        let resolved = if let Some(index) = preset
             .columns
             .iter()
             .position(|column| column.id.to_lowercase() == key)
@@ -360,7 +350,7 @@ fn validate_preset(preset: &PresetFile) -> Result<(), AppError> {
             return Err(AppError::Message("Invalid preset search columns.".into()));
         }
         // Reuse the same search and flag parser as query/export/bulk, including
-        // aliases and combinations. A preset must not widen an invalid filter.
+        // combinations. A preset must not widen an invalid filter.
         QuerySpec {
             search: Some(filters.search.clone()),
             flag_filter: Some(filters.flag_filter.clone()),

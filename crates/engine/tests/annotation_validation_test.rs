@@ -93,14 +93,16 @@ fn invalid_single_and_bulk_flags_leave_entries_revision_and_previous_undo_intact
     );
     assert_eq!(bulk_update(&fixture.store, prior).unwrap().updated, 1);
 
-    let snapshot = load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap();
+    let snapshot = load_flag_snapshot(&fixture.store.database_path(&fixture.project)).unwrap();
     let mut valid = fixture.bulk("safe");
     valid.preview_token = Some(
         bulk_preview(&fixture.store, valid.clone())
             .unwrap()
             .preview_token,
     );
-    for invalid in ["critcal", "none", "safe|critical", "future"] {
+    for invalid in [
+        "critcal", "none", "safe|critical", "future", "SAFE", " critical ", "◯", "?", "✗",
+    ] {
         let mut single = fixture.update(Some(invalid));
         single.memo = Some(Some("must not be saved".into()));
         let error = update_flag(&fixture.store, single).unwrap_err().to_string();
@@ -118,7 +120,7 @@ fn invalid_single_and_bulk_flags_leave_entries_revision_and_previous_undo_intact
             .to_string()
             .contains("Invalid flag value"));
         assert_eq!(
-            load_flag_snapshot(&fixture.store.flags_path(&fixture.project)).unwrap(),
+            load_flag_snapshot(&fixture.store.database_path(&fixture.project)).unwrap(),
             snapshot
         );
     }
@@ -133,18 +135,18 @@ fn invalid_single_and_bulk_flags_leave_entries_revision_and_previous_undo_intact
         .updated,
         1
     );
-    let entries = load_flags(&fixture.store.flags_path(&fixture.project)).unwrap();
+    let entries = load_flags(&fixture.store.database_path(&fixture.project)).unwrap();
     assert_eq!(entries[&0].flag, "critical");
     assert_eq!(entries[&0].memo.as_deref(), Some("saved note"));
     assert!(!entries.contains_key(&1));
 }
 
 #[test]
-fn recognized_aliases_and_explicit_clear_remain_writable() {
+fn canonical_flags_and_explicit_clear_remain_writable() {
     let fixture = Fixture::new();
-    for alias in ["safe", "SUSPICIOUS", " critical ", "◯", "?", "✗", ""] {
-        update_flag(&fixture.store, fixture.update(Some(alias))).unwrap();
-        let mut bulk = fixture.bulk(alias);
+    for flag in ["safe", "suspicious", "critical", ""] {
+        update_flag(&fixture.store, fixture.update(Some(flag))).unwrap();
+        let mut bulk = fixture.bulk(flag);
         bulk.preview_token = Some(
             bulk_preview(&fixture.store, bulk.clone())
                 .unwrap()
@@ -152,7 +154,7 @@ fn recognized_aliases_and_explicit_clear_remain_writable() {
         );
         bulk_update(&fixture.store, bulk).unwrap();
     }
-    let entries = load_flags(&fixture.store.flags_path(&fixture.project)).unwrap();
+    let entries = load_flags(&fixture.store.database_path(&fixture.project)).unwrap();
     assert_eq!(entries[&0].flag, "");
     assert_eq!(entries[&0].memo.as_deref(), Some("saved note"));
     assert_eq!(entries[&0].tags, ["review"]);
@@ -161,13 +163,13 @@ fn recognized_aliases_and_explicit_clear_remain_writable() {
 }
 
 #[test]
-fn updating_a_note_preserves_an_unknown_legacy_flag_without_accepting_new_unknown_flags() {
+fn updating_a_note_preserves_an_unknown_stored_flag_without_accepting_new_unknown_flags() {
     let fixture = Fixture::new();
     upsert_flag(
-        &fixture.store.flags_path(&fixture.project),
+        &fixture.store.database_path(&fixture.project),
         0,
         &FlagEntry {
-            flag: "legacy-custom".into(),
+            flag: "unknown-custom".into(),
             memo: None,
             tags: vec![],
             bookmarked: false,
@@ -175,8 +177,8 @@ fn updating_a_note_preserves_an_unknown_legacy_flag_without_accepting_new_unknow
     )
     .unwrap();
     update_flag(&fixture.store, fixture.update(None)).unwrap();
-    let entries = load_flags(&fixture.store.flags_path(&fixture.project)).unwrap();
-    assert_eq!(entries[&0].flag, "legacy-custom");
+    let entries = load_flags(&fixture.store.database_path(&fixture.project)).unwrap();
+    assert_eq!(entries[&0].flag, "unknown-custom");
     assert_eq!(entries[&0].memo.as_deref(), Some("saved note"));
     let page = query_project_rows(
         &fixture.store,

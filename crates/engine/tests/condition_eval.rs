@@ -182,6 +182,27 @@ fn contains_and_or_not_match_search_mask() {
 }
 
 #[test]
+fn unscoped_contains_reads_source_cells_and_never_the_joined_entry() {
+    let cells = HashMap::from([
+        ("left".into(), Value::String("Alpha".into())),
+        ("right".into(), Value::String("Beta".into())),
+        (String::new(), Value::String("Alpha Beta".into())),
+    ]);
+    assert!(eval(&contains("", "alpha"), &cells).unwrap());
+    assert!(!eval(&contains("", "alpha beta"), &cells).unwrap());
+    assert!(eval(&condition("", Op::Eq, &["Alpha Beta"], false), &cells).unwrap());
+    assert!(eval(&condition("", Op::Regex, &["^Alpha Beta$"], false), &cells).unwrap());
+
+    let no_source_cells = HashMap::from([(String::new(), Value::String("Alpha Beta".into()))]);
+    assert!(!eval(&contains("", "alpha"), &no_source_cells).unwrap());
+    assert!(eval(
+        &condition("", Op::Contains, &["alpha"], true),
+        &no_source_cells
+    )
+    .unwrap());
+}
+
+#[test]
 fn numeric_compare_keeps_integer_and_decimal_precision() {
     // Integers compare exactly through i128; adjacent long integers never
     // collapse into the same value.

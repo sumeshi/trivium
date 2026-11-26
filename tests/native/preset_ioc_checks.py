@@ -47,23 +47,23 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     project_id = case["meta"]["id"]
     saved = web.command("load_project", {"projectId": project_id}, request=True)["iocs"]
     invalid = root / "invalid-ioc.csv"
-    invalid.write_bytes(b"flag,tag,query\r\nsafe,valid,message:clear\r\ncritcal,bad,message:beacon\r\n")
+    invalid.write_bytes(b"flag,tag,query,column,value\r\nsafe,valid,message:clear,,\r\ncritcal,bad,message:beacon,,\r\n")
     _picker(web, invalid)
     web.named("Import IOC rules", ".ioc-panel")
-    wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
+    csv_error = wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
              lambda text: "line 3" in text and "critcal" in text, "invalid IOC import reports the CSV line and original flag")
     assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == saved
     assert web.script("return document.querySelectorAll('.ioc-row').length;") == 1
     assert _rows(web, project_id) == original
     web.close_drawer()
 
-    # Seed an older malformed saved definition in this test's isolated case.
+    # Seed a malformed saved definition in this test's isolated case.
     # Reopening must preserve it for correction rather than choosing Safe.
     web.tab(data["id"])
     web.named(f"Close {source.name}")
-    legacy = [*saved, {"flag": "critcal", "tag": "invalid", "query": "message:clear"}]
+    invalid_saved = [*saved, {"flag": "critcal", "tag": "invalid", "query": "message:clear"}]
     with sqlite3.connect(_case_database(root, project_id)) as database:
-        database.execute("UPDATE settings SET value=? WHERE key='iocs'", (json.dumps(legacy).encode(),))
+        database.execute("UPDATE settings SET value=? WHERE key='iocs'", (json.dumps(invalid_saved).encode(),))
     open_project(web, case["meta"]["name"])
     web.results(1)  # The previously saved text search remains active.
     _open_iocs(web)
@@ -75,8 +75,8 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     web.write('input[aria-label="Rule tag 2"]', "needs correction")
     web.named("Save rules", ".ioc-panel")
     wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=alert]')?.textContent??'';"),
-             lambda text: "rule 2" in text and "critcal" in text, "legacy invalid flags require an explicit correction before saving")
-    assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == legacy
+             lambda text: "rule 2" in text and "critcal" in text, "invalid stored flags require an explicit correction before saving")
+    assert web.command("load_project", {"projectId": project_id}, request=True)["iocs"] == invalid_saved
     assert _rows(web, project_id) == original
 
     # Correcting the invalid definition keeps the valid definition intact.
@@ -88,8 +88,8 @@ def _invalid_ioc_flags(web, data, case: dict, source: Path, root: Path, original
     assert sorted(rule["flag"] for rule in corrected) == ["critical", "suspicious"], corrected
     assert _rows(web, project_id) == original
     return {"project_id": project_id, "csv_path": str(invalid),
-            "csv_error_line": 3, "rejected_import_preserves_rules": True,
-            "legacy_invalid_visible": True, "invalid_apply_disabled": True,
+            "csv_error_line": 3, "csv_error": csv_error, "rejected_import_preserves_rules": True,
+            "invalid_stored_visible": True, "invalid_apply_disabled": True,
             "explicit_correction_preserves_valid_rules": True, "annotations_unchanged": True}
 
 
@@ -130,14 +130,6 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
              lambda widths: all(abs(width - custom_width) <= 1 for width in widths.values()),
              "loading the preset restores column width")
 
-    # Earlier files omit the optional layout fields and must not reset a
-    # user's current arrangement. Explicit empty values request defaults.
-    legacy_path = root / "legacy-layout-preset.json"
-    legacy_path.write_text(json.dumps({key: value for key, value in preset.items()
-        if key not in {"columnOrder", "columnWidths", "filters"}}), encoding="utf-8")
-    _load_preset(web, legacy_path)
-    assert _order(web) == custom_order
-    assert all(abs(width - custom_width) <= 1 for width in _width(web, ids["host"]).values())
     _load_preset(web, plain_path)
     wait_for(lambda: _order(web), lambda order: order == source_order, "explicit empty order restores source order")
     wait_for(lambda: _width(web, ids["host"]),
@@ -150,7 +142,7 @@ def _layout_presets(web, ids: dict[str, str], preset: dict, plain_path: Path, ro
     assert host_label["text"] == "host" and host_label["needed"] <= host_label["width"] + 1, host_label
     assert web.query() == original_query, "Column layout presets do not change the search scope"
     return {"custom_order": custom_order, "changed_widths_only": saved["columnWidths"],
-            "save_modify_load_restores_layout": True, "omitted_layout_preserves_current": True,
+            "save_modify_load_restores_layout": True,
             "new_default_save_restores_source_order_and_widths": True}
 
 
@@ -262,11 +254,11 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         wait_for(lambda: web.script("return document.querySelector('.ioc-panel').textContent;"), lambda text: "Rules exported." in text, "IOC export completes before closing")
         assert "critical,IOC,message:beacon" in export_path.read_text(encoding="utf-8")
         with export_path.open(encoding="utf-8", newline="") as handle:
-            assert csv.DictReader(handle).fieldnames == ["flag", "tag", "query"], "Legacy query-only CSV stays three columns"
+            assert csv.DictReader(handle).fieldnames == ["flag", "tag", "query", "column", "value"], "Query and cell rules share one CSV format"
         _picker(web, export_path)
         web.named("Import IOC rules", ".ioc-panel")
         wait_for(lambda: web.script("return document.querySelector('.ioc-panel [role=status]')?.textContent;"),
-                 lambda text: text == "Rules imported.", "legacy query CSV imports without changing annotations")
+                 lambda text: text == "Rules imported.", "query CSV imports without changing annotations")
         assert _rows(web, project_id) == original
         assert source.read_bytes() == original_source
         web.screenshot(evidence / "ioc-direct-apply-undo.png")

@@ -61,11 +61,9 @@ pub fn export_import_report_with_job(
         .import_report
         .as_ref()
         .ok_or_else(|| AppError::Message("This case has no saved import report.".into()))?;
-    if report.issues.len() > report.issue_count {
+    if report.full_diagnostics != Some(true) || report.issues.len() > report.issue_count {
         return Err(invalid_journal());
     }
-    let complete =
-        report.full_diagnostics == Some(true) || report.issue_count == report.issues.len();
     let destination = PathBuf::from(&payload.destination);
     let mut summary_report = report.clone();
     summary_report.issues.clear();
@@ -77,45 +75,36 @@ pub fn export_import_report_with_job(
             write_line(
                 writer,
                 &json!({
-                    "type": "summary", "version": 1, "diagnosticsComplete": complete,
+                    "type": "summary", "version": 1, "diagnosticsComplete": true,
                     "project": { "id": meta.id, "name": meta.name,
                         "sourceFileName": meta.source_file_name, "sourceSha256": meta.source_sha256,
                         "sourceFormat": meta.source_format, "sourceSize": meta.source_size },
                     "report": summary_report,
                 }),
             )?;
-            if report.full_diagnostics == Some(true) {
-                let path = store.project_dir(&meta.id).join(ISSUES_FILE);
-                let metadata = match std::fs::symlink_metadata(&path) {
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::NotFound
-                            && report.issue_count == 0 =>
-                    {
-                        return Ok(0)
-                    }
-                    result => result.context("failed to inspect saved import diagnostics")?,
-                };
-                if !metadata.file_type().is_file() {
-                    return Err(AppError::Message(
-                        "Saved import diagnostics are not a regular case file.".into(),
-                    ));
+            let path = store.project_dir(&meta.id).join(ISSUES_FILE);
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound && report.issue_count == 0 =>
+                {
+                    return Ok(0)
                 }
-                let file = crate::source_file::open_regular(&path)
-                    .context("failed to open saved import diagnostics")?;
-                write_journal(BufReader::new(file), writer, report, job)
-            } else {
-                for issue in &report.issues {
-                    job.check_cancelled()?;
-                    write_issue(writer, issue)?;
-                }
-                Ok(report.issues.len())
+                result => result.context("failed to inspect saved import diagnostics")?,
+            };
+            if !metadata.file_type().is_file() {
+                return Err(AppError::Message(
+                    "Saved import diagnostics are not a regular case file.".into(),
+                ));
             }
+            let file = crate::source_file::open_regular(&path)
+                .context("failed to open saved import diagnostics")?;
+            write_journal(BufReader::new(file), writer, report, job)
         },
     )?;
     Ok(ExportImportReportResult {
         destination: payload.destination,
         issues_written: written,
-        complete,
+        complete: true,
     })
 }
 

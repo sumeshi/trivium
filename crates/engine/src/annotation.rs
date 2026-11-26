@@ -33,7 +33,7 @@ pub struct AnnotationPatch {
 }
 
 impl AnnotationPatch {
-    /// Validate requested changes without rejecting unrelated legacy values
+    /// Validate requested changes without rejecting unrelated unknown values
     /// already stored on a row.
     pub fn validate(&self) -> Result<(), crate::error::AppError> {
         if let Some(flag) = self.flag.as_deref() {
@@ -71,8 +71,6 @@ pub fn apply_annotation_patch(
     });
 
     if let Some(flag) = &patch.flag {
-        // The query/export paths normalize on read (`normalize_flag_value`),
-        // matching what update_flag stored before this patch type existed.
         entry.flag = flag.clone();
     }
     if let Some(memo) = &patch.memo {

@@ -24,13 +24,10 @@ mod parse;
 mod profile;
 mod temporary;
 
-pub use load::{
-    load_column_kinds_with_job, load_project, load_project_metadata_with_job, load_project_with_job,
-};
+pub use load::{load_column_kinds_with_job, load_project, load_project_with_job};
 use profile::save_import_profile;
 pub use temporary::is_temporary_project;
 
-const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
 /// Fixed-size streaming buffer. The whole source is never held in memory just
 /// to compute the hash.
 const HASH_BUFFER_SIZE: usize = 64 * 1024;
@@ -306,7 +303,6 @@ fn create_project_impl(
             .values()
             .filter(|entry| entry.is_flagged())
             .count(),
-        ioc_applied_records: 0,
         source_sha256: Some(copied.sha256),
         source_file_name: source_path
             .file_name()
@@ -324,15 +320,12 @@ fn create_project_impl(
         ),
         import_report: Some(imported.report),
         hidden_columns: Vec::new(),
-        // New projects always use internal column ids and the `__original`
-        // record column. Legacy version 0 projects are only read.
-        storage_version: 2,
+        storage_version: crate::project_io::PROJECT_STORAGE_VERSION,
         columns: imported.columns,
     };
 
     if let Some(column_max_chars) = &imported.column_max_chars {
-        save_column_metrics(&staging.path().join(COLUMN_METRICS_FILE), column_max_chars)
-            .map_err(AppError::from)?;
+        save_column_metrics(staging.path(), column_max_chars).map_err(AppError::from)?;
     }
 
     let schema = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
@@ -344,9 +337,9 @@ fn create_project_impl(
         imported.column_max_chars.unwrap_or_default(),
     )?;
 
-    let flags_path = staging.path().join("flags.json");
+    let database_path = crate::storage::project_database_path(staging.path());
     if !imported.flags.is_empty() {
-        save_flags(&flags_path, &imported.flags).map_err(AppError::from)?;
+        save_flags(&database_path, &imported.flags).map_err(AppError::from)?;
     }
 
     // Ordinary imports discard the copied source. Temporary extraction cases

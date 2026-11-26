@@ -1,9 +1,5 @@
 //! Output transactions protect evidence and all active case storage, including aliases.
-use polars::prelude::*;
-use std::{
-    fs::{self, File},
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 use trivium_engine::{
     ops::{self, export::ExportProjectPayload, projects::CreateProjectPayload, rows::QuerySpec},
     store::ProjectsStore,
@@ -137,7 +133,7 @@ fn spreadsheet_formula_candidates_keep_source_values_and_notes_on_csv_roundtrip(
 }
 
 #[test]
-fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotation_only() {
+fn export_preserves_managed_files_and_aliases_and_supports_annotation_only_output() {
     let root =
         Fixture(std::env::temp_dir().join(format!("trivium-output-safety-{}", Uuid::new_v4())));
     fs::create_dir_all(&root.0).unwrap();
@@ -178,7 +174,6 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
         other_data.clone(),
         store.project_dir(&first).join("project.sqlite"),
         store.project_dir(&first).join("project.sqlite-wal"),
-        root.0.join("projects.json"),
         store.staging_root().join("future").join("new.csv"),
         store
             .project_dir(&first)
@@ -222,19 +217,6 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
         .to_string()
         .contains("managed case storage"));
     }
-    // A genuine legacy typed file has no synthetic __rowid column.
-    let columns =
-        ops::projects::load_project(&store, ops::projects::ProjectRequest { project_id: first })
-            .unwrap()
-            .columns_meta;
-    let mut typed = DataFrame::new(vec![
-        Series::new(&columns[0].id, [0i64, 1]),
-        Series::new(&columns[1].id, ["first", "last"]),
-    ])
-    .unwrap();
-    ParquetWriter::new(File::create(store.project_dir(&first).join("data.parquet")).unwrap())
-        .finish(&mut typed)
-        .unwrap();
     let output = root.0.join("annotations.csv");
     fs::write(&output, b"previous destination").unwrap();
     let mut overwrite = payload(output.clone(), Some(Vec::new()));

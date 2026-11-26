@@ -11,8 +11,7 @@ use crate::{
         validate_cell_columns, write_ioc_csv_to_writer,
     },
     jobs::JobContext,
-    models::{ColumnMeta, IocEntry, ProjectMeta},
-    project_io::{read_project_schema_columns, ProjectColumns},
+    models::{IocEntry, ProjectMeta},
     store::ProjectsStore,
 };
 
@@ -54,7 +53,7 @@ pub fn save_iocs(store: &ProjectsStore, payload: SaveIocsPayload) -> Result<(), 
         return Err(AppError::Message("Project not found.".into()));
     };
     let project_dir = store.project_dir(&meta.id);
-    let entries = prepare_project_entries(store, &meta, payload.entries)?;
+    let entries = prepare_project_entries(&meta, payload.entries)?;
     save_prepared_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     Ok(())
@@ -77,7 +76,7 @@ pub fn import_iocs(
         return Err(AppError::Message("Selected file does not exist.".into()));
     }
     let entries = read_ioc_csv(&source).map_err(AppError::from)?;
-    let entries = prepare_csv_entries(store, &meta, entries, CsvColumns::Import)?;
+    let entries = prepare_csv_entries(&meta, entries, CsvColumns::Import)?;
     save_prepared_ioc_entries(&project_dir, &entries).map_err(AppError::from)?;
 
     let final_entries = load_ioc_entries(&project_dir).map_err(AppError::from)?;
@@ -97,7 +96,7 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
         Some(entries) => entries,
         None => load_ioc_entries(&project_dir).map_err(AppError::from)?,
     };
-    let entries = prepare_csv_entries(store, &meta, entries, CsvColumns::Export)?;
+    let entries = prepare_csv_entries(&meta, entries, CsvColumns::Export)?;
     let destination = PathBuf::from(payload.destination);
     write_atomically(
         &destination,
@@ -109,28 +108,14 @@ pub fn export_iocs(store: &ProjectsStore, payload: ExportIocsPayload) -> Result<
 
 /// Validate all criteria and source IDs before replacing settings or outputs.
 fn prepare_project_entries(
-    store: &ProjectsStore,
     meta: &ProjectMeta,
     entries: Vec<IocEntry>,
 ) -> Result<Vec<IocEntry>, AppError> {
     let entries = prepare_ioc_entries(entries).map_err(AppError::from)?;
     if entries.iter().any(|entry| entry.cell.is_some()) {
-        validate_cell_columns(&entries, &project_columns(store, meta)?).map_err(AppError::from)?;
+        validate_cell_columns(&entries, &meta.columns).map_err(AppError::from)?;
     }
     Ok(entries)
-}
-
-fn project_columns(store: &ProjectsStore, meta: &ProjectMeta) -> Result<Vec<ColumnMeta>, AppError> {
-    if !meta.columns.is_empty() {
-        return Ok(meta.columns.clone());
-    }
-    // Old cases derive source IDs from their Parquet footer. Ordinary cases
-    // carry this mapping in metadata, without reading project data.
-    let path = store.project_dir(&meta.id).join("data.parquet");
-    let names = read_project_schema_columns(&path).map_err(AppError::from)?;
-    Ok(ProjectColumns::from_meta_and_names(meta, &names)
-        .columns()
-        .to_vec())
 }
 
 enum CsvColumns {
@@ -140,7 +125,6 @@ enum CsvColumns {
 
 /// The CSV uses portable source names/pointers; saved and API rules use IDs.
 fn prepare_csv_entries(
-    store: &ProjectsStore,
     meta: &ProjectMeta,
     entries: Vec<IocEntry>,
     direction: CsvColumns,
@@ -149,7 +133,7 @@ fn prepare_csv_entries(
     if !entries.iter().any(|entry| entry.cell.is_some()) {
         return Ok(entries);
     }
-    let columns = project_columns(store, meta)?;
+    let columns = &meta.columns;
     for (index, entry) in entries.iter_mut().enumerate() {
         let Some(cell) = &mut entry.cell else {
             continue;

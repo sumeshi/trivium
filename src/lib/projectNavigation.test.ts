@@ -9,9 +9,9 @@ const {get}=await import('svelte/store');
 const {mockIPC,clearMocks}=await import('@tauri-apps/api/mocks');
 const {reopenSaveAdmission}=await import('./src/lib/saveDrain.ts');
 const summary=id=>({meta:{id,name:id,source_file_name:id+'.csv',created_at:'2026-11-19',
-  total_records:1,flagged_records:0,ioc_applied_records:0,hidden_columns:[]}});
+  total_records:1,flagged_records:0,hidden_columns:[]}});
 const detail=id=>({project:summary(id),columns:['c1'],columns_meta:[],column_max_chars:{},
-  column_kinds:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+  column_kinds:{},color_rules:[],iocs:[],hidden_columns:[],});
 const failReads=new Set();
 const loaded=[],deleted=[],extractionJobs=[],deleteJobs=[];
 let failDelete=false,holdDeletes=false,finished=0;

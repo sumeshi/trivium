@@ -5,14 +5,10 @@ import {
   emptyHistory,
   goBack as stepBack,
   goForward as stepForward,
-  parseSavedView,
   pushApplied,
   withOffset,
   type History,
-  type SavedView,
 } from "../viewState.ts";
-
-const STORAGE_PREFIX = "trivium:view:";
 
 /** History has the same lifetime as its investigation. */
 export function createViewHistory() {
@@ -123,26 +119,4 @@ export function createViewHistory() {
   }
 
   return { canGoBack, canGoForward, historyRestore, setHistoryProject, resetHistory, snapshotHistory, restoreHistory, recordAppliedCondition, rememberOffset, goBack, goForward };
-}
-
-/**
- * Legacy localStorage view storage.
- *
- * New saves go to the engine (`saveViewState`), which keeps view state per
- * project and writes it atomically. This reader remains only to migrate a
- * project created before the engine view state existed; once it is read, the
- * caller writes the same view to the engine and later loads use the engine.
- *
- * @deprecated Use `Backend.loadViewState`.
- */
-export function loadProjectView(projectId: string, columns: readonly string[]): SavedView | null {
-  try {
-    const text = localStorage.getItem(STORAGE_PREFIX + projectId);
-    if (!text) {
-      return null;
-    }
-    return parseSavedView(text, columns);
-  } catch {
-    return null;
-  }
 }

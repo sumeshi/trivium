@@ -46,23 +46,18 @@ pub async fn delete_project(
     .await
 }
 
-/// Loads project metadata, initial rows, IOC entries, and column metrics.
+/// Loads project metadata, IOC entries, and column metrics.
 #[tauri::command]
 pub async fn load_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     request: ProjectRequest,
-    metadata_only: Option<bool>,
     request_id: Option<String>,
 ) -> Result<LoadProjectResponse, String> {
     let store = state.projects.clone();
     let project_id = Some(request.project_id);
     run_job_with_request(app, JobKind::Load, project_id, request_id, move |job| {
-        if metadata_only.unwrap_or(false) {
-            ops::projects::load_project_metadata_with_job(&store, request, &job)
-        } else {
-            ops::projects::load_project_with_job(&store, request, &job)
-        }
+        ops::projects::load_project_with_job(&store, request, &job)
     })
     .await
 }

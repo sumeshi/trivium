@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read architecture_bench JSONL (legacy debug lines are ignored)."""
+"""Summarize architecture_bench JSONL timings."""
 import argparse
 import json
 from pathlib import Path
@@ -9,8 +9,6 @@ def read(path):
     fixture = None
     records = {}
     for line in Path(path).read_text().splitlines():
-        if not line.startswith("{"):
-            continue
         value = json.loads(line)
         if "fixture" in value:
             fixture = Path(value["fixture"]).name

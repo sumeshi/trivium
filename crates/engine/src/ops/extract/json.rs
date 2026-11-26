@@ -1,7 +1,6 @@
 //! Scan selected JSON source values, never overlapping table serialization copies.
 use std::{borrow::Cow, collections::BTreeMap, fmt, path::Path};
 
-use polars::prelude::AnyValue;
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
@@ -11,7 +10,7 @@ use crate::{
     formats::CompiledFormat,
     jobs::JobContext,
     models::ProjectMeta,
-    project_io::{read_project_schema_columns, ProjectBatchReader, INTERNAL_ORIGINAL},
+    project_io::{read_project_schema_columns, INTERNAL_ORIGINAL},
 };
 
 use super::aggregate::{limit_error, Accumulator};
@@ -53,13 +52,20 @@ impl JsonSelection {
         path: &Path,
         job: &JobContext,
     ) -> Result<Option<Self>, AppError> {
-        let known_json = matches!(
-            meta.source_format.as_deref(),
-            Some("json" | "jsonl" | "ndjson")
-        );
-        let infer = meta.source_format.is_none() && meta.storage_version >= 2;
-        if !known_json && !infer {
-            return Ok(None);
+        job.check_cancelled()?;
+        match meta.source_format.as_deref() {
+            Some("csv") => return Ok(None),
+            Some("json" | "jsonl" | "ndjson") => {}
+            Some(format) => {
+                return Err(AppError::Message(format!(
+                    "Unsupported extraction source format {format:?}. Reimport this project."
+                )))
+            }
+            None => {
+                return Err(AppError::Message(
+                    "Extraction requires a saved source format. Reimport this project.".into(),
+                ))
+            }
         }
         if !read_project_schema_columns(path)
             .map_err(AppError::from)?
@@ -67,9 +73,6 @@ impl JsonSelection {
             .any(|column| column == INTERNAL_ORIGINAL)
         {
             return Err(missing_original());
-        }
-        if infer && !original_is_json(path, job)? {
-            return Ok(None);
         }
         let mut root = Selection::default();
         for id in columns {
@@ -127,35 +130,9 @@ impl JsonSelection {
 }
 
 fn missing_original() -> AppError {
-    AppError::Message("Extraction requires stored original records to identify the JSON source. Reimport this project.".into())
-}
-
-/// Version-2 CSV originals are arrays, while JSON originals are objects.
-/// Old metadata can omit the format; column labels alone cannot distinguish
-/// JSON Pointers from legitimate CSV headers that happen to start with `/`.
-fn original_is_json(path: &Path, job: &JobContext) -> Result<bool, AppError> {
-    let mut reader = ProjectBatchReader::for_range(path, &[INTERNAL_ORIGINAL.into()], 0, 1)
-        .map_err(AppError::from)?;
-    let Some(batch) = reader.next_with_job(job) else {
-        return Ok(false);
-    };
-    let batch = batch.map_err(AppError::from)?;
-    let original = batch
-        .frame
-        .column(INTERNAL_ORIGINAL)
-        .map_err(|error| AppError::Other(error.into()))?
-        .get(0)
-        .map_err(|error| AppError::Other(error.into()))?;
-    let classify = |text: &str| match text.trim_start().as_bytes().first() {
-        Some(b'{') => Ok(true),
-        Some(b'[') => Ok(false),
-        _ => Err(missing_original()),
-    };
-    match original {
-        AnyValue::String(text) => classify(text),
-        AnyValue::StringOwned(text) => classify(text.as_str()),
-        _ => Err(missing_original()),
-    }
+    AppError::Message(
+        "JSON extraction requires stored original records. Reimport this project.".into(),
+    )
 }
 
 fn source_error(row: usize, error: serde_json::Error) -> AppError {

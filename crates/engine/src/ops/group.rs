@@ -19,9 +19,6 @@ pub struct GroupTreePayload {
     pub project_id: Uuid,
     #[serde(default)]
     pub search: Option<String>,
-    /// Deprecated visible-column field kept for old callers.
-    #[serde(default)]
-    pub columns: Option<Vec<String>>,
     #[serde(default, rename = "searchColumns")]
     pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
@@ -91,10 +88,7 @@ pub fn group_tree_with_job(
 
     let spec = QuerySpec {
         search: payload.search.clone(),
-        search_columns: payload
-            .search_columns
-            .clone()
-            .or_else(|| payload.columns.clone()),
+        search_columns: payload.search_columns.clone(),
         condition: payload.condition.clone(),
         flag_filter: payload.flag_filter.clone(),
         bookmarked_only: payload.bookmarked_only,

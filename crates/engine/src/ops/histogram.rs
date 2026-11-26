@@ -24,10 +24,6 @@ pub struct HistogramPayload {
     pub buckets: u32,
     #[serde(default)]
     pub search: Option<String>,
-    /// Deprecated visible-column field kept for old callers. New callers send
-    /// `searchColumns`; `searchColumns` wins when both are present.
-    #[serde(default)]
-    pub columns: Option<Vec<String>>,
     #[serde(default, rename = "searchColumns")]
     pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
@@ -70,10 +66,7 @@ pub fn histogram_with_job(
     validate_bucket_count(bucket_count).map_err(AppError::Message)?;
     let spec = QuerySpec {
         search: payload.search.clone(),
-        search_columns: payload
-            .search_columns
-            .clone()
-            .or_else(|| payload.columns.clone()),
+        search_columns: payload.search_columns.clone(),
         condition: payload.condition.clone(),
         flag_filter: payload.flag_filter.clone(),
         bookmarked_only: payload.bookmarked_only,

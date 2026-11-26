@@ -56,8 +56,7 @@ fn condition(column: &str, op: Op, values: &[&str], negated: bool) -> Node {
     })
 }
 
-// This deliberately constructs the former per-row HashMap + JSON strings. It
-// exercises the compatibility evaluator, not the new bound-slot adapter.
+// Compare the owned HashMap/JSON evaluator with the indexed-column adapter.
 fn owned_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
     let tokens = tokenize_search_query(spec.search.as_deref().unwrap_or_default());
     let search = search_tokens_to_node(&tokens).unwrap();
@@ -111,7 +110,7 @@ fn borrowed_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String>
 }
 
 #[test]
-fn strings_null_unicode_negation_groups_and_legacy_types_match_owned_adapter() {
+fn strings_null_unicode_negation_groups_and_typed_values_match_owned_adapter() {
     let df = DataFrame::new(vec![
         Series::new(
             "text",

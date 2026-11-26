@@ -83,8 +83,7 @@ fn existing_case_reads_preserve_storage_original_records_and_saved_annotations()
         },
     )
     .unwrap();
-    // Older mixed-shape cases need reimport for corrected parent-cell search
-    // and export. Merely viewing one must not migrate its stored evidence.
+    // Viewing a saved mixed-shape record must not rewrite its stored evidence.
     get_cell(
         &store,
         GetCellPayload {
@@ -381,10 +380,14 @@ fn mixed_parent_objects_and_arrays_match_in_pages_cells_search_export_and_reopen
             },
         )
         .unwrap();
+
+        let loaded_rows = common::rows(&reopened, loaded.project.meta.id);
         assert_eq!(
-            loaded.initial_rows[0].cells[parent].text.as_deref(),
+            loaded_rows[0].cells[parent].text.as_deref(),
             expected[0].0.as_deref()
         );
-        assert_eq!(loaded.initial_rows[0].cells[parent].kind, "object");
+        assert_eq!(loaded_rows[0].cells[parent].kind, "object");
     }
 }
+
+mod common;

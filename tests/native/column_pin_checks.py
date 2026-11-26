@@ -156,7 +156,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
     try:
         assert not original.get("hiddenColumns"), original
         assert original.get("frozenThrough") is None, "Existing views retain the original first-visible-column default"
-        checks["legacy_default"] = _prefix(web, [first], "legacy view freezes first visible data column")
+        checks["default_prefix"] = _prefix(web, [first], "default view freezes first visible data column")
         _action(web, "source_id", "Unfreeze data columns")
         _prefix(web, [], "the default frozen first column offers unfreeze")
         _action(web, "source_id", "Freeze columns through this column")

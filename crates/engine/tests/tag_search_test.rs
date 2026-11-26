@@ -424,7 +424,6 @@ fn tag_result_scope_is_shared_by_group_stats_export_and_bulk_preview() {
         GroupTreePayload {
             project_id: f.id,
             search: Some(search.into()),
-            columns: None,
             search_columns: None,
             flag_filter: None,
             bookmarked_only: None,

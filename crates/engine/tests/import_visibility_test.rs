@@ -25,7 +25,7 @@ fn inspect_publication(cancel: bool) {
     let observed = Arc::new(AtomicBool::new(false));
     let seen = observed.clone();
     let inspect = store.clone();
-    let guard = jobs::try_begin_job(JobKind::Import, None).unwrap();
+    let guard = jobs::queue_job(JobKind::Import, None).unwrap();
     let context = JobContext::with_job(
         guard,
         Some(Arc::new(move |progress| {

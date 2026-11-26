@@ -107,8 +107,10 @@ fn record(value: &str, count: &str, rows: &str) -> csv::StringRecord {
 fn cancellable() -> jobs::JobGuard {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        if let Ok(guard) = jobs::try_begin_job(JobKind::Analysis, None) {
-            return guard;
+        if let Ok(guard) = jobs::queue_job(JobKind::Analysis, None) {
+            if guard.is_running() {
+                return guard;
+            }
         }
         assert!(
             Instant::now() < deadline,
@@ -166,7 +168,7 @@ fn extracted_csv_is_an_ordinary_queryable_case_with_only_values_and_exact_counts
         },
     )
     .unwrap();
-    assert_eq!(loaded.initial_rows.len(), 3);
+    assert_eq!(loaded.project.meta.total_records, 3);
     let count = result
         .meta
         .columns

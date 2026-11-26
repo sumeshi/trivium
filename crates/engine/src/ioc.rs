@@ -10,26 +10,15 @@ use crate::models::{ColumnMeta, IocCellMatch, IocEntry};
 pub const MAX_IOC_CELL_VALUE_BYTES: usize = 64 * 1024;
 const MAX_IOC_CSV_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_IOC_RULES: usize = 10_000;
+const IOC_CSV_HEADERS: [&str; 5] = ["flag", "tag", "query", "column", "value"];
 
 pub fn load_ioc_entries(project_dir: &Path) -> Result<Vec<IocEntry>> {
     let Some(data) = crate::storage::load_setting_bytes(project_dir, "iocs")? else {
         return Ok(Vec::new());
     };
-    let mut entries: Vec<IocEntry> =
-        serde_json::from_slice(&data).context("failed to parse saved IOC definitions")?;
-    for entry in &mut entries {
-        // Keep invalid legacy values visible for correction. Losing the value
-        // here used to let the editor silently turn an unknown flag into Safe.
-        let normalized = normalize_flag_value(&entry.flag);
-        entry.flag = if normalized.is_empty() {
-            entry.flag.trim().to_string()
-        } else {
-            normalized
-        };
-        entry.tag = entry.tag.trim().to_string();
-        entry.query = entry.query.trim().to_string();
-    }
-    Ok(entries)
+    // Preserve corrupt values for correction instead of silently changing
+    // their severity or discarding their original text during a read.
+    serde_json::from_slice(&data).context("failed to parse saved IOC definitions")
 }
 
 pub fn save_ioc_entries(project_dir: &Path, entries: &[IocEntry]) -> Result<()> {
@@ -60,7 +49,7 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
     // Parse only this bounded snapshot, including headers and quoted fields.
     let source = Cursor::new(read_ioc_csv_bytes(source)?);
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(source);
-    let (column_at, value_at) = cell_headers(reader.headers()?)?;
+    validate_ioc_csv_headers(reader.headers()?)?;
     let mut records = reader.into_records();
     let mut entries = Vec::new();
     let mut index = 0;
@@ -75,20 +64,15 @@ pub fn read_ioc_csv(path: &Path) -> Result<Vec<IocEntry>> {
         let flag = flag_value.to_string();
         let tag = record.get(1).unwrap_or("").to_string();
         let query = record.get(2).unwrap_or("").to_string();
-        let cell = match (column_at, value_at) {
-            (Some(column), Some(value)) => {
-                let column = record.get(column).unwrap_or("");
-                let value = record.get(value).unwrap_or("");
-                if column.is_empty() && value.is_empty() && !query.trim().is_empty() {
-                    None
-                } else {
-                    Some(IocCellMatch {
-                        column: column.into(),
-                        value: value.into(),
-                    })
-                }
-            }
-            _ => None,
+        let column = record.get(3).unwrap_or("");
+        let value = record.get(4).unwrap_or("");
+        let cell = if column.is_empty() && value.is_empty() && !query.trim().is_empty() {
+            None
+        } else {
+            Some(IocCellMatch {
+                column: column.into(),
+                value: value.into(),
+            })
         };
         match prepare_ioc_entry(
             IocEntry {
@@ -184,24 +168,17 @@ fn physical_record_line(source: &mut (impl Read + Seek), offset: u64) -> io::Res
 
 pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) -> Result<()> {
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(writer);
-    let cell_columns = entries.iter().any(|entry| entry.cell.is_some());
     writer
-        .write_record(if cell_columns {
-            vec!["flag", "tag", "query", "column", "value"]
-        } else {
-            vec!["flag", "tag", "query"]
-        })
+        .write_record(IOC_CSV_HEADERS)
         .context("failed to write IOC CSV header")?;
     for entry in entries {
-        let mut record = vec![
+        let record = [
             entry.flag.as_str(),
             entry.tag.as_str(),
             entry.query.as_str(),
+            entry.cell.as_ref().map_or("", |cell| cell.column.as_str()),
+            entry.cell.as_ref().map_or("", |cell| cell.value.as_str()),
         ];
-        if cell_columns {
-            record.push(entry.cell.as_ref().map_or("", |cell| cell.column.as_str()));
-            record.push(entry.cell.as_ref().map_or("", |cell| cell.value.as_str()));
-        }
         writer
             .write_record(record)
             .context("failed to write IOC CSV row")?;
@@ -212,7 +189,7 @@ pub(crate) fn write_ioc_csv_to_writer(entries: &[IocEntry], writer: impl Write) 
 fn validate_ioc_flag(value: &str, location: &str) -> Result<String> {
     let flag = normalize_flag_value(value);
     if flag.is_empty() {
-        bail!("{location}: invalid IOC flag {value:?}. Expected Safe, Suspicious, or Critical.");
+        bail!("{location}: invalid IOC flag {value:?}. Expected safe, suspicious, or critical.");
     }
     Ok(flag)
 }
@@ -263,32 +240,16 @@ fn prepare_ioc_entry(entry: IocEntry, location: &str) -> Result<Option<IocEntry>
     }))
 }
 
-/// Optional cell fields extend the legacy positional three-column CSV.
-fn cell_headers(headers: &csv::StringRecord) -> Result<(Option<usize>, Option<usize>)> {
-    if headers.len() < 3 {
-        bail!("IOC CSV header: expected at least three columns (flag, tag, query).");
+fn validate_ioc_csv_headers(headers: &csv::StringRecord) -> Result<()> {
+    if headers.len() != IOC_CSV_HEADERS.len() {
+        bail!("IOC CSV header: expected flag,tag,query,column,value.");
     }
-    let mut column = None;
-    let mut value = None;
-    for (index, header) in headers.iter().enumerate().skip(3) {
-        let target = if header.trim().eq_ignore_ascii_case("column") {
-            &mut column
-        } else if header.trim().eq_ignore_ascii_case("value") {
-            &mut value
-        } else {
-            bail!(
-                "IOC CSV header: unsupported column {} {header:?}. Expected optional column and value fields.",
-                index + 1
-            );
-        };
-        if target.replace(index).is_some() {
-            bail!("IOC CSV header: duplicate optional {header:?} column.");
+    for (index, (actual, expected)) in headers.iter().zip(IOC_CSV_HEADERS).enumerate() {
+        if actual != expected {
+            bail!("IOC CSV header: column {} must be {expected:?}.", index + 1);
         }
     }
-    if column.is_some() != value.is_some() {
-        bail!("IOC CSV header: optional column and value fields must appear together.");
-    }
-    Ok((column, value))
+    Ok(())
 }
 
 pub(crate) fn validate_cell_columns(entries: &[IocEntry], columns: &[ColumnMeta]) -> Result<()> {
@@ -327,7 +288,11 @@ mod tests {
     fn a_file_that_grows_after_metadata_cannot_exceed_the_read_budget() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("growing.csv");
-        std::fs::write(&path, b"flag,tag,query\nsafe,review,needle\n").unwrap();
+        std::fs::write(
+            &path,
+            b"flag,tag,query,column,value\nsafe,review,needle,,\n",
+        )
+        .unwrap();
         let source = crate::source_file::open_regular(&path).unwrap();
         check_ioc_csv_size(source.metadata().unwrap().len()).unwrap();
 

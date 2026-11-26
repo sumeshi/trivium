@@ -5,7 +5,7 @@ use rusqlite::OptionalExtension;
 
 use crate::models::ProjectMeta;
 
-use super::sqlite::{connect, migrated, project_database_path, revision};
+use super::sqlite::{connect, project_database_path, revision};
 
 pub fn read_project_meta(project_dir: &Path) -> Result<Option<ProjectMeta>> {
     if !project_database_path(project_dir).exists() {
@@ -20,8 +20,12 @@ pub fn read_project_meta(project_dir: &Path) -> Result<Option<ProjectMeta>> {
         )
         .optional()?
         .flatten();
-    text.map(|value| serde_json::from_str(&value).context("invalid SQLite project metadata"))
-        .transpose()
+    text.map(|value| {
+        let meta = serde_json::from_str(&value).context("invalid SQLite project metadata")?;
+        crate::project_io::validate_project_storage(&meta)?;
+        Ok(meta)
+    })
+    .transpose()
 }
 
 pub fn project_was_registered(project_dir: &Path) -> Result<bool> {
@@ -37,6 +41,7 @@ pub fn project_was_registered(project_dir: &Path) -> Result<bool> {
 }
 
 pub fn insert_project_meta(project_dir: &Path, meta: &ProjectMeta) -> Result<()> {
+    crate::project_io::validate_project_storage(meta)?;
     let mut db = connect(project_dir)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let registered: bool = tx.query_row(
@@ -47,15 +52,13 @@ pub fn insert_project_meta(project_dir: &Path, meta: &ProjectMeta) -> Result<()>
     if registered {
         bail!("Project is already registered.");
     }
+    let count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM annotations WHERE flagged=1",
+        [],
+        |row| row.get(0),
+    )?;
     let mut meta = meta.clone();
-    if migrated(&tx, "annotations")? {
-        let count: i64 = tx.query_row(
-            "SELECT flagged_count FROM project_state WHERE singleton=1",
-            [],
-            |row| row.get(0),
-        )?;
-        meta.flagged_records = usize::try_from(count)?;
-    }
+    meta.flagged_records = usize::try_from(count)?;
     tx.execute(
         "UPDATE project_state SET metadata=?1,flagged_count=?2,deleted=0 WHERE singleton=1",
         rusqlite::params![
@@ -85,7 +88,9 @@ pub fn update_project_meta(
         return Ok(());
     };
     let mut meta: ProjectMeta = serde_json::from_str(&text)?;
+    crate::project_io::validate_project_storage(&meta)?;
     update(&mut meta);
+    crate::project_io::validate_project_storage(&meta)?;
     tx.execute(
         "UPDATE project_state SET metadata=?1,flagged_count=?2 WHERE singleton=1",
         rusqlite::params![

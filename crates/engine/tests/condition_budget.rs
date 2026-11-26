@@ -173,7 +173,7 @@ fn search_limits_apply_before_ast_construction_and_keep_boundary_queries() {
         validate_search_query(&query).unwrap();
         let node = search_to_node(&query).unwrap().expect("bounded condition");
         let prepared = PreparedNode::prepare(&node).unwrap();
-        let row = HashMap::from([("".into(), json!(query))]);
+        let row = HashMap::from([("c000001".into(), json!(query))]);
         assert!(prepared.eval(&row).unwrap());
     }
 }

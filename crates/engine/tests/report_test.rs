@@ -185,9 +185,7 @@ fn report_escapes_memos_and_omits_script_tags() {
         !html.contains("<script"),
         "raw <script must never appear in the report"
     );
-    // The report shows user annotations only; saving the legacy IOC did not
-    // recalculate the stored applied-record count.
-    assert!(html.contains("IOC applied rows: 0"), "project meta is missing");
+    assert!(html.contains("Flagged rows: 2"), "project flag count is missing");
 
     let _ = fs::remove_dir_all(root);
 }

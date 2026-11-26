@@ -28,7 +28,7 @@ impl Fixture {
         &self.0
     }
     fn flags(&self) -> PathBuf {
-        self.0.join("flags.json")
+        project_database_path(&self.0)
     }
 }
 impl Drop for Fixture {
@@ -39,7 +39,7 @@ impl Drop for Fixture {
 fn entry(flag: &str) -> FlagEntry {
     FlagEntry {
         flag: flag.into(),
-        memo: Some("legacy note".into()),
+        memo: Some("investigation note".into()),
         tags: vec!["host".into()],
         bookmarked: true,
     }
@@ -48,19 +48,18 @@ fn meta(id: Uuid) -> ProjectMeta {
     ProjectMeta {
         import_report: None,
         id,
-        name: "legacy.csv".into(),
+        name: "events.csv".into(),
         description: None,
         created_at: Utc::now(),
         total_records: 1000,
         flagged_records: 0,
-        ioc_applied_records: 0,
         source_sha256: None,
         source_file_name: None,
         source_format: None,
         source_size: None,
         source_path: None,
         hidden_columns: vec![],
-        storage_version: 0,
+        storage_version: 2,
         columns: vec![],
     }
 }
@@ -72,5 +71,5 @@ fn patch(flag: &str) -> AnnotationPatch {
 }
 
 mod atomic_files;
-mod migrations;
+mod current_format;
 mod mutations;

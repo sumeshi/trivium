@@ -63,15 +63,20 @@ fn filtered_report_statistics_cover_matching_rows_including_unannotated_matches(
     let id = imported.meta.id;
     annotate(&store, id, 0);
     annotate(&store, id, 2);
-    for (search, hits, expected_values) in [
-        ("c000001:keep", 2, vec!["alpha", "beta"]),
-        ("absent", 0, vec![]),
-    ] {
-        let destination = root.path().join(format!("{hits}.html"));
+    for (index, (search, search_column, hits, expected_values)) in [
+        ("c000001:keep", Some("c000001"), 2, vec!["alpha", "beta"]),
+        ("keep", None, 2, vec!["alpha", "beta"]),
+        ("keep", Some("c000002"), 0, vec![]),
+        ("absent", Some("c000001"), 0, vec![]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let destination = root.path().join(format!("{index}.html"));
         let mut request = payload(id, &destination);
         request.search = Some(search.into());
         request.columns = Some(vec!["c000002".into()]);
-        request.search_columns = Some(vec!["c000001".into()]);
+        request.search_columns = search_column.map(|column| vec![column.into()]);
         let result = build_report(&store, request).unwrap();
         assert_eq!(result.hit_rows, hits);
         assert_eq!(result.flagged_in_matches, usize::from(hits > 0));

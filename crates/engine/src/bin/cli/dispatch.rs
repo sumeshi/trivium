@@ -70,7 +70,7 @@ pub(super) fn dispatch(
             operation(store, params, ops::import_report::export_import_report)
         }
         "load" => operation(store, params, |store, payload| {
-            ops::projects::load_project_metadata_with_job(store, payload, &JobContext::none())
+            ops::projects::load_project_with_job(store, payload, &JobContext::none())
         }),
         "query" => operation(store, params, ops::rows::query_project_rows),
         "locate" => operation(store, params, ops::rows::locate_project_row),

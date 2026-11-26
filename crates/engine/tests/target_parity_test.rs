@@ -59,7 +59,7 @@ fn setup() -> (
     .meta
     .id;
 
-    // 0 and 6 survive search + condition + priority + bookmark; 12 is
+    // 0 and 6 survive search + condition + suspicious/critical + bookmark; 12 is
     // bookmarked but only "safe" and 18 has no flag/bookmark.
     for (row, flag, bookmarked) in [
         (0usize, "suspicious", true),
@@ -96,7 +96,7 @@ fn spec(ids: &std::collections::HashMap<String, String>) -> QuerySpec {
             values: vec!["keep".to_string()],
             negated: false,
         })),
-        flag_filter: Some("priority".to_string()),
+        flag_filter: Some("suspicious|critical".to_string()),
         bookmarked_only: Some(true),
         sort_key: Some(common::id(ids, "rank")),
         sort_direction: Some("desc".to_string()),
@@ -263,7 +263,7 @@ fn bulk_update_requires_the_preview_token_and_applies_only_that_target() {
     let applied = bulk_update(&store, current).expect("matching token must apply");
     assert_eq!(applied.updated, 2);
 
-    let flags = load_flags(&store.project_dir(&id).join("flags.json")).expect("load flags");
+    let flags = load_flags(&store.database_path(&id)).expect("load flags");
     assert_eq!(flags.get(&0).map(|entry| entry.flag.as_str()), Some("safe"));
     assert_eq!(flags.get(&6).map(|entry| entry.flag.as_str()), Some("safe"));
     assert_eq!(

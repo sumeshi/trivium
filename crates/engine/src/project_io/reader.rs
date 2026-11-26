@@ -43,8 +43,7 @@ pub struct ProjectBatch {
 /// Projected, row-group-selective Parquet iteration, retaining one compressed
 /// row group and at most one decoded 8,192-row batch inside this reader.
 ///
-/// No synthetic row-id column or value statistics are needed, so legacy files
-/// and files without statistics use exactly the same selection path.
+/// Row-group selection uses file offsets without decoding row IDs or values.
 pub struct ProjectBatchReader {
     inner: RowGroupReader<TrackedFile>,
     schema: ArrowSchema,

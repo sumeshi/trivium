@@ -1,4 +1,4 @@
-import type { FlagFilterValue, ViewState } from "./types";
+import type { ViewState } from "./types";
 import type { EditorGroup } from "./stores/condition";
 import type { SavedView } from "./viewState";
 import { isFlagFilterValue } from "./flagFilters.ts";
@@ -20,7 +20,7 @@ const COMPARE_OPS = new Set([
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNode(value: unknown): boolean {
@@ -66,54 +66,48 @@ function conditionTree(value: unknown): EditorGroup | null {
   return value as EditorGroup;
 }
 
-function stringArray(value: unknown, known: Set<string>): string[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is string => typeof item === "string" && known.has(item)
-      )
-    : [];
+function knownColumns(value: readonly string[], known: Set<string>): string[] {
+  return value.filter(column => known.has(column));
 }
 
-function flagFilter(value: unknown): FlagFilterValue {
-  return isFlagFilterValue(value)
-    ? value
-    : "all";
-}
-
-function sortDirection(value: unknown): "asc" | "desc" {
-  return value === "desc" ? "desc" : "asc";
-}
-
-function nonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0
-    ? value
-    : 0;
+function strings(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === "string");
 }
 
 function columnWidths(
-  value: unknown,
+  value: Record<string, unknown>,
   known: Set<string>
 ): Record<string, number> {
-  if (!isRecord(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter(([column, width]) =>
-    known.has(column) && typeof width === "number" && Number.isFinite(width) && width > 0
+  return Object.fromEntries(Object.entries(value).filter(([column]) =>
+    known.has(column)
   )) as Record<string, number>;
 }
 
-function columnFormats(value: unknown, known: Set<string>): Record<string, ColumnDisplayFormat> {
-  if (!isRecord(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter(([id, format]) => known.has(id) && format === 'iso')) as Record<string, ColumnDisplayFormat>;
+function columnFormats(value: Record<string, unknown>, known: Set<string>): Record<string, ColumnDisplayFormat> {
+  return Object.fromEntries(Object.entries(value).filter(([id]) => known.has(id))) as Record<string, ColumnDisplayFormat>;
 }
 
 /**
- * Validates a legacy localStorage save or any parsed JSON into the current
- * SavedView shape. Returns null when the condition tree cannot be restored.
+ * Validates the current persisted schema before resolving its column IDs.
  */
 export function savedViewFromUnknown(
   value: unknown,
   columns: readonly string[]
 ): SavedView | null {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || value.version !== 1 || Object.hasOwn(value, "offset")
+    || typeof value.search !== "string" || !strings(value.searchColumns)
+    || !isFlagFilterValue(value.flagFilter) || typeof value.bookmarkedOnly !== "boolean"
+    || !strings(value.hiddenColumns) || (value.sortKey !== null && typeof value.sortKey !== "string")
+    || (value.sortDirection !== "asc" && value.sortDirection !== "desc")
+    || !isRecord(value.columnWidths) || Object.values(value.columnWidths).some(width =>
+      typeof width !== "number" || !Number.isFinite(width) || width <= 0)
+    || typeof value.logicalRow !== "number" || !Number.isSafeInteger(value.logicalRow) || value.logicalRow < 0
+    || (value.frozenThrough !== undefined && typeof value.frozenThrough !== "string")
+    || (value.noteColumnWidth !== undefined && (typeof value.noteColumnWidth !== "number"
+      || !Number.isFinite(value.noteColumnWidth) || value.noteColumnWidth <= 0))
+    || (value.columnOrder !== undefined && !strings(value.columnOrder))
+    || (value.columnFormats !== undefined && (!isRecord(value.columnFormats)
+      || Object.values(value.columnFormats).some(format => format !== "iso")))) {
     return null;
   }
   const condition = conditionTree(value.condition);
@@ -121,35 +115,27 @@ export function savedViewFromUnknown(
     return null;
   }
   const known = new Set(columns);
-  const rawOffset = nonNegativeInteger(value.offset);
-  const logicalRow =
-    value.logicalRow === undefined
-      ? rawOffset
-      : nonNegativeInteger(value.logicalRow);
   const frozenThrough = typeof value.frozenThrough === "string" &&
     (value.frozenThrough === "" || known.has(value.frozenThrough)) ? value.frozenThrough : undefined;
   return {
     condition,
-    search: typeof value.search === "string" ? value.search : "",
-    searchColumns: stringArray(value.searchColumns, known),
-    flagFilter: flagFilter(value.flagFilter),
-    bookmarkedOnly: value.bookmarkedOnly === true,
-    hiddenColumns: stringArray(value.hiddenColumns, known),
+    search: value.search,
+    searchColumns: knownColumns(value.searchColumns, known),
+    flagFilter: value.flagFilter,
+    bookmarkedOnly: value.bookmarkedOnly,
+    hiddenColumns: knownColumns(value.hiddenColumns, known),
     ...(frozenThrough !== undefined ? { frozenThrough } : {}),
     sortKey:
       typeof value.sortKey === "string" && known.has(value.sortKey)
         ? value.sortKey
         : null,
-    sortDirection: sortDirection(value.sortDirection),
+    sortDirection: value.sortDirection,
     columnWidths: columnWidths(value.columnWidths, known),
-    ...(typeof value.noteColumnWidth === 'number' && Number.isFinite(value.noteColumnWidth) && value.noteColumnWidth > 0
+    ...(value.noteColumnWidth !== undefined
       ? { noteColumnWidth: value.noteColumnWidth } : {}),
-    ...(Array.isArray(value.columnOrder) ? { columnOrder: [...new Set(stringArray(value.columnOrder, known))] } : {}),
+    ...(Array.isArray(value.columnOrder) ? { columnOrder: [...new Set(knownColumns(value.columnOrder, known))] } : {}),
     ...(isRecord(value.columnFormats) ? { columnFormats: columnFormats(value.columnFormats, known) } : {}),
-    // `offset` is the legacy name for the result-relative row; the engine
-    // keeps only `logicalRow`, so the two always agree after a round trip.
-    offset: logicalRow,
-    logicalRow,
+    logicalRow: value.logicalRow,
   };
 }
 
@@ -217,6 +203,6 @@ export function savedViewToViewState(view: SavedView): ViewState {
     ...(view.noteColumnWidth !== undefined ? { noteColumnWidth: view.noteColumnWidth } : {}),
     ...(view.columnOrder ? { columnOrder: [...view.columnOrder] } : {}),
     ...(view.columnFormats ? { columnFormats: { ...view.columnFormats } } : {}),
-    logicalRow: view.logicalRow ?? view.offset ?? 0,
+    logicalRow: view.logicalRow,
   };
 }

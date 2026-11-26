@@ -54,8 +54,8 @@ def _ioc_queries(web, owner: str, root: Path, report: dict) -> None:
         source = root / f"invalid-query-{index}.csv"
         with source.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["flag", "tag", "query"])
-            writer.writerow(["critical", "broken", query])
+            writer.writerow(["flag", "tag", "query", "column", "value"])
+            writer.writerow(["critical", "broken", query, "", ""])
         _rejected(web, "import_iocs", {"projectId": owner, "path": str(source)}, expected_errors)
         args = {**preview_args, "search": query}
         _rejected(web, "bulk_preview", args, expected_errors)

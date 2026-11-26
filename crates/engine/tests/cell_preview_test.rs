@@ -214,7 +214,7 @@ fn get_cell_rejects_internal_unknown_and_out_of_range_rows() {
         "unknown column must be rejected"
     );
 
-    let total_rows = store.find(&id).expect("project meta").total_records;
+    let total_rows = store.try_find(&id).unwrap().expect("project meta").total_records;
     assert!(
         get_cell(&store, cell_payload(id, total_rows, &payload_id)).is_err(),
         "out-of-range row must be rejected"

@@ -63,9 +63,10 @@ fn boolean_spellings_restore_consistently_without_altering_source_cells() {
         },
     )
     .unwrap();
-    assert_eq!(loaded.initial_rows.len(), rows.len());
-    for (index, ((row, expected), bookmark)) in loaded
-        .initial_rows
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
+    assert_eq!(loaded_rows.len(), rows.len());
+    for (index, ((row, expected), bookmark)) in loaded_rows
         .iter()
         .zip(rows.iter())
         .zip([true, false, false, true, false, false])
@@ -112,7 +113,9 @@ fn unknown_annotation_booleans_fail_atomically_but_ordinary_import_keeps_raw_dat
                 },
             )
             .unwrap();
-            let row = &loaded.initial_rows[1];
+
+            let loaded_rows = common::rows(&store, loaded.project.meta.id);
+            let row = &loaded_rows[1];
             assert_eq!(row.flag, "");
             assert!(!row.bookmarked);
             assert_eq!(
@@ -183,3 +186,5 @@ fn invalid_annotations_after_a_written_batch_leave_no_partial_case() {
     assert_no_case(&store);
     assert_eq!(fs::read(&path).unwrap(), bytes);
 }
+
+mod common;

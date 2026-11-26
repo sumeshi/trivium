@@ -1,5 +1,5 @@
 //! End-to-end smoke test over the engine ops, without any GUI:
-//! create -> query -> annotate -> legacy IOC definitions -> export -> re-import -> delete.
+//! create -> query -> annotate -> IOC definitions -> export -> re-import -> delete.
 //!
 //! Most fixtures are inline. Gap and duplicate checks also call python3.
 
@@ -131,6 +131,7 @@ fn create_and_load_project() {
     )
     .expect("load failed");
 
+    let response_rows = common::rows(&store, response.project.meta.id);
     assert_eq!(response.project.meta.total_records, 20);
     assert_eq!(response.project.meta.name, "smoke");
     let source_names = ["ts", "EventID", "host", "user", "proc", "path", "msg"];
@@ -146,7 +147,7 @@ fn create_and_load_project() {
     );
     assert!(response.hidden_columns.is_empty());
     assert!(response.iocs.is_empty());
-    assert_eq!(response.initial_rows.len(), 20);
+    assert_eq!(response_rows.len(), 20);
     assert_eq!(
         response.column_kinds.get(&common::id(&ids, "ts")).map(String::as_str),
         Some("datetime")
@@ -733,7 +734,6 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             column: event_id.clone(),
             buckets: 4,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -773,7 +773,6 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             column: event_id.clone(),
             buckets: 4,
             search: Some("WS01".to_string()),
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -805,7 +804,6 @@ fn histogram_bucket_sum_matches_filtered_rows() {
             column: user_id.clone(),
             buckets: 4,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -849,7 +847,6 @@ fn histogram_places_values_in_equal_width_buckets() {
             column: n_id,
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -876,7 +873,6 @@ fn histogram_places_values_in_equal_width_buckets() {
             column: x_id,
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -907,7 +903,6 @@ fn histogram_range_counts_outside_values() {
             column: event_id.clone(),
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -934,7 +929,6 @@ fn histogram_range_counts_outside_values() {
             column: ts_id.clone(),
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -970,7 +964,6 @@ fn histogram_range_counts_outside_values() {
             column: ts_id.clone(),
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -992,7 +985,6 @@ fn histogram_range_counts_outside_values() {
             column: event_id.clone(),
             buckets: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -1091,7 +1083,6 @@ fn time_analysis_finds_fixture_gaps() {
             burst_window_seconds: 60,
             burst_min: 10,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -1150,7 +1141,6 @@ fn time_analysis_gap_range_matches_bounds() {
             burst_window_seconds: 10,
             burst_min: 2,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,
@@ -1353,11 +1343,6 @@ fn saving_iocs_does_not_flag_rows() {
     )
     .expect("save iocs failed");
 
-    // The legacy definitions are stored, but saving them does not evaluate
-    // rows or change the existing applied-record count.
-    let meta = store.find(&id).expect("meta missing");
-    assert_eq!(meta.ioc_applied_records, 0);
-
     let r = query(&store, id);
     assert_eq!(r.annotated_total, 2); // two user safe flags
 
@@ -1372,7 +1357,7 @@ fn saving_iocs_does_not_flag_rows() {
     assert_eq!(row7.flag, "safe");
     assert!(
         !row7.memo.as_deref().unwrap_or("").contains("[logon-fail]"),
-        "the legacy IOC tag must not be appended"
+        "the IOC tag must not be appended"
     );
     for index in [6usize, 8, 9] {
         let row = r.rows.iter().find(|row| row.row_index == index).unwrap();
@@ -1652,13 +1637,14 @@ ts,EventID,host,user,proc,path,msg
     let first = create(&first_csv);
     let second = create(&second_csv);
     let ids = common::column_ids(&store, first);
-    let condition = eq_condition(&common::id(&ids, "user"), "alice");
+    let user_column = common::id(&ids, "user");
+    let condition = eq_condition(&user_column, "alice");
     let hits = ops::cross::search_projects(
         &store,
         CrossSearchPayload {
             project_ids: vec![first, second],
-            search: None,
-            columns: None,
+            search: Some("alice".into()),
+            search_columns: Some(vec![user_column.clone()]),
             flag_filter: None,
             offset: None,
             limit: Some(1),
@@ -1675,8 +1661,8 @@ ts,EventID,host,user,proc,path,msg
             QueryRowsPayload {
                 project_id: hit.project_id,
                 spec: QuerySpec {
-                    search: None,
-                    search_columns: None,
+                    search: Some("alice".into()),
+                    search_columns: Some(vec![user_column.clone()]),
                     flag_filter: None,
                     sort_key: None,
                     sort_direction: None,
@@ -1694,25 +1680,17 @@ ts,EventID,host,user,proc,path,msg
     }
     assert_eq!(hits[0].total_filtered_rows, 10);
     assert_eq!(hits[1].total_filtered_rows, 2);
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn legacy_flags_json_defaults_tags_and_bookmark() {
-    let root = temp_root();
-    let project_dir = root.join("legacy");
-    fs::create_dir_all(&project_dir).expect("failed to create legacy dir");
-    let flags_path = project_dir.join("flags.json");
-    fs::write(&flags_path, r#"{"0":{"flag":"safe","memo":"hello"}}"#)
-        .expect("failed to write legacy flags");
-
-    let flags = trivium_engine::storage::load_flags(&flags_path).expect("legacy load failed");
-    let entry = flags.get(&0).expect("legacy entry missing");
-    assert_eq!(entry.flag, "safe");
-    assert_eq!(entry.memo.as_deref(), Some("hello"));
-    assert!(entry.tags.is_empty());
-    assert!(!entry.bookmarked);
-
+    let excluded = ops::cross::search_projects(
+        &store,
+        serde_json::from_value(serde_json::json!({
+            "projectIds": [first, second],
+            "search": "alice",
+            "searchColumns": [common::id(&ids, "proc")],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(excluded.iter().all(|hit| hit.total_filtered_rows == 0));
     let _ = fs::remove_dir_all(root);
 }
 
@@ -1724,7 +1702,6 @@ fn grouping_counts_match_the_query_path() {
         GroupTreePayload {
             project_id: id,
             search: None,
-            columns: None,
             search_columns: None,
             bookmarked_only: None,
             flag_filter: None,

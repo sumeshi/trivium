@@ -14,7 +14,7 @@ function setup() {
   return workspace;
 }
 
-test("a legacy preset keeps omitted filters and emits a per-case sort revision", () => {
+test("a partial preset keeps unspecified filters and emits a per-case sort revision", () => {
   const a = setup(), b = setup();
   const condition = { column: "c2", op: "eq" as const, values: ["exact,value"], negated: false };
   const preset = { condition, hiddenColumns: ["c3"], sortKey: "c2", sortDirection: "asc" as const, unknown_columns: [] };

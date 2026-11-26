@@ -97,7 +97,7 @@ fn unavailable_deletion_workspace_preserves_case_database_annotations_and_data()
         .expect_err("no deletion may happen without its atomic workspace move");
     assert_eq!(fs::read(case.join("data.parquet")).unwrap(), parquet);
     assert!(project_database_path(&case).is_file());
-    let entry = trivium_engine::storage::load_flag(&fixture.store.flags_path(&fixture.id), 0)
+    let entry = trivium_engine::storage::load_flag(&fixture.store.database_path(&fixture.id), 0)
         .unwrap()
         .unwrap();
     assert_eq!(entry.flag, "critical");

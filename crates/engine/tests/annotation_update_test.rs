@@ -2,7 +2,7 @@
 //!
 //! The update path reads only the target row's annotation, updates the
 //! whole-project count by the difference for that row, and returns the entry
-//! plus a process-local revision.
+//! plus a durable revision.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,14 +67,14 @@ fn update(
     )
 }
 
-fn flags_path(store: &ProjectsStore, id: Uuid) -> PathBuf {
-    store.project_dir(&id).join("flags.json")
+fn database_path(store: &ProjectsStore, id: Uuid) -> PathBuf {
+    store.database_path(&id)
 }
 
 #[test]
 fn updating_one_row_does_not_touch_other_annotations() {
     let (root, store, id) = setup(20);
-    let path = flags_path(&store, id);
+    let path = database_path(&store, id);
 
     update(&store, id, 0, Some("suspicious"), None, None, None).expect("row 0 update failed");
     update(&store, id, 1, Some("critical"), None, None, None).expect("row 1 update failed");
@@ -128,62 +128,38 @@ fn flagged_count_changes_by_difference_and_revision_increases() {
     assert_eq!(memo_only.flagged_records, 3);
     assert!(memo_only.revision > cleared.revision);
 
-    let meta = store.find(&id).expect("project metadata missing");
+    let meta = store.try_find(&id).unwrap().expect("project metadata missing");
     assert_eq!(meta.flagged_records, 3);
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn update_before_project_load_migrates_legacy_flags_json() {
+fn update_before_project_load_preserves_saved_sqlite_annotations() {
     let (root, store, id) = setup(10);
 
-    // Model an actual pre-SQLite case: metadata lived in projects.json and
-    // annotations in flags.json. Removing flags.db alone would leave the
-    // authoritative SQLite case intact and must not retrigger migration.
-    update(&store, id, 0, Some("safe"), None, None, None).expect("initial update failed");
-    let meta = store.find(&id).expect("project metadata");
-    let project_dir = store.project_dir(&id);
+    update(
+        &store, id, 0, Some("safe"), Some(Some("saved memo")),
+        Some(vec!["saved"]), Some(true),
+    ).expect("initial update failed");
     drop(store);
-    fs::remove_file(project_database_path(&project_dir))
-        .expect("remove canonical fixture database");
-    fs::write(
-        root.join("projects.json"),
-        serde_json::to_vec(&vec![meta]).unwrap(),
-    )
-    .expect("write legacy registry");
-    let legacy: std::collections::HashMap<usize, trivium_engine::models::FlagEntry> =
-        std::collections::HashMap::from([(
-            0,
-            trivium_engine::models::FlagEntry {
-                flag: "safe".to_string(),
-                memo: Some("legacy memo".to_string()),
-                tags: vec!["legacy".to_string()],
-                bookmarked: true,
-            },
-        )]);
-    fs::write(
-        project_dir.join("flags.json"),
-        serde_json::to_vec(&legacy).expect("serialize legacy flags"),
-    )
-    .expect("write legacy flags");
 
     let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");
     assert_eq!(
-        reopened.find(&id).expect("project").flagged_records,
+        reopened.try_find(&id).unwrap().expect("project").flagged_records,
         1,
-        "legacy metadata must be present before any project data is loaded"
+        "saved metadata is available before any project data is loaded"
     );
     update(&reopened, id, 1, Some("critical"), None, None, None)
         .expect("update before load_project failed");
 
-    let path = flags_path(&reopened, id);
+    let path = database_path(&reopened, id);
     let row0 = load_flag(&path, 0)
         .expect("read row 0")
-        .expect("legacy row 0 disappeared");
+        .expect("saved row 0 disappeared");
     assert_eq!(row0.flag, "safe");
-    assert_eq!(row0.memo.as_deref(), Some("legacy memo"));
-    assert_eq!(row0.tags, vec!["legacy".to_string()]);
+    assert_eq!(row0.memo.as_deref(), Some("saved memo"));
+    assert_eq!(row0.tags, vec!["saved".to_string()]);
     assert!(row0.bookmarked);
     assert_eq!(
         load_flag(&path, 1)
@@ -199,9 +175,6 @@ fn update_before_project_load_migrates_legacy_flags_json() {
 #[test]
 fn metadata_write_failure_rolls_back_annotation_count_and_revision() {
     let (root, store, id) = setup(5);
-    // Complete the unrelated one-time annotation migration before injecting
-    // the failure, so this exercises rollback of an actual row patch.
-    assert!(load_flag(&flags_path(&store, id), 0).unwrap().is_none());
     let revision = store.current_revision(&id);
     let connection = rusqlite::Connection::open(project_database_path(&store.project_dir(&id)))
         .expect("open canonical database");
@@ -215,10 +188,10 @@ fn metadata_write_failure_rolls_back_annotation_count_and_revision() {
     let result = update(&store, id, 0, Some("safe"), None, None, None);
     result.expect_err("an annotation must not claim success if its count transaction fails");
     assert_eq!(
-        load_flag(&flags_path(&store, id), 0).expect("read row 0"),
+        load_flag(&database_path(&store, id), 0).expect("read row 0"),
         None
     );
-    assert_eq!(store.find(&id).expect("project").flagged_records, 0);
+    assert_eq!(store.try_find(&id).unwrap().expect("project").flagged_records, 0);
     assert_eq!(store.current_revision(&id), revision);
 
     connection
@@ -230,10 +203,10 @@ fn metadata_write_failure_rolls_back_annotation_count_and_revision() {
     assert_eq!(saved.flagged_records, 1);
     assert!(saved.revision > revision);
     assert_eq!(
-        load_flag(&flags_path(&store, id), 0).unwrap().unwrap().flag,
+        load_flag(&database_path(&store, id), 0).unwrap().unwrap().flag,
         "safe"
     );
-    assert_eq!(store.find(&id).expect("project").flagged_records, 1);
+    assert_eq!(store.try_find(&id).unwrap().expect("project").flagged_records, 1);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -248,7 +221,7 @@ fn row_index_outside_the_project_is_rejected() {
         "unexpected error: {error}"
     );
     assert_eq!(
-        load_flag(&flags_path(&store, id), 10).expect("failed to read row 10"),
+        load_flag(&database_path(&store, id), 10).expect("failed to read row 10"),
         None
     );
 
@@ -271,7 +244,7 @@ fn annotations_and_flagged_count_survive_reopening_the_store() {
     .expect("row 0 update failed");
     update(&store, id, 1, Some("safe"), None, None, None).expect("row 1 update failed");
 
-    let path = flags_path(&store, id);
+    let path = database_path(&store, id);
     let expected = load_flag(&path, 0)
         .expect("failed to read row 0")
         .expect("row 0 entry missing");
@@ -279,15 +252,15 @@ fn annotations_and_flagged_count_survive_reopening_the_store() {
 
     let reopened = ProjectsStore::new(root.clone()).expect("failed to reopen store");
     let meta = reopened
-        .find(&id)
+        .try_find(&id).unwrap()
         .expect("project metadata missing after reopen");
     assert_eq!(meta.flagged_records, 2);
     assert_eq!(
-        load_flag(&flags_path(&reopened, id), 0).expect("failed to read row 0"),
+        load_flag(&database_path(&reopened, id), 0).expect("failed to read row 0"),
         Some(expected)
     );
     assert_eq!(
-        load_flag(&flags_path(&reopened, id), 1)
+        load_flag(&database_path(&reopened, id), 1)
             .expect("failed to read row 1")
             .expect("row 1 entry missing")
             .flag,

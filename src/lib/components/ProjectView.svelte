@@ -68,7 +68,7 @@
   const dispatch = createEventDispatcher<{
     refresh: void;
     notify: { message: string; tone: 'success' | 'error' };
-    summary: { projectId: string; flagged: number; iocApplied: number; hiddenColumns: string[] };
+    summary: { projectId: string; flagged: number; hiddenColumns: string[] };
     extract: ExtractIntent;
     iocsSaved: { projectId: string; entries: LoadProjectResponse['iocs'] };
   }>();
@@ -385,7 +385,7 @@
       return;
     }
 
-    const savedRow = saved?.logicalRow ?? saved?.offset ?? 0;
+    const savedRow = saved?.logicalRow ?? 0;
     conditionTree.set(saved ? cloneTree(saved.condition) : emptyTree);
     workspace.restoreGroupFilter(tabSession?.groupPanel?.filter);
     lastConditionJson = JSON.stringify(get(conditionPayload));
@@ -430,7 +430,6 @@
     if (tabSession) restoreHistory(tabSession.history);
     else resetHistory(get(conditionTree), savedRow);
 
-    // Don't use seededRows from initial_rows as they may be stale
     // Always fetch fresh data from backend to ensure flags and memos are current
     totalRows.set(detail.project.meta.total_records);
     totalFilteredRows.set(0);
@@ -806,11 +805,10 @@
     }
     lastSummaryFlagged = $flaggedCount;
     lastSummaryHiddenKey = hiddenKey;
-    dispatch('summary', { 
+    dispatch('summary', {
       projectId: projectDetail.project.meta.id,
-      flagged: $flaggedCount, 
-      iocApplied: projectDetail?.project.meta.ioc_applied_records ?? 0,
-      hiddenColumns: hidden 
+      flagged: $flaggedCount,
+      hiddenColumns: hidden
     });
   };
 </script>

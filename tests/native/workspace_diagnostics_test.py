@@ -44,7 +44,6 @@ class WorkspaceDiagnosticsTests(unittest.TestCase):
             ("C:\\Users\\private\\case: The system cannot find the file specified. (os error 2)", "io_missing"),
             ("database is locked: private/path", "locked"),
             ("database table is locked: private-table", "locked"),
-            ("Legacy annotation database is in use; private/path", "locked"),
             ("The operation queue is full. Wait for an operation to finish.", "capacity"),
             ("The storage queue is full. Wait for a save to finish.", "capacity"),
             ("Too many long-running operations. Wait for one to finish.", "capacity"),

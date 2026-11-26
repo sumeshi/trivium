@@ -76,7 +76,7 @@ fn set_tags(store: &ProjectsStore, id: Uuid, row_index: usize, tags: &[&str]) {
 }
 
 fn stored(store: &ProjectsStore, id: Uuid, row_index: usize) -> Option<FlagEntry> {
-    load_flags(&store.project_dir(&id).join("flags.json"))
+    load_flags(&store.database_path(&id))
         .expect("failed to load flags")
         .get(&row_index)
         .cloned()

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCellIocEntry, iocBulkArgs, iocEntryError, iocQueryError, isIocFlag, normalizeIocFlag, prepareIocEntries, requireIocFlag, requireIocQuery } from "./iocRules.ts";
+import { createCellIocEntry, iocBulkArgs, iocEntryError, iocQueryError, isIocFlag,  prepareIocEntries, requireIocFlag, requireIocQuery } from "./iocRules.ts";
 import { applyBulkAnnotation } from "./bulkAnnotation.ts";
 import type { BulkAnnotateArgs } from "./backend";
 import type { BulkCount } from "./types";
@@ -74,29 +74,13 @@ test("IOC rules cannot annotate everything with an empty query or silently choos
   assert.equal(Object.hasOwn(iocBulkArgs("case", { ...rule, tag: " " }), "add_tags"), false);
 });
 
-test("loading IOC flags preserves invalid values and normalizes only known severities and aliases", () => {
-  for (const [stored, expected] of [
-    [" SAFE ", "safe"], [" Suspicious ", "suspicious"], ["CRITICAL", "critical"],
-    ["◯", "safe"], ["?", "suspicious"], ["✗", "critical"],
-    ["critcal", "critcal"], ["Mystery", "Mystery"], ["", ""], ["  ", ""],
-  ]) {
-    assert.equal(normalizeIocFlag(stored), expected);
-  }
-  const loaded = ["critical", "critcal", ""].map(flag => ({ ...rule, flag: normalizeIocFlag(flag) }));
-  assert.deepEqual(loaded.map(entry => entry.flag), ["critical", "critcal", ""]);
-  assert.deepEqual(loaded.map(entry => isIocFlag(entry.flag)), [true, false, false]);
-  assert.equal(iocBulkArgs("case", loaded[0]).flag, "critical");
-  for (const invalid of loaded.slice(1)) {
-    assert.throws(() => iocBulkArgs("case", invalid), /invalid flag/);
-  }
-});
+
 
 test("IOC save/apply validation reports the invalid value without defaulting to Safe", () => {
   assert.throws(() => requireIocFlag("critcal", "IOC rule 2"), /IOC rule 2: invalid flag "critcal"/);
-  for (const flag of ["critcal", "suspiciouss", "none", "unknown", " "]) {
+  for (const flag of ["critcal", "suspiciouss", "none", "unknown", " ", "SAFE", "✗", "◯", "?"]) {
     assert.throws(() => iocBulkArgs("case", { ...rule, flag }), /invalid flag/);
   }
-  assert.equal(iocBulkArgs("case", { ...rule, flag: "✗" }).flag, "critical");
 });
 
 test("IOC queries need an effective term and complete OR operands before Save or Apply", () => {

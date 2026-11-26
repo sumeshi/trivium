@@ -131,7 +131,7 @@ impl StatsAccumulator {
                 continue;
             };
             // Output clones do not exist during observation. Their reserved
-            // space can format one legacy typed/list cell, including repeats
+            // space can format one typed/list value, including repeats
             // when steady-state accounting is exactly at the limit.
             let retained = self
                 .fixed_bytes()

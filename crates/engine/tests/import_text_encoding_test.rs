@@ -3,7 +3,7 @@ use std::{fs, path::Path, sync::Arc};
 use tempfile::tempdir;
 use trivium_engine::{
     import::{options::TextEncoding, text_encoding::prepare_source},
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind, ProgressFn},
+    jobs::{queue_job, request_cancel, JobContext, JobKind, ProgressFn},
 };
 
 fn decoded_text(path: &Path) -> String {
@@ -253,7 +253,7 @@ fn cancellation_during_decoding_removes_its_partial_copy() {
     let destination = root.path().join("decoded");
     let bytes = encode_unicode(&"a".repeat(100_000), TextEncoding::Utf16Le, true);
     fs::write(&source, &bytes).unwrap();
-    let guard = try_begin_job(JobKind::Import, None).unwrap();
+    let guard = queue_job(JobKind::Import, None).unwrap();
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |progress| {
         if progress.message.as_deref() == Some("Decoding source") {
@@ -328,7 +328,9 @@ fn csv_pipeline_preserves_a_literal_bom_in_headers_and_headerless_first_cells() 
                 },
             )
             .unwrap();
-            let row = &loaded.initial_rows[0];
+
+            let loaded_rows = common::rows(&store, loaded.project.meta.id);
+            let row = &loaded_rows[0];
             assert_eq!(
                 row.cells[&summary.meta.columns[0].id].text.as_deref(),
                 Some("\u{feff}entry")
@@ -374,3 +376,5 @@ fn json_pipeline_does_not_hide_a_second_bom_in_the_actual_payload() {
     assert!(store.try_all().unwrap().is_empty());
     assert_eq!(fs::read(source).unwrap(), bytes);
 }
+
+mod common;

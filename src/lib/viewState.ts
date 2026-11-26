@@ -1,6 +1,5 @@
 import type { EditorGroup, EditorNode } from "./stores/condition";
 import type { FlagFilterValue } from "./types";
-import { savedViewFromUnknown } from "./viewStateMapping.ts";
 import type { ColumnDisplayFormat } from "./dateDisplay";
 import type { GroupFilterSnapshot } from "./grouping";
 
@@ -31,9 +30,8 @@ export interface SavedView {
   noteColumnWidth?: number;
   columnOrder?: string[];
   columnFormats?: Record<string, ColumnDisplayFormat>;
-  offset: number;
-  /** Result-relative row at the top of the viewport. Preferred over `offset`. */
-  logicalRow?: number;
+  /** Result-relative row at the top of the viewport. */
+  logicalRow: number;
 }
 
 const HISTORY_LIMIT = 50;
@@ -105,14 +103,4 @@ export function goForward(history: History): History | null {
     return null;
   }
   return { entries: history.entries, index: history.index + 1 };
-}
-
-export function parseSavedView(text: string, columns: readonly string[]): SavedView | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  return savedViewFromUnknown(parsed, columns);
 }

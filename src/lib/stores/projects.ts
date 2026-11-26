@@ -153,10 +153,7 @@ export function createProjectController(backend: Backend) {
     try {
       const loaded = await reads.run("detail", backend, (requestId) => backend.loadProject(projectId, requestId));
       if (!isCurrent()) return;
-      // ProjectView intentionally fetches fresh pages. Keeping the import seed
-      // here would retain another row payload without ever displaying it.
-      const detail = { ...loaded, initial_rows: [] };
-      state.update((value) => ({ ...value, projectDetail: detail, isLoadingDetail: false, detailError: "" }));
+      state.update((value) => ({ ...value, projectDetail: loaded, isLoadingDetail: false, detailError: "" }));
     } catch (error) {
       if (!isCurrent()) return;
       state.update((value) => ({ ...value, projectDetail: null, isLoadingDetail: false,
@@ -356,14 +353,14 @@ export function createProjectController(backend: Backend) {
   }
 
   function updateSummary(payload: {
-    projectId?: string; flagged: number; iocApplied: number; hiddenColumns: string[];
+    projectId?: string; flagged: number; hiddenColumns: string[];
   }) {
     state.update((value) => {
       if (!value.projectDetail || !value.selectedProjectId ||
         (payload.projectId && payload.projectId !== value.selectedProjectId)) return value;
       const meta = {
         ...value.projectDetail.project.meta, flagged_records: payload.flagged,
-        ioc_applied_records: payload.iocApplied, hidden_columns: payload.hiddenColumns,
+        hidden_columns: payload.hiddenColumns,
       };
       if (temporaryProjects.has(meta.id)) temporaryProjects.set(meta.id, { meta });
       return {

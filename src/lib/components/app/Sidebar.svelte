@@ -226,7 +226,7 @@
                 <div class="project-stats">
                   <span>{project.meta.total_records.toLocaleString()} rows</span>
                   <span class="stat-dot">·</span>
-                  <span>{project.meta.flagged_records + project.meta.ioc_applied_records} flagged</span>
+                  <span>{project.meta.flagged_records} flagged</span>
                 </div>
               </button>
               <button

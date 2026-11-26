@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use polars::io::parquet::write::BatchedWriter;
 use polars::prelude::{
     AnyValue, DataFrame, DataType, Field, ParquetReader, ParquetWriter, Schema, SerReader,
@@ -25,35 +25,34 @@ pub use page::{
 pub use read_stats::{project_read_stats, reset_project_read_stats, ProjectReadStats};
 pub use reader::{ProjectBatch, ProjectBatchReader, PROJECT_BATCH_ROWS};
 
-/// Internal row id column. It is present in every storage version.
+/// Internal row id column.
 pub const INTERNAL_ROW_ID: &str = "__rowid";
-/// Original record JSON column. Only the new storage format writes it; legacy
-/// projects keep the source only in the flattened, typed columns.
+/// Original record JSON column.
 pub const INTERNAL_ORIGINAL: &str = "__original";
 /// Source record location for each imported row: the physical CSV/JSONL line
 /// number or the 1-based JSON array element. Kept so an import error or a
 /// later review can point back to the original record even when blank lines or
 /// embedded newlines make the row id differ from the source location.
 pub const INTERNAL_SOURCE_RECORD: &str = "__trivium_source_record";
-/// Name used by early T12 imports before the internal column was renamed.
-/// Only projects with the new storage format can contain it as an internal
-/// column; a legacy project's data column with this name stays data.
-pub const LEGACY_INTERNAL_SOURCE_RECORD: &str = "__source_record";
+
+pub const PROJECT_STORAGE_VERSION: u32 = 2;
+
+/// Reject unsupported project formats before reading or changing case data.
+pub fn validate_project_storage(meta: &ProjectMeta) -> Result<()> {
+    if meta.storage_version != PROJECT_STORAGE_VERSION {
+        bail!(
+            "Unsupported project storage version {}. This application supports version {}.",
+            meta.storage_version,
+            PROJECT_STORAGE_VERSION
+        );
+    }
+    Ok(())
+}
 
 /// Internal columns are never part of the data column list, search scope,
 /// output columns, or analysis inputs.
 pub fn is_internal_column(name: &str) -> bool {
     name == INTERNAL_ROW_ID || name == INTERNAL_ORIGINAL || name == INTERNAL_SOURCE_RECORD
-}
-
-/// Version-aware internal check for paths that know the project storage
-/// format. `__source_record` was the first T12 internal name; it is internal
-/// only for storage version 2+ so a legacy data column with that name survives.
-pub fn is_internal_column_for_version(name: &str, storage_version: u32) -> bool {
-    if name == LEGACY_INTERNAL_SOURCE_RECORD {
-        return storage_version >= 2;
-    }
-    is_internal_column(name)
 }
 
 /// Number of [`read_project_dataframe`] calls since process start.
@@ -264,52 +263,19 @@ impl BatchDataWriter {
 
 /// Thin id/label/source mapping for a project's data columns.
 ///
-/// New projects read the metadata recorded in `ProjectMeta`. Legacy projects
-/// have no metadata, so ids and labels are synthesized from the frame names;
-/// no new id is guessed for them.
+/// Column identities and source names come from the recorded project metadata.
 #[derive(Debug, Clone)]
 pub struct ProjectColumns {
     columns: Vec<ColumnMeta>,
 }
 
 impl ProjectColumns {
-    pub fn from_meta(meta: &ProjectMeta, df: &DataFrame) -> Self {
-        let names: Vec<String> = df
-            .get_column_names()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect();
-        Self::from_meta_and_names(meta, &names)
-    }
-
-    /// Builds the column mapping without reading any rows.
-    ///
-    /// `names` are the parquet schema column names, including internal
-    /// columns. Legacy projects derive ids and labels from them.
-    pub fn from_meta_and_names(meta: &ProjectMeta, names: &[String]) -> Self {
-        if meta.columns.is_empty() {
-            return Self::from_names(names, meta.storage_version);
-        }
+    pub fn from_meta(meta: &ProjectMeta) -> Self {
         let columns = meta
             .columns
             .iter()
-            .filter(|column| !is_internal_column_for_version(&column.id, meta.storage_version))
+            .filter(|column| !is_internal_column(&column.id))
             .cloned()
-            .collect();
-        Self { columns }
-    }
-
-    fn from_names(names: &[String], storage_version: u32) -> Self {
-        let columns = names
-            .iter()
-            .filter(|name| !is_internal_column_for_version(name, storage_version))
-            .enumerate()
-            .map(|(order, name)| ColumnMeta {
-                id: name.to_string(),
-                label: name.to_string(),
-                source: name.to_string(),
-                order,
-            })
             .collect();
         Self { columns }
     }
@@ -325,8 +291,7 @@ impl ProjectColumns {
             .collect()
     }
 
-    /// Display label for an id. Unknown ids fall back to the id, which keeps
-    /// legacy callers working without a lookup.
+    /// Display label for an id, using the id when the column is unknown.
     pub fn label(&self, id: &str) -> String {
         self.columns
             .iter()

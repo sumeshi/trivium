@@ -37,7 +37,7 @@ test("all flag populations and a column scope without text do not falsely report
   const allFlags = describeAppliedFilters({ ...base(), flag: "safe|suspicious|critical|none",
     condition: { kind: "and", children: [] } }, labels);
   assert.equal(allFlags.active, false);
-  assert.equal(describeAppliedFilters({ ...base(), flag: "priority" }, labels).filters[0].value, "Suspicious + Critical");
+  assert.equal(describeAppliedFilters({ ...base(), flag: "suspicious|critical" }, labels).filters[0].value, "Suspicious + Critical");
 });
 
 test("applied status remains the requested snapshot while live inputs and editor change", () => {
@@ -59,7 +59,7 @@ test("clear resets every filter input and preserves visible columns, sort, annot
   workspace.flagFilter.set("critical"); workspace.bookmarkedOnly.set(true);
   workspace.filterByValue("c1", "evidence");
   workspace.hiddenColumns.set(new Set(["c2"])); workspace.sortKey.set("c1"); workspace.sortDirection.set("desc");
-  const row = normalizeRow({ row_index: 9, cells: { c1: { kind: "string", text: "evidence" } },
+  const row = normalizeRow({ color: null,  row_index: 9, cells: { c1: { truncated: false, length: Array.from("evidence").length,  kind: "string", text: "evidence" } },
     flag: "critical", memo: "keep note", tags: ["reviewed"], bookmarked: true });
   workspace.registerLoadedPage(0, 0, [row]);
   workspace.appliedFilters.set({ ...base(), search: "old search", flag: "critical", condition: get(workspace.conditionPayload) });

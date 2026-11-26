@@ -5,7 +5,7 @@ import type { BulkCount } from "./types";
 import { applyBulkAnnotation, buildBulkAnnotateArgs, buildBulkPatch } from "./bulkAnnotation.ts";
 
 const filters = {
-  search: "alpha", flag: "priority" as const, bookmarkedOnly: true,
+  search: "alpha", flag: "suspicious|critical" as const, bookmarkedOnly: true,
   searchColumns: ["c000002"], condition: null,
 };
 const blank = { flag: "keep" as const, memo: "", clearMemo: false, tag: "", tagOperation: "add" as const };

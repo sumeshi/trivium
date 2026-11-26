@@ -148,8 +148,8 @@ def verify_compact_ioc_list(web, owner: str, root: Path, evidence: Path, report:
                 for index, flag in enumerate(["safe", "suspicious", "critical"] * 12)]
     with source.open("w", encoding="utf-8", newline="") as handle:
         out = csv.writer(handle)
-        out.writerow(["flag", "tag", "query"])
-        out.writerows((entry["flag"], entry["tag"], entry["query"]) for entry in intended)
+        out.writerow(["flag", "tag", "query", "column", "value"])
+        out.writerows((entry["flag"], entry["tag"], entry["query"], "", "") for entry in intended)
     picker(web, source)
     web.named("Import IOC rules", ".ioc-panel")
     _notice(web, "Rules imported.")

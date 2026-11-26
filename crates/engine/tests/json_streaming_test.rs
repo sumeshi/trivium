@@ -15,7 +15,7 @@ use trivium_engine::import::jsonl::{
 };
 use trivium_engine::import::{json, jsonl};
 use trivium_engine::jobs::{
-    request_cancel, try_begin_job, JobContext, JobKind, JobProgress, ProgressFn,
+    queue_job, request_cancel, JobContext, JobKind, JobProgress, ProgressFn,
 };
 use trivium_engine::models::ProjectSummary;
 use trivium_engine::ops;
@@ -288,7 +288,7 @@ fn cancellation_during_pass_one_returns_cancelled() {
     fs::write(&path, body).expect("write fixture");
 
     let _job_lock = JOB_LOCK.lock().expect("job test lock");
-    let guard = try_begin_job(JobKind::Import, None).expect("begin job");
+    let guard = queue_job(JobKind::Import, None).expect("begin job");
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |progress: JobProgress| {
         if progress.message.as_deref() == Some("Scanning JSON") {
@@ -322,7 +322,7 @@ fn cancellation_at_a_pass_two_batch_boundary_returns_cancelled() {
     .expect("write fixture");
 
     let _job_lock = JOB_LOCK.lock().expect("job test lock");
-    let guard = try_begin_job(JobKind::Import, None).expect("begin job");
+    let guard = queue_job(JobKind::Import, None).expect("begin job");
     let id = guard.id();
     let job = JobContext::with_job(guard, None);
     let importer = JsonImporter::open(
@@ -359,7 +359,7 @@ fn cancelled_json_create_leaves_no_staging_or_project() {
     );
 
     let _job_lock = JOB_LOCK.lock().expect("job test lock");
-    let guard = try_begin_job(JobKind::Import, None).expect("begin job");
+    let guard = queue_job(JobKind::Import, None).expect("begin job");
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |_progress: JobProgress| {
         request_cancel(id);
@@ -369,7 +369,7 @@ fn cancelled_json_create_leaves_no_staging_or_project() {
     let error = create_project_with_job(&store, payload(&path), &job)
         .expect_err("a cancelled import must fail");
     assert_eq!(error.to_string(), "Cancelled.");
-    assert!(store.all().is_empty(), "no project may be registered");
+    assert!(store.try_all().unwrap().is_empty(), "no project may be registered");
     assert!(
         fs::read_dir(store.staging_root())
             .expect("staging root")
@@ -439,7 +439,7 @@ fn broken_inputs_report_element_or_line_numbers() {
         error
     );
 
-    assert!(store.all().is_empty(), "failed imports must not register projects");
+    assert!(store.try_all().unwrap().is_empty(), "failed imports must not register projects");
     let _ = fs::remove_dir_all(root);
 }
 
@@ -457,8 +457,12 @@ fn load_project_reopens_a_streamed_json_array() {
         },
     )
     .expect("load created project");
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     assert_eq!(loaded.columns.len(), 2);
-    assert_eq!(loaded.initial_rows.len(), 3);
+    assert_eq!(loaded_rows.len(), 3);
 
     let _ = fs::remove_dir_all(root);
 }
+
+mod common;

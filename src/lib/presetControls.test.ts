@@ -59,7 +59,7 @@ const api={loadViewState:()=>restoring,saveViewState:async()=>{},cancelRequest:a
  queryProjectRows:async()=>({offset:0,rows:[],total_rows:1,total_filtered_rows:0,annotated_total:0,annotated_filtered:0,annotation_revision:0})};
 const detail={project:{meta:{id:'case',name:'case',source_file_name:'case.csv',total_records:1,flagged_records:0}},
  columns:['c1'],columns_meta:[{id:'c1',label:'Message',source:'Message',order:0}],column_kinds:{c1:'string'},
- column_max_chars:{c1:20},hidden_columns:[],iocs:[],initial_rows:[],color_rules:[]};
+ column_max_chars:{c1:20},hidden_columns:[],iocs:[],color_rules:[]};
 const Project=await compileHeadless('../ProjectView');
 const project=await mountHeadless(Project,{projectDetail:detail,backend:api});
 const settle=async()=>{for(let i=0;i<20;i++){await Promise.resolve();await tick();}};

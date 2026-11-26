@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 pub const PROJECT_DATABASE: &str = "project.sqlite";
 
@@ -16,9 +16,24 @@ pub fn project_database_path(project_dir: &Path) -> PathBuf {
 /// Connections belong to one operation, never to an inactive project. SQLite's
 /// page cache is bounded to 2 MiB and the WAL provides transactional recovery.
 pub(crate) fn connect(project_dir: &Path) -> Result<Connection> {
+    let path = project_database_path(project_dir);
+    if !path.exists() {
+        for name in [
+            "flags.json",
+            "flags.db",
+            "colors.json",
+            "iocs.json",
+            "view_state.json",
+            "column_max_chars.json",
+            "column_profile.json",
+        ] {
+            if project_dir.join(name).exists() {
+                bail!("Unsupported project storage at {project_dir:?}: project.sqlite is required; files were preserved.");
+            }
+        }
+    }
     fs::create_dir_all(project_dir)
         .with_context(|| format!("failed to create project directory {project_dir:?}"))?;
-    let path = project_database_path(project_dir);
     let mut db = Connection::open(&path)
         .with_context(|| format!("failed to open project database {path:?}"))?;
     db.busy_timeout(Duration::from_secs(5))?;
@@ -53,7 +68,6 @@ pub(crate) fn connect(project_dir: &Path) -> Result<Connection> {
                 entry TEXT NOT NULL, flagged INTEGER NOT NULL CHECK(flagged IN (0,1))
              );
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value BLOB NOT NULL);
-             CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY);
              CREATE TABLE IF NOT EXISTS bulk_undo (
                 row_id INTEGER PRIMARY KEY, previous_entry TEXT, applied_entry TEXT
              );
@@ -65,18 +79,6 @@ pub(crate) fn connect(project_dir: &Path) -> Result<Connection> {
         tx.commit()?;
     }
     Ok(db)
-}
-
-pub(crate) fn migrated(db: &Connection, key: &str) -> Result<bool> {
-    Ok(db
-        .query_row("SELECT 1 FROM migrations WHERE key=?1", [key], |_| Ok(()))
-        .optional()?
-        .is_some())
-}
-
-pub(crate) fn mark_migrated(db: &Connection, key: &str) -> Result<()> {
-    db.execute("INSERT OR IGNORE INTO migrations(key) VALUES(?1)", [key])?;
-    Ok(())
 }
 
 pub(crate) fn revision(db: &Connection) -> Result<u64> {

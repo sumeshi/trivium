@@ -121,7 +121,7 @@ pub fn export_project_with_job(
             "Select at least one output column.".into(),
         ));
     }
-    let project_columns = ProjectColumns::from_meta_and_names(&source.meta, &source.target.columns);
+    let project_columns = ProjectColumns::from_meta(&source.meta);
     let data_headers: Vec<String> = columns
         .iter()
         .map(|name| project_columns.label(name))

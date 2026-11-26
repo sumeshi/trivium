@@ -15,14 +15,13 @@ function deferred<T>() {
 }
 
 function summary(id: string): ProjectSummary {
-  return { meta: { id, name: id, source_file_name: `${id}.csv`, created_at: "2026-11-11",
-    total_records: 100, flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } };
+  return { meta: { description: null, source_sha256: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: id, source_file_name: `${id}.csv`, created_at: "2026-11-11",
+    total_records: 100, flagged_records: 0, hidden_columns: [] } };
 }
 
 function detail(id: string): LoadProjectResponse {
   return { project: summary(id), columns: ["c1"], columns_meta: [], column_max_chars: {}, column_kinds: {}, color_rules: [], iocs: [],
-    hidden_columns: [], initial_rows: [{ row_index: 0, cells: { c1: { kind: "string", text: "seed" } },
-      flag: "", memo: "", tags: [], bookmarked: false }] };
+    hidden_columns: [],  };
 }
 
 function fixture(overrides: Partial<Backend> = {}) {
@@ -102,7 +101,6 @@ test("opening and closing compact tabs never deletes saved projects or caches in
   await controller.selectProject("b");
   await controller.selectProject("c");
   assert.deepEqual(get(controller.state).openProjectIds, ["a", "b", "c"]);
-  assert.deepEqual(get(controller.state).projectDetail?.initial_rows, []);
   await controller.closeProject("b");
   assert.equal(get(controller.state).selectedProjectId, "c");
   await controller.closeProject("c");
@@ -221,7 +219,7 @@ test("an import finishing after a user switches tabs does not steal the active t
 test("a stale summary cannot rewrite the new tab metadata", async () => {
   const { controller } = fixture();
   await controller.selectProject("b");
-  controller.updateSummary({ projectId: "a", flagged: 99, iocApplied: 0, hiddenColumns: ["c1"] });
+  controller.updateSummary({ projectId: "a", flagged: 99, hiddenColumns: ["c1"] });
   assert.equal(get(controller.state).projectDetail?.project.meta.flagged_records, 0);
   assert.deepEqual(get(controller.state).projectDetail?.hidden_columns, []);
 });
@@ -253,7 +251,6 @@ test("tab snapshots isolate controls, history and original-ID selections without
   assert.equal(copied.writable, false);
   assert.deepEqual(copied.extractPanel, { open: true, selectedColumns: ['c1'], scope: 'all' });
   assert.ok(!("rowsCache" in copied));
-  assert.ok(!("initial_rows" in copied));
 });
 
 test("view saves stay ordered across tab instances and reopening waits for the final write", async () => {

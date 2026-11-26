@@ -5,9 +5,8 @@ import type { WorkspaceController } from "./workspaceController";
 import type { WorkspaceSession } from "./workspaceSession";
 import type { SavedView } from "./viewState";
 import { cloneTree } from "./viewState.ts";
-import { loadProjectView } from "./stores/viewHistory.ts";
 import { saveWorkspaceView, waitForWorkspaceSave } from "./workspaceSession.ts";
-import { savedViewToViewState, viewStateToSavedView, viewStateWarnings } from "./viewStateMapping.ts";
+import { viewStateToSavedView, viewStateWarnings } from "./viewStateMapping.ts";
 
 interface ViewOptions {
   backend: Backend;
@@ -134,6 +133,13 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
     }
     if (disposed || !isCurrent()) return undefined;
     let saved: SavedView | null = null;
+    if (loadFailed || status === "unreadable" || status === "newer") {
+      writable = false;
+      notify(status === "newer"
+        ? "Saved view settings were written by a newer version. The file is kept; changes in this session will not overwrite it."
+        : "Saved view settings could not be read. The file is kept; changes in this session will not overwrite it.");
+      return null;
+    }
     if (state) {
       saved = viewStateToSavedView(state, detail.columns);
       if (!saved) {
@@ -147,26 +153,7 @@ export function createWorkspaceView(workspace: WorkspaceController, options: Vie
         }
       }
     }
-    if (loadFailed || status === "unreadable" || status === "newer") {
-      writable = false;
-      notify(status === "newer"
-        ? "Saved view settings were written by a newer version. The file is kept; changes in this session will not overwrite it."
-        : "Saved view settings could not be read. The file is kept; changes in this session will not overwrite it.");
-      return saved;
-    }
-    if (state) return saved;
-    if (status === "missing") {
-      const legacy = loadProjectView(projectId, detail.columns);
-      if (legacy && !suspended) {
-        void saveWorkspaceView(options.backend, projectId, savedViewToViewState(legacy))
-          .catch((error) => {
-            console.error("[view] failed to migrate legacy view state:", error);
-            notify("Failed to migrate saved view settings. Evidence and annotations are unchanged.");
-          });
-      }
-      return legacy;
-    }
-    return null;
+    return saved;
   };
   workspace.onDispose(() => {
     disposed = true;

@@ -75,7 +75,8 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     imports.report_low_trials();
 
     let meta = store
-        .find(&id)
+        .try_find(&id)
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("project missing after import".into()))?;
     let input_bytes = fs::metadata(fixture)
         .map_err(|e| AppError::Message(format!("failed to stat fixture: {}", e)))?

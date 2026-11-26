@@ -91,9 +91,11 @@ fn ascii_control_delimiters_preserve_values_through_import_export_and_reimport()
         let restored = create_project(&store, payload(&output, None)).unwrap();
         for project_id in [imported.meta.id, restored.meta.id] {
             let loaded = load_project(&store, ProjectRequest { project_id }).unwrap();
+
+            let loaded_rows = common::rows(&store, loaded.project.meta.id);
             assert_eq!(loaded.project.meta.total_records, rows.len());
             for (index, expected) in rows.iter().enumerate() {
-                let actual = &loaded.initial_rows[index];
+                let actual = &loaded_rows[index];
                 assert_eq!(actual.row_index, index);
                 assert_eq!(actual.cells["c000001"].text.as_deref(), Some(expected[0]));
                 assert_eq!(actual.cells["c000002"].text.as_deref(), Some(expected[1]));
@@ -143,16 +145,18 @@ fn unicode_boms_import_exact_values_and_invalid_utf32_leaves_no_partial_case() {
             },
         )
         .unwrap();
+
+        let loaded_rows = common::rows(&store, loaded.project.meta.id);
         assert_eq!(loaded.project.meta.total_records, 2);
         assert_eq!(loaded.columns_meta[0].source, "value");
-        assert_eq!(loaded.initial_rows[0].row_index, 0);
+        assert_eq!(loaded_rows[0].row_index, 0);
         assert_eq!(
-            loaded.initial_rows[0].cells["c000001"].text.as_deref(),
+            loaded_rows[0].cells["c000001"].text.as_deref(),
             Some("00123")
         );
-        assert_eq!(loaded.initial_rows[1].row_index, 1);
+        assert_eq!(loaded_rows[1].row_index, 1);
         assert_eq!(
-            loaded.initial_rows[1].cells["c000001"].text.as_deref(),
+            loaded_rows[1].cells["c000001"].text.as_deref(),
             Some("調査😀")
         );
         assert_eq!(fs::read(&path).unwrap(), bytes);
@@ -184,3 +188,5 @@ fn short_utf8_bom_and_utf16_inputs_still_decode_through_tiny_buffers() {
         assert!(importer.next_batch(&JobContext::none()).unwrap().is_none());
     }
 }
+
+mod common;

@@ -10,7 +10,7 @@ use polars::prelude::*;
 use uuid::Uuid;
 
 use trivium_engine::{
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     project_io::{
         project_read_stats, read_page_dataframe, read_page_dataframe_with_job,
         read_page_rows_dataframe, read_project_columns_with_job, reset_project_read_counters,
@@ -246,7 +246,7 @@ fn large_row_groups_stream_bounded_chunks_with_original_global_offsets() {
 fn cancellation_before_or_between_batches_stops_further_parquet_io() {
     let _lock = guard();
     let fixture = Fixture::new(25_000, 12_500);
-    let guard = try_begin_job(JobKind::Query, None).unwrap();
+    let guard = queue_job(JobKind::Query, None).unwrap();
     let job = JobContext::with_job(guard, None);
     let mut reader = ProjectBatchReader::open(&fixture.path, &["seq".into()]).unwrap();
     reset_project_read_counters();

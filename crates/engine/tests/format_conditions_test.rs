@@ -291,14 +291,6 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
         },
     )
     .unwrap();
-    // Older saved views/presets can still carry removed classification metadata.
-    // Loading must retain their frozen matcher and columns without reviving it.
-    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    saved["condition"]["format"]["classifier"] = serde_json::json!({
-        "kind": "ipv4-cidr", "default": "Unclassified",
-        "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
-    });
-    fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
     let loaded = ops::preset::load_preset(
         &second.store,
         LoadPresetPayload {
@@ -316,9 +308,6 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
         condition.format, definition,
         "preset stores its applied definition rather than a mutable catalog lookup"
     );
-    assert!(serde_json::to_value(&node).unwrap()["format"]
-        .get("classifier")
-        .is_none());
     assert_eq!(
         condition.columns,
         vec![
@@ -327,6 +316,24 @@ fn format_snapshots_and_all_column_references_survive_portable_presets() {
         ]
     );
     assert_eq!(second.query(node), [0]);
+
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    for property in ["classifier", "classification"] {
+        let mut unsupported = saved.clone();
+        unsupported["condition"]["format"][property] = serde_json::json!({
+            "kind": "ipv4-cidr", "default": "Unclassified",
+            "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
+        });
+        fs::write(&path, serde_json::to_vec(&unsupported).unwrap()).unwrap();
+        assert!(ops::preset::load_preset(
+            &second.store,
+            LoadPresetPayload {
+                project_id: Some(second.id),
+                source: path.to_string_lossy().into_owned(),
+            },
+        )
+        .is_err());
+    }
 }
 
 #[test]

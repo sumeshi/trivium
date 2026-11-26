@@ -7,8 +7,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use trivium_engine::jobs::{
-    active_jobs, is_cancelled, request_cancel, try_begin_job, JobContext, JobKind, JobProgress,
-    ProgressFn, ThrottledProgress, MAX_CONCURRENT_JOBS,
+    active_jobs, is_cancelled, request_cancel, queue_job, JobContext, JobKind, JobProgress,
+    ProgressFn, ThrottledProgress,
 };
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows_with_job, QueryRowsPayload, QuerySpec};
@@ -25,42 +25,11 @@ fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
-fn concurrency_limit_rejects_a_third_job() {
-    let _lock = registry_test_lock();
-    assert!(active_jobs().is_empty());
-
-    let first = try_begin_job(JobKind::Query, None).expect("first job");
-    let second = try_begin_job(JobKind::Export, None).expect("second job");
-    assert_eq!(active_jobs().len(), MAX_CONCURRENT_JOBS);
-
-    let error = try_begin_job(JobKind::Import, None)
-        .err()
-        .expect("third job must be rejected");
-    assert!(
-        error
-            .to_string()
-            .contains("Too many long-running operations"),
-        "unexpected error: {error}"
-    );
-
-    // Finishing one job makes room for exactly one more.
-    drop(first);
-    assert_eq!(active_jobs().len(), 1);
-    let third = try_begin_job(JobKind::Import, None).expect("job after releasing one slot");
-    assert_eq!(third.kind(), JobKind::Import);
-    assert_eq!(active_jobs().len(), MAX_CONCURRENT_JOBS);
-
-    drop(second);
-    drop(third);
-    assert!(active_jobs().is_empty());
-}
-
-#[test]
 fn cancel_targets_only_the_requested_job() {
     let _lock = registry_test_lock();
     let project_id = Uuid::new_v4();
-    let first = try_begin_job(JobKind::Query, Some(project_id)).expect("first job");
-    let second = try_begin_job(JobKind::Export, None).expect("second job");
+    let first = queue_job(JobKind::Query, Some(project_id)).expect("first job");
+    let second = queue_job(JobKind::Export, None).expect("second job");
 
     assert_eq!(first.info().project_id, Some(project_id));
     assert!(request_cancel(first.id()));
@@ -81,7 +50,7 @@ fn cancel_targets_only_the_requested_job() {
 #[test]
 fn finished_job_cannot_cancel_or_change_a_new_job() {
     let _lock = registry_test_lock();
-    let old = try_begin_job(JobKind::Query, None).expect("old job");
+    let old = queue_job(JobKind::Query, None).expect("old job");
     let old_id = old.id();
     drop(old);
 
@@ -89,7 +58,7 @@ fn finished_job_cannot_cancel_or_change_a_new_job() {
     assert!(!request_cancel(old_id));
     assert!(!is_cancelled(old_id));
 
-    let new = try_begin_job(JobKind::Query, None).expect("new job");
+    let new = queue_job(JobKind::Query, None).expect("new job");
     assert_ne!(new.id(), old_id);
     assert!(!new.is_cancelled());
 
@@ -154,7 +123,7 @@ fn empty_context_never_cancels_or_emits() {
 #[test]
 fn job_context_observes_cancel_and_emits_progress() {
     let _lock = registry_test_lock();
-    let guard = try_begin_job(JobKind::Query, None).expect("job");
+    let guard = queue_job(JobKind::Query, None).expect("job");
     let id = guard.id();
     let emitted = Arc::new(Mutex::new(Vec::<JobProgress>::new()));
     let sink = Arc::clone(&emitted);
@@ -184,7 +153,7 @@ fn cancelled_query_stops_before_reading_project_data() {
     std::fs::create_dir_all(&root).expect("temp dir");
     let store = ProjectsStore::new(root.clone()).expect("store");
 
-    let guard = try_begin_job(JobKind::Query, None).expect("job");
+    let guard = queue_job(JobKind::Query, None).expect("job");
     assert!(request_cancel(guard.id()));
     let context = JobContext::with_job(guard, None);
     let payload = QueryRowsPayload {
@@ -199,7 +168,7 @@ fn cancelled_query_stops_before_reading_project_data() {
     assert_eq!(error.to_string(), "Cancelled.");
 
     // A cancelled import is rejected before touching the selected path.
-    let guard = try_begin_job(JobKind::Import, None).expect("import job");
+    let guard = queue_job(JobKind::Import, None).expect("import job");
     assert!(request_cancel(guard.id()));
     let context = JobContext::with_job(guard, None);
     let error = trivium_engine::ops::projects::create_project_with_job(

@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use trivium_engine::{
     error::AppError,
     ioc::{load_ioc_entries, read_ioc_csv},
@@ -143,7 +143,7 @@ impl Fixture {
 
     fn annotations(&self) -> (Value, u64) {
         (
-            serde_json::to_value(load_flags(&self.store.flags_path(&self.id)).unwrap()).unwrap(),
+            serde_json::to_value(load_flags(&self.store.database_path(&self.id)).unwrap()).unwrap(),
             project_revision(&self.store.project_dir(&self.id)).unwrap(),
         )
     }
@@ -176,37 +176,31 @@ fn cell_csv_row(entry: &IocEntry) -> Vec<String> {
 }
 
 #[test]
-fn legacy_three_column_csv_and_json_definitions_remain_query_rules() {
+fn query_rules_export_and_import_with_the_current_five_column_header() {
     let f = Fixture::new();
     let before = f.annotations();
-    let path = f.root.join("legacy.csv");
-    // The original three headers remain positional, including a third header
-    // named value. Optional cell headers are recognized only after these.
+    let path = f.root.join("queries.csv");
     write_csv(
         &path,
-        &["severity", "label", "value"],
+        &["flag", "tag", "query", "column", "value"],
         vec![vec![
             "critical".into(),
-            "legacy".into(),
+            "query".into(),
             "powershell".into(),
+            String::new(),
+            String::new(),
         ]],
     );
     let imported = f.import(&path).unwrap();
     assert_eq!(imported.len(), 1);
     assert!(imported[0].cell.is_none());
     assert_eq!(imported[0].query, "powershell");
-    let legacy: IocEntry =
-        serde_json::from_value(json!({"flag":"critical", "tag":"legacy", "query":"powershell"}))
-            .unwrap();
-    assert!(legacy.cell.is_none());
-    assert!(serde_json::to_value(&legacy).unwrap().get("cell").is_none());
-
-    let output = f.root.join("legacy-export.csv");
+    let output = f.root.join("query-export.csv");
     f.export(&output, None).unwrap();
     let mut csv = csv::Reader::from_path(&output).unwrap();
     assert_eq!(
         csv.headers().unwrap(),
-        &csv::StringRecord::from(vec!["flag", "tag", "query"])
+        &csv::StringRecord::from(vec!["flag", "tag", "query", "column", "value"])
     );
     assert_eq!(
         serde_json::to_value(read_ioc_csv(&output).unwrap()).unwrap(),
@@ -257,33 +251,6 @@ fn cell_literals_survive_saved_rules_and_mixed_csv_roundtrips_without_auto_annot
         expected
     );
 
-    let reordered = f.root.join("optional-header-order.csv");
-    let rows = entries
-        .iter()
-        .map(|entry| {
-            let (value, column) = entry
-                .cell
-                .as_ref()
-                .map(|cell| (cell.value.clone(), "message".to_string()))
-                .unwrap_or_default();
-            vec![
-                entry.flag.clone(),
-                entry.tag.clone(),
-                entry.query.clone(),
-                value,
-                column,
-            ]
-        })
-        .collect();
-    write_csv(
-        &reordered,
-        &["flag", "tag", "query", " VALUE ", " CoLuMn "],
-        rows,
-    );
-    assert_eq!(
-        serde_json::to_value(f.import(&reordered).unwrap()).unwrap(),
-        expected
-    );
     assert_eq!(
         f.annotations(),
         before,
@@ -291,7 +258,6 @@ fn cell_literals_survive_saved_rules_and_mixed_csv_roundtrips_without_auto_annot
     );
     let meta = f.store.try_find(&f.id).unwrap().unwrap();
     assert_eq!(meta.flagged_records, 1);
-    assert_eq!(meta.ioc_applied_records, 0);
 }
 
 #[test]
@@ -325,14 +291,19 @@ fn invalid_cell_definitions_preserve_saved_rules_annotations_and_existing_output
 }
 
 #[test]
-fn incomplete_or_duplicate_optional_csv_headers_do_not_replace_saved_rules() {
+fn noncanonical_csv_headers_do_not_replace_saved_rules() {
     let f = Fixture::new();
     let saved = f.rules_bytes();
     let source = f.root.join("invalid-headers.csv");
     for headers in [
+        vec!["flag", "tag", "query"],
+        vec!["severity", "label", "value"],
         vec!["flag", "tag", "query", "column"],
         vec!["flag", "tag", "query", "value"],
         vec!["flag", "tag", "query", "column", "COLUMN", "value"],
+        vec!["flag", "tag", "query", "value", "column"],
+        vec!["flag", "tag", "query", " COLUMN ", "value"],
+        vec!["severity", "label", "query", "column", "value"],
     ] {
         let mut row = vec!["critical".into(), "valid-query".into(), "powershell".into()];
         row.resize(headers.len(), String::new());
@@ -359,7 +330,7 @@ fn incomplete_or_duplicate_optional_csv_headers_do_not_replace_saved_rules() {
 }
 
 #[test]
-fn unrecognized_optional_cell_headers_do_not_silently_erase_saved_rules() {
+fn unrecognized_cell_headers_do_not_silently_erase_saved_rules() {
     let f = Fixture::new();
     let before = f.rules_bytes();
     let annotations = f.annotations();
@@ -380,7 +351,7 @@ fn unrecognized_optional_cell_headers_do_not_silently_erase_saved_rules() {
         );
         let error = f.import(&source).unwrap_err().to_string();
         assert!(
-            error.contains("column 4") && error.contains("colum"),
+            error.contains("column 4") && error.contains("\"column\""),
             "{error}"
         );
         assert_eq!(f.rules_bytes(), before);
@@ -389,7 +360,7 @@ fn unrecognized_optional_cell_headers_do_not_silently_erase_saved_rules() {
 }
 
 #[test]
-fn missing_legacy_csv_columns_do_not_silently_erase_saved_rules() {
+fn missing_csv_columns_do_not_silently_erase_saved_rules() {
     let f = Fixture::new();
     let before = f.rules_bytes();
     let annotations = f.annotations();
@@ -399,7 +370,7 @@ fn missing_legacy_csv_columns_do_not_silently_erase_saved_rules() {
         row.resize(headers.len(), "review".into());
         write_csv(&source, &headers, vec![row]);
         let error = f.import(&source).unwrap_err().to_string();
-        assert!(error.contains("three columns"), "{error}");
+        assert!(error.contains("flag,tag,query,column,value"), "{error}");
         assert_eq!(f.rules_bytes(), before);
         assert_eq!(f.annotations(), annotations);
     }

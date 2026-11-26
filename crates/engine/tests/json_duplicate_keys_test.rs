@@ -164,7 +164,7 @@ fn failed_duplicate_import_preserves_existing_case_and_removes_staging() {
     )
     .expect("annotate existing case");
     let original_annotations =
-        load_flags(&store.flags_path(&existing.meta.id)).expect("existing annotations");
+        load_flags(&store.database_path(&existing.meta.id)).expect("existing annotations");
     let original_data =
         fs::read(store.project_dir(&existing.meta.id).join("data.parquet")).expect("existing data");
 
@@ -184,10 +184,10 @@ fn failed_duplicate_import_preserves_existing_case_and_removes_staging() {
         let error = create_project(&store, payload(&path)).expect_err("reject duplicate import");
         assert!(error.to_string().contains("Duplicate JSON key"), "{error}");
         assert_eq!(fs::read_to_string(&path).expect("source bytes"), source);
-        assert_eq!(store.all().len(), 1, "no failed project registered");
-        assert_eq!(store.all()[0].id, existing.meta.id);
+        assert_eq!(store.try_all().unwrap().len(), 1, "no failed project registered");
+        assert_eq!(store.try_all().unwrap()[0].id, existing.meta.id);
         assert_eq!(
-            load_flags(&store.flags_path(&existing.meta.id)).expect("existing annotations"),
+            load_flags(&store.database_path(&existing.meta.id)).expect("existing annotations"),
             original_annotations
         );
         assert_eq!(

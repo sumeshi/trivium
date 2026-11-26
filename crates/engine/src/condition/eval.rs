@@ -280,12 +280,11 @@ impl From<EvalError> for AppError {
 
 /// Evaluates a condition tree against one row.
 ///
-/// This compatibility entry point prepares the tree for each call, so hot
+/// This entry point prepares the tree for each call, so hot
 /// query paths use [`PreparedNode`] instead. Column names match
 /// case-insensitively. An empty Contains column searches the supplied data
 /// cells without crossing their boundaries. Other empty-column predicates read
-/// the `""` joined-text entry. A legacy map containing only that entry is
-/// treated as one supplied cell because its source boundaries are unavailable.
+/// the `""` joined-text entry.
 /// Equality and text operators use the original cell string. Ordered comparisons use exact
 /// base-ten numbers or parsed datetimes according to each bound. Empty/null,
 /// missing and unparseable source values do not match an ordered predicate;
@@ -297,7 +296,7 @@ pub fn eval(node: &Node, row: &HashMap<String, Value>) -> Result<bool, EvalError
 
 impl PreparedCondition {
     fn eval(&self, row: &HashMap<String, Value>) -> Result<bool, EvalError> {
-        if self.is_unscoped_contains() && row.keys().any(|column| !column.is_empty()) {
+        if self.is_unscoped_contains() {
             let matched = row.iter().any(|(column, value)| {
                 if column.is_empty() {
                     return false;

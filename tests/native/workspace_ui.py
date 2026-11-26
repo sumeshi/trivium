@@ -88,7 +88,7 @@ def _ipc_error_category(error: Any) -> str:
     if error in {"Project data file missing.", "Project directory missing"} or any(part in error for part in (
             "No such file or directory", "The system cannot find the file specified", "(os error 2)", "(os error 3)")):
         return "io_missing"
-    if any(part in error for part in ("database is locked", "database table is locked", "Legacy annotation database is in use;")):
+    if any(part in error for part in ("database is locked", "database table is locked")):
         return "locked"
     if error in {
         "Too many long-running operations. Wait for one to finish.",
@@ -200,7 +200,7 @@ class WorkspaceView(WebView):
             try{args=JSON.parse(typeof options.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
             const request=args?.payload??args?.request??{};
             const entry={sequence:++window.__workspaceIpcSequence,name,request,requestId:args.requestId??null,
-              metadataOnly:args.metadataOnly??null,started:performance.now()};
+              started:performance.now()};
             window.__workspaceIpc.push(entry);
             if(window.__workspaceIpc.length>2000)window.__workspaceIpc.shift();
             const perform=()=>{entry.dispatched=true;return original.call(window,input,options,...rest);};
@@ -1014,7 +1014,7 @@ def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Pa
         web.results(2)
         wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='1')?.querySelector('.flag-safe.selected')!==null&&document.querySelector('.table-meta-right')?.textContent.trim()==='Flagged 1';"), bool, "reopened row and Flagged counter include the old tab's committed edit")
         loaded = next(entry for entry in web.trace(after=before) if entry["name"] == "load_project" and entry["request"].get("projectId") == project_id)
-        assert loaded["metadataOnly"] is True and loaded["requestId"], loaded
+        assert loaded["requestId"], loaded
         saved = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 1})
         assert saved["rows"][0]["flag"] == "safe" and saved["annotated_total"] == 1, saved
         report["pending_annotation_reopen"] = {"held_before_native_dispatch": True, "different_case_independent": True,
@@ -1187,7 +1187,7 @@ def main() -> None:
             expected_invalid_ioc = [entry for entry in errors if entry["name"] == "import_iocs"
                 and entry["request"].get("projectId") == rejected_ioc.get("project_id")
                 and entry["request"].get("path") == rejected_ioc.get("csv_path")
-                and entry["error"] == 'IOC CSV line 3: invalid IOC flag "critcal". Expected Safe, Suspicious, or Critical.']
+                and entry["error"] == rejected_ioc.get("csv_error")]
             assert len(expected_invalid_ioc) == (1 if rejected_ioc else 0), expected_invalid_ioc
             boundary_expected = report.get("boundary_expected_errors", [])
             expected_boundary = [entry for entry in errors if any(

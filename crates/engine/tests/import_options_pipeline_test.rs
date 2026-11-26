@@ -62,7 +62,7 @@ fn omitted_and_partial_options_stay_strict_with_headers_and_auto_encoding() {
     let path = root.path().join("ragged.csv");
     fs::write(&path, "A,B\n1,2\n3\n").unwrap();
     assert!(create_project(&store, payload(&path, None)).is_err());
-    assert!(store.all().is_empty());
+    assert!(store.try_all().unwrap().is_empty());
 }
 
 #[test]
@@ -243,6 +243,6 @@ fn malformed_encoding_and_incompatible_headerless_restore_publish_nothing() {
         .unwrap_err()
         .to_string()
         .contains("header"));
-    assert!(store.all().is_empty());
+    assert!(store.try_all().unwrap().is_empty());
     assert_eq!(fs::read_dir(store.staging_root()).unwrap().count(), 0);
 }

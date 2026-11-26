@@ -7,7 +7,7 @@ use tempfile::TempDir;
 use trivium_engine::import::jsonl::{BatchLimits, JsonImportSummary, JsonImporter, RecordFormat};
 use trivium_engine::import::options::{ImportIssueAction, ImportOptions, ImportReport};
 use trivium_engine::jobs::{
-    request_cancel, try_begin_job, JobContext, JobKind, JobProgress, ProgressFn,
+    queue_job, request_cancel, JobContext, JobKind, JobProgress, ProgressFn,
 };
 use trivium_engine::ops::projects::{create_project, CreateProjectPayload};
 use trivium_engine::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
@@ -212,7 +212,7 @@ fn failed_recovery_never_publishes_an_empty_case() {
         let path = dir.path().join(name);
         fs::write(&path, body).unwrap();
         assert!(create_project(&store, payload(&path, Some(recover()))).is_err());
-        assert!(store.all().is_empty());
+        assert!(store.try_all().unwrap().is_empty());
         assert_eq!(fs::read_dir(store.staging_root()).unwrap().count(), 0);
     }
 }
@@ -264,7 +264,7 @@ fn cancellation_is_observed_even_when_every_scanned_line_is_invalid() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("invalid.jsonl");
     fs::write(&path, "not-json\n".repeat(2_000)).unwrap();
-    let guard = try_begin_job(JobKind::Import, None).unwrap();
+    let guard = queue_job(JobKind::Import, None).unwrap();
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |progress: JobProgress| {
         if progress.message.as_deref() == Some("Scanning JSON") {

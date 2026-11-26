@@ -13,8 +13,8 @@ use polars::prelude::*;
 use uuid::Uuid;
 
 use trivium_engine::{
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind, ProgressFn},
-    models::ProjectMeta,
+    jobs::{queue_job, request_cancel, JobContext, JobKind, ProgressFn},
+    models::{ColumnMeta, ProjectMeta},
     ops::{
         flags::{update_flag, UpdateFlagPayload},
         projects::{create_project, CreateProjectPayload},
@@ -196,7 +196,7 @@ fn annotation_dependent_lookup_invalidates_flag_and_bookmark_results() {
     update(&store, id, 5, Some("critical"), None);
     update(&store, id, 50, Some("suspicious"), None);
     let spec = QuerySpec {
-        flag_filter: Some("priority".into()),
+        flag_filter: Some("suspicious|critical".into()),
         sort_key: Some(common::id(&ids, "key")),
         sort_direction: Some("desc".into()),
         ..Default::default()
@@ -226,7 +226,7 @@ fn annotation_dependent_lookup_invalidates_flag_and_bookmark_results() {
 fn running_lookup_observes_cancellation_before_source_data_reads() {
     let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (root, store, id, _) = csv_fixture();
-    let guard = try_begin_job(JobKind::Query, Some(id)).unwrap();
+    let guard = queue_job(JobKind::Query, Some(id)).unwrap();
     let callback: ProgressFn = Arc::new(|progress| {
         request_cancel(progress.id);
     });
@@ -257,10 +257,17 @@ fn two_million_row_lookup_reaches_source_start_middle_and_end_without_full_reads
     let id = Uuid::new_v4();
     let directory = store.project_dir(&id);
     fs::create_dir_all(&directory).unwrap();
-    let mut frame = DataFrame::new(vec![Series::new(
-        "seq",
-        (0..2_000_000u64).collect::<Vec<_>>(),
-    )])
+    let mut frame = DataFrame::new(vec![
+        Series::new("c000001", (0..2_000_000u64).collect::<Vec<_>>()),
+        Series::new(
+            "__original",
+            (0..2_000_000u64)
+                .map(|row| serde_json::json!({"seq": row}).to_string())
+                .collect::<Vec<_>>(),
+        ),
+        Series::new("__rowid", (0..2_000_000i64).collect::<Vec<_>>()),
+        Series::new("__trivium_source_record", (1..=2_000_000i64).collect::<Vec<_>>()),
+    ])
     .unwrap();
     ParquetWriter::new(File::create(directory.join("data.parquet")).unwrap())
         .finish(&mut frame)
@@ -275,15 +282,19 @@ fn two_million_row_lookup_reaches_source_start_middle_and_end_without_full_reads
             created_at: Utc::now(),
             total_records: 2_000_000,
             flagged_records: 0,
-            ioc_applied_records: 0,
             source_sha256: None,
             source_file_name: None,
             source_format: None,
             source_size: None,
             source_path: None,
             hidden_columns: vec![],
-            storage_version: 0,
-            columns: vec![],
+            storage_version: 2,
+            columns: vec![ColumnMeta {
+                id: "c000001".into(),
+                label: "seq".into(),
+                source: "/seq".into(),
+                order: 0,
+            }],
         })
         .unwrap();
     reset_project_read_counters();
@@ -307,7 +318,7 @@ fn two_million_row_lookup_reaches_source_start_middle_and_end_without_full_reads
         .unwrap();
         assert_eq!(page.rows[0].row_index, row);
         assert_eq!(
-            common::cell_text(&page.rows[0], "seq"),
+            common::cell_text(&page.rows[0], "c000001"),
             Some(row.to_string().as_str())
         );
     }

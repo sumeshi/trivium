@@ -25,14 +25,14 @@ function deferred<T>() {
 const filters = (search = ""): AppliedFilters => ({ search, flag: "all", bookmarkedOnly: false, searchColumns: [], condition: null });
 function detail(id: string, total = 5199): LoadProjectResponse {
   return {
-    project: { meta: { id, name: id, created_at: "2026-11-11", total_records: total, flagged_records: 0,
-      ioc_applied_records: 0, hidden_columns: [] } },
+    project: { meta: { description: null, source_sha256: null, source_file_name: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: id, created_at: "2026-11-11", total_records: total, flagged_records: 0,
+      hidden_columns: [] } },
     columns: ["c1"], columns_meta: [], column_max_chars: {}, column_kinds: {},
-    color_rules: [], iocs: [], hidden_columns: [], initial_rows: [],
+    color_rules: [], iocs: [], hidden_columns: [],
   };
 }
 function row(id: number, text = String(id)): ProjectRow {
-  return { row_index: id, cells: { c1: { kind: "string", text } }, flag: "", memo: "", tags: [], bookmarked: false };
+  return { color: null,  row_index: id, cells: { c1: { kind: "string", text, truncated: false, length: [...text].length } }, flag: "", memo: "", tags: [], bookmarked: false };
 }
 function response(offset = 0, rows = [row(offset)], total = 5199): QueryProjectRowsResponse {
   return { offset, rows, total_rows: total, total_filtered_rows: total, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 };
@@ -532,7 +532,7 @@ for (const succeeds of [false, true]) {
     // A real 26-row tail page with 1,259 complete 256-character source
     // columns fits just below the bound. A normal 10 KiB note pushes it over.
     const cells = Object.fromEntries(Array.from({ length: 1259 }, (_, index) =>
-      [`c${index}`, { kind: 'string' as const, text: 'x'.repeat(256), truncated: false }]));
+      [`c${index}`, { length: Array.from('x'.repeat(256)).length,  kind: 'string' as const, text: 'x'.repeat(256), truncated: false }]));
     const source = Array.from({ length: 26 }, (_, index) => ({ ...row(PAGE_SIZE + index), cells }));
     const cached = source.map(normalizeRow);
     assert.equal(16 * 1024 * 1024 - estimatePageBytes(cached), 4096);

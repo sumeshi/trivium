@@ -33,7 +33,7 @@ workspace.backend.set({histogram:args=>{
  return Promise.resolve(resultFor(args));
 }});
 workspace.projectDetail.set({project:{meta:{id:'case-a'}},columns:['Timestamp','OtherTime','Host','EventID'],columns_meta:[],
- column_kinds:{Timestamp:'datetime',OtherTime:'datetime'},column_max_chars:{},hidden_columns:[],iocs:[],initial_rows:[]});
+ column_kinds:{Timestamp:'datetime',OtherTime:'datetime'},column_max_chars:{},hidden_columns:[],iocs:[],});
 workspace.currentProjectId.set('case-a');
 workspace.conditionTree.set(presetCondition(manual));
 workspace.appliedFilters.set(structuredClone(scope));
@@ -115,7 +115,7 @@ const buckets=Array.from({length:60},(_,index)=>({
 workspace.backend.set({histogram:async()=>({column:'Timestamp',kind:'datetime',
  buckets,missing:1,invalid:1,outside:0,full_range:{min:timestamp,max:timestamp},auto_focused:false})});
 workspace.projectDetail.set({project:{meta:{id:'constant-case'}},columns:['Timestamp'],columns_meta:[],
- column_kinds:{Timestamp:'string'},column_max_chars:{},hidden_columns:[],iocs:[],initial_rows:[]});
+ column_kinds:{Timestamp:'string'},column_max_chars:{},hidden_columns:[],iocs:[],});
 workspace.currentProjectId.set('constant-case');
 globalThis.__workspace=workspace;
 globalThis.__annotations=writable({});

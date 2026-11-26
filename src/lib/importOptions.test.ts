@@ -17,14 +17,14 @@ function fixture(onCreate?: (args: CreateProjectArgs) => void) {
       calls.push(structuredClone(args));
       onCreate?.(args);
       if (failure) throw new Error('Unreadable source record');
-      const project: ProjectSummary = { meta: { id: String(projects.length), name: args.path!,
-        created_at: '2026-11-26', total_records: 2, flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } };
+      const project: ProjectSummary = { meta: { description: null, source_sha256: null, source_file_name: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id: String(projects.length), name: args.path!,
+        created_at: '2026-11-26', total_records: 2, flagged_records: 0, hidden_columns: [] } };
       projects.push(project);
       return project;
     },
     listProjects: async () => projects,
     loadProject: async (id: string): Promise<LoadProjectResponse> => ({ project: projects.find(p => p.meta.id === id)!,
-      columns: [], columns_meta: [], column_max_chars: {}, column_kinds: {}, color_rules: [], iocs: [], hidden_columns: [], initial_rows: [] }),
+      columns: [], columns_meta: [], column_max_chars: {}, column_kinds: {}, color_rules: [], iocs: [], hidden_columns: [],  }),
   } as Backend;
   return { controller: createProjectController(backend), calls, fail: (next: boolean) => { failure = next; } };
 }

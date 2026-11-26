@@ -11,12 +11,6 @@ pub(crate) const ANNOTATION_COLUMNS: [&str; 6] = [
     "trivium-bookmarked",
 ];
 
-#[derive(Clone, Copy)]
-pub(crate) enum TagFormat {
-    Json,
-    Legacy,
-}
-
 fn matches_header(actual: &str, canonical: &str) -> bool {
     actual == canonical
         || actual
@@ -31,19 +25,14 @@ fn matches_header(actual: &str, canonical: &str) -> bool {
 
 /// Recognize only a complete leading export block. Arbitrary suffixed source
 /// columns elsewhere must not become annotations through name guessing.
-pub(crate) fn leading_block(headers: &[&str]) -> Option<TagFormat> {
+pub(crate) fn leading_block(headers: &[&str]) -> Option<()> {
     if headers.len() != ANNOTATION_COLUMNS.len()
-        || [0, 1, 2, 3, 5]
-            .into_iter()
-            .any(|index| !matches_header(headers[index], ANNOTATION_COLUMNS[index]))
+        || headers
+            .iter()
+            .zip(ANNOTATION_COLUMNS)
+            .any(|(actual, canonical)| !matches_header(actual, canonical))
     {
         return None;
     }
-    if matches_header(headers[4], ANNOTATION_COLUMNS[4]) {
-        Some(TagFormat::Json)
-    } else if matches_header(headers[4], "trivium-tags") {
-        Some(TagFormat::Legacy)
-    } else {
-        None
-    }
+    Some(())
 }

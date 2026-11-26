@@ -210,7 +210,7 @@ fn flexible_dates_share_sort_filter_analysis_bulk_and_export_instants() {
             .updated,
         4
     );
-    let mut flagged = load_flags(&store.flags_path(&id))
+    let mut flagged = load_flags(&store.database_path(&id))
         .unwrap()
         .into_keys()
         .collect::<Vec<_>>();

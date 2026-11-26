@@ -13,8 +13,8 @@ const notes = [
   " \t\n ",
 ];
 
-const source: ProjectRow = {
-  row_index: 9, cells: { c1: { kind: "string", text: "source is unchanged" } },
+const source: ProjectRow = { color: null,
+  row_index: 9, cells: { c1: { truncated: false, length: Array.from("source is unchanged").length,  kind: "string", text: "source is unchanged" } },
   flag: "suspicious", memo: null, tags: ["triage"], bookmarked: true,
 };
 
@@ -43,7 +43,7 @@ test("annotation responses update notes losslessly without changing source cells
 });
 
 test("notes never replace a source column whose id is memo", () => {
-  const row = normalizeRow({ ...source, cells: { memo: { kind: "string", text: "source field" } } });
+  const row = normalizeRow({ ...source, cells: { memo: { truncated: false, length: Array.from("source field").length,  kind: "string", text: "source field" } } });
   const updated = applyAnnotationEntry(row, { flag: "safe", memo: "investigation note", tags: [], bookmarked: false });
   assert.equal(updated.memo, "investigation note");
   assert.equal(updated.displayCache.memo, "source field");

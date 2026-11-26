@@ -46,9 +46,9 @@ test('IOC drafts retain edits and exact cell values until explicit Save or Disca
   assert.equal(get(f.editor.state).entries.at(-1)?.flag, 'critical');
   f.editor.update(queryId, 'query', 'host:evil');
   const value = '  "quoted" | -value:\\path\n18446744073709551615  ';
-  const cellId = f.editor.addCell('legacy column:"', value);
+  const cellId = f.editor.addCell('source column:"', value);
   f.editor.update(cellId, 'tag', 'triage');
-  assert.deepEqual(get(f.editor.state).entries.at(-1)?.cell, { column: 'legacy column:"', value });
+  assert.deepEqual(get(f.editor.state).entries.at(-1)?.cell, { column: 'source column:"', value });
   f.editor.updateCell(cellId, '__proto__', '');
   assert.deepEqual(get(f.editor.state).entries.at(-1)?.cell, { column: '__proto__', value: '' });
   assert.equal(f.editor.hasUnsavedChanges(), true);

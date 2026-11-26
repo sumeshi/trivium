@@ -8,14 +8,11 @@ use uuid::Uuid;
 
 /// Where a data column came from and how it is displayed.
 ///
-/// Legacy projects (storage version 0) have no column metadata; their ids and
-/// labels are synthesized from the original frame column names. New projects
-/// use an internal id (`c000001`) so the display label and the source path can
-/// differ from the column the query paths address.
+/// Internal ids (`c000001`) keep query addressing separate from display labels
+/// and original source paths.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 pub struct ColumnMeta {
-    /// Internal column id. `c000001` for the new storage format, the original
-    /// column name for legacy projects.
+    /// Internal column id, such as `c000001`.
     pub id: String,
     /// Display label. Not guaranteed to be unique.
     pub label: String,
@@ -41,37 +38,25 @@ pub struct ProjectMeta {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub total_records: usize,
-    #[serde(default)]
     pub flagged_records: usize,
-    #[serde(default)]
-    pub ioc_applied_records: usize,
-    #[serde(default)]
     pub source_sha256: Option<String>,
-    /// Original file name as selected by the user. Legacy projects and
-    /// hand-built fixtures have none.
-    #[serde(default)]
+    /// Original file name as selected by the user.
     pub source_file_name: Option<String>,
     /// `csv`, `json`, `jsonl`, or `ndjson` when known.
-    #[serde(default)]
     pub source_format: Option<String>,
     /// Size of the imported bytes. The recorded hash covers the same bytes.
-    #[serde(default)]
     #[ts(type = "number | null")]
     pub source_size: Option<u64>,
     /// Absolute path of the evidence file as it was when the project was
-    /// created. Export refuses to overwrite this file. Legacy projects and
-    /// hand-built fixtures have none.
-    #[serde(default)]
+    /// created. Export refuses to overwrite this file.
     pub source_path: Option<String>,
-    /// Decoding choices and recovery diagnostics. Absent for older cases.
+    /// Decoding choices and recovery diagnostics for imported data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub import_report: Option<crate::import::options::ImportReport>,
     pub hidden_columns: Vec<String>,
-    /// 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
-    #[serde(default)]
+    /// Version 2 stores internal column ids and the original record.
     pub storage_version: u32,
-    #[serde(default)]
     pub columns: Vec<ColumnMeta>,
 }
 
@@ -119,13 +104,25 @@ pub struct ViewState {
     pub frozen_through: Option<String>,
     #[serde(default, rename = "columnWidths")]
     pub column_widths: HashMap<String, f64>,
-    #[serde(default, rename = "noteColumnWidth", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "noteColumnWidth",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub note_column_width: Option<f64>,
-    #[serde(default, rename = "columnOrder", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "columnOrder",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub column_order: Option<Vec<String>>,
-    #[serde(default, rename = "columnFormats", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "columnFormats",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub column_formats: Option<HashMap<String, String>>,
     #[serde(default, rename = "logicalRow")]
@@ -232,8 +229,7 @@ pub struct IocEntry {
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct LoadProjectResponse {
     pub project: ProjectSummary,
-    /// Data column ids in source order. For legacy projects these are the
-    /// original column names.
+    /// Data column ids in source order.
     pub columns: Vec<String>,
     /// Display and source metadata for `columns`.
     pub columns_meta: Vec<ColumnMeta>,
@@ -242,18 +238,15 @@ pub struct LoadProjectResponse {
     pub column_kinds: HashMap<String, String>,
     pub iocs: Vec<IocEntry>,
     pub color_rules: Vec<ColorRule>,
-    pub initial_rows: Vec<ProjectRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 pub struct FlagEntry {
     pub flag: String,
     pub memo: Option<String>,
-    /// User-defined tags. serde's default keeps entries written before F19 readable.
-    #[serde(default)]
+    /// User-defined tags.
     pub tags: Vec<String>,
-    /// Independent bookmark flag. Old entries deserialize as `false`.
-    #[serde(default)]
+    /// Independent bookmark flag.
     pub bookmarked: bool,
 }
 
@@ -261,16 +254,13 @@ impl FlagEntry {
     /// A row is flagged only by a non-empty flag. Memo/tag/bookmark-only rows
     /// are annotated but not flagged.
     pub fn is_flagged(&self) -> bool {
-        !self.flag.trim().is_empty()
+        !self.flag.is_empty()
     }
 
     /// True when any independent annotation field is present.
     pub fn is_annotated(&self) -> bool {
         self.is_flagged()
-            || self
-                .memo
-                .as_deref()
-                .is_some_and(|memo| !memo.is_empty())
+            || self.memo.as_deref().is_some_and(|memo| !memo.is_empty())
             || !self.tags.is_empty()
             || self.bookmarked
     }

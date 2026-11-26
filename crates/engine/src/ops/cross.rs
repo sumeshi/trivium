@@ -14,8 +14,8 @@ pub struct CrossSearchPayload {
     pub project_ids: Vec<Uuid>,
     #[serde(default)]
     pub search: Option<String>,
-    #[serde(default)]
-    pub columns: Option<Vec<String>>,
+    #[serde(default, rename = "searchColumns")]
+    pub search_columns: Option<Vec<String>>,
     #[serde(default, rename = "flagFilter")]
     pub flag_filter: Option<String>,
     #[serde(default)]
@@ -60,7 +60,7 @@ pub fn search_projects_with_job(
                 project_id,
                 spec: QuerySpec {
                     search: payload.search.clone(),
-                    search_columns: payload.columns.clone(),
+                    search_columns: payload.search_columns.clone(),
                     flag_filter: payload.flag_filter.clone(),
                     bookmarked_only: None,
                     sort_key: payload.sort_key.clone(),

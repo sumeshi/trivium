@@ -11,7 +11,7 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::Cell;
 use crate::project_io::{
-    is_internal_column_for_version, read_page_rows_dataframe_with_job, read_project_schema_columns,
+    is_internal_column, read_page_rows_dataframe_with_job, read_project_schema_columns,
     ProjectColumns, INTERNAL_ORIGINAL,
 };
 use crate::store::ProjectsStore;
@@ -54,7 +54,7 @@ pub fn get_cell_with_job(
         .try_find(&payload.project_id)
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
-    if is_internal_column_for_version(&payload.column_id, meta.storage_version) {
+    if is_internal_column(&payload.column_id) {
         return Err(AppError::Message("Column not found.".into()));
     }
     let project_dir = store.project_dir(&meta.id);
@@ -68,7 +68,7 @@ pub fn get_cell_with_job(
 
     // The footer is enough to validate the column; no rows are materialized.
     let schema_columns = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-    let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema_columns);
+    let project_columns = ProjectColumns::from_meta(&meta);
     let column = project_columns
         .columns()
         .iter()

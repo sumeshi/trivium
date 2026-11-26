@@ -8,7 +8,7 @@ const snapshot: ExportSnapshot = {
   search: "alpha",
   searchColumns: ["c000002"],
   condition: null,
-  flagFilter: "priority",
+  flagFilter: "suspicious|critical",
   bookmarkedOnly: true,
   sortKey: "c000001",
   sortDirection: "desc",
@@ -28,7 +28,7 @@ test("filtered export sends the query scope but no selection ids", () => {
   );
   assert.equal(args.scope, "filtered");
   assert.deepEqual(args.searchColumns, ["c000002"]);
-  assert.equal(args.flagFilter, "priority");
+  assert.equal(args.flagFilter, "suspicious|critical");
   assert.equal(args.bookmarkedOnly, true);
   assert.equal(args.rowIndices, undefined);
   assert.equal(args.columns, undefined);

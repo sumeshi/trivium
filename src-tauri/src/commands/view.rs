@@ -5,7 +5,7 @@ use crate::state::AppState;
 use trivium_engine::ops;
 use trivium_engine::ops::view::{SaveViewStatePayload, ViewStateLoad, ViewStateRequest};
 
-/// Loads the rebuildable view state for a project. Legacy projects have none.
+/// Loads the rebuildable view state for a project.
 #[tauri::command]
 pub async fn load_view_state(
     state: State<'_, AppState>,

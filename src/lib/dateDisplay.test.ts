@@ -62,10 +62,9 @@ test('truncated source previews without a datetime key keep the preview error', 
 test('ISO display keeps null, missing, empty and whitespace values unchanged', () => {
   assert.deepEqual(formatIsoCell(null), { text: '' });
   assert.deepEqual(formatIsoCell(undefined), { text: '' });
-  assert.deepEqual(formatIsoCell(cell('', { kind: 'null', text: null })), { text: 'null' });
-  assert.deepEqual(formatIsoCell(cell('', { kind: 'missing', text: null })), { text: '—' });
+  assert.deepEqual(formatIsoCell(cell('', { truncated: false, length: null,  kind: 'null', text: null })), { text: 'null' });
+  assert.deepEqual(formatIsoCell(cell('', { truncated: false, length: null,  kind: 'missing', text: null })), { text: '—' });
   for (const source of ['', '  ', '\t\r\n\u2002']) {
     assert.deepEqual(formatIsoCell(cell(source)), { text: source });
   }
 });
-

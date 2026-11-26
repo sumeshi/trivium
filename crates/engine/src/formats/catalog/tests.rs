@@ -250,47 +250,21 @@ fn validation_capture_and_examples_round_trip_as_a_complete_definition_snapshot(
 }
 
 #[test]
-fn legacy_classifier_is_ignored_and_omitted_when_the_definition_is_saved_again() {
+fn unsupported_definition_metadata_is_rejected_without_rewriting_the_file() {
     let directory = Directory::new();
     fs::create_dir_all(&directory.0).unwrap();
     let path = directory.0.join("marker.json");
-    let expected = custom("marker");
-    let mut legacy = serde_json::to_value(&expected).unwrap();
-    legacy["classifier"] = json!({
-        "kind": "ipv4-cidr", "default": "Unclassified",
-        "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
-    });
-    let original = serde_json::to_vec(&legacy).unwrap();
-    fs::write(&path, &original).unwrap();
-    let entries = list_formats(&directory.0).unwrap();
-    let loaded = entries
-        .iter()
-        .find(|entry| entry.definition.id == "marker")
-        .unwrap();
-    assert_eq!(loaded.definition, expected);
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        original,
-        "reading a legacy definition does not rewrite it"
-    );
-    assert!(serde_json::to_value(&loaded.definition)
-        .unwrap()
-        .get("classifier")
-        .is_none());
-    let frozen_matcher = CompiledFormat::new(&loaded.definition).unwrap();
-    assert!(frozen_matcher.has_match("x MARKER-42 y", Some("MARKER-42")));
-    save_format(&directory.0, &loaded.definition).unwrap();
-    let regenerated: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert!(regenerated.get("classifier").is_none());
-    assert_eq!(regenerated, serde_json::to_value(&expected).unwrap());
-    assert!(frozen_matcher.has_match("x MARKER-42 y", Some("MARKER-42")));
-    let reopened = list_formats(&directory.0).unwrap();
-    assert_eq!(
-        reopened
-            .iter()
-            .find(|entry| entry.definition.id == "marker")
-            .unwrap()
-            .definition,
-        expected
-    );
+    for property in ["classifier", "classification"] {
+        let mut unsupported = serde_json::to_value(custom("marker")).unwrap();
+        unsupported[property] = json!({
+            "kind": "ipv4-cidr", "default": "Unclassified",
+            "rules": [{"cidr": "10.0.0.0/8", "label": "Private"}]
+        });
+        let original = serde_json::to_vec(&unsupported).unwrap();
+        fs::write(&path, &original).unwrap();
+        let error = list_formats(&directory.0).unwrap_err().to_string();
+        assert!(error.contains("unknown field"), "{error}");
+        assert!(error.contains(property), "{error}");
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
 }

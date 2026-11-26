@@ -9,7 +9,7 @@ const baseline: FlagEntry = { flag: "safe", memo: "original", tags: ["manual"], 
 
 test("an unchanged note editor creates no write, including a missing note", () => {
   assert.deepEqual(buildMemoPatch(baseline, { memo: "original", tags: ["manual"], bookmarked: true }), {});
-  assert.deepEqual(buildMemoPatch({ tags: [], bookmarked: false }, { memo: "", tags: [], bookmarked: false }), {});
+  assert.deepEqual(buildMemoPatch({ memo: null, tags: [], bookmarked: false }, { memo: "", tags: [], bookmarked: false }), {});
 });
 
 test("editing the note omits untouched tags and bookmark and keeps raw text exact", () => {

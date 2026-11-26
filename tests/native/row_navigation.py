@@ -43,7 +43,7 @@ def emit_navigation_failure(progress: dict[str, Any], error: Exception) -> None:
     label = progress.get("stage", "startup")
     stages = {"startup", "generate fixture", "native import", "open project", "First / Last unfiltered",
               "search keep", "numeric score sort ascending", "numeric score sort descending",
-              "rejected jumps preserve query and viewport", "annotation / selected export compatibility",
+              "rejected jumps preserve query and viewport", "annotation / selected export roundtrip",
               "stale real lookup response", "complete"}
     stage = "unknown checkpoint"
     if isinstance(label, str):
@@ -476,7 +476,7 @@ def scenario(web: WebView, directory: Path, total: int, progress: dict[str, Any]
     located = web.command("locate_project_row", {"projectId": project_id, "rowIndex": original - 1, **query})
     assert located["position"] == (last_even - original) // 2, located
     if total == 5199:
-        stage("annotation / selected export compatibility")
+        stage("annotation / selected export roundtrip")
         exported = directory / "selected-navigation.csv"
         result = web.command("export_project", {"projectId": project_id, **query, "destination": str(exported),
                              "scope": "selected", "rowIndices": [middle - 1], "includeAnnotations": True})

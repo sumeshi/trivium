@@ -50,14 +50,14 @@ fn assert_counts(result: &Histogram, total: u64) {
 }
 
 #[test]
-fn legacy_flag_symbols_case_and_unknown_entries_match_query_normalization() {
+fn canonical_flags_count_unknown_values_as_unflagged() {
     let flags = [
+        "safe",
+        "suspicious",
+        "critical",
         "◯",
-        " SAFE ",
+        "SAFE",
         "?",
-        "Suspicious",
-        "✗",
-        "CRITICAL",
         "",
         "unknown",
     ]
@@ -84,7 +84,7 @@ fn legacy_flag_symbols_case_and_unknown_entries_match_query_normalization() {
             counts.critical,
             counts.unflagged
         ),
-        (2, 2, 2, 2)
+        (1, 1, 1, 5)
     );
     assert_counts(&result, 8);
 }
@@ -321,7 +321,6 @@ fn operation_respects_search_multiselect_and_bookmark_scope_in_one_source_read()
             column: common::id(&ids, "ts"),
             buckets: 2,
             search: Some("keep".into()),
-            columns: None,
             search_columns: None,
             flag_filter: Some("safe|critical".into()),
             bookmarked_only: Some(true),

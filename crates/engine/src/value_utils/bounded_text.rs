@@ -45,7 +45,7 @@ impl Write for Text {
     }
 }
 
-/// Lists use the legacy comma-join representation; null elements disappear,
+/// Lists use the shared comma-joined search text; null elements disappear,
 /// while present empty strings retain their separators. Format into one
 /// bounded buffer instead of allocating every element and a joined copy.
 fn append(value: &AnyValue, output: &mut Text) -> Result<bool, fmt::Error> {

@@ -4,7 +4,7 @@ use std::{fs, path::Path};
 use tempfile::TempDir;
 use trivium_engine::{
     import::options::{ImportOptions, TextEncoding},
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     ops::import_preview::{
         preview_import, preview_import_with_job, ImportPreview, PreviewImportPayload,
         MAX_PREVIEW_BYTES,
@@ -275,7 +275,7 @@ fn invalid_json_records_are_visible_as_warnings_and_recovery_is_explicit() {
 fn preview_honors_cancel_and_rejects_directories_without_creating_files() {
     let root = tempfile::tempdir().unwrap();
     assert!(preview_import(payload(root.path(), ImportOptions::default())).is_err());
-    let guard = try_begin_job(JobKind::Load, None).unwrap();
+    let guard = queue_job(JobKind::Load, None).unwrap();
     request_cancel(guard.id());
     let job = JobContext::with_job(guard, None);
     let error = preview_import_with_job(

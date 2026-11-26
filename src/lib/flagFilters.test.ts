@@ -27,14 +27,10 @@ test("checkbox changes allow any combination and clearing the last one restores 
   assert.equal(toggleFlagFilter(current, "safe"), "all");
 });
 
-test("legacy values retain their meaning and malformed saved combinations are rejected", () => {
-  assert.deepEqual(parseFlagFilter("priority"), ["suspicious", "critical"]);
+test("only canonical flag selections are accepted", () => {
   assert.deepEqual(parseFlagFilter("none"), ["none"]);
-  assert.deepEqual(parseFlagFilter(""), []);
-  assert.deepEqual(parseFlagFilter("none|safe|safe"), ["safe", "none"]);
-  assert.deepEqual(parseFlagFilter(" safe | none "), ["safe", "none"]);
-  assert.equal(toggleFlagFilter("priority", "safe"), "safe|suspicious|critical");
-  for (const unknown of ["future", "safe|future", "safe|", "safe|all", "safe|priority", null, []]) {
+  for (const unknown of ["priority", "", "none|safe|safe", "none|safe", " safe | none ",
+    "future", "safe|future", "safe|", "safe|all", "safe|priority", null, []]) {
     assert.equal(parseFlagFilter(unknown), null);
     assert.equal(isFlagFilterValue(unknown), false);
   }

@@ -187,13 +187,13 @@ mod tests {
     }
     #[test]
     fn cancellation_after_writing_preserves_destination_and_cleans_all_runs() {
-        use crate::jobs::{request_cancel, try_begin_job, JobKind};
+        use crate::jobs::{queue_job, request_cancel, JobKind};
         let directory =
             std::env::temp_dir().join(format!("trivium-atomic-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
         let destination = directory.join("saved.csv");
         fs::write(&destination, b"old destination").unwrap();
-        let guard = try_begin_job(JobKind::Export, None).unwrap();
+        let guard = queue_job(JobKind::Export, None).unwrap();
         let id = guard.id();
         let job = JobContext::with_job(guard, None);
         let result = write_atomically(

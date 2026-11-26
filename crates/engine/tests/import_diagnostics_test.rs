@@ -6,7 +6,7 @@ use trivium_engine::{
         diagnostics::{issue, IssueSink, ISSUES_FILE},
         options::{ImportIssueAction, ImportOptions, ImportReport},
     },
-    jobs::{request_cancel, try_begin_job, JobContext, JobKind},
+    jobs::{queue_job, request_cancel, JobContext, JobKind},
     models::ProjectSummary,
     ops::{
         import_report::{
@@ -131,31 +131,31 @@ fn actual_csv_settings_are_saved_and_clean_imports_leave_no_empty_journal() {
 }
 
 #[test]
-fn old_reports_export_only_available_examples_and_explicitly_mark_truncation() {
+fn only_finalized_diagnostics_can_be_exported_even_when_the_examples_are_complete() {
     let root = tempfile::tempdir().unwrap();
     let store = ProjectsStore::new(root.path().join("cases")).unwrap();
-    let source = root.path().join("legacy.jsonl");
-    fs::write(&source, format!("{}{{\"value\":1}}\n", "[]\n".repeat(40))).unwrap();
-    let project = create(&store, &source, None, true);
-    update_project_meta(&store.project_dir(&project.meta.id), |meta| {
-        let report = meta.import_report.as_mut().unwrap();
-        report.full_diagnostics = None;
-        report.delimiter = None;
-        report.recover = None;
-        report.restore_annotations = None;
-    })
-    .unwrap();
-    fs::remove_file(store.project_dir(&project.meta.id).join(ISSUES_FILE)).unwrap();
-    let destination = root.path().join("legacy-report.jsonl");
-    let result =
-        export_import_report(&store, export(project.meta.id, &destination, false)).unwrap();
-    assert!(!result.complete);
-    assert_eq!(result.issues_written, 30);
-    let output = lines(&destination);
-    assert_eq!(output[0]["diagnosticsComplete"], false);
-    assert_eq!(output[0]["report"]["issueCount"], 40);
-    assert!(output[0]["report"].get("recover").is_none());
-    assert_eq!(output.len(), 31);
+    for count in [0, 1, 40] {
+        let source = root.path().join(format!("source-{count}.jsonl"));
+        fs::write(
+            &source,
+            format!("{}{{\"value\":1}}\n", "[]\n".repeat(count)),
+        )
+        .unwrap();
+        let project = create(&store, &source, None, true);
+        let destination = root.path().join(format!("report-{count}.jsonl"));
+        fs::write(&destination, "previous output").unwrap();
+        for finalized in [None, Some(false)] {
+            update_project_meta(&store.project_dir(&project.meta.id), |meta| {
+                meta.import_report.as_mut().unwrap().full_diagnostics = finalized;
+            })
+            .unwrap();
+            let error =
+                export_import_report(&store, export(project.meta.id, &destination, true))
+                    .unwrap_err();
+            assert!(error.to_string().contains("incomplete or invalid"));
+            assert_eq!(fs::read_to_string(&destination).unwrap(), "previous output");
+        }
+    }
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn diagnostic_export_obeys_overwrite_consent_and_preserves_managed_case_files() 
     let before = fs::read(&managed).unwrap();
     assert!(export_import_report(&store, export(project.meta.id, &managed, true)).is_err());
     assert_eq!(fs::read(managed).unwrap(), before);
-    let guard = try_begin_job(JobKind::Export, Some(project.meta.id)).unwrap();
+    let guard = queue_job(JobKind::Export, Some(project.meta.id)).unwrap();
     assert!(request_cancel(guard.id()));
     let job = JobContext::with_job(guard, None);
     let before = fs::read(&destination).unwrap();

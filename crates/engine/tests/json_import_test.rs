@@ -193,7 +193,7 @@ fn broken_json_fails_instead_of_falling_back_to_csv() {
         err
     );
     assert!(
-        store.all().is_empty(),
+        store.try_all().unwrap().is_empty(),
         "a failed import must not register a project"
     );
 
@@ -324,8 +324,12 @@ fn load_project_survives_json_array_import() {
         },
     )
     .expect("failed to load created project");
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     assert_eq!(loaded.columns.len(), 2, "union of /a and /b");
-    assert_eq!(loaded.initial_rows.len(), 3);
+    assert_eq!(loaded_rows.len(), 3);
 
     let _ = fs::remove_dir_all(root);
 }
+
+mod common;

@@ -89,8 +89,8 @@ pub fn duplicate_rows_with_job(
         );
     }
     let indices = index.finish(payload.mode == DupeMode::Duplicates, job)?;
-    let project_columns = ProjectColumns::from_meta_and_names(&meta, &schema);
-    let flags = load_flags(&store.flags_path(&meta.id)).map_err(AppError::from)?;
+    let project_columns = ProjectColumns::from_meta(&meta);
+    let flags = load_flags(&store.database_path(&meta.id)).map_err(AppError::from)?;
     // Keys use only projected columns. Full row payloads are decoded one bounded
     // batch at a time and retain their original source IDs.
     let mut reader =

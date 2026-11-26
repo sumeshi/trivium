@@ -152,7 +152,7 @@ fn assert_rule_limit(error: &str) {
 fn exactly_four_mib_are_accepted_and_one_extra_byte_is_rejected() {
     let f = Fixture::new();
     let source = f.root.path().join("maximum-bytes.csv");
-    let prefix = b"flag,tag,query\nsafe,review,needle\n";
+    let prefix = b"flag,tag,query,column,value\nsafe,review,needle,,\n";
     let mut writer = File::create(&source).unwrap();
     writer.write_all(prefix).unwrap();
     // Padding with blank lines reaches the byte boundary without retaining a
@@ -187,7 +187,11 @@ fn exactly_four_mib_are_accepted_and_one_extra_byte_is_rejected() {
 fn oversized_single_tag_is_rejected_without_replacing_rules_or_changing_sources() {
     let f = Fixture::new();
     let source = f.root.path().join("large-tag.csv");
-    write_large_field(&source, b"flag,tag,query\nsafe,\"", b"\",needle\n");
+    write_large_field(
+        &source,
+        b"flag,tag,query,column,value\nsafe,\"",
+        b"\",needle,,\n",
+    );
     f.assert_rejected_unchanged(&source, "4 MiB");
 }
 
@@ -195,9 +199,13 @@ fn oversized_single_tag_is_rejected_without_replacing_rules_or_changing_sources(
 fn oversized_header_is_rejected_before_it_can_replace_saved_rules() {
     let f = Fixture::new();
     let source = f.root.path().join("large-header.csv");
-    // The legacy first three headers are positional, so this is otherwise a
-    // valid input. Header parsing needs the same byte bound as data records.
-    write_large_field(&source, b"", b",tag,query\nsafe,review,needle\n");
+    // Header parsing needs the same byte bound as data records, even before
+    // the header names are validated.
+    write_large_field(
+        &source,
+        b"",
+        b",tag,query,column,value\nsafe,review,needle,,\n",
+    );
     f.assert_rejected_unchanged(&source, "4 MiB");
 }
 
@@ -206,9 +214,9 @@ fn more_than_ten_thousand_valid_rules_cannot_replace_the_existing_set() {
     let f = Fixture::new();
     let source = f.root.path().join("too-many-rules.csv");
     let mut writer = File::create(&source).unwrap();
-    writer.write_all(b"flag,tag,query\n").unwrap();
+    writer.write_all(b"flag,tag,query,column,value\n").unwrap();
     for index in 0..=MAX_RULES {
-        writeln!(writer, "safe,rule-{index},needle").unwrap();
+        writeln!(writer, "safe,rule-{index},needle,,").unwrap();
     }
     drop(writer);
     let saved = f.saved();
@@ -257,21 +265,9 @@ fn direct_save_and_preparation_enforce_the_same_accepted_rule_limit() {
 }
 
 #[test]
-fn more_than_ten_thousand_skipped_queries_do_not_consume_accepted_rule_slots() {
+fn empty_query_drafts_do_not_consume_accepted_rule_slots() {
     let f = Fixture::new();
-    let source = f.root.path().join("skipped-rules.csv");
-    let mut writer = File::create(&source).unwrap();
-    writer.write_all(b"flag,tag,query\n").unwrap();
-    for _ in 0..=MAX_RULES {
-        writer.write_all(b"safe,,\n").unwrap();
-    }
-    writer.write_all(b"safe,review,needle\n").unwrap();
-    drop(writer);
-    let before = source_digest(&source);
     let expected = vec![query_rule("needle")];
-    assert_eq!(f.import(&source).unwrap(), expected);
-    assert_eq!(source_digest(&source), before);
-
     let mut entries = vec![query_rule(" \t "); MAX_RULES + 1];
     entries.push(query_rule("needle"));
     assert_eq!(prepare_ioc_entries(entries.clone()).unwrap(), expected);
@@ -295,17 +291,13 @@ fn more_than_ten_thousand_skipped_queries_do_not_consume_accepted_rule_slots() {
 }
 
 #[test]
-fn exactly_ten_thousand_valid_rules_are_accepted_with_skipped_empty_query_rows() {
+fn exactly_ten_thousand_valid_rules_are_accepted() {
     let f = Fixture::new();
     let source = f.root.path().join("maximum-rules.csv");
     let mut writer = File::create(&source).unwrap();
-    writer.write_all(b"flag,tag,query\n").unwrap();
+    writer.write_all(b"flag,tag,query,column,value\n").unwrap();
     for index in 0..MAX_RULES {
-        writeln!(writer, "safe,rule-{index},needle").unwrap();
-        if index % 100 == 0 {
-            // These rows do not produce a definition and must not use a slot.
-            writer.write_all(b"safe,,\n").unwrap();
-        }
+        writeln!(writer, "safe,rule-{index},needle,,").unwrap();
     }
     drop(writer);
     let before = source_digest(&source);
@@ -331,7 +323,7 @@ fn small_quoted_multiline_imports_and_invalid_flag_locations_keep_their_behavior
         fs::write(
             &source,
             format!(
-                "flag,tag,query{newline} SAFE ,\"multi{newline}line\",needle{newline}?,second,other{newline}"
+                "flag,tag,query,column,value{newline}safe,\"multi{newline}line\",needle,,{newline}suspicious,second,other,,{newline}"
             ),
         )
         .unwrap();
@@ -346,7 +338,7 @@ fn small_quoted_multiline_imports_and_invalid_flag_locations_keep_their_behavior
         fs::write(
             &source,
             format!(
-                "flag,tag,query{newline}safe,\"multi{newline}line\",needle{newline}critcal,bad,other{newline}"
+                "flag,tag,query,column,value{newline}safe,\"multi{newline}line\",needle,,{newline}critcal,bad,other,,{newline}"
             ),
         )
         .unwrap();

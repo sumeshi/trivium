@@ -27,7 +27,7 @@ function setup() {
           if (resolved) return;
           resolved = true;
           active -= 1;
-          resolve({ offset, rows: [{ row_index: offset, cells: { c1: { kind: "string", text: String(offset) } },
+          resolve({ offset, rows: [{ color: null,  row_index: offset, cells: { c1: { truncated: false, length: Array.from(String(offset)).length,  kind: "string", text: String(offset) } },
             flag: "", memo: "", tags: [], bookmarked: false }], total_rows: TOTAL,
             total_filtered_rows: TOTAL, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 });
         } });
@@ -38,7 +38,7 @@ function setup() {
   const workspace = createWorkspaceController();
   workspace.currentProjectId.set("queue-test");
   workspace.projectDetail.set({ project: { meta: { id: "queue-test", total_records: TOTAL } },
-    columns: ["c1"], columns_meta: [], hidden_columns: [], initial_rows: [] } as unknown as LoadProjectResponse);
+    columns: ["c1"], columns_meta: [], hidden_columns: [],  } as unknown as LoadProjectResponse);
   const queries = createWorkspaceQuery(workspace, { backend, isReady: () => true,
     restoreViewport: async () => {}, scopeChanged: () => {}, summary: () => {},
     notify: (message) => notices.push(message) });
@@ -190,13 +190,13 @@ function queryStateSetup(columns = ["c1"], hiddenColumns: string[] = []) {
   const workspace = createWorkspaceController();
   workspace.currentProjectId.set("query-state");
   workspace.projectDetail.set({ project: { meta: { id: "query-state", total_records: TOTAL } },
-    columns, columns_meta: [], hidden_columns: hiddenColumns, initial_rows: [] } as unknown as LoadProjectResponse);
+    columns, columns_meta: [], hidden_columns: hiddenColumns,  } as unknown as LoadProjectResponse);
   workspace.hiddenColumns.set(new Set(hiddenColumns));
   const backend = { queryProjectRows: (args: QueryProjectRowsArgs) => new Promise<QueryProjectRowsResponse>((resolve, reject) => {
     calls.push({ args, reject: message => reject(new Error(message)), resolve: (count = TOTAL) => {
       const offset = args.offset ?? 0;
-      resolve({ offset, rows: count > offset ? [{ row_index: offset, cells: Object.fromEntries((args.pageColumns ?? columns)
-        .map(column => [column, { kind: "string", text: column === "c1" ? args.search || "source" : column + " source" }])),
+      resolve({ offset, rows: count > offset ? [{ color: null,  row_index: offset, cells: Object.fromEntries((args.pageColumns ?? columns)
+        .map(column => [column, { truncated: false, length: Array.from(column === "c1" ? args.search || "source" : column + " source").length,  kind: "string", text: column === "c1" ? args.search || "source" : column + " source" }])),
         flag: "", memo: "", tags: [], bookmarked: false }] : [], total_rows: TOTAL,
         total_filtered_rows: count, annotated_total: 0, annotated_filtered: 0, annotation_revision: 0 });
     } });
@@ -422,7 +422,7 @@ test("an empty visible projection stays explicit and disposed tabs ignore projec
   await settle();
   assert.equal(calls.length, 1, "hiding all columns leaves the query and existing cells untouched");
   const hidden = queries.requestPage(1); await settle();
-  assert.deepEqual(calls[1].args.pageColumns, [], "all-hidden is distinct from the omitted legacy projection");
+  assert.deepEqual(calls[1].args.pageColumns, [], "all-hidden is distinct from the default saved visibility");
   workspace.hiddenColumns.set(new Set());
   await settle();
   assert.deepEqual(calls[2].args.pageColumns, ["c1", "c2"]);

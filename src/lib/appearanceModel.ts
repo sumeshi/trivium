@@ -11,11 +11,7 @@ export function parseWallpaperSettings(value: unknown): WallpaperSettings | null
   const saved = value as Record<string, unknown>;
   if (typeof saved.enabled !== "boolean" || typeof saved.strength !== "number"
     || !Number.isInteger(saved.strength) || saved.strength < 0 || saved.strength > 100) return null;
-  if (saved.version === 1) {
-    if (typeof saved.behindTable !== "boolean" || typeof saved.fit !== "string" || !["cover", "contain"].includes(saved.fit)) return null;
-  } else if (saved.version !== 2) return null;
-  // Version 2 scopes wallpaper to the table body and always covers it. Old
-  // placement/fit options no longer affect the retained image or visibility.
+  if (saved.version !== 2) return null;
   return { version: 2, enabled: saved.enabled, strength: saved.strength };
 }
 export function parseWallpaperImage(value: unknown): WallpaperImage {

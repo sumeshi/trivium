@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// A portable snapshot. Saved investigations retain the definition they applied.
-/// Unused metadata from older definitions is ignored when loading a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FormatDefinition {
     pub schema_version: u32,
     pub id: String,

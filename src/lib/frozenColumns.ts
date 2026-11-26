@@ -1,4 +1,4 @@
-/** Missing means the legacy first-visible default; empty means no frozen data. */
+/** Missing freezes the first visible column; empty means no frozen data. */
 export type FrozenThrough = string | undefined;
 
 export interface FrozenColumnLayout {

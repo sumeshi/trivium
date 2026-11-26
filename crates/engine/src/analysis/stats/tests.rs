@@ -96,7 +96,7 @@ fn growing_table_is_budgeted_before_old_and_new_tables_coexist() {
 }
 
 #[test]
-fn bounded_text_keeps_legacy_scalar_and_list_formatting() {
+fn bounded_text_matches_scalar_and_list_search_text() {
     let list = Series::new("list", &[None, Some(""), Some("x"), None]);
     let values = [
         AnyValue::UInt64(u64::MAX),
@@ -131,7 +131,7 @@ fn oversized_borrowed_value_is_rejected_before_key_allocation() {
 }
 
 #[test]
-fn legacy_formatted_repeats_fit_the_exact_budget_too() {
+fn formatted_numeric_repeats_fit_the_exact_budget_too() {
     let series = Series::new("value", &[17i64, 17]);
     let mut probe = StatsAccumulator::with_limits(
         "value",

@@ -110,11 +110,7 @@ fn import_query_annotations_bulk_export_view_and_reopen_use_the_real_engine() {
     let imported = cli.call("import", json!({"path":source}));
     let id = imported["meta"]["id"].as_str().unwrap().to_string();
     let loaded = cli.call("load", json!({"projectId":id}));
-    assert_eq!(
-        loaded["initial_rows"],
-        json!([]),
-        "CLI load is metadata-only"
-    );
+    assert_eq!(loaded["columns_meta"].as_array().unwrap().len(), 3);
     let name = column(&loaded, "/name");
     let number = column(&loaded, "/number");
     let time = column(&loaded, "/time");

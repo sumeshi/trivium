@@ -244,7 +244,7 @@ fn cancelled_job_stops_the_search() {
     }
     let fixture = Fixture::create(&body);
 
-    let guard = jobs::try_begin_job(JobKind::Query, Some(fixture.id))
+    let guard = jobs::queue_job(JobKind::Query, Some(fixture.id))
         .expect("failed to begin query job");
     jobs::request_cancel(guard.id());
     let job = JobContext::with_job(guard, None);

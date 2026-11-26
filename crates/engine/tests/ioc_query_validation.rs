@@ -19,6 +19,8 @@ use trivium_engine::{
 };
 use uuid::Uuid;
 
+mod common;
+
 struct Fixture {
     root: PathBuf,
     store: ProjectsStore,
@@ -145,7 +147,7 @@ fn invalid_ioc_queries_cannot_replace_saved_rules_or_mutate_annotations() {
     let f = Fixture::new();
     let dir = f.store.project_dir(&f.id);
     let saved = load_setting_bytes(&dir, "iocs").unwrap().unwrap();
-    let flags = serde_json::to_value(load_flags(&f.store.flags_path(&f.id)).unwrap()).unwrap();
+    let flags = serde_json::to_value(load_flags(&f.store.database_path(&f.id)).unwrap()).unwrap();
     let revision = project_revision(&dir).unwrap();
     for query in [
         "|",
@@ -173,11 +175,15 @@ fn invalid_ioc_queries_cannot_replace_saved_rules_or_mutate_annotations() {
         let source = f.root.join("rules.csv");
         {
             let mut writer = csv::Writer::from_path(&source).unwrap();
-            writer.write_record(["flag", "tag", "query"]).unwrap();
             writer
-                .write_record(["safe", "multi\nline", "notepad"])
+                .write_record(["flag", "tag", "query", "column", "value"])
                 .unwrap();
-            writer.write_record(["critical", "invalid", query]).unwrap();
+            writer
+                .write_record(["safe", "multi\nline", "notepad", "", ""])
+                .unwrap();
+            writer
+                .write_record(["critical", "invalid", query, "", ""])
+                .unwrap();
             writer.flush().unwrap();
         }
         let error = import_iocs(
@@ -208,7 +214,7 @@ fn invalid_ioc_queries_cannot_replace_saved_rules_or_mutate_annotations() {
         let error = bulk_update(&f.store, apply).unwrap_err().to_string();
         assert!(error.contains("Invalid search query"), "{error}");
         assert_eq!(
-            serde_json::to_value(load_flags(&f.store.flags_path(&f.id)).unwrap()).unwrap(),
+            serde_json::to_value(load_flags(&f.store.database_path(&f.id)).unwrap()).unwrap(),
             flags
         );
         assert_eq!(project_revision(&dir).unwrap(), revision);
@@ -216,13 +222,13 @@ fn invalid_ioc_queries_cannot_replace_saved_rules_or_mutate_annotations() {
 }
 
 #[test]
-fn invalid_legacy_queries_remain_editable_without_applying_or_blocking_case_load() {
+fn corrupt_queries_remain_editable_without_applying_or_blocking_case_load() {
     let f = Fixture::new();
     let dir = f.store.project_dir(&f.id);
     let rules: Vec<_> = ["|", "||", "\"\""].into_iter().map(rule).collect();
     let saved = serde_json::to_vec(&rules).unwrap();
     save_setting_bytes(&dir, "iocs", &saved).unwrap();
-    let flags = serde_json::to_value(load_flags(&f.store.flags_path(&f.id)).unwrap()).unwrap();
+    let flags = serde_json::to_value(load_flags(&f.store.database_path(&f.id)).unwrap()).unwrap();
     let loaded = load_project(&f.store, ProjectRequest { project_id: f.id }).unwrap();
     assert_eq!(
         loaded
@@ -234,8 +240,7 @@ fn invalid_legacy_queries_remain_editable_without_applying_or_blocking_case_load
     );
     assert_eq!(loaded.project.meta.flagged_records, 1);
     assert_eq!(
-        loaded
-            .initial_rows
+        common::rows(&f.store, f.id)
             .iter()
             .map(|row| row.flag.as_str())
             .collect::<Vec<_>>(),
@@ -251,7 +256,7 @@ fn invalid_legacy_queries_remain_editable_without_applying_or_blocking_case_load
     .is_err());
     assert_eq!(load_setting_bytes(&dir, "iocs").unwrap().unwrap(), saved);
     assert_eq!(
-        serde_json::to_value(load_flags(&f.store.flags_path(&f.id)).unwrap()).unwrap(),
+        serde_json::to_value(load_flags(&f.store.database_path(&f.id)).unwrap()).unwrap(),
         flags
     );
 }

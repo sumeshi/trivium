@@ -146,9 +146,8 @@ impl CellColumns {
     }
 }
 
-/// Maps a column kind to the cell kind used when no source record is available
-/// (legacy projects). Datetimes keep their display text, so the cell kind is
-/// "string".
+/// Maps an inferred kind for standalone typed values to the cell DTO kind.
+/// Datetimes keep their display text, so the cell kind is "string".
 pub fn cell_kind_name(kind: ColumnKind) -> &'static str {
     match kind {
         ColumnKind::Int => "int",
@@ -172,9 +171,8 @@ pub fn build_cell(
 ///
 /// A JSON source record carries the per-cell JSON type. Reading it here keeps
 /// `"123"` (string) distinct from `123` (number), preserves booleans, and
-/// keeps arrays/objects in one cell. CSV originals are arrays of strings, and
-/// legacy projects have no `__original`, so those fall back to the Polars
-/// value's own type.
+/// keeps arrays/objects in one cell. CSV originals are arrays of strings;
+/// CSV and standalone typed values use the Polars value's own type.
 pub fn build_full_cell(
     value: &AnyValue,
     column_kind: ColumnKind,
@@ -286,8 +284,8 @@ fn preview_cell(cell: Cell) -> Cell {
 }
 
 /// A JSON object whose pointer is absent means "missing"; a present key with a
-/// JSON null means "null". CSV originals are arrays, and legacy projects have
-/// no `__original`, so those cells are null only.
+/// JSON null means "null". CSV originals are arrays; CSV and standalone typed
+/// nulls have no absent-key distinction.
 fn null_cell_kind(original: Option<&Value>, source: &str) -> &'static str {
     match original {
         Some(Value::Object(_)) if original_json_field(original, source).is_none() => "missing",
@@ -295,8 +293,8 @@ fn null_cell_kind(original: Option<&Value>, source: &str) -> &'static str {
     }
 }
 
-/// Parses the `__original` value for one row. Returns `None` for a Polars null
-/// and for frames without the internal column (legacy projects).
+/// Parses the `__original` value for one row. Standalone DataFrames and CSV
+/// page projections can omit this internal column.
 pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
     let series = df.column(INTERNAL_ORIGINAL).ok()?;
     match series.get(row_idx).ok()? {

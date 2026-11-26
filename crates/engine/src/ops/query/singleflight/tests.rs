@@ -45,8 +45,10 @@ fn wait_for_waiters(key: &QueryCacheKey, waiters: usize) {
 fn cancellable_job() -> JobContext {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        if let Ok(guard) = jobs::try_begin_job(JobKind::Query, None) {
-            return JobContext::with_job(guard, None);
+        if let Ok(guard) = jobs::queue_job(JobKind::Query, None) {
+            if guard.is_running() {
+                return JobContext::with_job(guard, None);
+            }
         }
         assert!(
             Instant::now() < deadline,

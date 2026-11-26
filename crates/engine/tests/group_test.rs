@@ -59,7 +59,6 @@ fn payload(id: Uuid, group_columns: Vec<&str>, search: Option<&str>) -> GroupTre
     GroupTreePayload {
         project_id: id,
         search: search.map(|value| value.to_string()),
-        columns: None,
         search_columns: None,
         bookmarked_only: None,
         flag_filter: None,

@@ -7,7 +7,7 @@ document.addEventListener=()=>{};
 document.removeEventListener=()=>{};
 const workspace=createWorkspaceController();
 const detail=id=>({project:{meta:{id,name:id,total_records:2,hidden_columns:[]}},columns:['c1','c2'],
- columns_meta:[],column_kinds:{},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+ columns_meta:[],column_kinds:{},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],});
 workspace.projectDetail.set(detail('source'));
 globalThis.__workspace=workspace;
 const Controls=await compileHeadless('FilterControls');
@@ -45,7 +45,7 @@ const {createWorkspaceController}=await import('./src/lib/workspaceController.ts
 document.addEventListener=()=>{};document.removeEventListener=()=>{};
 const workspace=createWorkspaceController();
 const detail=id=>({project:{meta:{id,name:id,total_records:2,hidden_columns:[]}},columns:['host','user'],
- columns_meta:[],column_kinds:{host:'string',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+ columns_meta:[],column_kinds:{host:'string',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],});
 workspace.projectDetail.set(detail('source'));
 const path=['alpha','alice'].map(label=>({label,value:label,count:1,children:[]}));
 workspace.filterByGroupPath(['host','user'],path);
@@ -99,7 +99,7 @@ const Controls=await compileHeadless('FilterControls');
 for(const selected of [false,true]){
  const workspace=createWorkspaceController();
  workspace.projectDetail.set({project:{meta:{id:'case',name:'case',total_records:2,hidden_columns:[]}},columns:['host','time','user'],
-  columns_meta:[],column_kinds:{host:'string',time:'datetime',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],initial_rows:[]});
+  columns_meta:[],column_kinds:{host:'string',time:'datetime',user:'string'},column_max_chars:{},color_rules:[],iocs:[],hidden_columns:[],});
  workspace.addFilterCondition('user','eq','manual');
  if(selected)workspace.filterByGroupPath(['host','time'],[
   {label:'alpha',value:'alpha',count:1,children:[]},

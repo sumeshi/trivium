@@ -17,6 +17,8 @@ use trivium_engine::{
 };
 use uuid::Uuid;
 
+mod common;
+
 fn rule(flag: &str) -> IocEntry {
     IocEntry {
         flag: flag.into(),
@@ -55,11 +57,17 @@ fn csv_rejects_invalid_flags_with_the_physical_line_and_original_value() {
         ("critcal", "powershell"),
         ("", "powershell"),
         ("unknown", ""),
+        ("SAFE", "powershell"),
+        (" Safe ", "powershell"),
+        ("◯", "powershell"),
+        ("?", "powershell"),
+        ("✗", "powershell"),
+        ("Suspicious", "powershell"),
     ] {
         // The tag in the valid preceding record spans two physical lines.
         fs::write(
             &path,
-            format!("flag,tag,query\nsafe,\"multi\nline\",notepad\n{value},bad,{query}\n"),
+            format!("flag,tag,query,column,value\nsafe,\"multi\nline\",notepad,,\n{value},bad,{query},,\n"),
         )
         .unwrap();
         let error = read_ioc_csv(&path).unwrap_err().to_string();
@@ -68,7 +76,7 @@ fn csv_rejects_invalid_flags_with_the_physical_line_and_original_value() {
     }
     fs::write(
         &path,
-        "flag,tag,query\n SAFE ,a,one\n?,b,two\n✗,c,three\n◯,d,four\nSuspicious,e,five\n",
+        "flag,tag,query,column,value\nsafe,a,one,,\nsuspicious,b,two,,\ncritical,c,three,,\n",
     )
     .unwrap();
     assert_eq!(
@@ -77,7 +85,7 @@ fn csv_rejects_invalid_flags_with_the_physical_line_and_original_value() {
             .iter()
             .map(|entry| entry.flag.as_str())
             .collect::<Vec<_>>(),
-        ["safe", "suspicious", "critical", "safe", "suspicious"]
+        ["safe", "suspicious", "critical"]
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -90,18 +98,18 @@ fn csv_invalid_flag_locations_match_physical_lines_across_line_endings_and_blank
     for newline in ["\n", "\r\n", "\r"] {
         for (prefix, expected_line) in [
             (String::new(), 2),
-            (format!("safe,valid,notepad{newline}"), 3),
-            (format!("safe,\"multi{newline}line\",notepad{newline}"), 4),
+            (format!("safe,valid,notepad,,{newline}"), 3),
+            (format!("safe,\"multi{newline}line\",notepad,,{newline}"), 4),
             (newline.into(), 3),
-            (format!("safe,valid,notepad{newline}{newline}"), 4),
+            (format!("safe,valid,notepad,,{newline}{newline}"), 4),
             (
-                format!("{newline}safe,\"multi{newline}line\",notepad{newline}{newline}"),
+                format!("{newline}safe,\"multi{newline}line\",notepad,,{newline}{newline}"),
                 6,
             ),
         ] {
             fs::write(
                 &path,
-                format!("flag,tag,query{newline}{prefix}critcal,bad,powershell{newline}"),
+                format!("flag,tag,query,column,value{newline}{prefix}critcal,bad,powershell,,{newline}"),
             )
             .unwrap();
             let error = read_ioc_csv(&path).unwrap_err().to_string();
@@ -149,7 +157,7 @@ fn failed_import_and_save_preserve_the_complete_existing_rule_set() {
     let source = root.join("invalid.csv");
     fs::write(
         &source,
-        "flag,tag,query\nsafe,valid,notepad\ncritcal,bad,powershell\n",
+        "flag,tag,query,column,value\nsafe,valid,notepad,,\ncritcal,bad,powershell,,\n",
     )
     .unwrap();
     let error = import_iocs(
@@ -196,10 +204,10 @@ fn failed_import_and_save_preserve_the_complete_existing_rule_set() {
 }
 
 #[test]
-fn invalid_legacy_rules_remain_visible_without_blocking_the_case_or_becoming_safe() {
+fn corrupt_rules_remain_visible_without_blocking_the_case_or_becoming_safe() {
     let (root, store, id) = setup();
     let project_dir = store.project_dir(&id);
-    let original = serde_json::to_vec(&vec![rule("◯"), rule("critcal"), rule("")]).unwrap();
+    let original = serde_json::to_vec(&vec![rule("critcal"), rule(" ◯ "), rule("")]).unwrap();
     save_setting_bytes(&project_dir, "iocs", &original).unwrap();
     let loaded = load_project(&store, ProjectRequest { project_id: id }).unwrap();
     assert_eq!(
@@ -208,9 +216,11 @@ fn invalid_legacy_rules_remain_visible_without_blocking_the_case_or_becoming_saf
             .iter()
             .map(|entry| entry.flag.as_str())
             .collect::<Vec<_>>(),
-        ["safe", "critcal", ""]
+        ["critcal", " ◯ ", ""]
     );
-    assert!(loaded.initial_rows.iter().all(|row| row.flag.is_empty()));
+    assert!(common::rows(&store, id)
+        .iter()
+        .all(|row| row.flag.is_empty()));
     assert_eq!(loaded.project.meta.flagged_records, 0);
     assert!(save_iocs(
         &store,

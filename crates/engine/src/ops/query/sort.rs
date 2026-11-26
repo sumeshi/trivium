@@ -104,8 +104,8 @@ pub fn sort_row_indices(
         return Ok(indices);
     };
     // Projection already resolves internal IDs case-insensitively. Resolve
-    // the same column here, while preserving exact names for legacy tables
-    // that can contain both `Value` and `value`.
+    // the same column here. Standalone DataFrames can contain both `Value`
+    // and `value`, so prefer an exact match before ignoring case.
     let Some(series) = df.column(sort_key).ok().or_else(|| {
         df.get_columns()
             .iter()

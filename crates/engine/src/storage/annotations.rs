@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::{
@@ -8,18 +8,16 @@ use crate::{
     models::{FlagEntry, UpdateFlagResponse},
 };
 
-use super::{
-    legacy::ensure_annotations,
-    sqlite::{advance_revision, connect, mark_migrated, revision},
-};
+use super::sqlite::{advance_revision, connect, revision, PROJECT_DATABASE};
 
 pub(crate) fn connection(path: &Path) -> Result<Connection> {
+    if path.file_name().is_none_or(|name| name != PROJECT_DATABASE) {
+        bail!("Unsupported annotation storage path {path:?}: project.sqlite is required.");
+    }
     let parent = path
         .parent()
         .context("Annotation path has no project directory")?;
-    let mut db = connect(parent)?;
-    ensure_annotations(&mut db, path)?;
-    Ok(db)
+    connect(parent)
 }
 
 pub(crate) fn read_entry(db: &Connection, index: usize) -> Result<Option<FlagEntry>> {
@@ -120,7 +118,6 @@ pub fn save_flags(path: &Path, flags: &HashMap<usize, FlagEntry>) -> Result<()> 
         [i64::try_from(count)?],
     )?;
     advance_revision(&tx, 0)?;
-    mark_migrated(&tx, "annotations")?;
     tx.commit()?;
     Ok(())
 }

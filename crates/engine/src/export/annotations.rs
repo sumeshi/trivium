@@ -77,7 +77,7 @@ pub(crate) fn build_annotations(
     for (i, row) in rows.iter().enumerate() {
         let user_flag = flags
             .get(row)
-            .map(|entry| normalize_flag_value(entry.flag.trim()))
+            .map(|entry| normalize_flag_value(&entry.flag))
             .unwrap_or_default();
         let final_memo = flags
             .get(row)

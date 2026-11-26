@@ -29,8 +29,8 @@ pub(super) fn resolve_source_order(
     let mut filtered = Vec::new();
     let mut annotated_filtered = 0;
     if columns.is_empty() {
-        // Tag/flag/bookmark-only membership needs no Parquet data, including
-        // legacy files without __rowid. Bound the synthetic count anchor too.
+        // Tag/flag/bookmark-only membership needs no Parquet data. Bound the
+        // synthetic row-count anchor for empty projections too.
         for offset in (0..total_rows).step_by(PROJECT_BATCH_ROWS) {
             job.check_cancelled()?;
             let frame = DataFrame::new(vec![Series::full_null(

@@ -32,7 +32,7 @@ export const GROUP_GRANULARITIES = [
   ["day", "Day (UTC)"], ["hour", "Hour (UTC)"], ["minute", "Minute (UTC)"],
 ] as const satisfies readonly (readonly [GroupGranularity, string])[];
 
-/** Legacy column ids may match object properties; only explicit choices apply. */
+/** Only explicit per-column granularity choices apply. */
 export function selectedGroupGranularities(
   columns: readonly string[], settings: Readonly<Record<string, GroupGranularity>>,
 ): GroupGranularity[] {

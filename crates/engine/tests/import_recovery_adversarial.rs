@@ -51,8 +51,10 @@ fn invalid_utf8_fields_cannot_combine_into_a_valid_schema_discovery_record() {
         },
     )
     .unwrap();
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     assert_eq!(
-        loaded.initial_rows[0].cells[&summary.meta.columns[0].id]
+        loaded_rows[0].cells[&summary.meta.columns[0].id]
             .text
             .as_deref(),
         Some("good")
@@ -108,12 +110,16 @@ fn unclosed_csv_quote_is_fatal_by_default_and_only_salvaged_by_explicit_recovery
         },
     )
     .unwrap();
-    assert_eq!(loaded.initial_rows.len(), 1);
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
+    assert_eq!(loaded_rows.len(), 1);
     assert_eq!(
-        loaded.initial_rows[0].cells[&summary.meta.columns[0].id]
+        loaded_rows[0].cells[&summary.meta.columns[0].id]
             .text
             .as_deref(),
         Some("first")
     );
     assert_eq!(fs::read(source).unwrap(), bytes);
 }
+
+mod common;

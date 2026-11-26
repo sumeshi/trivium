@@ -36,7 +36,7 @@ Imports are strict by default. **Import options** lets you open CSV without a he
 
 **Preview** is off by default. Enable it to inspect a bounded sample before importing; suggested CSV delimiters are applied only when you choose them. Records are limited to 64MiB while reading, with cancellation checks; JSONL checks both encoded and decoded size. JSONL recovery can also skip invalid UTF-16, UTF-32, or Shift JIS lines without inserting replacement characters.
 
-The import report records the delimiter, recovery mode, and annotation restoration setting. **Export JSONL** writes its summary and all recorded diagnostics; the screen still shows at most 30 examples. Older imports export their retained details and identify any incomplete diagnostic list.
+The import report records the delimiter, recovery mode, and annotation restoration setting. **Export JSONL** writes its summary and all recorded diagnostics; the screen still shows at most 30 examples.
 
 Open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 

@@ -410,7 +410,7 @@ fn export_bulk_and_panels_apply_the_same_label_search_as_the_table() {
             .updated,
         2
     );
-    let flags = load_flags(&fixture.store.flags_path(&fixture.id)).unwrap();
+    let flags = load_flags(&fixture.store.database_path(&fixture.id)).unwrap();
     let mut annotated: Vec<_> = flags.keys().copied().collect();
     annotated.sort_unstable();
     assert_eq!(annotated, [0, 2]);

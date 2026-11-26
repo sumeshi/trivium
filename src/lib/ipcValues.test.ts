@@ -66,10 +66,10 @@ test("bool cells keep their source spelling", () => {
 
 test("table, detail, copy, and filter share the same exact string", () => {
   const row = rowFromIpc({
-    c000001: { text: "9007199254740993", kind: "int" },
-    c000002: { text: null, kind: "null" },
-    c000003: { text: null, kind: "missing" },
-    c000004: { text: "", kind: "string" },
+    c000001: { truncated: false, length: Array.from("9007199254740993").length,  text: "9007199254740993", kind: "int" },
+    c000002: { truncated: false, length: null,  text: null, kind: "null" },
+    c000003: { truncated: false, length: null,  text: null, kind: "missing" },
+    c000004: { truncated: false, length: Array.from("").length,  text: "", kind: "string" },
   });
   const { displayCache, previewCache } = buildCellCaches(row.cells);
 
@@ -104,26 +104,4 @@ test("a truncated cell is marked as a preview, not shown as the full value", () 
   assert.equal(displayCache.c000001, `${preview}…`);
   assert.equal(previewCache.c000001, preview);
   assert.notEqual(previewCache.c000001, displayCache.c000001);
-});
-
-test("legacy column ids preserve exact cell values without inherited object keys", () => {
-  const cells = JSON.parse(`{
-    "__proto__": {"text":"exact source text", "kind":"string", "truncated":false},
-    "constructor": {"text":"preview", "kind":"string", "truncated":true},
-    "hasOwnProperty": {"text":null, "kind":"null", "truncated":false},
-    "toString": {"text":null, "kind":"missing", "truncated":false}
-  }`);
-  const { displayCache, previewCache } = buildCellCaches(cells);
-  assert.deepEqual(Object.keys(displayCache), Object.keys(cells));
-  assert.deepEqual(Object.keys(previewCache), Object.keys(cells));
-  assert.equal(displayCache.__proto__, "exact source text");
-  assert.equal(previewCache.__proto__, "exact source text");
-  assert.equal(displayCache.constructor, "preview…");
-  assert.equal(previewCache.constructor, "preview");
-  assert.equal(displayCache.hasOwnProperty, "null");
-  assert.equal(previewCache.hasOwnProperty, "null");
-  assert.equal(displayCache.toString, "—");
-  assert.equal(previewCache.toString, "");
-  assert.equal("valueOf" in displayCache, false);
-  assert.equal("isPrototypeOf" in previewCache, false);
 });

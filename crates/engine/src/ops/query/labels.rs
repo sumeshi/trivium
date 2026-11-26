@@ -7,12 +7,8 @@ use super::QuerySpec;
 impl QuerySpec {
     /// The editor/API continue to store the user's original query. Only this
     /// request's search is normalized; condition and sort IDs stay untouched.
-    /// Legacy projects without column metadata already use their source names.
     pub fn resolve_search_labels(&mut self, columns: &[ColumnMeta]) -> Result<(), AppError> {
         self.validate_filter()?;
-        if columns.is_empty() {
-            return Ok(());
-        }
         if let Some(search) = self.search.as_deref().filter(|search| search.contains(':')) {
             self.search = Some(rewrite_scopes(search, columns)?);
         }

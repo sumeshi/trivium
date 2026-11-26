@@ -19,25 +19,24 @@ export function formatDefinitionKey(value: FormatDefinition): string {
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+const DEFINITION_FIELDS = new Set(["schemaVersion", "id", "name", "pattern", "valueGroup", "validation", "examples"]);
 
 /** Structural checks only. The Rust matcher validates expressions and examples. */
 export function isFormatDefinition(value: unknown): value is FormatDefinition {
   if (!record(value) || value.schemaVersion !== 1 || typeof value.id !== "string" || !value.id.trim()
     || typeof value.name !== "string" || !value.name.trim() || typeof value.pattern !== "string") return false;
+  if (Object.keys(value).some(field => !DEFINITION_FIELDS.has(field))) return false;
   if (value.valueGroup !== undefined && typeof value.valueGroup !== "string") return false;
   if (value.validation !== undefined && !VALIDATIONS.includes(value.validation as FormatValidation)) return false;
   return value.examples === undefined || (Array.isArray(value.examples) && value.examples.every(example =>
-    record(example) && typeof example.text === "string" && Array.isArray(example.values)
+    record(example) && Object.keys(example).every(field => field === "text" || field === "values")
+    && typeof example.text === "string" && Array.isArray(example.values)
     && example.values.every(item => typeof item === "string")));
 }
 
 export function parseFormatDefinition(value: unknown): FormatDefinition {
   if (!isFormatDefinition(value)) throw new Error("Invalid pattern definition. Expected a version 1 pattern file.");
-  const { schemaVersion, id, name, pattern, valueGroup, validation, examples } = value;
-  return structuredClone({ schemaVersion, id, name, pattern,
-    ...(valueGroup === undefined ? {} : { valueGroup }),
-    ...(validation === undefined ? {} : { validation }),
-    ...(examples === undefined ? {} : { examples }) });
+  return structuredClone(value);
 }
 
 export function formatFileName(definition: FormatDefinition): string {

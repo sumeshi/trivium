@@ -211,7 +211,7 @@ fn count_keys(
                     .unwrap_or_default();
                 let text = text.trim();
                 // Length framing keeps separator characters inside values
-                // distinct while preserving the legacy trim/null semantics.
+                // distinct while retaining the defined trim/null comparison semantics.
                 key.push_str(&text.len().to_string());
                 key.push(':');
                 key.push_str(text);

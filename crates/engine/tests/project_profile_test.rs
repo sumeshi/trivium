@@ -7,7 +7,6 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use chrono::Utc;
 use polars::prelude::*;
 use uuid::Uuid;
 
@@ -15,7 +14,7 @@ use trivium_engine::{
     jobs::JobContext,
     models::ProjectMeta,
     ops::projects::{
-        create_project, load_column_kinds_with_job, load_project, load_project_metadata_with_job,
+        create_project, load_column_kinds_with_job, load_project_with_job,
         CreateProjectPayload, ProjectRequest,
     },
     project_io::{project_full_reads, project_read_stats, reset_project_read_counters},
@@ -81,7 +80,7 @@ fn fresh_import_metadata_and_kinds_never_decode_rows() {
     assert!(profile.get("signature").is_some());
     for _ in 0..2 {
         reset_project_read_counters();
-        let loaded = load_project_metadata_with_job(
+        let loaded = load_project_with_job(
             &store,
             ProjectRequest {
                 project_id: meta.id,
@@ -89,7 +88,6 @@ fn fresh_import_metadata_and_kinds_never_decode_rows() {
             &JobContext::none(),
         )
         .unwrap();
-        assert!(loaded.initial_rows.is_empty());
         assert_eq!(
             loaded.columns,
             meta.columns
@@ -138,17 +136,17 @@ fn classifications_merge_across_real_import_batches() {
 }
 
 #[test]
-fn legacy_profile_is_built_once_then_invalidated_by_data_signature() {
+fn missing_profile_is_built_once_then_invalidated_by_data_signature() {
     let _guard = guard();
     let fixture = Fixture::new();
     let store = fixture.store();
-    let path = fixture.0.join("legacy.csv");
+    let path = fixture.0.join("profile.csv");
     fs::write(&path, "value\n1\n2\n3\n").unwrap();
     let meta = import(&store, &path);
     let dir = store.project_dir(&meta.id);
     remove_setting(&dir, "column_profile").unwrap();
     reset_project_read_counters();
-    let first = load_project_metadata_with_job(
+    let first = load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -160,7 +158,7 @@ fn legacy_profile_is_built_once_then_invalidated_by_data_signature() {
     assert_eq!(project_read_stats().decoded_rows, 3);
     assert_eq!(project_full_reads(), 0);
     reset_project_read_counters();
-    load_project_metadata_with_job(
+    load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -170,18 +168,23 @@ fn legacy_profile_is_built_once_then_invalidated_by_data_signature() {
     .unwrap();
     assert_eq!(project_read_stats().decoded_rows, 0);
 
-    // Different bytes, row count and schema content force the derived profile
-    // to change even when the saved project id and column id stay unchanged.
-    let mut replacement = DataFrame::new(vec![Series::new(
-        &meta.columns[0].id,
-        ["changed", "text", "new", "rows"],
-    )])
+    // Changed data invalidates the cached profile for the same column IDs.
+    let values = ["changed", "text", "rows"];
+    let mut replacement = DataFrame::new(vec![
+        Series::new(&meta.columns[0].id, values),
+        Series::new(
+            "__original",
+            values.map(|value| serde_json::json!([value]).to_string()),
+        ),
+        Series::new("__rowid", [0_i64, 1, 2]),
+        Series::new("__trivium_source_record", [2_i64, 3, 4]),
+    ])
     .unwrap();
     ParquetWriter::new(File::create(dir.join("data.parquet")).unwrap())
         .finish(&mut replacement)
         .unwrap();
     reset_project_read_counters();
-    let changed = load_project_metadata_with_job(
+    let changed = load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -190,9 +193,9 @@ fn legacy_profile_is_built_once_then_invalidated_by_data_signature() {
     )
     .unwrap();
     assert_eq!(changed.column_kinds[&meta.columns[0].id], "string");
-    assert_eq!(project_read_stats().decoded_rows, 4);
+    assert_eq!(project_read_stats().decoded_rows, 3);
     reset_project_read_counters();
-    load_project_metadata_with_job(
+    load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -204,107 +207,7 @@ fn legacy_profile_is_built_once_then_invalidated_by_data_signature() {
 }
 
 #[test]
-fn legacy_typed_initial_page_preserves_original_ids_nulls_and_nanoseconds() {
-    let _guard = guard();
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let id = Uuid::new_v4();
-    let dir = store.project_dir(&id);
-    fs::create_dir_all(&dir).unwrap();
-    let mut frame = DataFrame::new(vec![
-        Series::new(
-            "number",
-            (0..600).map(|row| u64::MAX - row).collect::<Vec<_>>(),
-        ),
-        Series::new(
-            "time",
-            (0..600)
-                .map(|row| 1_700_000_000_123_456_789i64 + row)
-                .collect::<Vec<_>>(),
-        )
-        .cast(&DataType::Datetime(TimeUnit::Nanoseconds, None))
-        .unwrap(),
-        Series::new(
-            "message",
-            (0..600)
-                .map(|row| {
-                    if row == 500 {
-                        "w".repeat(80)
-                    } else {
-                        "x".into()
-                    }
-                })
-                .collect::<Vec<_>>(),
-        ),
-        Series::new(
-            "nullable",
-            (0..600)
-                .map(|row| if row % 2 == 0 { None } else { Some("") })
-                .collect::<Vec<_>>(),
-        ),
-    ])
-    .unwrap();
-    ParquetWriter::new(File::create(dir.join("data.parquet")).unwrap())
-        .with_row_group_size(Some(100))
-        .finish(&mut frame)
-        .unwrap();
-    store
-        .insert(ProjectMeta {
-            import_report: None,
-            id,
-            name: "typed".into(),
-            description: None,
-            created_at: Utc::now(),
-            total_records: 600,
-            flagged_records: 0,
-            ioc_applied_records: 0,
-            source_sha256: None,
-            source_file_name: None,
-            source_format: None,
-            source_size: None,
-            source_path: None,
-            hidden_columns: vec![],
-            storage_version: 0,
-            columns: vec![],
-        })
-        .unwrap();
-    // The one-time migration is separate from the bounded compatibility page.
-    load_project_metadata_with_job(
-        &store,
-        ProjectRequest { project_id: id },
-        &JobContext::none(),
-    )
-    .unwrap();
-    reset_project_read_counters();
-    let loaded = load_project(&store, ProjectRequest { project_id: id }).unwrap();
-    assert_eq!(loaded.initial_rows.len(), 250);
-    assert_eq!(loaded.column_max_chars["message"], 80);
-    for (index, row) in loaded.initial_rows.iter().enumerate() {
-        assert_eq!(row.row_index, index);
-        assert_eq!(
-            row.cells["number"].text.as_deref(),
-            Some((u64::MAX - index as u64).to_string().as_str())
-        );
-        if index % 2 == 0 {
-            assert!(row.cells["nullable"].text.is_none());
-        } else {
-            assert_eq!(row.cells["nullable"].text.as_deref(), Some(""));
-        }
-        let expected = trivium_engine::value_utils::anyvalue_to_search_string(&AnyValue::Datetime(
-            1_700_000_000_123_456_789 + index as i64,
-            TimeUnit::Nanoseconds,
-            &None,
-        ))
-        .unwrap();
-        assert_eq!(row.cells["time"].text.as_deref(), Some(expected.as_str()));
-    }
-    assert_eq!(project_full_reads(), 0);
-    assert_eq!(project_read_stats().decoded_row_groups, 3);
-    assert!(project_read_stats().decoded_rows <= 300);
-}
-
-#[test]
-fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() {
+fn malformed_derived_profile_rebuilds_without_blocking_evidence() {
     let _guard = guard();
     let fixture = Fixture::new();
     let store = fixture.store();
@@ -314,7 +217,7 @@ fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() 
     let dir = store.project_dir(&meta.id);
     save_setting_bytes(&dir, "column_profile", b"{broken").unwrap();
     reset_project_read_counters();
-    let loaded = load_project_metadata_with_job(
+    let loaded = load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -326,9 +229,8 @@ fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() 
     assert_eq!(project_read_stats().decoded_rows, 2);
     assert!(load_setting(&dir, "column_profile").unwrap().is_some());
     remove_setting(&dir, "column_profile").unwrap();
-    save_setting_bytes(&dir, "column_max_chars", b"{broken").unwrap();
     reset_project_read_counters();
-    load_project_metadata_with_job(
+    load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -338,7 +240,7 @@ fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() 
     .unwrap();
     assert_eq!(project_read_stats().decoded_rows, 2);
     reset_project_read_counters();
-    load_project_metadata_with_job(
+    load_project_with_job(
         &store,
         ProjectRequest {
             project_id: meta.id,
@@ -352,87 +254,81 @@ fn malformed_derived_profile_or_width_json_rebuilds_without_blocking_evidence() 
 #[test]
 fn stale_parser_profile_refreshes_once_without_changing_widths_or_investigation() {
     let _guard = guard();
-    for legacy_version in [None, Some(0)] {
-        let fixture = Fixture::new();
-        let store = fixture.store();
-        let path = fixture.0.join("newly-recognized.csv");
-        let source = "Timestamp,message\n2026/1/2 3:04:05,keep\n2026/1/2 4:05:06,later\n";
-        fs::write(&path, source).unwrap();
-        let meta = import(&store, &path);
-        let dir = store.project_dir(&meta.id);
-        let timestamp = &meta.columns[0].id;
-        let message = &meta.columns[1].id;
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let path = fixture.0.join("newly-recognized.csv");
+    let source = "Timestamp,message\n2026/1/2 3:04:05,keep\n2026/1/2 4:05:06,later\n";
+    fs::write(&path, source).unwrap();
+    let meta = import(&store, &path);
+    let dir = store.project_dir(&meta.id);
+    let timestamp = &meta.columns[0].id;
+    let message = &meta.columns[1].id;
 
-        let mut old = load_setting(&dir, "column_profile").unwrap().unwrap();
-        let current_version = old["inference_version"].as_u64().unwrap();
-        assert!(current_version > 0);
-        if let Some(version) = legacy_version {
-            old["inference_version"] = serde_json::json!(version);
-        } else {
-            old.as_object_mut().unwrap().remove("inference_version");
-        }
-        old["kinds"][timestamp] = serde_json::json!("string");
-        old["widths"][timestamp] = serde_json::json!(123);
-        old["widths"][message] = serde_json::json!(77);
-        save_setting(&dir, "column_profile", &old).unwrap();
+    let mut old = load_setting(&dir, "column_profile").unwrap().unwrap();
+    let current_version = old["inference_version"].as_u64().unwrap();
+    assert!(current_version > 0);
+    old["inference_version"] = serde_json::json!(0);
+    old["kinds"][timestamp] = serde_json::json!("string");
+    old["widths"][timestamp] = serde_json::json!(123);
+    old["widths"][message] = serde_json::json!(77);
+    save_setting(&dir, "column_profile", &old).unwrap();
 
-        trivium_engine::ops::flags::update_flag(
-            &store,
-            serde_json::from_value(serde_json::json!({
-                "projectId": meta.id, "row_index": 0, "flag": "critical",
-                "memo": "<CommandLine>whoami</CommandLine>",
-                "tags": ["review"], "bookmarked": true,
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let annotations = load_flags(&store.flags_path(&meta.id)).unwrap();
-        let view = trivium_engine::models::ViewState {
-            search: "keep".into(),
-            column_widths: std::collections::HashMap::from([(timestamp.clone(), 321.0)]),
-            ..Default::default()
-        };
-        save_setting(&dir, "view_state", &serde_json::to_value(view).unwrap()).unwrap();
-        let view_bytes = load_setting_bytes(&dir, "view_state").unwrap();
-        let parquet_before = fs::read(dir.join("data.parquet")).unwrap();
+    trivium_engine::ops::flags::update_flag(
+        &store,
+        serde_json::from_value(serde_json::json!({
+            "projectId": meta.id, "row_index": 0, "flag": "critical",
+            "memo": "<CommandLine>whoami</CommandLine>",
+            "tags": ["review"], "bookmarked": true,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let annotations = load_flags(&store.database_path(&meta.id)).unwrap();
+    let view = trivium_engine::models::ViewState {
+        search: "keep".into(),
+        column_widths: std::collections::HashMap::from([(timestamp.clone(), 321.0)]),
+        ..Default::default()
+    };
+    save_setting(&dir, "view_state", &serde_json::to_value(view).unwrap()).unwrap();
+    let view_bytes = load_setting_bytes(&dir, "view_state").unwrap();
+    let parquet_before = fs::read(dir.join("data.parquet")).unwrap();
 
-        reset_project_read_counters();
-        let refreshed = load_project_metadata_with_job(
-            &store,
-            ProjectRequest {
-                project_id: meta.id,
-            },
-            &JobContext::none(),
-        )
-        .unwrap();
-        assert_eq!(refreshed.column_kinds[timestamp], "datetime");
-        assert_eq!(refreshed.column_max_chars[timestamp], 123);
-        assert_eq!(refreshed.column_max_chars[message], 77);
-        assert_eq!(project_read_stats().decoded_rows, 2);
-        assert_eq!(project_full_reads(), 0);
-        let saved = load_setting(&dir, "column_profile").unwrap().unwrap();
-        assert_eq!(saved["inference_version"].as_u64(), Some(current_version));
-        assert_eq!(saved["kinds"][timestamp], "datetime");
-        assert_eq!(
-            load_flags(&store.flags_path(&meta.id)).unwrap(),
-            annotations
-        );
-        assert_eq!(load_setting_bytes(&dir, "view_state").unwrap(), view_bytes);
-        assert_eq!(fs::read(dir.join("data.parquet")).unwrap(), parquet_before);
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    reset_project_read_counters();
+    let refreshed = load_project_with_job(
+        &store,
+        ProjectRequest {
+            project_id: meta.id,
+        },
+        &JobContext::none(),
+    )
+    .unwrap();
+    assert_eq!(refreshed.column_kinds[timestamp], "datetime");
+    assert_eq!(refreshed.column_max_chars[timestamp], 123);
+    assert_eq!(refreshed.column_max_chars[message], 77);
+    assert_eq!(project_read_stats().decoded_rows, 2);
+    assert_eq!(project_full_reads(), 0);
+    let saved = load_setting(&dir, "column_profile").unwrap().unwrap();
+    assert_eq!(saved["inference_version"].as_u64(), Some(current_version));
+    assert_eq!(saved["kinds"][timestamp], "datetime");
+    assert_eq!(
+        load_flags(&store.database_path(&meta.id)).unwrap(),
+        annotations
+    );
+    assert_eq!(load_setting_bytes(&dir, "view_state").unwrap(), view_bytes);
+    assert_eq!(fs::read(dir.join("data.parquet")).unwrap(), parquet_before);
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
 
-        reset_project_read_counters();
-        let cached = load_project_metadata_with_job(
-            &store,
-            ProjectRequest {
-                project_id: meta.id,
-            },
-            &JobContext::none(),
-        )
-        .unwrap();
-        assert_eq!(cached.column_kinds, refreshed.column_kinds);
-        assert_eq!(cached.column_max_chars, refreshed.column_max_chars);
-        assert_eq!(project_read_stats().decoded_rows, 0);
-        assert_eq!(project_full_reads(), 0);
-    }
+    reset_project_read_counters();
+    let cached = load_project_with_job(
+        &store,
+        ProjectRequest {
+            project_id: meta.id,
+        },
+        &JobContext::none(),
+    )
+    .unwrap();
+    assert_eq!(cached.column_kinds, refreshed.column_kinds);
+    assert_eq!(cached.column_max_chars, refreshed.column_max_chars);
+    assert_eq!(project_read_stats().decoded_rows, 0);
+    assert_eq!(project_full_reads(), 0);
 }

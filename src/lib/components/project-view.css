@@ -1517,7 +1517,7 @@ button.dialog-close:hover:not(:disabled) { background: var(--surface-weak); colo
 }
 
 
-/* The legacy IOC flag selector reuses `.flag-option`; keep the filter menu
+/* The IOC flag selector reuses `.flag-option`; keep the filter menu
    styling explicit so the later dialog rules cannot change its density. */
 .flag-menu .flag-option {
   display: flex;

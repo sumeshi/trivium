@@ -53,30 +53,14 @@ test("wallpaper defaults do not change paint, and invalid assets/preferences can
   assert.equal(wallpaperVisible({ ...DEFAULT_WALLPAPER, enabled: true }, null), false);
   assert.equal(wallpaperVisible({ ...DEFAULT_WALLPAPER, enabled: true, strength: 0 }, image), false);
   assert.deepEqual(parseWallpaperSettings(DEFAULT_WALLPAPER), DEFAULT_WALLPAPER);
-  for (const bad of [null, [], custom(), { ...DEFAULT_WALLPAPER, version: 3 }, { ...DEFAULT_WALLPAPER, strength: 101 },
+  for (const bad of [null, [], custom(), { ...DEFAULT_WALLPAPER, version: 1 }, { ...DEFAULT_WALLPAPER, version: 3 }, { ...DEFAULT_WALLPAPER, strength: 101 },
     { ...DEFAULT_WALLPAPER, strength: -1 }, { ...DEFAULT_WALLPAPER, strength: 30.5 }, { ...DEFAULT_WALLPAPER, enabled: "true" }]) assert.equal(parseWallpaperSettings(bad), null);
   assert.deepEqual(parseWallpaperImage(image), image);
   for (const bad of [{ ...image, dataUrl: "https://example.invalid/image.png" }, { ...image, dataUrl: "data:image/svg+xml;base64,AA==" },
     { ...image, dataUrl: "data:image/webp;base64,AA==" }, { ...image, width: 3841 }, { ...image, width: 3840, height: 3840 }]) assert.throws(() => parseWallpaperImage(bad));
 });
 
-test("legacy wallpaper preferences retain visibility and strength while dropping old layout options", () => {
-  for (const fit of ["cover", "contain"]) {
-    for (const behindTable of [false, true]) {
-      const legacy = { version: 1, enabled: true, fit, strength: 64, behindTable };
-      const expected = { version: 2, enabled: true, strength: 64 };
-      assert.deepEqual(parseWallpaperSettings(legacy), expected);
-      assert.deepEqual(parseWallpaperSettings(JSON.stringify(legacy)), expected);
-    }
-  }
-  assert.deepEqual(parseWallpaperSettings({ version: 1, enabled: false, fit: "contain", strength: 0, behindTable: false }),
-    { version: 2, enabled: false, strength: 0 });
-  for (const legacy of [
-    { version: 1, enabled: true, strength: 30 },
-    { version: 1, enabled: true, strength: 30, fit: "repeat", behindTable: false },
-    { version: 1, enabled: true, strength: 30, fit: "cover", behindTable: "false" },
-  ]) assert.equal(parseWallpaperSettings(legacy), null);
-});
+
 
 async function environment(run: (f: { files: Map<string, string>; cache: Map<string, string>; writes: Array<{ path: string; text: string }>; calls: string[];
   holdWrite: (value: Promise<void> | null) => void; failWrites: (value: boolean) => void;
@@ -195,23 +179,7 @@ test("wallpaper slider coalesces file writes and normal close drains the last ac
   });
 });
 
-test("legacy wallpaper startup keeps the managed image and writes only current preferences after an edit", async () => {
-  for (const location of ["cache", "disk"]) {
-    await environment(async f => {
-      const legacy = { version: 1, enabled: true, fit: "contain", strength: 47, behindTable: false };
-      const saved = JSON.stringify(legacy);
-      f.files.set("/managed/appearance.json", saved);
-      if (location === "cache") f.cache.set("trivium:wallpaper", saved);
-      await initWallpaper();
-      assert.deepEqual(get(wallpaper), { image, settings: { version: 2, enabled: true, strength: 47 } });
-      assert.equal(f.files.get("/managed/appearance.json"), saved, "startup should remain a read");
-      await setWallpaperSettings({ ...get(wallpaper).settings, strength: 66 });
-      const expected = { version: 2, enabled: true, strength: 66 };
-      assert.deepEqual(JSON.parse(f.files.get("/managed/appearance.json")!), expected);
-      assert.deepEqual(JSON.parse(f.cache.get("trivium:wallpaper")!), expected);
-    });
-  }
-});
+
 
 test("image import/clear use native managed-image commands and persist no source paths or data URLs", async () => {
   await environment(async f => {

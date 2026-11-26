@@ -42,7 +42,6 @@ function saved(overrides: Partial<SavedView> = {}): SavedView {
     sortKey: "c000001",
     sortDirection: "desc",
     columnWidths: { c000001: 176.5, c000002: 320 },
-    offset: 12,
     logicalRow: 12,
     ...overrides,
   };
@@ -55,27 +54,13 @@ test("save and restore keeps search, search columns, flag filter, widths and row
   assert.deepEqual(restored, saved());
 });
 
-test("legacy column widths survive saved JSON restoration with reserved object names", () => {
-  const legacy = ["__proto__", "constructor", "toString"];
-  const widths = Object.fromEntries(legacy.map((column, index) => [column, 200 + index]));
-  const view = saved({ columnWidths: widths, searchColumns: [legacy[0]], hiddenColumns: [legacy[1]], sortKey: legacy[2] });
-  const wire = JSON.parse(JSON.stringify(savedViewToViewState(view)));
-  const restored = viewStateToSavedView(wire, legacy);
-  assert.ok(restored);
-  assert.deepEqual(Object.entries(restored.columnWidths), Object.entries(widths));
-  assert.deepEqual(viewStateWarnings(wire, legacy), []);
-  const savedAgain = JSON.parse(JSON.stringify(savedViewToViewState(restored)));
-  assert.deepEqual(savedAgain.columnWidths, widths);
-  assert.equal(Object.getOwnPropertyDescriptor(savedAgain.columnWidths, "__proto__")?.value, 200);
-});
-
 test('note width survives view round trips separately from source column widths', () => {
   const view = saved({ noteColumnWidth: 154 });
   const wire = JSON.parse(JSON.stringify(savedViewToViewState(view)));
   assert.deepEqual(viewStateToSavedView(wire, columns), view);
   assert.deepEqual(wire.columnWidths, view.columnWidths);
   for (const invalid of [null, -10, 0, '154', Infinity]) {
-    assert.equal(savedViewFromUnknown({ ...view, noteColumnWidth: invalid }, columns)?.noteColumnWidth, undefined);
+    assert.equal(savedViewFromUnknown({ ...wire, noteColumnWidth: invalid }, columns), null);
   }
   assert.equal(viewStateToSavedView(savedViewToViewState(saved()), columns)?.noteColumnWidth, undefined);
 });
@@ -96,7 +81,7 @@ test("preset literal arrays survive engine view JSON and saved-view restoration"
 test("malformed saved literal arrays are rejected without silently changing the rule", () => {
   for (const sourceValues of [null, "a,b", ["a", null], [1], {}]) {
     const malformed = { ...condition, children: [{ ...condition.children[0], sourceValues }] };
-    assert.equal(savedViewFromUnknown(saved({ condition: malformed as EditorGroup }), columns), null);
+    assert.equal(savedViewFromUnknown(savedViewToViewState(saved({ condition: malformed as EditorGroup })), columns), null);
   }
 });
 
@@ -106,10 +91,11 @@ test('display order and ISO settings survive save/restore without changing query
   assert.deepEqual(viewStateToSavedView(state, columns), view);
   assert.deepEqual(state.searchColumns, ['c000002']);
   assert.equal(state.sortKey, 'c000001');
-  const stale = { ...state, columnOrder: ['gone', 'c000002', 'c000002'], columnFormats: { gone: 'iso', c000001: 'future', c000002: 'iso' } };
+  const stale = { ...state, columnOrder: ['gone', 'c000002', 'c000002'], columnFormats: { gone: 'iso', c000002: 'iso' } };
   assert.deepEqual(viewStateToSavedView(stale, columns)?.columnOrder, ['c000002']);
   assert.deepEqual(viewStateToSavedView(stale, columns)?.columnFormats, { c000002: 'iso' });
   assert.deepEqual(viewStateWarnings(stale, columns), ['column order', 'column formats']);
+  assert.equal(viewStateToSavedView({ ...state, columnFormats: { c000001: 'future' } }, columns), null);
 });
 
 test("unknown saved fields are reported instead of silently reset", () => {
@@ -137,30 +123,18 @@ test("unsupported sorting and widths are reported before their defaults can repl
   assert.deepEqual(viewStateWarnings(savedViewToViewState(saved()), columns), []);
 });
 
-test("a legacy save without the new fields restores safe defaults", () => {
-  const parsed = savedViewFromUnknown(
-    {
-      condition,
-      hiddenColumns: ["c000002"],
-      sortKey: "c000001",
-      sortDirection: "desc",
-      offset: 21,
-    },
-    columns
-  );
-
-  assert.ok(parsed);
-  assert.equal(parsed.search, "");
-  assert.deepEqual(parsed.searchColumns, []);
-  assert.equal(parsed.flagFilter, "all");
-  assert.equal(parsed.bookmarkedOnly, false);
-  assert.deepEqual(parsed.hiddenColumns, ["c000002"]);
-  assert.deepEqual(parsed.columnWidths, {});
-  // `offset` used to mean the result-relative row at the top of the viewport.
-  assert.equal(parsed.logicalRow, 21);
+test("only the current complete persisted schema is accepted", () => {
+  const state = savedViewToViewState(saved());
+  for (const version of [undefined, null, -1, 0, 2, '1']) {
+    assert.equal(savedViewFromUnknown({ ...state, version }, columns), null);
+  }
+  for (const patch of [{ offset: 21 }, { logicalRow: undefined }, { logicalRow: -1 },
+    { search: 1 }, { searchColumns: 'c000001' }, { bookmarkedOnly: 'true' }]) {
+    assert.equal(savedViewFromUnknown({ ...state, ...patch }, columns), null);
+  }
 });
 
-test("unknown columns and invalid widths are dropped instead of used", () => {
+test("unknown column references are excluded and reported without changing valid current fields", () => {
   const restored = viewStateToSavedView(
     {
       ...savedViewToViewState(saved()),
@@ -169,8 +143,6 @@ test("unknown columns and invalid widths are dropped instead of used", () => {
       sortKey: "removed-column",
       columnWidths: {
         c000001: 200,
-        c000002: Number.NaN,
-        c000003: -10,
         "removed-column": 300,
       },
     },
@@ -191,7 +163,7 @@ test("an unreadable condition tree is reported instead of silently emptied", () 
   );
 });
 
-test("flag filter falls back to all when the stored value is unknown", () => {
+test("an unsupported flag filter is rejected without widening the saved result", () => {
   const restored = viewStateToSavedView(
     {
       ...savedViewToViewState(saved()),
@@ -199,17 +171,16 @@ test("flag filter falls back to all when the stored value is unknown", () => {
     },
     columns
   );
-  assert.ok(restored);
-  assert.equal(restored.flagFilter, "all");
+  assert.equal(restored, null);
 });
 
-test("composite flags survive save and restore and legacy priority remains compatible", () => {
-  for (const flagFilter of ["safe|critical|none", "safe|suspicious|critical|none", "priority", "none", "all"] as const) {
+test("canonical composite flags survive save and restore", () => {
+  for (const flagFilter of ["safe|critical|none", "safe|suspicious|critical|none", "none", "all"] as const) {
     const state = savedViewToViewState(saved({ flagFilter }));
     assert.equal(viewStateToSavedView(state, columns)?.flagFilter, flagFilter);
     assert.deepEqual(viewStateWarnings(state, columns), []);
   }
   const malformed = { ...savedViewToViewState(saved()), flagFilter: "safe|future" as const };
-  assert.equal(viewStateToSavedView(malformed, columns)?.flagFilter, "all");
+  assert.equal(viewStateToSavedView(malformed, columns), null);
   assert.deepEqual(viewStateWarnings(malformed, columns), ["flag filter"]);
 });

@@ -6,12 +6,12 @@ import type { Backend } from './backend.ts';
 import type { ProjectSummary, LoadProjectResponse } from './types.ts';
 
 function summary(id: string): ProjectSummary {
-  return { meta: { id, name: id, source_file_name: `${id}.csv`, created_at: '2026-11-16',
-    total_records: 3, flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } };
+  return { meta: { description: null, source_sha256: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: id, source_file_name: `${id}.csv`, created_at: '2026-11-16',
+    total_records: 3, flagged_records: 0, hidden_columns: [] } };
 }
 function detail(id: string): LoadProjectResponse {
   return { project: summary(id), columns: ['c1'], columns_meta: [], column_max_chars: {}, column_kinds: {},
-    color_rules: [], iocs: [], hidden_columns: [], initial_rows: [] };
+    color_rules: [], iocs: [], hidden_columns: [],  };
 }
 function fixture(overrides: Partial<Backend> = {}) {
   const loaded: string[] = [], deleted: string[] = [];

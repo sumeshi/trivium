@@ -1,4 +1,4 @@
-//! Shared helpers for engine integration tests after the column-id change.
+//! Shared helpers for engine integration tests.
 //!
 //! Tests keep referring to source names and resolve them through the project
 //! metadata, so the expectations stay about data rather than id formatting.
@@ -39,4 +39,19 @@ pub fn search(ids: &HashMap<String, String>, column: &str, expression: &str) -> 
 /// Exact text of one cell, or `None` for null/missing.
 pub fn cell_text<'a>(row: &'a ProjectRow, column: &str) -> Option<&'a str> {
     row.cells.get(column).and_then(|cell| cell.text.as_deref())
+}
+
+/// Read the first table page through the row-query API.
+pub fn rows(store: &ProjectsStore, project_id: Uuid) -> Vec<ProjectRow> {
+    trivium_engine::ops::rows::query_project_rows(
+        store,
+        trivium_engine::ops::rows::QueryRowsPayload {
+            project_id,
+            spec: trivium_engine::ops::rows::QuerySpec::default(),
+            offset: Some(0),
+            limit: None,
+        },
+    )
+    .expect("failed to query project rows")
+    .rows
 }

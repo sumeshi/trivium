@@ -34,8 +34,8 @@ pub struct SaveViewStatePayload {
 
 /// Loads the reusable view state for one project.
 ///
-/// A missing file is normal for a new or legacy project. A broken file or a
-/// file written by a newer version is ignored (and left on disk) so the
+/// A missing view is normal for a new project. Unreadable or unsupported
+/// saved views are left untouched so the
 /// project, its evidence, and its annotations still open.
 pub fn load_view_state(
     store: &ProjectsStore,
@@ -72,14 +72,19 @@ pub fn load_view_state(
         }
     };
 
-    if state.version > VIEW_STATE_VERSION {
+    if state.version != VIEW_STATE_VERSION {
         eprintln!(
-            "[view] ignoring newer view state version {} (supported {}) for {:?}",
+            "[view] ignoring unsupported view state version {} (supported {}) for {:?}",
             state.version, VIEW_STATE_VERSION, path
         );
         return Ok(ViewStateLoad {
             state: None,
-            status: "newer".to_string(),
+            status: if state.version > VIEW_STATE_VERSION {
+                "newer"
+            } else {
+                "unreadable"
+            }
+            .to_string(),
         });
     }
 
@@ -94,6 +99,9 @@ pub fn save_view_state(
     store: &ProjectsStore,
     payload: SaveViewStatePayload,
 ) -> Result<(), AppError> {
+    if payload.state.version != VIEW_STATE_VERSION {
+        return Err(AppError::Message("Unsupported view state version.".into()));
+    }
     if store
         .try_find(&payload.project_id)
         .map_err(AppError::from)?
@@ -111,8 +119,8 @@ pub fn save_view_state(
         |existing| {
             if let Some(existing) = existing {
                 match serde_json::from_slice::<ViewState>(existing) {
-                    Ok(state) if state.version > VIEW_STATE_VERSION => bail!(
-                        "Existing view state uses a newer version ({}); not overwriting.",
+                    Ok(state) if state.version != VIEW_STATE_VERSION => bail!(
+                        "Existing view state uses an unsupported version ({}); not overwriting.",
                         state.version
                     ),
                     Ok(_) => {}

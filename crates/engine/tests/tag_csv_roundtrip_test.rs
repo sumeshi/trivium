@@ -113,7 +113,7 @@ fn special_tag_names_survive_export_restore_and_exact_tag_search() {
     assert_eq!(&exported[1][index], "[]");
 
     let restored = import(&store, &destination, true).unwrap();
-    let annotations = load_flags(&store.flags_path(&restored)).unwrap();
+    let annotations = load_flags(&store.database_path(&restored)).unwrap();
     let entry = annotations.get(&0).unwrap();
     assert_eq!(entry.tags, tags);
     assert_eq!(entry.flag, "critical");
@@ -140,7 +140,7 @@ fn special_tag_names_survive_export_restore_and_exact_tag_search() {
 }
 
 #[test]
-fn explicit_json_tags_win_over_legacy_cells_without_guessing_old_json_text() {
+fn only_json_tag_columns_restore_annotations_and_other_source_columns_remain_data() {
     let fixture = Fixture::new();
     let store = ProjectsStore::new(fixture.0.join("store")).unwrap();
     let legacy = fixture.0.join("legacy.csv");
@@ -150,9 +150,28 @@ fn explicit_json_tags_win_over_legacy_cells_without_guessing_old_json_text() {
         &[vec!["0", "old;other"], vec!["1", r#"["one exact tag"]"#]],
     );
     let id = import(&store, &legacy, true).unwrap();
-    let entries = load_flags(&store.flags_path(&id)).unwrap();
-    assert_eq!(entries[&0].tags, ["old", "other"]);
-    assert_eq!(entries[&1].tags, [r#"["one exact tag"]"#]);
+    let entries = load_flags(&store.database_path(&id)).unwrap();
+    assert!(entries.is_empty());
+    let rows = query_project_rows(
+        &store,
+        QueryRowsPayload {
+            project_id: id,
+            spec: QuerySpec::default(),
+            offset: None,
+            limit: None,
+        },
+    )
+    .unwrap();
+    let tag_column = rows.rows[0]
+        .cells
+        .iter()
+        .find(|(_, cell)| cell.text.as_deref() == Some("old;other"))
+        .map(|(column, _)| column)
+        .unwrap();
+    assert_eq!(
+        rows.rows[1].cells[tag_column].text.as_deref(),
+        Some(r#"["one exact tag"]"#)
+    );
 
     let mixed = fixture.0.join("mixed.csv");
     write_csv(
@@ -164,11 +183,11 @@ fn explicit_json_tags_win_over_legacy_cells_without_guessing_old_json_text() {
         ],
     );
     let id = import(&store, &mixed, true).unwrap();
-    let entries = load_flags(&store.flags_path(&id)).unwrap();
+    let entries = load_flags(&store.database_path(&id)).unwrap();
     assert_eq!(entries[&0].tags, ["new;exact", " padded "]);
     assert!(
         !entries.contains_key(&1),
-        "[] must not fall back to legacy tags"
+        "[] restores no tags"
     );
 }
 
@@ -180,11 +199,8 @@ fn invalid_explicit_tag_json_rejects_restore_with_record_number_and_no_partial_c
         let source = fixture.0.join("invalid.csv");
         write_csv(
             &source,
-            &["id", "trivium-tags", "trivium-tags-json"],
-            &[
-                vec!["0", "legacy", r#"["valid"]"#],
-                vec!["1", "legacy fallback must not apply", text],
-            ],
+            &["id", "trivium-tags-json"],
+            &[vec!["0", r#"["valid"]"#], vec!["1", text]],
         );
         let before = fs::read(&source).unwrap();
         let error = import(&store, &source, true).unwrap_err();
@@ -283,7 +299,7 @@ fn repeated_exports_restore_latest_annotations_despite_canonical_and_suffixed_so
             );
 
             current = import(&store, &destination, true).unwrap();
-            let restored = load_flags(&store.flags_path(&current)).unwrap();
+            let restored = load_flags(&store.database_path(&current)).unwrap();
             if round == 1 {
                 assert_eq!(restored[&0].flag, "safe");
                 assert_eq!(
@@ -341,48 +357,9 @@ fn repeated_exports_restore_latest_annotations_despite_canonical_and_suffixed_so
 }
 
 #[test]
-fn legacy_complete_export_block_uses_actual_positions_but_partial_blocks_do_not_guess_aliases() {
+fn partial_annotation_blocks_do_not_guess_suffixed_source_columns() {
     let fixture = Fixture::new();
     let store = ProjectsStore::new(fixture.0.join("store")).unwrap();
-    let source = fixture.0.join("legacy-block.csv");
-    write_csv(
-        &source,
-        &[
-            "trivium-safe_2",
-            "trivium-suspicious_3",
-            "trivium-critical",
-            "trivium-memo_2",
-            "trivium-tags_2",
-            "trivium-bookmarked_2",
-            "id",
-            "trivium-safe",
-            "trivium-suspicious",
-            "trivium-memo",
-            "trivium-tags",
-            "trivium-bookmarked",
-        ],
-        &[vec![
-            "1",
-            "0",
-            "0",
-            "latest legacy note",
-            "latest;legacy",
-            "1",
-            "0",
-            "0",
-            "1",
-            "stale note",
-            "stale tags",
-            "0",
-        ]],
-    );
-    let id = import(&store, &source, true).unwrap();
-    let entries = load_flags(&store.flags_path(&id)).unwrap();
-    assert_eq!(entries[&0].flag, "safe");
-    assert_eq!(entries[&0].memo.as_deref(), Some("latest legacy note"));
-    assert_eq!(entries[&0].tags, ["latest", "legacy"]);
-    assert!(entries[&0].bookmarked);
-
     for malformed in [
         "missing-last-column",
         "invalid-plus-suffix",
@@ -423,7 +400,7 @@ fn legacy_complete_export_block_uses_actual_positions_but_partial_blocks_do_not_
         record.extend(["1", "canonical note", r#"["canonical tag"]"#]);
         write_csv(&path, &headers, &[record]);
         let id = import(&store, &path, true).unwrap();
-        let entries = load_flags(&store.flags_path(&id)).unwrap();
+        let entries = load_flags(&store.database_path(&id)).unwrap();
         assert_eq!(entries[&0].flag, "safe");
         assert_eq!(
             entries[&0].memo.as_deref(),

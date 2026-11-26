@@ -4,7 +4,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use polars::prelude::*;
 use trivium_engine::{
     annotation::AnnotationPatch,
     condition::{Condition, Node, Op},
@@ -22,7 +21,6 @@ use trivium_engine::{
     },
     store::ProjectsStore,
 };
-use trivium_engine::{models::ProjectMeta, project_io::write_project_dataframe};
 use uuid::Uuid;
 
 mod common;
@@ -30,34 +28,25 @@ mod common;
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn annotation_only_and_constant_group_queries_work_on_legacy_parquet_without_row_ids() {
+fn annotation_only_and_constant_group_queries_need_no_source_value_reads() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let root = std::env::temp_dir().join(format!("trivium-query-legacy-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("trivium-query-annotations-{}", Uuid::new_v4()));
     let store = ProjectsStore::new(root.clone()).unwrap();
-    let id = Uuid::new_v4();
-    fs::create_dir_all(store.project_dir(&id)).unwrap();
-    let mut frame = DataFrame::new(vec![Series::new("value", [5i64, 8, 13])]).unwrap();
-    write_project_dataframe(&store.project_dir(&id).join("data.parquet"), &mut frame).unwrap();
-    store
-        .insert(ProjectMeta {
-            import_report: None,
-            id,
-            name: "legacy".into(),
+    let source = root.join("values.csv");
+    fs::write(&source, "value\n5\n8\n13\n").unwrap();
+    let id = ops::projects::create_project(
+        &store,
+        CreateProjectPayload {
+            import_options: None,
+            path: source.to_string_lossy().into(),
             description: None,
-            created_at: chrono::Utc::now(),
-            total_records: 3,
-            flagged_records: 0,
-            ioc_applied_records: 0,
-            source_sha256: None,
-            source_file_name: None,
-            source_format: None,
-            source_size: None,
-            source_path: None,
-            hidden_columns: vec![],
-            storage_version: 0,
-            columns: vec![],
-        })
-        .unwrap();
+            delimiter: None,
+            restore_annotations: None,
+        },
+    )
+    .unwrap()
+    .meta
+    .id;
     update_flag(
         &store,
         UpdateFlagPayload {
@@ -99,7 +88,7 @@ fn annotation_only_and_constant_group_queries_work_on_legacy_parquet_without_row
     assert_eq!(
         &*target.ids,
         &[0, 1, 2],
-        "constant query lost legacy source row count"
+        "constant query lost the source row count"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -262,7 +251,7 @@ fn single_and_selected_bulk_annotations_never_decode_source_cells() {
         "selection apply decoded source cells"
     );
     assert_eq!(project_data_reads(), 0);
-    let saved = trivium_engine::storage::load_flags(&store.flags_path(&id)).unwrap();
+    let saved = trivium_engine::storage::load_flags(&store.database_path(&id)).unwrap();
     assert_eq!(saved.len(), 4);
     assert_eq!(saved[&0].flag, "safe");
     assert_eq!(saved[&1].flag, "suspicious");

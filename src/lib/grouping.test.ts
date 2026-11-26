@@ -61,7 +61,7 @@ test("sorting precedes pagination and preserves expanded paths across sibling re
   assert.deepEqual(second.rows[0].path.map(part => part.label), ["parent", "child-105"]);
 });
 
-test("legacy group columns use exact defaults and retain explicit time granularity choices", () => {
+test("group columns use exact defaults and retain explicit time granularity choices", () => {
   const columns = ["__proto__", "constructor", "toString", "timestamp"];
   assert.deepEqual(selectedGroupGranularities(columns, {}), ["exact", "exact", "exact", "exact"]);
   const settings = JSON.parse('{"__proto__":"day","constructor":"hour","toString":"minute"}');

@@ -19,7 +19,12 @@ use trivium_engine::store::ProjectsStore;
 
 mod common;
 
-fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, String>) {
+fn setup() -> (
+    PathBuf,
+    ProjectsStore,
+    Uuid,
+    std::collections::HashMap<String, String>,
+) {
     let root = std::env::temp_dir().join(format!("trivium-panel-scope-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("failed to create temp dir");
     let path = root.join("panels.csv");
@@ -98,7 +103,6 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
             column: ts_column.clone(),
             buckets: 6,
             search: None,
-            columns: None,
             search_columns: None,
             flag_filter: None,
             bookmarked_only: Some(true),
@@ -109,7 +113,11 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
     )
     .expect("histogram");
     assert_eq!(
-        histogram.buckets.iter().map(|bucket| bucket.count).sum::<u64>(),
+        histogram
+            .buckets
+            .iter()
+            .map(|bucket| bucket.count)
+            .sum::<u64>(),
         2,
         "histogram must cover only bookmarked rows"
     );
@@ -119,13 +127,12 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
         TimeAnalysisPayload {
             as_datetime: false,
             project_id: id,
-            column: ts_column,
+            column: ts_column.clone(),
             gap_seconds: 1,
             session_minutes: 30,
             burst_window_seconds: 60,
             burst_min: 10,
             search: None,
-            columns: None,
             search_columns: None,
             flag_filter: None,
             bookmarked_only: Some(true),
@@ -134,26 +141,67 @@ fn stats_histogram_and_time_follow_bookmark_and_search_scope() {
     )
     .expect("time analysis");
     let session_rows: u64 = time.sessions.iter().map(|span| span.count).sum();
-    assert_eq!(session_rows, 2, "time analysis must cover only bookmarked rows");
+    assert_eq!(
+        session_rows, 2,
+        "time analysis must cover only bookmarked rows"
+    );
 
     // A search scoped to a column that does not contain the term yields no
     // rows, rather than falling back to the visible-column list.
     let scoped = QuerySpec {
         search: Some("alpha".to_string()),
-        search_columns: Some(vec![id_column]),
+        search_columns: Some(vec![id_column.clone()]),
         ..Default::default()
     };
     let scoped_stats = ops::stats::column_stats(
         &store,
         ColumnStatsPayload {
             project_id: id,
-            column: group_column,
+            column: group_column.clone(),
             rare_max: 1,
             spec: scoped,
         },
     )
     .expect("scoped stats");
     assert_eq!(scoped_stats.unique, 0);
+
+    for (search_columns, expected) in [
+        (None, 2),
+        (Some(Vec::<String>::new()), 2),
+        (Some(vec![group_column.clone()]), 2),
+        (Some(vec![id_column]), 0),
+    ] {
+        let mut params = serde_json::json!({
+            "projectId": id,
+            "search": "alpha",
+            "searchColumns": search_columns,
+            "bookmarkedOnly": true,
+            "column": ts_column,
+        });
+        let histogram =
+            ops::histogram::histogram(&store, serde_json::from_value(params.clone()).unwrap())
+                .unwrap();
+        assert_eq!(
+            histogram
+                .buckets
+                .iter()
+                .map(|bucket| bucket.count)
+                .sum::<u64>(),
+            expected,
+        );
+        let time =
+            ops::time::time_analysis(&store, serde_json::from_value(params.clone()).unwrap())
+                .unwrap();
+        assert_eq!(
+            time.sessions.iter().map(|span| span.count).sum::<u64>(),
+            expected
+        );
+        params.as_object_mut().unwrap().remove("column");
+        params["groupColumns"] = serde_json::json!([group_column]);
+        let grouped =
+            ops::group::group_tree(&store, serde_json::from_value(params).unwrap()).unwrap();
+        assert_eq!(grouped.total as u64, expected);
+    }
 
     let _ = fs::remove_dir_all(root);
 }

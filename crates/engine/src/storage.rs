@@ -1,5 +1,4 @@
 mod annotations;
-mod legacy;
 mod metadata;
 mod settings;
 mod sqlite;
@@ -32,7 +31,7 @@ use crate::{
     value_utils::{anyvalue_to_json, value_display_length},
 };
 
-/// Unknown legacy flag text remains stored, but behaves as Unflagged in every
+/// Unknown flag text remains stored, but behaves as Unflagged in every
 /// query and counter. Memo/tag/bookmark-only entries are independent.
 pub(crate) fn is_recognized_flag(entry: &crate::models::FlagEntry) -> bool {
     !crate::flags::normalize_flag_value(&entry.flag).is_empty()
@@ -75,20 +74,18 @@ fn write_file_atomic_with(
     result
 }
 
-pub fn load_column_metrics(path: &Path) -> Result<Option<HashMap<String, usize>>> {
-    let parent = path
-        .parent()
-        .context("column metrics path has no project directory")?;
-    load_setting_bytes(parent, "column_max_chars")?
+pub fn load_column_metrics(project_dir: &Path) -> Result<Option<HashMap<String, usize>>> {
+    load_setting_bytes(project_dir, "column_max_chars")?
         .map(|bytes| serde_json::from_slice(&bytes).context("invalid column metrics"))
         .transpose()
 }
 
-pub fn save_column_metrics(path: &Path, metrics: &HashMap<String, usize>) -> Result<()> {
-    let parent = path
-        .parent()
-        .context("column metrics path has no project directory")?;
-    save_setting_bytes(parent, "column_max_chars", &serde_json::to_vec(metrics)?)
+pub fn save_column_metrics(project_dir: &Path, metrics: &HashMap<String, usize>) -> Result<()> {
+    save_setting_bytes(
+        project_dir,
+        "column_max_chars",
+        &serde_json::to_vec(metrics)?,
+    )
 }
 
 pub const COLUMN_WIDTH_SAMPLE_ROWS: usize = 1_000;

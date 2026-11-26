@@ -15,13 +15,12 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 function summary(id: string): ProjectSummary {
-  return { meta: { id, name: id, source_file_name: id, created_at: "2026-11-15",
-    total_records: 2, flagged_records: 0, ioc_applied_records: 0, hidden_columns: [] } };
+  return { meta: { description: null, source_sha256: null, source_format: null, source_size: null, source_path: null, storage_version: 2, columns: [], id, name: id, source_file_name: id, created_at: "2026-11-15",
+    total_records: 2, flagged_records: 0, hidden_columns: [] } };
 }
 function detail(project: ProjectSummary): LoadProjectResponse {
   return { project, columns: [], columns_meta: [], column_max_chars: {}, column_kinds: {},
-    color_rules: [], iocs: [], hidden_columns: [], initial_rows: [{ row_index: 0, cells: {},
-      flag: "", memo: "", tags: [], bookmarked: false }] };
+    color_rules: [], iocs: [], hidden_columns: [],  };
 }
 function fixture(create: (args: CreateProjectArgs) => Promise<void> = async () => {}) {
   const projects: ProjectSummary[] = [];
@@ -68,7 +67,6 @@ test("batch imports run in selection order, isolate a middle failure, and retain
   assert.deepEqual(result.failures.map((p) => p.path), ["bad.json"]);
   assert.deepEqual(get(f.controller.state).openProjectIds, ["a.csv", "c.ndjson"]);
   assert.equal(get(f.controller.state).selectedProjectId, "c.ndjson");
-  assert.deepEqual(get(f.controller.state).projectDetail?.initial_rows, []);
   assert.deepEqual(f.loaded, ["c.ndjson"]);
   assert.equal(f.lists(), 1, "refresh the recent list once per batch");
   assert.deepEqual(get(f.controller.state).pendingFilePaths, ["bad.json"]);

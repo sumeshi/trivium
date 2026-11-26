@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use trivium_engine::jobs::{request_cancel, try_begin_job, JobContext, JobKind};
+use trivium_engine::jobs::{queue_job, request_cancel, JobContext, JobKind};
 use trivium_engine::ops::export::{
     export_project, export_project_with_job, ExportProjectPayload, ExportResult,
 };
@@ -473,7 +473,7 @@ fn cancelled_export_leaves_the_destination_untouched() {
     let destination = root.join("existing.csv");
     fs::write(&destination, "existing").expect("failed to write existing destination");
 
-    let guard = try_begin_job(JobKind::Export, Some(id)).expect("job");
+    let guard = queue_job(JobKind::Export, Some(id)).expect("job");
     assert!(request_cancel(guard.id()));
     let job = JobContext::with_job(guard, None);
 

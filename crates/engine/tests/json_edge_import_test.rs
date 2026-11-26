@@ -190,8 +190,10 @@ fn nested_empty_objects_survive_import_query_full_cell_reopen_and_csv_export() {
             },
         )
         .unwrap();
+
+        let loaded_rows = common::rows(&reopened, loaded.project.meta.id);
         assert_eq!(
-            loaded.initial_rows[0].cells[context].text.as_deref(),
+            loaded_rows[0].cells[context].text.as_deref(),
             Some("{}")
         );
     }
@@ -213,8 +215,10 @@ fn root_empty_objects_remain_records_without_a_synthetic_data_column() {
             },
         )
         .unwrap();
-        assert_eq!(loaded.initial_rows.len(), 1);
-        assert!(loaded.initial_rows[0].cells.is_empty());
+
+        let loaded_rows = common::rows(&store, loaded.project.meta.id);
+        assert_eq!(loaded_rows.len(), 1);
+        assert!(loaded_rows[0].cells.is_empty());
     }
 }
 
@@ -267,3 +271,5 @@ fn malformed_json_after_long_whitespace_reports_source_lines_and_rolls_back() {
     assert_eq!(fs::read_dir(store.staging_root()).unwrap().count(), 0);
     assert_eq!(fs::read_dir(fixture.0.join("projects")).unwrap().count(), 0);
 }
+
+mod common;

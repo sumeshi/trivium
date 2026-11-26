@@ -404,11 +404,15 @@ fn recovered_case_persists_diagnostics_and_roundtrips_annotations_through_csv() 
         },
     )
     .unwrap();
-    assert_eq!(loaded.initial_rows.len(), 2);
-    assert_eq!(loaded.initial_rows[1].flag, "critical");
-    assert_eq!(loaded.initial_rows[1].memo.as_deref(), Some(note));
-    assert_eq!(loaded.initial_rows[1].tags, ["review,comma", "日本語"]);
-    assert!(loaded.initial_rows[1].bookmarked);
+
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
+    assert_eq!(loaded_rows.len(), 2);
+    assert_eq!(loaded_rows[1].flag, "critical");
+    assert_eq!(loaded_rows[1].memo.as_deref(), Some(note));
+    assert_eq!(loaded_rows[1].tags, ["review,comma", "日本語"]);
+    assert!(loaded_rows[1].bookmarked);
     assert_eq!(restored.meta.import_report.unwrap().skipped_records, 0);
     assert_eq!(fs::read(&source).unwrap(), bytes);
 }
+
+mod common;

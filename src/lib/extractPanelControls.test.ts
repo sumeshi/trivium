@@ -6,7 +6,7 @@ const {createWorkspaceController}=await import('./src/lib/workspaceController.ts
 const workspace=createWorkspaceController();
 workspace.projectDetail.set({project:{meta:{id:'source',name:'source',source_file_name:'source.csv',total_records:4}},
  columns:['first','second'],columns_meta:[],column_kinds:{},column_max_chars:{},
- color_rules:[],iocs:[],hidden_columns:['second'],initial_rows:[]});
+ color_rules:[],iocs:[],hidden_columns:['second'],});
 workspace.queryCountKnown.set(true);
 globalThis.__workspace=workspace;
 globalThis.innerHeight=900;

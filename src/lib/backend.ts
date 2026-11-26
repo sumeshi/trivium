@@ -199,8 +199,6 @@ export interface HistogramArgs extends RequestOwned {
   searchColumns?: string[];
   flagFilter?: FlagFilterValue;
   bookmarkedOnly?: boolean;
-  /** Deprecated visible-column field; `searchColumns` takes precedence. */
-  columns?: string[];
   condition?: ConditionNode | null;
   range?: { min: string; max: string } | null;
   /** Focus the initial datetime histogram on its main populated interval. */
@@ -228,8 +226,6 @@ export interface TimeAnalysisArgs extends RequestOwned {
   searchColumns?: string[];
   flagFilter?: FlagFilterValue;
   bookmarkedOnly?: boolean;
-  /** Deprecated visible-column field; `searchColumns` takes precedence. */
-  columns?: string[];
   condition?: ConditionNode | null;
 }
 
@@ -268,8 +264,6 @@ export interface GroupTreeArgs extends RequestOwned {
   searchColumns?: string[];
   flagFilter?: FlagFilterValue;
   bookmarkedOnly?: boolean;
-  /** Deprecated visible-column field; `searchColumns` takes precedence. */
-  columns?: string[];
   condition?: ConditionNode | null;
 }
 
@@ -444,7 +438,6 @@ class NativeBackend implements Backend {
     await Promise.all([waitForHiddenColumnWrites(projectId), waitForAnnotationWrites(projectId)]);
     return invoke("load_project", {
       request: { projectId: projectId },
-      metadataOnly: true,
       requestId,
     });
   }
@@ -481,7 +474,6 @@ class NativeBackend implements Backend {
         searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
         bookmarkedOnly: args.bookmarkedOnly ?? null,
-        columns: args.columns ?? null,
         condition: args.condition ?? null,
         range: args.range ?? null,
         focus: args.focus ?? false,
@@ -503,7 +495,6 @@ class NativeBackend implements Backend {
         searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
         bookmarkedOnly: args.bookmarkedOnly ?? null,
-        columns: args.columns ?? null,
         condition: args.condition ?? null,
       },
     }, args);
@@ -564,7 +555,6 @@ class NativeBackend implements Backend {
         searchColumns: args.searchColumns ?? null,
         flagFilter: args.flagFilter ?? null,
         bookmarkedOnly: args.bookmarkedOnly ?? null,
-        columns: args.columns ?? null,
         condition: args.condition ?? null,
         groupColumns: args.groupColumns,
         groupGranularities: args.groupGranularities ?? [],

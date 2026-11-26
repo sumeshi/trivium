@@ -335,7 +335,7 @@ fn imported_phrase_membership_is_identical_in_hidden_projected_query_export_and_
     assert_eq!(preview.count, 3);
     payload.preview_token = Some(preview.preview_token);
     assert_eq!(bulk_update(&fixture.store, payload).unwrap().updated, 3);
-    let flags = load_flags(&fixture.store.flags_path(&fixture.id)).unwrap();
+    let flags = load_flags(&fixture.store.database_path(&fixture.id)).unwrap();
     let mut annotated = flags
         .into_iter()
         .map(|(index, entry)| {

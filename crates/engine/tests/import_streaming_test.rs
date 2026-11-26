@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use trivium_engine::import::csv::{BatchLimits, CsvImporter};
 use trivium_engine::jobs::{
-    request_cancel, try_begin_job, JobContext, JobKind, JobProgress, ProgressFn,
+    queue_job, request_cancel, JobContext, JobKind, JobProgress, ProgressFn,
 };
 use trivium_engine::models::ColumnMeta;
 use trivium_engine::ops::projects::{
@@ -193,7 +193,7 @@ fn cancellation_between_batches_returns_cancelled() {
     let path = root.join("rows.csv");
     fs::write(&path, "id,msg\n1,a\n2,b\n3,c\n").expect("write fixture");
 
-    let guard = try_begin_job(JobKind::Import, None).expect("begin job");
+    let guard = queue_job(JobKind::Import, None).expect("begin job");
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |progress: JobProgress| {
         if progress.message.as_deref() == Some("Reading CSV") {
@@ -237,7 +237,7 @@ fn cancelled_import_leaves_no_staging_or_project() {
     }
     fs::write(&path, body).expect("write fixture");
 
-    let guard = try_begin_job(JobKind::Import, None).expect("begin job");
+    let guard = queue_job(JobKind::Import, None).expect("begin job");
     let id = guard.id();
     let emit: ProgressFn = Arc::new(move |_progress: JobProgress| {
         // The first progress report is the copy stage. Cancelling there makes
@@ -249,7 +249,7 @@ fn cancelled_import_leaves_no_staging_or_project() {
     let error = create_project_with_job(&store, payload(&path), &job)
         .expect_err("cancelled import must fail");
     assert_eq!(error.to_string(), "Cancelled.");
-    assert!(store.all().is_empty(), "no project may be registered");
+    assert!(store.try_all().unwrap().is_empty(), "no project may be registered");
     assert!(
         fs::read_dir(store.staging_root())
             .expect("staging root")
@@ -280,10 +280,7 @@ fn column_width_estimate_uses_only_the_leading_sample() {
 
     let summary = create_project_with_job(&store, payload(&path), &JobContext::none())
         .expect("create project");
-    let metrics_path = store
-        .project_dir(&summary.meta.id)
-        .join("column_max_chars.json");
-    let metrics = load_column_metrics(&metrics_path)
+    let metrics = load_column_metrics(&store.project_dir(&summary.meta.id))
         .expect("load metrics")
         .expect("metrics were written during import");
 
@@ -296,7 +293,7 @@ fn column_width_estimate_uses_only_the_leading_sample() {
 }
 
 #[test]
-fn legacy_width_estimate_scans_only_the_leading_sample() {
+fn width_estimate_scans_only_the_leading_sample() {
     let mut values: Vec<String> = (0..COLUMN_WIDTH_SAMPLE_ROWS)
         .map(|_| "short".to_string())
         .collect();

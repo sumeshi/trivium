@@ -29,7 +29,7 @@ pub const MAX_QUEUED_JOBS: usize = 32;
 
 pub use scheduler::{
     active_jobs, cancel_request_jobs, is_cancelled, queue_job, queue_job_with_request,
-    request_cancel, scheduler_stats, try_begin_job, JobGuard, SchedulerStats,
+    request_cancel, scheduler_stats, JobGuard, SchedulerStats,
 };
 
 /// Minimum interval between two progress notifications from one job.
@@ -84,8 +84,8 @@ pub fn cancelled_error() -> AppError {
 
 /// Cooperative cancellation and throttled progress for an engine operation.
 ///
-/// `JobContext::none()` keeps the old engine behaviour for direct callers and
-/// tests. Tauri commands pass a context backed by a [`JobGuard`].
+/// `JobContext::none()` runs synchronous callers without cancellation or
+/// progress callbacks. Tauri commands pass a context backed by a [`JobGuard`].
 pub struct JobContext {
     guard: Option<JobGuard>,
     progress: Mutex<Option<ThrottledProgress>>,

@@ -46,7 +46,6 @@ impl Signature {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct ColumnProfile {
-    #[serde(default)]
     inference_version: u32,
     signature: Signature,
     pub kinds: HashMap<String, String>,
@@ -124,8 +123,7 @@ pub(super) fn save_import_profile(
     .map_err(AppError::from)
 }
 
-/// New imports already have a profile. Old projects build it once through
-/// projected bounded batches, then use footer/stat validation on later opens.
+/// Use a matching cached profile or rebuild it through projected batches.
 pub(super) fn load_profile(
     project_dir: &Path,
     rows: usize,
@@ -138,7 +136,6 @@ pub(super) fn load_profile(
     let signature = Signature::read(&path, rows, schema)?;
     let ids = columns.ids();
     let cached = load_setting_bytes(project_dir, PROFILE_KEY).map_err(AppError::from)?;
-    let had_profile = cached.is_some();
     let mut matching_widths = None;
     if let Some(bytes) = cached {
         if let Ok(profile) = serde_json::from_slice::<ColumnProfile>(&bytes) {
@@ -156,24 +153,12 @@ pub(super) fn load_profile(
             }
         }
     }
-    // Preserve the existing leading-sample width estimate when migrating a
-    // legacy project. A changed Parquet signature requires fresh estimates.
-    let cached_widths = if matching_widths.is_some() {
-        matching_widths
-    } else if had_profile {
-        None
-    } else {
-        load_setting_bytes(project_dir, "column_max_chars")
-            .map_err(AppError::from)?
-            .and_then(|bytes| serde_json::from_slice::<HashMap<String, usize>>(&bytes).ok())
-            .filter(|widths| ids.iter().all(|id| widths.contains_key(id)))
-    };
-    let mut remaining_width_rows = if cached_widths.is_some() {
+    let mut remaining_width_rows = if matching_widths.is_some() {
         0
     } else {
         COLUMN_WIDTH_SAMPLE_ROWS
     };
-    let mut widths = cached_widths.unwrap_or_else(|| {
+    let mut widths = matching_widths.unwrap_or_else(|| {
         ids.iter()
             .map(|id| (id.clone(), id.chars().count()))
             .collect()

@@ -123,6 +123,7 @@ fn csv_duplicate_and_empty_headers_get_positional_ids() {
     )
     .expect("load failed");
 
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     let sources: Vec<&str> = loaded
         .columns_meta
         .iter()
@@ -177,7 +178,7 @@ fn csv_duplicate_and_empty_headers_get_positional_ids() {
         "an empty header gets an auxiliary label while keeping its empty source"
     );
     assert!(!loaded.columns.iter().any(|id| id == "__original"));
-    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
+    assert!(!loaded_rows[0].cells.contains_key("__original"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -341,7 +342,7 @@ fn restore_annotations_is_explicit_and_keeps_the_columns() {
 
     let without = create(&store, &path, None);
     assert_eq!(without.meta.flagged_records, 0);
-    let flags = load_flags(&store.project_dir(&without.meta.id).join("flags.json"))
+    let flags = load_flags(&store.database_path(&without.meta.id))
         .expect("load flags");
     assert!(flags.is_empty(), "trivium-* must not become annotations by default");
     let loaded_without = load_project(
@@ -362,7 +363,7 @@ fn restore_annotations_is_explicit_and_keeps_the_columns() {
 
     let with = create(&store, &path, Some(true));
     assert_eq!(with.meta.flagged_records, 1);
-    let flags = load_flags(&store.project_dir(&with.meta.id).join("flags.json"))
+    let flags = load_flags(&store.database_path(&with.meta.id))
         .expect("load flags");
     let entry = flags.get(&0).expect("row 0 annotation");
     assert_eq!(entry.flag, "critical");
@@ -412,6 +413,7 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     let id = summary.meta.id;
     let loaded = load_project(&store, ProjectRequest { project_id: id }).expect("load failed");
 
+    let loaded_rows = common::rows(&store, loaded.project.meta.id);
     let sources: Vec<&str> = loaded
         .columns_meta
         .iter()
@@ -446,15 +448,15 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
         ]
     );
     assert!(!loaded.columns.iter().any(|id| id == "__original"));
-    assert!(!loaded.initial_rows[0].cells.contains_key("__original"));
+    assert!(!loaded_rows[0].cells.contains_key("__original"));
 
     let literal = "c000001".to_string();
     let nested = "c000002".to_string();
-    assert_eq!(loaded.initial_rows.len(), 3, "the empty object is one row");
-    assert_eq!(common::cell_text(&loaded.initial_rows[0], &literal), Some("1"));
-    assert_eq!(common::cell_text(&loaded.initial_rows[0], &nested), Some("2"));
-    assert_eq!(common::cell_text(&loaded.initial_rows[2], &literal), Some("3"));
-    assert_eq!(common::cell_text(&loaded.initial_rows[2], &nested), Some("4"));
+    assert_eq!(loaded_rows.len(), 3, "the empty object is one row");
+    assert_eq!(common::cell_text(&loaded_rows[0], &literal), Some("1"));
+    assert_eq!(common::cell_text(&loaded_rows[0], &nested), Some("2"));
+    assert_eq!(common::cell_text(&loaded_rows[2], &literal), Some("3"));
+    assert_eq!(common::cell_text(&loaded_rows[2], &nested), Some("4"));
 
     let collision = query(
         &store,

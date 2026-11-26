@@ -92,10 +92,6 @@ def verify_preset_filter_snapshot(web, data: dict, case: dict, source: Path, ids
     web.results(1)
     assert web.query() == expected_query, "Reopening keeps all restored filter fields"
     web.drawer("Presets")
-    legacy_path = root / "legacy-without-filters.json"
-    legacy_path.write_text(json.dumps({key: value for key, value in base.items() if key != "filters"}), encoding="utf-8")
-    _load_preset(web, legacy_path)
-    assert web.query() == expected_query, "Older presets leave omitted filters alone"
     unknown_path = root / "unknown-search-column-preset.json"
     unknown_path.write_text(json.dumps({**saved, "filters": {**expected_filters, "searchColumns": ["unknown-search-column"]}}), encoding="utf-8")
     _picker(web, unknown_path)
@@ -108,7 +104,7 @@ def verify_preset_filter_snapshot(web, data: dict, case: dict, source: Path, ids
     web.applied(projectId=project_id, **base["filters"])
     web.results(3)
     return {"saved_filters": expected_filters, "file_save_load_restore": True,
-            "reopen_retains_restored_filters": True, "legacy_omission_preserves_filters": True,
+            "reopen_retains_restored_filters": True,
             "unknown_search_column_preserves_view": True, "explicit_empty_defaults_reset_filters": True}
 
 
