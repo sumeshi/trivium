@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs,
     io::Read,
     path::{Path, PathBuf},
 };
@@ -16,7 +16,8 @@ const SOURCE: &str = "source.csv";
 /// Check an owned marker, not a user-editable name/description or filename.
 /// Ordinary case discovery and addressing remain unchanged.
 pub fn is_temporary_project(store: &ProjectsStore, id: &Uuid) -> bool {
-    let Ok(mut marker) = File::open(store.project_dir(id).join(MARKER)) else {
+    let Ok(mut marker) = crate::source_file::open_regular(&store.project_dir(id).join(MARKER))
+    else {
         return false;
     };
     if marker

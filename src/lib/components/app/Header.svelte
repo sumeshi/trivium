@@ -19,10 +19,15 @@
   let menuOpen = false;
   let appearanceOpen = false;
   let importReportOpen = false;
+  let reportProjectId = projectDetail?.project.meta.id ?? null;
   let copyMessage = '';
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: meta = projectDetail?.project.meta;
+  $: if ((meta?.id ?? null) !== reportProjectId) {
+    reportProjectId = meta?.id ?? null;
+    importReportOpen = false;
+  }
   $: fileName = meta?.source_file_name || meta?.name || '';
   $: sourcePath = meta?.source_path || '';
   const shortSha = (sha: string) => `${sha.slice(0, 12)}${sha.length > 12 ? '…' : ''}`;
