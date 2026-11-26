@@ -264,15 +264,9 @@ fn append_searchable(joined: &mut String, text: &str) {
     if !joined.is_empty() {
         joined.push(' ');
     }
-    if text.is_ascii() {
-        joined.extend(
-            text.bytes()
-                .map(|byte| char::from(byte.to_ascii_lowercase())),
-        );
-    } else {
-        // Keep Rust's contextual Unicode lowercase rules (not per-char folding).
-        joined.push_str(&text.to_lowercase());
-    }
+    // Exact equality and regex predicates use the original selected text.
+    // Case-insensitive text operators fold it in PreparedCondition::eval_text.
+    joined.push_str(text);
 }
 
 fn resolve_columns(column_names: &[String], requested: &[String]) -> Result<Vec<String>, AppError> {
