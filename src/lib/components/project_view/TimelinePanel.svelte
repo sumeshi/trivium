@@ -93,14 +93,14 @@
   };
 
   const selectBuckets = (low: number, high: number) => {
-    const first = histogram?.buckets[low], last = histogram?.buckets[high];
-    if (!first?.start || !last?.end || !column) return;
-    const min = parseTimelineNanos(first.start), rawEnd = parseTimelineNanos(last.end);
+    const selected = histogram ? timelineBucketSelection(histogram.buckets, low, high) : null;
+    if (!selected?.start || !selected.end || !column) return;
+    const min = parseTimelineNanos(selected.start), rawEnd = parseTimelineNanos(selected.end);
     if (min === null || rawEnd === null) return;
-    const max = rawEnd - (last.end_inclusive ? 0n : 1n);
+    const max = rawEnd - (selected.end_inclusive ? 0n : 1n);
     if (max >= min) {
       fullPeriod = false;
-      filterByRange(column, first.start, formatTimelineNanos(max));
+      filterByRange(column, selected.start, formatTimelineNanos(max));
     }
   };
 

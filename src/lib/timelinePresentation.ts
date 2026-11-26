@@ -23,8 +23,12 @@ export function initialTimelineBucket(buckets: readonly HistogramBucket[]): numb
 export function timelineBucketSelection(buckets: readonly HistogramBucket[], low: number, high: number): HistogramBucket | null {
   if (!Number.isInteger(low) || !Number.isInteger(high) || low < 0 || high < low || high >= buckets.length) return null;
   const selected = buckets.slice(low, high + 1);
+  const last = selected.at(-1)!;
   return {
-    start: selected[0].start, end: selected.at(-1)!.end, end_inclusive: selected.at(-1)!.end_inclusive,
+    start: selected[0].start, end: last.end,
+    // Empty repeated intervals cannot remove an endpoint included earlier in
+    // the selection, as occurs after the first bucket of a constant range.
+    end_inclusive: selected.some(bucket => bucket.end === last.end && bucket.end_inclusive),
     count: selected.reduce((sum, bucket) => sum + bucket.count, 0),
     flags: {
       safe: selected.reduce((sum, bucket) => sum + bucket.flags.safe, 0),

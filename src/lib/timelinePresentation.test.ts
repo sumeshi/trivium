@@ -67,3 +67,35 @@ test("drag readout sums exact existing bucket counts and preserves endpoint incl
   assert.equal(timelineBucketSelection([a], -1, 0), null);
   assert.equal(timelineBucketSelection([a], 1, 0), null);
 });
+
+test("selection bounds retain inclusive endpoints before repeated empty intervals", () => {
+  const point = "2026-11-12T00:00:00.000000001";
+  const end = "2026-11-12T00:00:00.000000003";
+  const flags = { safe: 0, suspicious: 0, critical: 0, unflagged: 0 };
+  const empty = { start: point, end: point, end_inclusive: false, count: 0, flags };
+  const occupied = { ...empty, end_inclusive: true, count: 1, flags: { ...flags, unflagged: 1 } };
+  const constant = [occupied, empty, empty];
+  const selected = timelineBucketSelection(constant, 0, 2)!;
+  assert.deepEqual([selected.start, selected.end, selected.end_inclusive, selected.count], [point, point, true, 1]);
+  const emptySelection = timelineBucketSelection(constant, 1, 2)!;
+  assert.deepEqual([emptySelection.start, emptySelection.end, emptySelection.end_inclusive, emptySelection.count], [point, point, false, 0]);
+
+  const positive = [{ ...occupied, end }, { ...empty, start: end, end }];
+  const positiveSelection = timelineBucketSelection(positive, 0, 1)!;
+  assert.deepEqual([positiveSelection.start, positiveSelection.end, positiveSelection.end_inclusive], [point, end, true]);
+});
+
+test("tiny ranges retain exclusive intermediate edges and inclusive final points", () => {
+  const start = "2026-11-12T00:00:00.000000001";
+  const end = "2026-11-12T00:00:00.000000002";
+  const flags = { safe: 0, suspicious: 0, critical: 0, unflagged: 0 };
+  const buckets = [
+    { start, end, end_inclusive: false, count: 1, flags: { ...flags, unflagged: 1 } },
+    { start: end, end, end_inclusive: false, count: 0, flags },
+    { start: end, end, end_inclusive: true, count: 1, flags: { ...flags, unflagged: 1 } },
+  ];
+  const partial = timelineBucketSelection(buckets, 0, 1)!;
+  assert.deepEqual([partial.start, partial.end, partial.end_inclusive, partial.count], [start, end, false, 1]);
+  const full = timelineBucketSelection(buckets, 0, 2)!;
+  assert.deepEqual([full.start, full.end, full.end_inclusive, full.count], [start, end, true, 2]);
+});

@@ -98,3 +98,54 @@ try{
  assert.equal(state().error,'');
 }finally{panel.$destroy();workspace.dispose();}
 `,15_000));
+
+test('dragging across a constant timestamp and empty trailing intervals filters that instant', () => runSvelteTest(String.raw`
+const {get}=await import('svelte/store');
+const {createWorkspaceController}=await import('./src/lib/workspaceController.ts');
+const {parseTimelineNanos}=await import('./src/lib/timelineRange.ts');
+const flush=async()=>{for(let i=0;i<6;i++){await Promise.resolve();await tick();}};
+const workspace=createWorkspaceController();
+const timestamp='2026-11-19T00:00:00.000000001';
+// Equal endpoints put every valid row in the first inclusive bucket; the
+// remaining displayed buckets are empty half-open intervals at the same point.
+const buckets=Array.from({length:60},(_,index)=>({
+ start:timestamp,end:timestamp,count:index===0?1:0,end_inclusive:index===0,
+ flags:{safe:0,suspicious:0,critical:0,unflagged:index===0?1:0},
+}));
+workspace.backend.set({histogram:async()=>({column:'Timestamp',kind:'datetime',
+ buckets,missing:1,invalid:1,outside:0,full_range:{min:timestamp,max:timestamp},auto_focused:false})});
+workspace.projectDetail.set({project:{meta:{id:'constant-case'}},columns:['Timestamp'],columns_meta:[],
+ column_kinds:{Timestamp:'string'},column_max_chars:{},hidden_columns:[],iocs:[],initial_rows:[]});
+workspace.currentProjectId.set('constant-case');
+globalThis.__workspace=workspace;
+globalThis.__annotations=writable({});
+const Panel=await compileHeadless('TimelinePanel');
+const panel=await mountHeadless(Panel,{open:true,column:'Timestamp'});
+const state=()=>panel.$capture_state();
+try{
+ await new Promise(done=>setTimeout(done,160));await flush();
+ assert.equal(state().histogram.buckets[0].count,1);
+ assert.equal(get(workspace.conditionPayload),null);
+ panel.$inject_state({svgEl:{
+  getScreenCTM:()=>({inverse:()=>({})}),
+  createSVGPoint:()=>({x:0,y:0,matrixTransform(){return {x:this.x,y:this.y};}}),
+ }});
+ const pointer=x=>({button:0,clientX:x,clientY:20,preventDefault(){}});
+ state().startDrag(pointer(1));await flush();
+ assert.equal(state().dragStart,0);
+ state().moveDrag(pointer(999));await flush();
+ assert.equal(state().dragEnd,59);
+ const preview=state().inspectedBucket;
+ assert.deepEqual([preview.start,preview.end,preview.end_inclusive,preview.count],
+  [timestamp,timestamp,true,1],'the selection preview includes the same exact point as the filter');
+ state().endDrag();await flush();
+ const condition=get(workspace.conditionPayload);
+ assert.ok(condition,'a drag containing the event must apply a range even with empty trailing intervals');
+ const terms=condition.children;
+ assert.ok(terms.some(term=>term.op==='regex'&&term.values[0]==='\\S'));
+ const bounds=terms.filter(term=>term.op==='ge'||term.op==='le');
+ assert.deepEqual(bounds.map(term=>parseTimelineNanos(term.values[0])),[
+  parseTimelineNanos(timestamp),parseTimelineNanos(timestamp),
+ ]);
+}finally{panel.$destroy();workspace.dispose();}
+`));
