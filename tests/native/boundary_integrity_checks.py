@@ -20,14 +20,14 @@ def _rows(web, owner: str) -> list[dict]:
 
 
 def _rejected(web, name: str, payload: dict, expected_errors: list[dict]) -> None:
-    start = len(web.trace())
+    start = web.checkpoint()
     response = web.async_script("""
       const done=arguments[arguments.length-1];
       window.__TAURI_INTERNALS__.invoke(arguments[0],{payload:arguments[1]})
         .then(()=>done({ok:true}),error=>done({ok:false,reason:String(error)}));
     """, name, payload)
     assert response["ok"] is False and response["reason"], (name, response)
-    entries = [entry for entry in web.trace()[start:] if entry["name"] == name and entry.get("error") == response["reason"]]
+    entries = [entry for entry in web.trace(after=start) if entry["name"] == name and entry.get("error") == response["reason"]]
     assert len(entries) == 1, (name, entries)
     expected_errors.append({"name": name, "request": entries[0]["request"], "error": response["reason"]})
 
@@ -37,11 +37,11 @@ def _ioc_queries(web, owner: str, root: Path, report: dict) -> None:
     web.command("save_iocs", {"projectId": owner, "entries": saved})
     # Direct setup writes do not update the active case's owned editor draft.
     # Reload through the UI before checking its saved baseline.
-    start = len(web.trace())
+    start = web.checkpoint()
     web.named("Workspace options")
     web.named("Reload saved project", ".workspace-options")
     wait_for(lambda: any(entry["name"] == "load_project" and entry["request"].get("projectId") == owner
-                         and "result" in entry for entry in web.trace()[start:]),
+                         and "result" in entry for entry in web.trace(after=start)),
              bool, "reload the saved IOC rules into the active case editor")
     web.results(2)
     initial = _rows(web, owner)
@@ -117,7 +117,7 @@ def _export(web, destination: Path) -> None:
 
 
 def _export_calls(web, owner: str, start: int) -> list[dict]:
-    return [entry for entry in web.trace()[start:] if entry["name"] == "export_project" and entry["request"].get("projectId") == owner]
+    return [entry for entry in web.trace(after=start) if entry["name"] == "export_project" and entry["request"].get("projectId") == owner]
 
 
 def _read_critical(destination: Path) -> list[dict]:
@@ -139,7 +139,7 @@ def _ordered_export(web, owner: str, root: Path, report: dict) -> None:
         web.named("Critical", '.data-row[data-row-index="0"]')
         web.flags(["critical"])
         web.results(0)
-        start = len(web.trace())
+        start = web.checkpoint()
         destination = root / "ordered-export.csv"
         _export(web, destination)
         web.async_script("const done=arguments[arguments.length-1];setTimeout(()=>done(true),150);")
@@ -161,7 +161,7 @@ def _ordered_export(web, owner: str, root: Path, report: dict) -> None:
         web.named("Safe", '.data-row[data-row-index="0"]')
         wait_for(lambda: web.script("return !window.__boundaryTransport.failNext&&document.querySelector('.toast.error')?.textContent.includes('Failed to save flag.');"),
                  bool, "the rejected native annotation response is shown")
-        start = len(web.trace())
+        start = web.checkpoint()
         _export(web, blocked)
         wait_for(lambda: web.script("return document.querySelector('.toast.error')?.textContent??'';"),
                  lambda text: "Export stopped" in text and "annotation could not be saved" in text,

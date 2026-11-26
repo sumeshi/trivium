@@ -282,7 +282,7 @@ def _failed_save(app, root: Path, report: dict, *, sqlite_failure=False) -> tupl
     web.command("update_flag", {"projectId": owner, "row_index": 0, "flag": "critical"})
     _open_case(web, case)
     database = None
-    start = len(web.trace())
+    start = web.checkpoint()
     try:
         if sqlite_failure:
             # Force a real failed native write, rather than only a frontend
@@ -301,7 +301,7 @@ def _failed_save(app, root: Path, report: dict, *, sqlite_failure=False) -> tupl
             database.execute("ROLLBACK")
             database.close()
     if sqlite_failure:
-        failed = [entry for entry in web.trace()[start:] if entry["name"] == "update_flag"
+        failed = [entry for entry in web.trace(after=start) if entry["name"] == "update_flag"
                   and entry["request"].get("projectId") == owner and entry.get("error")]
         assert len(failed) == 1 and any(word in failed[0]["error"].lower() for word in ["locked", "busy"]), failed
         report.setdefault("boundary_expected_errors", []).append({"name": failed[0]["name"],

@@ -166,7 +166,7 @@ def _fit_visible(web, column: str) -> dict:
     """, column), lambda value: value is not None and value["below"] >= value["height"] * 2
         and "offscreen-long" in value["text"], "the long cached value is mounted in overscan, below the visible viewport")
     _settle(web)
-    before, checkpoint = web.query(), len(web.trace())
+    before, checkpoint = web.query(), web.checkpoint()
     handle = web.node(f'.data-header [data-column-id="{column}"] .column-resize-handle')
     point = web.script("""
       const e=arguments[0],r=e.getBoundingClientRect(),x=Math.round(r.left+r.width/2),y=Math.round(r.top+r.height/2);
@@ -198,7 +198,7 @@ def _fit_visible(web, column: str) -> dict:
         assert visible and all(row["id"] < 82 and row["fits"] for row in visible), visible
         _settle(web)
         assert web.query() == before, "Auto-fit changes presentation only"
-        assert not [entry for entry in web.trace()[checkpoint:]
+        assert not [entry for entry in web.trace(after=checkpoint)
                     if entry["name"] in {"query_project_rows", "get_cell", "locate_project_row"}], "Auto-fit must not scan or fetch source data"
         return {"trusted_double_click": True, "width": widths, "visible_rows": [row["id"] for row in visible],
                 "offscreen_long_value_ignored": True, "mounted_overscan_value": overscan, "no_source_reads": True}

@@ -103,10 +103,10 @@ def _verify_mixed_rule_roundtrip(web, owner: str, raw: str, ids: dict, original:
             assert web.script("return document.querySelector(arguments[0]).value;", f'[aria-label="Rule column {index + 1}"]') == ids["message"]
         else:
             assert web.script("return document.querySelector(arguments[0]).value;", f'[aria-label="Rule query {index + 1}"]') == query
-        before = len(web.trace())
+        before = web.checkpoint()
         web.named("Apply", f'.ioc-row[data-rule-index="{index}"]')
         _notice(web, "2 rows annotated.")
-        updates = [item for item in web.trace()[before:] if item["name"] == "bulk_update"]
+        updates = [item for item in web.trace(after=before) if item["name"] == "bulk_update"]
         assert len(updates) == 1 and updates[0]["request"]["flag"] == entry["flag"]
         assert updates[0]["request"]["add_tags"] == [entry["tag"]]
         assert updates[0]["request"]["search"] == entry["query"]
@@ -227,14 +227,14 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         web.results(1)
         web.click(web.node('.data-row input[aria-label="Select row 1"]'))
         query, selection = web.query(), selected()
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         _context(web, ids["message"])
         web.named("Create IOC rule…", '[aria-label="Cell actions"]')
         wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Rule value 1\"]')?.value;"),
                  lambda value: value == raw, "cell action resolves the complete original spelling")
         assert web.script("return document.querySelector('.ioc-editor .flag-select').dataset.flag;") == "critical"
         assert web.script("return document.querySelector('[aria-label=\"Rule column 1\"]').value;") == ids["message"]
-        assert any(e["name"] == "get_cell" and e["request"].get("columnId") == ids["message"] for e in web.trace()[checkpoint:])
+        assert any(e["name"] == "get_cell" and e["request"].get("columnId") == ids["message"] for e in web.trace(after=checkpoint))
         assert saved_rules() == [] and rows() == original, "Creating a draft neither saves rules nor annotates"
         cell_layout = _editor_layout(web)
         for _ in range(2):
@@ -257,11 +257,11 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         web.named(f"Close {source.name}")
         wait_for(lambda: web.view().get("toast", ""), lambda text: "Save or discard your IOC rules" in text, "dirty IOC blocks closing its tab")
         assert web.state()["active"] == f"project-tab-{owner}"
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Workspace options")
         web.named("Reload saved project", ".workspace-options")
         wait_for(lambda: web.view().get("toast", ""), lambda text: "Save or discard your IOC rules" in text, "dirty IOC blocks reload")
-        assert not any(e["name"] == "load_project" for e in web.trace()[checkpoint:])
+        assert not any(e["name"] == "load_project" for e in web.trace(after=checkpoint))
         _panel(web)
         web.screenshot(evidence / "ioc-cell-draft-panel.png")
         web.named("Save rules", ".ioc-panel")
@@ -269,10 +269,10 @@ def verify_cell_iocs(web, data, root: Path, evidence: Path, report: dict, picker
         expected = [{"flag": "critical", "tag": "cell-review", "query": "", "cell": {"column": ids["message"], "value": raw}}]
         assert saved_rules() == expected and rows() == original
         assert web.query() == query and selected() == selection, "Saving definitions preserves filters and selection"
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Apply", ".ioc-row")
         _notice(web, "2 rows annotated.")
-        operations = [e for e in web.trace()[checkpoint:] if e["name"] in {"bulk_preview", "bulk_update"}]
+        operations = [e for e in web.trace(after=checkpoint) if e["name"] in {"bulk_preview", "bulk_update"}]
         assert [e["name"] for e in operations] == ["bulk_preview", "bulk_update"]
         assert all(e["request"]["search"] == "" and e["request"]["condition"] == {"column": ids["message"], "op": "eq", "values": [raw], "negated": False} for e in operations)
         applied = rows()

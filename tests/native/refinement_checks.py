@@ -30,7 +30,7 @@ def _scope_without_search(web, data, report) -> None:
     _settle(web)
     before = web.state()
     assert sorted(before["selectedIds"]) == [242, 243], before
-    start = len(web.trace())
+    start = web.checkpoint()
     _scope(web, "cohort")
     web.write('input[aria-label="Search rows"]', "   ")
     _scope(web, "cohort")
@@ -38,7 +38,7 @@ def _scope_without_search(web, data, report) -> None:
     time.sleep(.4)  # Wait beyond the real search debounce; no reads should start.
     _settle(web)
     after = web.state()
-    reads = [entry for entry in web.trace()[start:] if entry["name"] in READS]
+    reads = [entry for entry in web.trace(after=start) if entry["name"] in READS]
     assert not reads, reads
     assert abs(after["scrollTop"] - before["scrollTop"]) <= 1 and after["scrollLeft"] == before["scrollLeft"], (before, after)
     assert after["selectedIds"] == before["selectedIds"] and after["selectionTotal"] == 2, (before, after)

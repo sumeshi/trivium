@@ -19,7 +19,7 @@ def _settle(web) -> None:
 
 
 def _valid_value_check(web, kind: str, op: str, value: str, checkpoint: int) -> None:
-    entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
+    entry = wait_for(lambda: next((item for item in reversed(web.trace(after=checkpoint))
         if item["name"] == "validate_condition_values" and item["request"].get("kind") == kind
         and item["request"].get("op") == op and item["request"].get("values") == [value]
         and ("result" in item or "error" in item)), None), bool, "the real input validator completes")
@@ -158,7 +158,7 @@ def _column_and_dates(web, data, report) -> None:
     assert accepted["valid"] and accepted["values"][0]["parsedNanos"] == accepted["values"][1]["parsedNanos"], accepted
     invalid = web.command("validate_condition_values", {"kind": "datetime", "op": "ge", "values": ["2026-13-42"]})
     assert not invalid["valid"] and invalid["values"][0]["error"], invalid
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.write('input[aria-label="Value"]', offset)
     _valid_value_check(web, "datetime", "ge", offset, checkpoint)
     compact_help = web.script("""

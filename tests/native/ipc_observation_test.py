@@ -44,6 +44,48 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stdout.strip(), "OBSERVATION_COMPLETE", "Every asynchronous assertion must finish")
 
+    def workspace_cursor_api(self):
+        class Capture:
+            def script(self, source, *args):
+                return source
+        checkpoint = WorkspaceView.checkpoint(Capture())
+        trace = WorkspaceView.trace(Capture(), after=0)
+        return (f"const checkpoint=new Function({json.dumps(checkpoint)});"
+                f"const trace=after=>new Function({json.dumps(trace)})(after);\n")
+
+    def test_workspace_checkpoints_survive_trace_eviction_and_keep_the_memory_bound(self):
+        self.check(WorkspaceView, self.workspace_cursor_api() + r"""
+assert.equal(checkpoint(),0);assert.deepEqual(trace(0),[]);value={};
+for(let i=0;i<1999;i++)await(await call('list_projects')).json();
+const beforeFull=checkpoint();assert.equal(beforeFull,1999);
+await(await call('load_project')).json();const atFull=checkpoint();
+assert.equal(atFull,2000);assert.equal(window.__workspaceIpc.length,2000);
+await(await call('update_flag')).json();await(await call('load_project')).json();
+assert.equal(checkpoint(),2002);assert.equal(window.__workspaceIpc.length,2000);
+assert.equal(window.__workspaceIpc[0].sequence,3);
+assert.deepEqual(trace(beforeFull).map(entry=>entry.name),['load_project','update_flag','load_project']);
+assert.deepEqual(trace(atFull).map(entry=>entry.name),['update_flag','load_project']);
+assert.equal(trace(null).length,2000);assert.deepEqual(trace(checkpoint()),[]);
+assert.equal(trace(2).length,2000,'The last evicted request is a valid boundary');
+assert.throws(()=>trace(1),/checkpoint exceeded retained history/,'Missing history must not produce a false absence');
+assert.throws(()=>trace(checkpoint()+1),/checkpoint is ahead of this session/);
+assert.equal(reads,2002,'Cursor reads do not decode an IPC response again');
+""")
+
+    def test_workspace_checkpoints_track_issue_order_when_an_older_write_finishes_late(self):
+        self.check(WorkspaceView, self.workspace_cursor_api() + r"""
+window.__workspaceBeforeCommit={name:'update_flag',projectId:'p1',ready:false};
+const pending=call('update_flag');await tick();
+const beforeLoad=checkpoint();assert.equal(beforeLoad,1);
+assert.deepEqual(trace(beforeLoad),[],'An existing pending write is before the boundary');
+window.__workspaceBeforeCommit.release();await(await pending).json();
+assert.deepEqual(trace(beforeLoad),[],'Completing an older write does not issue a new request');
+await(await call('load_project')).json();
+const loaded=trace(beforeLoad);assert.equal(loaded.length,1);
+assert.equal(loaded[0].name,'load_project');assert.equal(loaded[0].sequence,2);
+assert.ok(loaded[0].decode_done>=loaded[0].started);
+""")
+
     def test_both_observers_forward_before_the_only_decode_and_keep_error_stages(self):
         for owner, trace in [(WebView, '__navigationIpc'), (WorkspaceView, '__workspaceIpc')]:
             with self.subTest(observer=owner.__name__):

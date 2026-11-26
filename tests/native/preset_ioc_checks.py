@@ -32,10 +32,10 @@ def _rows(web, project_id: str) -> list[dict]:
 
 
 def _load_preset(web, source: Path) -> None:
-    start = len(web.trace())
+    start = web.checkpoint()
     _picker(web, source)
     web.named("Load preset file", "#analysis-drawer")
-    wait_for(lambda: [entry for entry in web.trace()[start:]
+    wait_for(lambda: [entry for entry in web.trace(after=start)
                      if entry["name"] == "set_hidden_columns" and "result" in entry],
              bool, "the loaded preset's presentation is applied")
     wait_for(lambda: web.script("return document.querySelector('#analysis-drawer').textContent;"),
@@ -241,10 +241,10 @@ def verify_presets_iocs(web, data, root: Path, evidence: Path, report: dict) -> 
         web.write('input[aria-label="Rule query 1"]', "")
         assert web.script("return [...document.querySelectorAll('.ioc-rule-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;"), "A blank rule cannot apply"
         web.write('input[aria-label="Rule query 1"]', "message:beacon")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".ioc-row")
         wait_for(lambda: web.script("return document.querySelector('.ioc-panel').textContent;"), lambda text: "2 rows annotated." in text, "IOC apply stays open and reports its committed count")
-        operations = [entry for entry in web.trace()[start:] if entry["name"] in {"bulk_preview", "bulk_update"}]
+        operations = [entry for entry in web.trace(after=start) if entry["name"] in {"bulk_preview", "bulk_update"}]
         assert [entry["name"] for entry in operations] == ["bulk_preview", "bulk_update"], operations
         assert all(entry["request"]["target"] == "filtered" and entry["request"]["search"] == "message:beacon"
                    for entry in operations), "A direct rule uses its own all-row query, independent of the current table search"

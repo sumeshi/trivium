@@ -182,7 +182,7 @@ class WorkspaceView(WebView):
 
     def instrument(self) -> None:
         assert self.script("""
-          window.__workspaceErrors=[];window.__workspaceIpc=[];
+          window.__workspaceErrors=[];window.__workspaceIpc=[];window.__workspaceIpcSequence=0;
           addEventListener('error',e=>window.__workspaceErrors.push(e.message));
           addEventListener('unhandledrejection',e=>window.__workspaceErrors.push(String(e.reason)));
           const original=window.fetch;
@@ -192,7 +192,7 @@ class WorkspaceView(WebView):
             let args={};
             try{args=JSON.parse(typeof options.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
             const request=args?.payload??args?.request??{};
-            const entry={name,request,requestId:args.requestId??null,
+            const entry={sequence:++window.__workspaceIpcSequence,name,request,requestId:args.requestId??null,
               metadataOnly:args.metadataOnly??null,started:performance.now()};
             window.__workspaceIpc.push(entry);
             if(window.__workspaceIpc.length>2000)window.__workspaceIpc.shift();
@@ -238,8 +238,20 @@ class WorkspaceView(WebView):
           window.fetch=wrapped;return window.fetch===wrapped;
         """), "Real native IPC instrumentation must be active"
 
-    def trace(self) -> list[dict[str, Any]]:
-        return self.script("return window.__workspaceIpc;")
+    def checkpoint(self) -> int:
+        """Use an issued-request sequence, not an index into the bounded trace."""
+        return self.script("return window.__workspaceIpcSequence;")
+
+    def trace(self, *, after: int | None = None) -> list[dict[str, Any]]:
+        return self.script("""
+          const entries=window.__workspaceIpc,after=arguments[0];
+          if(after===null)return entries;
+          if(after>window.__workspaceIpcSequence)
+            throw Error('Native IPC checkpoint is ahead of this session');
+          if(entries.length&&after<entries[0].sequence-1)
+            throw Error('Native IPC checkpoint exceeded retained history');
+          return entries.filter(entry=>entry.sequence>after);
+        """, after)
 
     def visible_column_count(self) -> int:
         return self.script("return Number(document.querySelector('[aria-label=\"Choose visible columns\"] .count-chip').textContent.split('/')[0]);")
@@ -295,7 +307,7 @@ class WorkspaceView(WebView):
         return {key: request.get(key) for key in ["projectId", "search", "searchColumns", "condition", "flagFilter", "bookmarkedOnly", "sortKey", "sortDirection"]}
 
     def refreshed(self, after: int) -> None:
-        wait_for(lambda: next((entry for entry in reversed(self.trace()[after:])
+        wait_for(lambda: next((entry for entry in reversed(self.trace(after=after))
             if entry["name"] == "query_project_rows" and "searchColumns" in entry["request"]), None),
             lambda entry: bool(entry and "result" in entry), "annotation refresh finishes before independent readback")
 
@@ -461,16 +473,16 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
             assert not tokens or active in tokens, (tokens, row)
         web.drawer("Bulk annotation")
         web.write('input[aria-label="Bulk tag"]', f"filter-check-{mask}")
-        before = len(web.trace())
+        before = web.checkpoint()
         web.named("Apply", ".bulk-form")
-        applied = wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "actual direct bulk annotation")
-        preview = next(entry for entry in web.trace()[before:] if entry["name"] == "bulk_preview" and "result" in entry)
+        applied = wait_for(lambda: next((entry for entry in reversed(web.trace(after=before)) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "actual direct bulk annotation")
+        preview = next(entry for entry in web.trace(after=before) if entry["name"] == "bulk_preview" and "result" in entry)
         assert preview["result"]["count"] == expected and preview["request"]["flagFilter"] == wire, preview
         assert applied["result"]["updated"] == expected and applied["request"]["flagFilter"] == wire, applied
         web.refreshed(before)
-        before = len(web.trace())
+        before = web.checkpoint()
         web.named("Undo", ".bulk-form")
-        restored = wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "direct bulk annotation is reversible")
+        restored = wait_for(lambda: next((entry for entry in reversed(web.trace(after=before)) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "direct bulk annotation is reversible")
         assert restored["result"]["updated"] == expected, restored
         web.refreshed(before)
         web.close_drawer()
@@ -479,15 +491,15 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.results(total // 2)
     web.drawer("Bulk annotation")
     web.write('input[aria-label="Bulk tag"]', "native-ui")
-    before = len(web.trace())
+    before = web.checkpoint()
     web.named("Apply", ".bulk-form")
-    wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "bulk adds tags to applied result")
+    wait_for(lambda: next((entry for entry in reversed(web.trace(after=before)) if entry["name"] == "bulk_update" and "result" in entry), None), bool, "bulk adds tags to applied result")
     web.refreshed(before)
     all_rows = web.command("query_project_rows", {"projectId": data["id"], "offset": 0, "limit": total})["rows"]
     assert all(("native-ui" in row["tags"]) == ((row["row_index"] + 1) % 4 in [0, 2]) for row in all_rows)
-    before = len(web.trace())
+    before = web.checkpoint()
     web.named("Undo", ".bulk-form")
-    wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "bulk undo")
+    wait_for(lambda: next((entry for entry in reversed(web.trace(after=before)) if entry["name"] == "bulk_undo" and "result" in entry), None), bool, "bulk undo")
     web.refreshed(before)
     assert all("native-ui" not in row["tags"] for row in web.command("query_project_rows", {"projectId": data["id"], "offset": 0, "limit": total})["rows"])
     web.close_drawer()
@@ -496,7 +508,7 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
     web.drawer("Bulk annotation")
     web.named("Set bulk flag Safe", ".bulk-form")
     web.write('input[aria-label="Bulk note"]', "delayed bulk audit")
-    before = len(web.trace())
+    before = web.checkpoint()
     web.script("window.__workspaceHold={name:'bulk_update',projectId:arguments[0],ready:false,release:null};", data["id"])
     try:
         web.named("Apply", "#analysis-drawer")
@@ -544,14 +556,13 @@ def columns_and_header(web: WorkspaceView, data: dict[str, Any], root: Path, rep
     copy = wait_for(lambda: web.script("return document.querySelector('.copy-status')?.textContent;"), bool, "SHA copy result")
     assert copy == "SHA-256 copied", copy
     data["source"].rename(root / "original-source-moved.csv")
-    imports = sum(entry["name"] == "create_project" for entry in web.trace())
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.named("Workspace options")
     web.named("Reload saved project", ".workspace-options")
-    wait_for(lambda: next((entry for entry in reversed(web.trace()[checkpoint:]) if entry["name"] == "load_project" and entry["request"].get("projectId") == data["id"] and "result" in entry), None), bool, "saved project actually reloads")
+    wait_for(lambda: next((entry for entry in reversed(web.trace(after=checkpoint)) if entry["name"] == "load_project" and entry["request"].get("projectId") == data["id"] and "result" in entry), None), bool, "saved project actually reloads")
     web.refreshed(checkpoint)
     web.results(expected)
-    assert imports == sum(entry["name"] == "create_project" for entry in web.trace()), "Reload must not reimport the source"
+    assert not any(entry["name"] == "create_project" for entry in web.trace(after=checkpoint)), "Reload must not reimport the source"
     assert data["sha"] in web.script("return document.querySelector('[aria-label=\"Copy full SHA-256\"]').title;")
     web.write('input[aria-label="Search rows"]', "")
     web.applied(search="")
@@ -590,14 +601,14 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     assert web.script("return document.querySelector('select[aria-label=\"Sort gaps\"]').value;") == "duration"
     titles = web.script("return [...document.querySelectorAll('.span-row')].map(e=>e.title);")
     assert titles and any(".123456" in title for title in titles), titles
-    time_reads = sum(entry["name"] == "time_analysis" for entry in web.trace())
+    time_reads = web.checkpoint()
     web.choose('select[aria-label="Time column"]', "")
     wait_for(lambda: web.script("return !document.querySelector('.time-panel .time-section,.time-panel [role=status]');"),
              bool, "clearing the time column removes its previous results and loading state")
-    assert time_reads == sum(entry["name"] == "time_analysis" for entry in web.trace()), "Clearing the column must not scan another one"
+    assert not any(entry["name"] == "time_analysis" for entry in web.trace(after=time_reads)), "Clearing the column must not scan another one"
     web.choose('select[aria-label="Time column"]', data["columns"]["timestamp"])
     wait_for(lambda: web.script("return !!document.querySelector('.time-panel .time-section');"), bool, "reselecting the same time column loads its analysis again")
-    assert time_reads < sum(entry["name"] == "time_analysis" for entry in web.trace())
+    assert any(entry["name"] == "time_analysis" for entry in web.trace(after=time_reads))
     web.drawer("Timeline")
     web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
     focused = wait_for(lambda: web.script("const e=document.querySelector('.timeline-chart');return e?{inside:Number(e.dataset.inWindow),outside:Number(e.dataset.outside),text:e.textContent}:null;"), lambda value: bool(value and 0 < value["outside"] < data["total"] / 4), "dense timeline initial focus")
@@ -605,14 +616,14 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     web.screenshot(evidence / "timeline-focused.png")
     web.named("Show all events", "#analysis-drawer")
     wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"), lambda value: value == 0, "show all includes old outliers")
-    histogram_reads = sum(entry["name"] == "histogram" for entry in web.trace())
+    histogram_reads = web.checkpoint()
     web.choose('select[aria-label="Timeline column"]', "")
     wait_for(lambda: web.script("return !document.querySelector('.timeline-svg,.timeline-chart');"),
              bool, "clearing the timeline column removes its previous chart")
-    assert histogram_reads == sum(entry["name"] == "histogram" for entry in web.trace())
+    assert not any(entry["name"] == "histogram" for entry in web.trace(after=histogram_reads))
     web.choose('select[aria-label="Timeline column"]', data["columns"]["timestamp"])
     wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "reselecting the same timeline column loads a fresh chart")
-    assert histogram_reads < sum(entry["name"] == "histogram" for entry in web.trace())
+    assert any(entry["name"] == "histogram" for entry in web.trace(after=histogram_reads))
     web.named("Show all events", "#analysis-drawer")
     wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.outside??-1);"), lambda value: value == 0, "reselected timeline shows all events before editing flags")
     buckets = web.script("return [...document.querySelectorAll('.timeline-bucket')].map(e=>({count:Number(e.dataset.count),safe:Number(e.dataset.safe),suspicious:Number(e.dataset.suspicious),critical:Number(e.dataset.critical),unflagged:Number(e.dataset.unflagged),title:e.querySelector('title').textContent}));")
@@ -633,12 +644,12 @@ def analysis(web: WorkspaceView, data: dict[str, Any], evidence: Path, report: d
     assert raw["cells"][data["columns"]["timestamp"]]["text"] == data["timestamps"][1]
     web.screenshot(evidence / "timeline-all-flags.png")
     web.close_drawer()
-    before = sum(entry["name"] in HEAVY for entry in web.trace())
+    before = web.checkpoint()
     web.write('input[aria-label="Search rows"]', "keep")
     web.applied(search="keep")
     web.results(sum(i % 5 != 0 for i in range(1, data["total"] + 1)))
     time.sleep(.4)
-    assert before == sum(entry["name"] in HEAVY for entry in web.trace()), "Closed panels must not run heavy analysis"
+    assert not any(entry["name"] in HEAVY for entry in web.trace(after=before)), "Closed panels must not run heavy analysis"
     web.write('input[aria-label="Search rows"]', "")
     web.applied(search="")
     web.results(data["total"])
@@ -670,7 +681,7 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     web.drawer("Timeline")
     wait_for(lambda: web.script("return !!document.querySelector('.timeline-chart');"), bool, "timeline before gestures")
     point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),left:Math.round(r.left),width:Math.round(r.width)};")
-    before = sum(entry["name"] == "histogram" for entry in web.trace())
+    before = web.checkpoint()
     web.script("window.__workspaceWheelEvents=[];window.addEventListener('wheel',event=>{if(event.target.closest?.('.timeline-svg')&&event.deltaY!==0)window.__workspaceWheelEvents.push({delta:event.deltaY,trusted:event.isTrusted});},true);")
     wheel_supported = True
     try:
@@ -685,14 +696,14 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
     if wheel_supported:
         events = web.script("return window.__workspaceWheelEvents;")
         assert len(events) == 10 and all(event["trusted"] for event in events), events
-        wait_for(lambda: sum(entry["name"] == "histogram" for entry in web.trace()), lambda value: value > before, "wheel zoom native histogram")
+        wait_for(lambda: any(entry["name"] == "histogram" for entry in web.trace(after=before)), bool, "wheel zoom native histogram")
         time.sleep(.3)
-        calls = sum(entry["name"] == "histogram" for entry in web.trace()) - before
+        calls = sum(entry["name"] == "histogram" for entry in web.trace(after=before))
         assert calls == 1, f"One rapid10-eventwheelburst must request one histogram, observed {calls}"
     for action in ["Zoom in", "Pan left"]:
-        before = len(web.trace())
+        before = web.checkpoint()
         web.named(action, "#analysis-drawer")
-        wait_for(lambda: next((entry for entry in reversed(web.trace()[before:]) if entry["name"] == "histogram"), None), lambda entry: bool(entry and "result" in entry), f"{action} completes")
+        wait_for(lambda: next((entry for entry in reversed(web.trace(after=before)) if entry["name"] == "histogram"), None), lambda entry: bool(entry and "result" in entry), f"{action} completes")
     def drag_period() -> None:
         point = web.script("const r=document.querySelector('.timeline-svg').getBoundingClientRect();return {x:Math.round(r.left+r.width*.3),to:Math.round(r.left+r.width*.7),y:Math.round(r.top+r.height*.5)};")
         web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "native-mouse", "parameters": {"pointerType": "mouse"}, "actions": [
@@ -702,13 +713,13 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
         ]}]})
 
     def show_full_period() -> None:
-        start = len(web.trace())
+        start = web.checkpoint()
         button = web.node('[aria-label="Show all events"]')
         assert not web.script("return arguments[0].disabled;", button), "A time filter can be reset even when its selected period is empty"
         web.click(button)
         web.applied(**original_query)
         web.results(data["total"])
-        completed = wait_for(lambda: next((entry for entry in reversed(web.trace()[start:])
+        completed = wait_for(lambda: next((entry for entry in reversed(web.trace(after=start))
             if entry["name"] == "histogram" and "result" in entry
             and entry["request"].get("projectId") == data["id"]
             and entry["request"].get("column") == data["columns"]["timestamp"]
@@ -949,18 +960,18 @@ def pending_annotation_reopen(web: WorkspaceView, data: dict[str, Any], root: Pa
         web.named("Open project menu")
         web.named("Refresh projects", ".workspace-drawer")
         card = wait_for(lambda: web.script("return [...document.querySelectorAll('.project-card')].find(e=>e.querySelector('.project-name')?.textContent.trim()===arguments[0])??null;", project["meta"]["name"]), bool, "pending case in saved project list")
-        before = len(web.trace())
+        before = web.checkpoint()
         web.click(card)
         wait_for(lambda: web.state()["active"], lambda value: value == f"project-tab-{project_id}", "reopened pending case selected")
         web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
         time.sleep(.2)
         assert web.script("return !document.querySelector('.project-view')&&document.querySelector('main')?.textContent.includes('Loading project');"), "The replacement case must wait instead of querying stale annotations"
-        assert not any(entry["name"] == "load_project" and entry["request"].get("projectId") == project_id for entry in web.trace()[before:]), "Pending annotation must settle before metadata-only native load is dispatched"
+        assert not any(entry["name"] == "load_project" and entry["request"].get("projectId") == project_id for entry in web.trace(after=before)), "Pending annotation must settle before metadata-only native load is dispatched"
         web.script("window.__workspaceBeforeCommit.release();delete window.__workspaceBeforeCommit;")
         wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "project menu closes after annotation commit")
         web.results(2)
         wait_for(lambda: web.script("return [...document.querySelectorAll('.data-row')].find(e=>e.querySelector('.cell.index')?.textContent.trim()==='1')?.querySelector('.flag-safe.selected')!==null&&document.querySelector('.table-meta-right')?.textContent.trim()==='Flagged 1';"), bool, "reopened row and Flagged counter include the old tab's committed edit")
-        loaded = next(entry for entry in web.trace()[before:] if entry["name"] == "load_project" and entry["request"].get("projectId") == project_id)
+        loaded = next(entry for entry in web.trace(after=before) if entry["name"] == "load_project" and entry["request"].get("projectId") == project_id)
         assert loaded["metadataOnly"] is True and loaded["requestId"], loaded
         saved = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 1})
         assert saved["rows"][0]["flag"] == "safe" and saved["annotated_total"] == 1, saved

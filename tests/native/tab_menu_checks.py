@@ -79,12 +79,12 @@ def verify_tab_close_menu(web, data: dict, root: Path, evidence: Path, report: d
                  bool, "Escape returns focus to the inactive context tab")
         assert _active(web) == c["id"]
         _menu(web, base)
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Close others", ".project-tab-context-menu")
         wait_for(lambda: web.view().get("toast", ""), lambda text: "Save or discard your IOC rules" in text,
                  "an unsaved active IOC draft blocks the whole batch")
         assert _tabs(web) == expected and _active(web) == c["id"]
-        assert not any(item["name"] in {"load_project", "delete_project"} for item in web.trace()[checkpoint:])
+        assert not any(item["name"] in {"load_project", "delete_project"} for item in web.trace(after=checkpoint))
         web.named("Discard", ".ioc-panel")
         wait_for(lambda: web.script("return document.querySelectorAll('.ioc-row').length;"), lambda count: count == 0, "discard removes the unsaved IOC rule")
 
@@ -92,22 +92,22 @@ def verify_tab_close_menu(web, data: dict, root: Path, evidence: Path, report: d
         web.applied(**outer_query); web.results(outer_total)
         _menu(web, b["id"])
         assert _active(web) == base
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Close tabs to the right", ".project-tab-context-menu")
         wait_for(lambda: _tabs(web), lambda tabs: tabs == [base, b["id"]], "Close right keeps the context tab and all tabs to its left")
         assert _active(web) == base and web.query() == outer_query
-        assert not any(item["name"] == "load_project" for item in web.trace()[checkpoint:]), "Closing inactive right-hand tabs does not load another case"
+        assert not any(item["name"] == "load_project" for item in web.trace(after=checkpoint)), "Closing inactive right-hand tabs does not load another case"
         open_project(web, c["name"])
         web.results(2)
 
         _menu(web, base)
         assert _active(web) == c["id"]
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Close others", ".project-tab-context-menu")
         wait_for(lambda: _tabs(web), lambda tabs: tabs == [base], "Close others keeps exactly the context tab")
         web.applied(**outer_query); web.results(outer_total)
         assert _active(web) == base and web.query() == outer_query
-        calls = web.trace()[checkpoint:]
+        calls = web.trace(after=checkpoint)
         assert not any(item["name"] == "load_project" and item["request"].get("projectId") in {b["id"], c["id"]} for item in calls), "A batch must not load a tab that it is closing"
         assert not any(item["name"] == "delete_project" for item in calls), "Closing saved tabs never deletes their cases"
         saved = {case["meta"]["id"] for case in web.command("list_projects")}

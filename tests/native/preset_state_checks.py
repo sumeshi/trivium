@@ -138,13 +138,13 @@ def verify_preset_state(web, data: dict, case: dict, source: Path, ids: dict[str
         web.results(2)
         exported = root / "literal-values-saved.json"
         _picker(web, exported)
-        before_save = len(web.trace())
+        before_save = web.checkpoint()
         web.named("Save preset file", "#analysis-drawer")
         wait_for(exported.exists, bool, "literal condition preset is saved")
         wait_for(lambda: web.script("return document.querySelector('#analysis-drawer')?.textContent??'';"),
                  lambda text: "Preset saved." in text, "literal preset save completes")
         assert json.loads(exported.read_text(encoding="utf-8"))["condition"] == literal
-        saved_calls = [entry for entry in web.trace()[before_save:]
+        saved_calls = [entry for entry in web.trace(after=before_save)
                        if entry["name"] == "save_preset" and "result" in entry]
         assert len(saved_calls) == 1 and saved_calls[0]["request"]["allowOverwrite"] is True
 

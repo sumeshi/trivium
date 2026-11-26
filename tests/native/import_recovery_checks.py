@@ -121,9 +121,9 @@ def verify_import_recovery(web, data: dict, root: Path, evidence: Path, report: 
     try:
         web.close_drawer()
         _pick(web, ragged, csv=True)
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Import and open", ".workspace-drawer")
-        error = wait_for(lambda: next((entry for entry in web.trace()[start:]
+        error = wait_for(lambda: next((entry for entry in web.trace(after=start)
             if entry["name"] == "create_project" and entry.get("request", {}).get("path") == str(ragged)
             and "error" in entry), None), bool, "strict CSV rejects an unequal record")
         wait_for(lambda: web.script("return document.querySelector('.import-failures')?.textContent??'';"),

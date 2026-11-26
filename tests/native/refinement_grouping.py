@@ -52,7 +52,7 @@ def _sort(web, by: str, direction: str) -> None:
 
 
 def _verify_sorting(web) -> None:
-    before = len([entry for entry in web.trace() if entry["name"] == "group_tree"])
+    before = web.checkpoint()
     initial = {(row["depth"], row["missing"], row["label"]): row["count"] for row in _rows(web)}
     for by, direction, roots, children, grandchildren in [
         ("count", "asc", [1, 1, 2, 2, 4], ["y", "x"], ["blue", "red"]),
@@ -69,7 +69,7 @@ def _verify_sorting(web) -> None:
         assert actual == roots, (by, direction, rows)
         assert [row["label"] for row in rows if row["depth"] == 1] == children, (by, direction, rows)
         assert [row["label"] for row in rows if row["depth"] == 2] == grandchildren, (by, direction, rows)
-    assert len([entry for entry in web.trace() if entry["name"] == "group_tree"]) == before, "Changing group order must not rescan the source data"
+    assert not any(entry["name"] == "group_tree" for entry in web.trace(after=before)), "Changing group order must not rescan the source data"
 
 
 def _reset(web, total: int) -> None:
@@ -108,7 +108,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         detail = web.command("load_project", {"projectId": project_id}, request=True)
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
         # Navigation is available before any group or managed rule exists.
-        original_query, checkpoint = web.query(), len(web.trace())
+        original_query, checkpoint = web.query(), web.checkpoint()
         web.drawer("Conditions")
         assert not web.script("return [...document.querySelectorAll('.condition-editor button')].find(e=>e.textContent.trim()==='Open Groups')?.disabled??true;"), "Open Groups is enabled without a selected path"
         web.named("Open Groups", ".condition-editor")
@@ -121,7 +121,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
                  lambda value: value == "true", "empty Groups opens Filter Rules")
         _settle(web)
         assert web.query() == original_query, "Empty navigation changes no query settings"
-        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] in {"query_project_rows", "group_tree"}], "Empty navigation needs no result scan or grouping request"
+        assert not [entry for entry in web.trace(after=checkpoint) if entry["name"] in {"query_project_rows", "group_tree"}], "Empty navigation needs no result scan or grouping request"
         web.close_drawer()
         assert web.script("return document.activeElement?.id;") == "tool-group-filters", "Closing returns focus to the destination Filter control"
         web.named("Actions for column level1")
@@ -147,12 +147,12 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.results(4)
         wait_for(lambda: _rows(web), lambda rows: len(rows) == 1 and rows[0]["label"] == "alpha" and rows[0]["count"] == 4,
                  "a selected group remains one group in the filtered results")
-        selected_query, checkpoint = web.query(), len(web.trace())
+        selected_query, checkpoint = web.query(), web.checkpoint()
         for _ in range(3):
             web.click(web.script("return arguments[0].querySelector('.group-value');", _row(web, 0, "alpha")))
             _settle(web)
         assert web.query() == selected_query, "Repeated clicks must not duplicate a group filter"
-        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] in {"query_project_rows", "group_tree"}], "Repeated selection must not reload the same results"
+        assert not [entry for entry in web.trace(after=checkpoint) if entry["name"] in {"query_project_rows", "group_tree"}], "Repeated selection must not reload the same results"
         web.named("Ungroup last level", ".grouping-panel")
         web.applied(projectId=project_id, condition=None)
         web.results(len(records))
@@ -173,10 +173,10 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         options = web.script("return [...document.querySelector('[aria-label=\"Group level 2 column\"]').options].map(option=>option.value);")
         assert columns["level2"] in options and not {columns["level1"], columns["level3"]}.intersection(options), "A nested level cannot duplicate another selected column"
         for replacement in ("large", "level3"):
-            start = len(web.trace())
+            start = web.checkpoint()
             web.choose('select[aria-label="Group level 3 column"]', columns[replacement])
             expected_columns = [columns["level1"], columns["level2"], columns[replacement]]
-            wait_for(lambda: [entry for entry in web.trace()[start:] if entry["name"] == "group_tree"
+            wait_for(lambda: [entry for entry in web.trace(after=start) if entry["name"] == "group_tree"
                      and entry["request"].get("groupColumns") == expected_columns and "result" in entry],
                      bool, "editing a nested level aggregates the chosen source column")
             wait_for(lambda: _rows(web), lambda rows: len(rows) == 5 and sum(row["count"] for row in rows) == 10,
@@ -270,7 +270,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         saved_query = web.query()
         web.tab(data["id"])
         web.results(data["total"])
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.tab(project_id)
         web.applied(projectId=project_id, condition=expected)
         web.results(1)
@@ -281,7 +281,7 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
                  lambda titles: titles == [f"{name}: {value}" for name, value in path],
                  "returning to the source tab restores its selected group path")
         assert web.query() == saved_query, "Tab switching must not replace the investigation's selected group filter"
-        returned_group_reads = wait_for(lambda: [entry for entry in web.trace()[checkpoint:]
+        returned_group_reads = wait_for(lambda: [entry for entry in web.trace(after=checkpoint)
             if entry["name"] == "group_tree" and entry["request"].get("projectId") == project_id],
             lambda entries: bool(entries and "result" in entries[0]), "the restored Groups drawer loads its saved selection")
         assert returned_group_reads[0]["request"].get("condition") == expected, "The first restored group request must use the saved filter"
@@ -307,11 +307,11 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         _select_path(web, [value for _, value in path])
         web.applied(projectId=project_id, condition=expected)
         web.results(1)
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.click(web.node('nav[aria-label="Selected group path"] [aria-current="step"]'))
         _settle(web)
         assert web.query()["condition"] == expected
-        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] in {"query_project_rows", "group_tree"}], "Selecting the current breadcrumb must not duplicate filters or reload"
+        assert not [entry for entry in web.trace(after=checkpoint) if entry["name"] in {"query_project_rows", "group_tree"}], "Selecting the current breadcrumb must not duplicate filters or reload"
         web.click(web.node('nav[aria-label="Selected group path"] .path-part'))
         web.applied(projectId=project_id, condition=_condition(columns, path[:1], original_or))
         web.results(3)
@@ -356,12 +356,12 @@ def verify_grouping(web, data, root: Path, evidence: Path, report: dict) -> None
         web.named("Open Filters", ".grouping-panel")
         wait_for(lambda: web.script("return document.querySelector('#tool-tab-conditions')?.getAttribute('aria-selected');"),
                  lambda value: value == "true", "reciprocal navigation returns to the unchanged group Rules")
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         web.named("Make rule", ".condition-editor")
         _settle(web)
         assert not web.script("return !!document.querySelector('.managed-rule,.managed-group-actions');")
         assert web.query()["condition"] == _condition(columns, path[:1], original_or), "Conversion changes ownership, not matching rows"
-        assert not [entry for entry in web.trace()[checkpoint:] if entry["name"] == "query_project_rows"], "Converting the same query needs no new scan"
+        assert not [entry for entry in web.trace(after=checkpoint) if entry["name"] == "query_project_rows"], "Converting the same query needs no new scan"
         value_index = web.script("return [...document.querySelectorAll('.condition-row')].findIndex(e=>e.querySelector('select[aria-label=\"Column\"]').value===arguments[0]);", columns["level1"])
         assert value_index >= 0
         web.write('.condition-row input[aria-label="Value"]', "beta", value_index)

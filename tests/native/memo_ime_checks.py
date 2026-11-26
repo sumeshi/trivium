@@ -140,7 +140,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
 
         _editor(web)
         _draft(web, '.memo-dialog textarea', "日本語 <alice@example.org>")
-        before = len(web.trace())
+        before = web.checkpoint()
         probes = web.script("""
           const e=document.querySelector('.memo-dialog textarea');
           const key=options=>{const k=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,...options});e.dispatchEvent(k);return k.defaultPrevented;};
@@ -151,7 +151,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
           return {prevented:results,editor:!!document.querySelector('.memo-dialog'),text:e.value};
         """)
         assert probes == {"prevented": [False] * 4, "editor": True, "text": "日本語 <alice@example.org>"}, probes
-        assert not any(entry["name"] == "update_flag" for entry in web.trace()[before:])
+        assert not any(entry["name"] == "update_flag" for entry in web.trace(after=before))
         assert _stored(web, owner)["memo"] == samples[-1]
 
         tag_input = '.memo-dialog .tag-input'
@@ -180,7 +180,7 @@ def verify_memo_ime(app, data: dict, root: Path, evidence: Path, report: dict) -
         ]}]})
         final = "日本語 <alice@example.org>\n"
         assert web.script("return document.querySelector('.memo-dialog textarea').value;") == final
-        assert not any(entry["name"] == "update_flag" for entry in web.trace()[before:])
+        assert not any(entry["name"] == "update_flag" for entry in web.trace(after=before))
         _key(web, "\ue007")
         _saved(web)
         assert _stored(web, owner)["memo"] == final and _stored(web, owner)["tags"] == ["調査中"]

@@ -32,7 +32,7 @@ def verify_review_integrity(web, data: dict, root: Path, evidence: Path, report:
         assert [row["row_index"] for row in page["rows"]] == [0, 1, 2]
         assert page["rows"][1]["cells"][meta["columns"][1]["id"]]["text"] is None
 
-        start = len(web.trace())
+        start = web.checkpoint()
         _open_report(web)
         assert web.script("return document.querySelector('.import-report-dialog tbody td')?.textContent;") == "5"
         # Call the real tab handler to model background activation. This is
@@ -49,7 +49,7 @@ def verify_review_integrity(web, data: dict, root: Path, evidence: Path, report:
         assert not web.script("return !!document.querySelector('.import-report-dialog');"), "Returning must not reopen an old report"
         restored = web.command("load_project", {"projectId": meta["id"]}, request=True)
         assert restored["project"]["meta"]["import_report"] == diagnostics
-        assert not any(entry["name"] == "export_import_report" for entry in web.trace()[start:])
+        assert not any(entry["name"] == "export_import_report" for entry in web.trace(after=start))
         _open_report(web)
         web.screenshot(evidence / "review-cr-source-report.png")
         _close_report(web)

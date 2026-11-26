@@ -77,7 +77,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
                 web.tap(web.node('.restore-annotations'))
                 wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
                          bool, "annotation restoration is selected before cancelling the picker")
-                trace_start = len(web.trace())
+                trace_start = web.checkpoint()
                 before_count = web.script("return window.__refinementDialog.count;")
                 _pick(web, None)
                 wait_for(lambda: web.script("return window.__refinementDialog.count;"),
@@ -88,7 +88,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
                     restore:document.querySelector('[aria-label="Restore Trivium annotations"]').checked};
                 """)
                 assert pending == {"name": source.name, "delimiter": "\t", "restore": True}, pending
-                assert not any(entry["name"] == "create_project" for entry in web.trace()[trace_start:])
+                assert not any(entry["name"] == "create_project" for entry in web.trace(after=trace_start))
                 cancelled_selection = True
             web.named("Import and open", ".workspace-drawer")
             wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "real native import opens the saved case")
@@ -126,7 +126,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
         web.tap(web.node('.restore-annotations'))
         wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
                  bool, "annotation restoration is selected before importing the batch")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Import and open", ".workspace-drawer")
         settled = wait_for(lambda: web.script("""
           const button=document.querySelector('.workspace-drawer .button.primary');
@@ -138,7 +138,7 @@ def verify_import_identity(web, data, root: Path, report: dict) -> None:
         failure = settled["failures"][0]
         assert failure.startswith(f"{batch_bad.name}:") and len(failure) > len(batch_bad.name) + 3, failure
         assert batch_csv.name not in failure and batch_ndjson.name not in failure, failure
-        requests = [entry for entry in web.trace()[start:] if entry["name"] == "create_project"]
+        requests = [entry for entry in web.trace(after=start) if entry["name"] == "create_project"]
         assert [entry["request"]["path"] for entry in requests] == [str(source) for source in batch_sources], requests
         assert [bool(entry.get("error")) for entry in requests] == [False, True, False], requests
         assert requests[1]["error"] == "Failed to parse JSON: expected value at line 1 column 9", requests[1]

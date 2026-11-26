@@ -177,9 +177,9 @@ def _import_preserves_note(web, path: Path, pointer: NativePointer, evidence: Pa
             web.script("window.__workspaceBeforeCommit={name:'update_flag',projectId:arguments[0],rowIndex:0,ready:false,release:null};", active.removeprefix("project-tab-"))
             web.named("Save", ".memo-dialog")
             wait_for(lambda: web.script("return !!window.__workspaceBeforeCommit?.ready;"), bool, "note save waits before its real native dispatch")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
-        wait_for(lambda: any(entry["name"] == "list_projects" and "result" in entry for entry in web.trace()[start:]),
+        wait_for(lambda: any(entry["name"] == "list_projects" and "result" in entry for entry in web.trace(after=start)),
                  bool, "the import batch completes its real project-list refresh")
         assert web.state()["active"] == active, "Import completion must preserve the case containing the unsaved note"
         assert web.script("return window.__importDraftEditor===document.querySelector('.memo-dialog textarea')&&window.__importDraftEditor.value===arguments[0];", draft), "Keep the original note editor and its unsaved text"
@@ -240,7 +240,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
         _settle(web)
         pointer = NativePointer()
         source = GtkFileSource([csv, jsonl], evidence, token)
-        start = len(web.trace())
+        start = web.checkpoint()
         _cancel(web, source, pointer, evidence / "native-file-drop-overlay.png")
         assert not web.script("return !!document.querySelector('.workspace-drawer');")
         source.close()
@@ -260,7 +260,7 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert web.script("return document.querySelector('[aria-label=\"CSV delimiter\"]').value;") == "\t"
         assert web.script("return [...document.querySelectorAll('.pending-files li')].map(e=>e.title);") == expected
         time.sleep(.35)
-        assert not any(entry["name"] == "create_project" for entry in web.trace()[start:]), "File drop stages paths for review; it must not import automatically"
+        assert not any(entry["name"] == "create_project" for entry in web.trace(after=start)), "File drop stages paths for review; it must not import automatically"
         assert web.script("return window.__fileDropAudit.pickers;") == 0
         web.tap(web.node(".workspace-drawer .button.primary"))
         wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "trusted Import and open completes both dropped files")
@@ -279,18 +279,18 @@ def verify_file_drop(web, data, root: Path, evidence: Path, report: dict) -> Non
             host_column = columns.get("host") or columns["/host"]
             rows = web.command("query_project_rows", {"projectId": meta["id"], "offset": 0, "limit": 10})["rows"]
             assert [row["cells"][host_column]["text"] for row in rows] == hosts, rows
-        requests = [entry for entry in web.trace()[start:] if entry["name"] == "create_project"]
+        requests = [entry for entry in web.trace(after=start) if entry["name"] == "create_project"]
         assert [entry["request"]["path"] for entry in requests] == expected, requests
         assert [entry["request"]["delimiter"] for entry in requests] == ["\t", ""], requests
         note_guard = _import_preserves_note(web, note_import, pointer, evidence, created)
         saving_guard = _import_preserves_note(web, saving_import, pointer, evidence, created, saving=True)
-        unsupported_start = len(web.trace())
+        unsupported_start = web.checkpoint()
         source = GtkFileSource([unsupported], evidence, f"{token}-unsupported")
         _drop(web, source, pointer, "Unsupported file type")
         wait_for(lambda: web.view().get("toast", ""),
             lambda value: value == "Only CSV / JSON / JSONL / NDJSON files are supported.", "unsupported dropped files show a format notice", timeout=8)
         assert not web.script("return !!document.querySelector('.workspace-drawer');")
-        assert not any(entry["name"] == "create_project" for entry in web.trace()[unsupported_start:])
+        assert not any(entry["name"] == "create_project" for entry in web.trace(after=unsupported_start))
         assert web.script("return window.__fileDropAudit.pickers;") == 0
         assert all(path.read_bytes() == original for path, original in originals.items())
         web.screenshot(evidence / "native-external-file-drop.png")

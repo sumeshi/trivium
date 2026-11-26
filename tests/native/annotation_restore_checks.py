@@ -132,7 +132,7 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
                 wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"),
                          bool, "annotation restoration is selected before importing the annotated CSV")
                 web.screenshot(evidence / "csv-annotation-restore-option.png")
-            start = len(web.trace())
+            start = web.checkpoint()
             if restore:
                 assert web.script("return !window.__workspaceHold;"), "The restore check must own its response hold"
                 web.script("window.__annotationRestoreHoldNextQuery={excluded:arguments[0]};",
@@ -162,7 +162,7 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
                 web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
             web.applied(projectId=project_id)
             web.results(len(records))
-            request = next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")
+            request = next(entry for entry in web.trace(after=start) if entry["name"] == "create_project")
             assert request["request"]["restore_annotations"] is restore, request
             loaded = web.command("load_project", {"projectId": project_id}, request=True)
             rows = web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 10})["rows"]
@@ -190,9 +190,9 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         # the new leading annotation block must win even when names are suffixed.
         latest = [dict(entry) for entry in annotations]
         latest[0] = {**latest[0], "flag": "suspicious", "memo": 'Updated <bob@example.org>\n<CommandLine>hostname</CommandLine>\n再調査, "new"  '}
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Suspicious", '.data-row[data-row-index="0"]')
-        wait_for(lambda: [entry for entry in web.trace()[start:] if entry["name"] == "update_flag" and "result" in entry],
+        wait_for(lambda: [entry for entry in web.trace(after=start) if entry["name"] == "update_flag" and "result" in entry],
                  bool, "the edited restored flag is committed by the native engine")
         web.tap(web.node('.data-row[data-row-index="0"] .memo-button'))
         wait_for(lambda: web.script("return !!document.querySelector('.memo-dialog textarea');"), bool, "restored note editor opens")
@@ -216,14 +216,14 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
         _pick(web, second)
         web.tap(web.node('.restore-annotations'))
         wait_for(lambda: web.script("return document.querySelector('[aria-label=\"Restore Trivium annotations\"]').checked;"), bool, "second GUI restore is explicitly enabled")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Import and open", ".workspace-drawer")
         wait_for(lambda: web.script("return !document.querySelector('.workspace-drawer');"), bool, "second exported CSV opens as an investigation")
         second_id = next(item["meta"]["id"] for item in web.command("list_projects") if item["meta"].get("source_file_name") == second.name)
         created.append((second_id, second.name))
         web.applied(projectId=second_id)
         web.results(len(records))
-        assert next(entry for entry in web.trace()[start:] if entry["name"] == "create_project")["request"]["restore_annotations"] is True
+        assert next(entry for entry in web.trace(after=start) if entry["name"] == "create_project")["request"]["restore_annotations"] is True
         loaded = web.command("load_project", {"projectId": second_id}, request=True)
         all_column_ids = [column["id"] for column in loaded["columns_meta"]]
         rows = web.command("query_project_rows", {"projectId": second_id, "offset": 0, "limit": 10})["rows"]
@@ -281,9 +281,9 @@ def verify_annotation_restore(web, data: dict, root: Path, evidence: Path, repor
                 wait_for(lambda: web.state()["selectedIds"], lambda selected: selected == [1],
                          "the selected export contains only the explicit source row")
             destination = root / f"annotation-{scope}-{uuid.uuid4().hex[:8]}.csv"
-            checkpoint = len(web.trace())
+            checkpoint = web.checkpoint()
             _export_gui(web, destination, scope)
-            calls = [entry for entry in web.trace()[checkpoint:] if entry["name"] == "export_project" and "result" in entry]
+            calls = [entry for entry in web.trace(after=checkpoint) if entry["name"] == "export_project" and "result" in entry]
             assert len(calls) == 1 and calls[0]["request"]["scope"] == scope
             assert calls[0]["request"]["search"] == search and calls[0]["request"]["sortDirection"] == "desc"
             assert calls[0]["result"]["rows"] == len(original_indices)

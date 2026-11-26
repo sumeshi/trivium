@@ -41,11 +41,11 @@ def _range_from_first_bucket(web, project_id: str, column: str, expected_leaves:
              bool, "timeline histogram uses the actual applied Rules")
     wait_for(lambda: web.script("return Number(document.querySelector('.timeline-chart')?.dataset.inWindow??-1);"),
              lambda count: count >= 1, "timeline for the applied Rules")
-    before = len(web.trace())
+    before = web.checkpoint()
     web.script("document.querySelector('.timeline-svg').focus();")
     _key(web, "\ue011")  # Home
     _key(web, "\ue007")  # Enter selects the exact bucket interval.
-    wait_for(lambda: next((entry for entry in reversed(web.trace()[before:])
+    wait_for(lambda: next((entry for entry in reversed(web.trace(after=before))
              if entry["name"] == "query_project_rows" and "result" in entry
              and "searchColumns" in entry["request"]), None), bool, "new timeline range query completes")
     condition = _query_condition(web, project_id,
@@ -56,7 +56,7 @@ def _range_from_first_bucket(web, project_id: str, column: str, expected_leaves:
 
 
 def _show_full_period(web, project_id: str, column: str, expected_rules: dict, expected_rows: int) -> None:
-    before = len(web.trace())
+    before = web.checkpoint()
     current_condition = web.query()["condition"]
     wait_for(lambda: next((entry for entry in reversed(web.trace())
              if entry["name"] == "histogram" and "result" in entry
@@ -73,7 +73,7 @@ def _show_full_period(web, project_id: str, column: str, expected_rules: dict, e
     assert {key: value for key, value in web.query().items() if key != "condition"} == scope
 
     def completed_full_period():
-        return next((entry for entry in reversed(web.trace()[before:])
+        return next((entry for entry in reversed(web.trace(after=before))
             if entry["name"] == "histogram" and "result" in entry
             and entry["request"].get("projectId") == project_id
             and entry["request"].get("column") == column

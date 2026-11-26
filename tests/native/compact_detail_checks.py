@@ -52,7 +52,7 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
     case = web.command("create_project", {"path": str(source)})
     project_id = case["meta"]["id"]
     checks = []
-    start = len(web.trace())
+    start = web.checkpoint()
     try:
         open_project(web, case["meta"]["name"])
         web.results(2)
@@ -60,12 +60,12 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
         columns = {column["label"]: column["id"] for column in detail["columns_meta"]}
         for height in ((827,) if measure_only else (827, 620)):
             web.request("POST", web.route("window/rect"), {"width": 1280, "height": height})
-            opened = len(web.trace())
+            opened = web.checkpoint()
             clicked = web.script("return document.querySelector('.data-row .stickyData').closest('[data-column-id]').dataset.columnId;")
             web.click(web.script("return document.querySelector('.data-row .stickyData');"))
             wait_for(lambda: web.script("return document.querySelectorAll('.row-detail-field').length;"), lambda count: count == len(columns), "all67 detail fields render")
             _settle(web)
-            initial_reads = [entry for entry in web.trace()[opened:] if entry["name"] == "get_cell"]
+            initial_reads = [entry for entry in web.trace(after=opened) if entry["name"] == "get_cell"]
             assert not any(entry["request"].get("columnId") == columns["very_long"] for entry in initial_reads), "An offscreen truncated field waits until it is revealed"
             assert not any(entry["request"].get("columnId") == clicked for entry in initial_reads), "The clicked complete cell reuses its exact cached value"
             before = _geometry(web, columns["last_field"])
@@ -145,7 +145,7 @@ def verify_compact_detail(web, data, root: Path, evidence: Path, report: dict, m
             web.results(1)
             assert not web.script("return !!document.querySelector('.row-detail-dialog');")
             _clear(web, 2)
-            assert not any(entry["name"] == "surrounding_rows" for entry in web.trace()[start:])
+            assert not any(entry["name"] == "surrounding_rows" for entry in web.trace(after=start))
         report["compact_row_detail"] = {"fields": len(columns), "short_fields": 64, "long_characters": len(long_value),
             "measure_only": measure_only, "sizes": checks, "cached_clicked_cell_without_io": True,
             "offscreen_long_field_deferred": True,

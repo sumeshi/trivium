@@ -79,7 +79,7 @@ def _prefix(web, expected: list[str], description: str):
 def _unchanged_query(web, start: int, before: dict) -> None:
     time.sleep(.35)  # Beyond the real query debounce: visibility/pins cannot reload data.
     assert web.query() == before, (before, web.query())
-    reads = [entry for entry in web.trace()[start:] if entry["name"] in {"query_project_rows", "locate_project_row"}]
+    reads = [entry for entry in web.trace(after=start) if entry["name"] in {"query_project_rows", "locate_project_row"}]
     assert not reads, reads
 
 
@@ -114,7 +114,7 @@ def _oversized_prefix(web, data, evidence: Path, checks: dict) -> None:
     open_project(web, data["name"]); web.results(data["total"])
     _focus_column(web, 3, wide[-1])
     _key(web, "\ue015")  # The focused header's actual keyboard context-menu action.
-    before, checkpoint = web.query(), len(web.trace())
+    before, checkpoint = web.query(), web.checkpoint()
     web.named("Freeze columns through this column", ".column-context-menu")
     _horizontal_to(web, 1600)
     panned = _geometry(web)
@@ -161,7 +161,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         _prefix(web, [], "the default frozen first column offers unfreeze")
         _action(web, "source_id", "Freeze columns through this column")
         _prefix(web, [first], "the same menu toggles an unfrozen column back on")
-        before, checkpoint = web.query(), len(web.trace())
+        before, checkpoint = web.query(), web.checkpoint()
         _action(web, "score", "Hide this column")
         wait_for(lambda: {"headers": web.state()["headers"], "count": web.visible_column_count()},
             lambda state: "score" not in state["headers"] and state["count"] == 26,
@@ -169,14 +169,14 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         _unchanged_query(web, checkpoint, before)
         _saved(web, data["id"], lambda state: state.get("hiddenColumns") == [hidden], "hidden column persisted")
 
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         _action(web, "cohort", "Freeze columns through this column")
         _prefix(web, [first, third], "arbitrary third source column freezes visible prefix")
         _horizontal_to(web, 700)
         checks["third_boundary_hidden_width_omitted"] = _prefix(web, [first, third], "hidden preceding column leaves no frozen gap")
         _unchanged_query(web, checkpoint, before)
 
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         _action(web, "timestamp", "Freeze columns through this column")
         _saved(web, data["id"], lambda state: state.get("frozenThrough") == boundary, "fourth-column frozen boundary persisted")
         _horizontal_to(web, 700)
@@ -191,7 +191,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         _action(web, "timestamp", "Freeze columns through this column")
         _prefix(web, [first, third, boundary], "the frozen prefix can be restored after toggling")
 
-        checkpoint = len(web.trace())
+        checkpoint = web.checkpoint()
         _action(web, "timestamp", "Hide this column")
         checks["hidden_boundary"] = _prefix(web, [first, third], "hiding boundary retains its visible frozen predecessors")
         _saved(web, data["id"], lambda state: state.get("frozenThrough") == boundary and boundary in state.get("hiddenColumns", []),
@@ -216,7 +216,7 @@ def verify_column_pinning(web, data, root: Path, evidence: Path, report: dict) -
         checks["tab_restore"] = _prefix(web, [first, third, boundary], "tab session restores frozen prefix")
         assert "score" not in web.state()["headers"]
 
-        checkpoint, before = len(web.trace()), web.query()
+        checkpoint, before = web.checkpoint(), web.query()
         _action(web, "timestamp", "Unfreeze data columns")
         _horizontal_to(web, 700)
         checks["context_unfreeze"] = _prefix(web, [], "context menu unfreezes data while annotation columns remain fixed")

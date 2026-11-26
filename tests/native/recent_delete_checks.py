@@ -23,7 +23,7 @@ def _failed_reload_retry(web, owner: str, root: Path, evidence: Path, report: di
     missing = source.with_name("data.parquet-unavailable")
     source.rename(missing)
     try:
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Workspace options")
         web.named("Reload saved project", ".workspace-options")
         wait_for(lambda: web.script("return document.querySelector('.project-load-error[role=alert]')?.textContent??'';"),
@@ -31,17 +31,17 @@ def _failed_reload_retry(web, owner: str, root: Path, evidence: Path, report: di
                  "an actual case I/O failure keeps a reason and retry control in the workspace")
         assert web.state()["active"] == f"project-tab-{owner}"
         assert not web.script("return !!document.querySelector('.project-view');"), "A failed reload must not show stale evidence"
-        errors = [entry for entry in web.trace()[start:] if entry["name"] == "load_project"
+        errors = [entry for entry in web.trace(after=start) if entry["name"] == "load_project"
                   and entry["request"].get("projectId") == owner and entry.get("error")]
         assert len(errors) == 1 and errors[0]["error"] == "Project data file missing.", errors
         report.setdefault("boundary_expected_errors", []).append({key: errors[0][key] for key in ("name", "request", "error")})
         web.screenshot(evidence / "project-load-error-retry.png")
         missing.rename(source)
-        retry_start = len(web.trace())
+        retry_start = web.checkpoint()
         web.named("Retry loading project")
         web.applied(projectId=owner)
         web.results(2)
-        calls = web.trace()[retry_start:]
+        calls = web.trace(after=retry_start)
         assert len([entry for entry in calls if entry["name"] == "load_project" and entry["request"].get("projectId") == owner]) == 1
         assert not any(entry["name"] in {"create_project", "list_projects"} for entry in calls), "Retry reopens the saved case without importing or rescanning Recent"
         assert not web.script("return !!document.querySelector('.project-load-error');")
@@ -72,19 +72,19 @@ def verify_recent_delete(web, data: dict, root: Path, evidence: Path, report: di
         web.named("Open project menu")
         wait_for(lambda: _recent(web, name), bool, "saved case appears in Recent")
         before = web.state()["active"]
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named(f"Delete {name}", ".workspace-drawer")
         wait_for(lambda: web.script("return document.querySelector('.delete-project-dialog')?.getAttribute('role');"),
                  lambda role: role == "alertdialog", "trash opens an explicit confirmation")
         wait_for(lambda: web.script("return document.activeElement?.textContent.trim();"),
                  lambda text: text == "Cancel", "deletion defaults to Cancel")
         assert _recent(web, name) and web.state()["active"] == before
-        assert not any(entry["name"] == "delete_project" for entry in web.trace()[start:]), "Opening confirmation does not begin deletion"
+        assert not any(entry["name"] == "delete_project" for entry in web.trace(after=start)), "Opening confirmation does not begin deletion"
         web.screenshot(evidence / "recent-delete-confirmation.png")
         web.named("Cancel", ".delete-project-dialog")
         wait_for(lambda: web.script("return !document.querySelector('.delete-project-dialog');"), bool, "Cancel dismisses the confirmation")
         assert _recent(web, name) and web.state()["active"] == before
-        assert not any(entry["name"] == "delete_project" for entry in web.trace()[start:])
+        assert not any(entry["name"] == "delete_project" for entry in web.trace(after=start))
         saved = web.command("query_project_rows", {"projectId": owner, "offset": 0, "limit": 1})["rows"][0]
         assert all(saved[field] == value for field, value in annotation.items()), saved
 
@@ -110,9 +110,9 @@ def verify_recent_delete(web, data: dict, root: Path, evidence: Path, report: di
         assert pending["busy"] == "true" and pending["disabled"] and pending["trashDisabled"] and "Deleting" in pending["text"], pending
         assert not web.script("return !!document.querySelector(arguments[0]);", f"#project-tab-{owner}"), "Only a confirmed delete closes its tab"
         assert not any(project["meta"]["id"] == owner for project in web.command("list_projects")), "The held reply follows the real storage deletion"
-        refresh_start = len(web.trace())
+        refresh_start = web.checkpoint()
         web.named("Refresh projects", ".workspace-drawer")
-        wait_for(lambda: [entry for entry in web.trace()[refresh_start:] if entry["name"] == "list_projects" and "result" in entry],
+        wait_for(lambda: [entry for entry in web.trace(after=refresh_start) if entry["name"] == "list_projects" and "result" in entry],
                  bool, "the pending-delete refresh receives its real saved-project list")
         _settle(web)
         wait_for(lambda: web.script("return arguments[0]?.getAttribute('aria-busy');", _recent(web, name)),

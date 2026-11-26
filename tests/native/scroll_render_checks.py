@@ -43,7 +43,7 @@ def verify_scroll_rendering(web, data, evidence: Path, report: dict) -> None:
         web.button("First")
         web.results(data["total"])
         _settle(web)
-        start = len(web.trace())
+        start = web.checkpoint()
         web.script("""
           const e=document.querySelector('.virtual-viewport'),p=window.__scrollTurnCoverage={e,samples:[]};
           p.listen=()=>queueMicrotask(()=>{
@@ -67,7 +67,7 @@ def verify_scroll_rendering(web, data, evidence: Path, report: dict) -> None:
                                bool, "scroll-event microtask records DOM coverage")
             assert all(item["covered"] and item["unloaded"] == 0 and item["loading"] == 0 for item in current), current
             turns.extend(current)
-        assert not any(entry["name"] == "query_project_rows" for entry in web.trace()[start:]), "The coverage regression must use already cached rows"
+        assert not any(entry["name"] == "query_project_rows" for entry in web.trace(after=start)), "The coverage regression must use already cached rows"
         report["stable_scroll_rendering"] = {"retained_rows_keep_original_stripe_across_virtual_window_parity": True,
             "samples": samples, "loaded_rows_cover_viewport_in_scroll_event_turn": turns}
     finally:

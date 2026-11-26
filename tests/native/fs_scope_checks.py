@@ -28,7 +28,7 @@ def _write(web, path: Path, text: str) -> dict:
 
 
 def _import(web, path: Path, kind: str, report: dict) -> dict:
-    before = len(web.trace())
+    before = web.checkpoint()
     result = web.async_script("""
       const done=arguments[arguments.length-1];
       window.__TAURI_INTERNALS__.invoke('read_import_text',{path:arguments[0],kind:arguments[1]})
@@ -36,7 +36,7 @@ def _import(web, path: Path, kind: str, report: dict) -> dict:
           denied:String(error)==='Choose the import file in the file picker first.'}));
     """, str(path), kind)
     if not result["ok"]:
-        entries = [entry for entry in web.trace()[before:] if entry["name"] == "read_import_text"
+        entries = [entry for entry in web.trace(after=before) if entry["name"] == "read_import_text"
                    and entry.get("error") == "Choose the import file in the file picker first."]
         assert len(entries) == 1, "The expected import refusal must be observed exactly once"
         report.setdefault("boundary_expected_errors", []).append({

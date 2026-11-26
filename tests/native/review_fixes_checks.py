@@ -25,7 +25,7 @@ def _search(web, query: str, expected: list[int]) -> None:
 
 
 def _query_failure(web, project_id: str, report: dict) -> None:
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.write('input[aria-label="Search rows"]', "|")
     _key(web, "\ue007")
 
@@ -48,14 +48,14 @@ def _query_failure(web, project_id: str, report: dict) -> None:
     wait_for(lambda: web.script("return document.querySelectorAll('.condition-row').length;"),
         lambda count: count == 1, "Rules remain clickable above the query-error layer")
     web.close_drawer()
-    before_retry = len(web.trace())
+    before_retry = web.checkpoint()
     web.named("Retry", '.table-query-state[role="alert"]')
-    wait_for(lambda: [entry for entry in web.trace()[before_retry:] if entry["name"] == "query_project_rows"
+    wait_for(lambda: [entry for entry in web.trace(after=before_retry) if entry["name"] == "query_project_rows"
         and entry["request"].get("projectId") == project_id and entry["request"].get("search") == "|"],
         lambda entries: bool(entries and entries[-1].get("error")), "Retry repeats the same rejected query")
     retry = wait_for(failed, lambda value: "Could not load rows." in value["message"], "retry failure remains explicit")
     assert retry["query"] == "|" and not retry["empty"] and retry["cells"] == 0, retry
-    errors = [entry for entry in web.trace()[checkpoint:] if entry["name"] == "query_project_rows"
+    errors = [entry for entry in web.trace(after=checkpoint) if entry["name"] == "query_project_rows"
         and entry["request"].get("projectId") == project_id and entry["request"].get("search") == "|"
         and "error" in entry]
     assert len(errors) >= 2 and all("Invalid search query" in entry["error"] for entry in errors), errors
@@ -94,7 +94,7 @@ def _note_width(web, width: int) -> dict:
 def _resize_note(web, case: dict, source: Path, report: dict) -> None:
     _search(web, "", list(range(8)))
     _horizontal_to(web, 0)
-    query, before, checkpoint = web.query(), _note_width(web, 200), len(web.trace())
+    query, before, checkpoint = web.query(), _note_width(web, 200), web.checkpoint()
     slider = web.node('[aria-label="Resize column Note"]')
     assert web.script("return [arguments[0].getAttribute('aria-valuemin'),arguments[0].getAttribute('aria-valuemax'),arguments[0].tabIndex];", slider) == ["120", "600", 0]
     web.script("arguments[0].focus({preventScroll:true});", slider)
@@ -110,7 +110,7 @@ def _resize_note(web, case: dict, source: Path, report: dict) -> None:
     time.sleep(.35)  # Beyond filter debounce: presentation changes must not query.
     assert web.query() == query, (query, web.query())
     assert not any(entry["name"] in {"query_project_rows", "locate_project_row"}
-        for entry in web.trace()[checkpoint:]), "Resizing Note must not reload or re-sort rows"
+        for entry in web.trace(after=checkpoint)), "Resizing Note must not reload or re-sort rows"
     _horizontal_to(web, 300)
     panned = _note_width(web, 150)
     assert panned["scroll"] == 300 and abs(panned["header"]["left"] - before["header"]["left"]) <= 1, panned

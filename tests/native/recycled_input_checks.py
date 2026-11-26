@@ -28,7 +28,7 @@ def _state(web) -> dict:
 
 
 def _writes(web, start: int) -> list[dict]:
-    return [entry for entry in web.trace()[start:] if entry["name"] == "update_flag"]
+    return [entry for entry in web.trace(after=start) if entry["name"] == "update_flag"]
 
 
 def _activate(web, keyboard: bool) -> None:
@@ -61,7 +61,7 @@ def verify_recycled_inputs(web, projectId: str, report: dict) -> None:
               return {x,y,hit:button.contains(document.elementFromPoint(x,y))};
             """, control, keyboard)
             assert point.pop("hit"), "The pressed control must be reachable by the real pointer"
-            before, start = _state(web), len(web.trace())
+            before, start = _state(web), web.checkpoint()
             if keyboard:
                 _space(web, True)
             else:
@@ -89,7 +89,7 @@ def verify_recycled_inputs(web, projectId: str, report: dict) -> None:
             assert after["selected"] == before["selected"] and after["dialog"] is None, after
             if control == "checkbox":
                 assert after["checked"] == recycled["checked"], "Cancelled checkbox activation must roll back its native checked state"
-            fresh_start = len(web.trace())
+            fresh_start = web.checkpoint()
             _activate(web, keyboard)
             if control == "safe":
                 fresh = wait_for(lambda: _writes(web, fresh_start), bool, "a fresh flag activation still writes the current original row")
@@ -98,7 +98,7 @@ def verify_recycled_inputs(web, projectId: str, report: dict) -> None:
                 # Restore only the flag through its normal UI, preserving notes,
                 # tags, bookmarks and any annotation established by earlier tests.
                 restore = after["flag"] or "Safe"
-                restore_start = len(web.trace())
+                restore_start = web.checkpoint()
                 web.tap(web.script("return [...window.__recycledInput.row.querySelectorAll('.flag-buttons button')].find(e=>e.getAttribute('aria-label')===arguments[0]);", restore))
                 wait_for(lambda: _writes(web, restore_start), lambda values: bool(values and "result" in values[-1]), "the original flag is restored")
             elif control == "checkbox":

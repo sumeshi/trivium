@@ -50,9 +50,9 @@ def _custom_pattern(web, name):
              bool, "New pattern opens its editor without dismissing the picker")
     web.write('[aria-label="Pattern name"]', name)
     web.write('[aria-label="Pattern expression"]', "TOKEN-[0-9]{2}")
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.named("Save pattern", "#search-pattern-menu")
-    entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:]) if item["name"] == "save_format"), None),
+    entry = wait_for(lambda: next((item for item in reversed(web.trace(after=checkpoint)) if item["name"] == "save_format"), None),
         lambda item: bool(item and "result" in item), "custom pattern saves through the actual Rust catalog")
     definition = entry["request"]["definition"]
     custom = wait_for(lambda: web.script("""
@@ -72,9 +72,9 @@ def _custom_pattern(web, name):
              bool, "Edit keeps the selected pattern editor open")
     changed = {**definition, "pattern": "TOKEN-99", "examples": [{"text": "TOKEN-99", "values": ["TOKEN-99"]}]}
     web.write('[aria-label="Pattern definition JSON"]', json.dumps(changed))
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.named("Save pattern", "#search-pattern-menu")
-    wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:]) if item["name"] == "save_format"), None),
+    wait_for(lambda: next((item for item in reversed(web.trace(after=checkpoint)) if item["name"] == "save_format"), None),
              lambda item: bool(item and "result" in item), "editing the reusable pattern completes")
     # Beyond the real 160ms query debounce: catalog edits must not silently
     # replace the definition already applied to this investigation.
@@ -106,7 +106,7 @@ def _ranking(web, values, columns):
 def _scan(web, project_id, values):
     if web.script("return !!document.querySelector('#extraction-column-list');"):
         web.named("Close extraction columns", ".extract-panel")
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     existing_tabs = set(web.script("return [...document.querySelectorAll('.project-tabs [role=tab]')].map(e=>e.id);"))
     web.write('.extract-panel [aria-label="Find an extraction pattern"]', "IPv4")
     _settle(web)
@@ -121,7 +121,7 @@ def _scan(web, project_id, values):
       state.observer.observe(document.querySelector('.extract-panel'),{attributes:true,subtree:true,childList:true});
     """)
     web.named("IPv4-like", ".extract-panel")
-    entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:])
+    entry = wait_for(lambda: next((item for item in reversed(web.trace(after=checkpoint))
         if item["name"] == "extract_values" and item["request"].get("projectId") == project_id), None),
         lambda value: bool(value and ("result" in value or "error" in value)), "real extraction creates a CSV")
     assert "result" in entry and "error" not in entry, entry
@@ -132,7 +132,7 @@ def _scan(web, project_id, values):
     assert web.script("return document.querySelector('.project-tabs [role=tab][aria-selected=true]')?.id;") == f"project-tab-{project_id}"
     assert web.script("return !!document.querySelector('.extract-panel');"), "Extract remains open for another scan"
     assert not any(item["name"] in ("load_project", "query_project_rows")
-                   and item["request"].get("projectId") == derived_id for item in web.trace()[checkpoint:]), "Background tabs retain metadata without loading row data"
+                   and item["request"].get("projectId") == derived_id for item in web.trace(after=checkpoint)), "Background tabs retain metadata without loading row data"
     _settle(web)
     layout = web.script("""
       const s=window.__extractLayout;s.samples.push(s.bounds());s.observer.disconnect();
@@ -187,9 +187,9 @@ def _export(web, destination):
     checkbox = web.node('.export-dialog .export-annotations input')
     if web.script("return arguments[0].checked;", checkbox):
         web.tap(checkbox)
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     web.named("Export…", ".export-dialog")
-    entry = wait_for(lambda: next((item for item in reversed(web.trace()[checkpoint:]) if item["name"] == "export_project"), None),
+    entry = wait_for(lambda: next((item for item in reversed(web.trace(after=checkpoint)) if item["name"] == "export_project"), None),
         lambda value: bool(value and ("result" in value or "error" in value)), "normal CSV export writes extracted values")
     assert "result" in entry and "error" not in entry, entry
     assert entry["request"]["scope"] == "all" and entry["request"]["includeAnnotations"] is False

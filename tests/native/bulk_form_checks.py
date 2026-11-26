@@ -18,7 +18,7 @@ def _status(web, expected: str) -> None:
 
 
 def _calls(web, start: int, project_id: str, name: str) -> list[dict]:
-    return [entry for entry in web.trace()[start:] if entry["name"] == name and entry["request"].get("projectId") == project_id]
+    return [entry for entry in web.trace(after=start) if entry["name"] == name and entry["request"].get("projectId") == project_id]
 
 
 def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> None:
@@ -49,7 +49,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');"), "Clicking an active optional flag removes the requested flag change"
         assert web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
         web.write('input[aria-label="Bulk tag"]', "review, exact")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".bulk-form")
         _status(web, "2 rows applied")
         assert len(_calls(web, start, project_id, "bulk_preview")) == len(_calls(web, start, project_id, "bulk_update")) == 1
@@ -66,7 +66,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
 
         web.choose('select[aria-label="Bulk tag action"]', "clear")
         assert web.script("return document.querySelector('[aria-label=\"Bulk tag\"]').disabled;"), "Clear tags does not require or consume a tag name"
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".bulk-form"); _status(web, "1 rows applied")
         updates = _calls(web, start, project_id, "bulk_update")
         assert len(updates) == 1 and updates[0]["request"]["tags"] == [], updates
@@ -83,7 +83,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.named("Set bulk flag Critical", ".bulk-form")
         web.write('input[aria-label="Bulk note"]', "combined note")
         web.write('input[aria-label="Bulk tag"]', "combined tag")
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".bulk-form"); _status(web, "2 rows applied")
         updates = _calls(web, start, project_id, "bulk_update")
         assert len(updates) == 1 and updates[0]["request"]["flag"] == "critical" and updates[0]["request"]["memo"] == "combined note", updates
@@ -125,7 +125,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.choose('select[aria-label="Bulk tag action"]', "add")
         web.write('input[aria-label="Bulk tag"]', "closed panel")
         web.script("window.__workspaceHold={name:'bulk_preview',projectId:arguments[0],ready:false};", project_id)
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".bulk-form")
         wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "the direct Apply's actual internal preview response is held")
         web.close_drawer()
@@ -146,7 +146,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
 
         web.write('input[aria-label="Bulk tag"]', "stale target")
         web.script("window.__workspaceHold={name:'bulk_preview',projectId:arguments[0],ready:false};", project_id)
-        start = len(web.trace())
+        start = web.checkpoint()
         web.named("Apply", ".bulk-form")
         wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "a second direct preview is held while the panel remains open")
         web.write('input[aria-label="Search rows"]', "match")

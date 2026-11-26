@@ -31,7 +31,7 @@ def _copy_audit(web) -> None:
 
 
 def _details(web, project_id: str, columns: dict[str, str], message: str, total: int, evidence: Path) -> dict:
-    checkpoint = len(web.trace())
+    checkpoint = web.checkpoint()
     _open_detail(web)
     wait_for(lambda: web.script("return document.querySelector(arguments[0])?.querySelector('.row-field-value')?.textContent;", f'.row-detail-field[data-column-id="{columns["message"]}"]'), lambda value: value == message, "truncated message is fetched and shown in full")
     assert web.script("return document.querySelector('.row-detail-dialog').getAttribute('aria-label');") == "Row 1"
@@ -86,7 +86,7 @@ def _details(web, project_id: str, columns: dict[str, str], message: str, total:
     web.applied(projectId=project_id, condition={"column": columns["message"], "op": "ne", "values": [message], "negated": False})
     web.results(total - 1)
     _clear(web, total)
-    requests = web.trace()[checkpoint:]
+    requests = web.trace(after=checkpoint)
     assert not any(entry["name"] == "surrounding_rows" for entry in requests), requests
     full_reads = [entry for entry in requests if entry["name"] == "get_cell" and entry["request"].get("columnId") == columns["message"]]
     assert full_reads and all(entry["requestId"] for entry in full_reads), full_reads
@@ -121,7 +121,7 @@ def _timeline(web, project_id: str, evidence: Path) -> dict:
     assert bucket["total"] == bucket["critical"] == 1 and sum(item["count"] for item in details["counts"]) == 1, (bucket, details)
     assert [item["flag"] for item in details["counts"]] == ["critical", "suspicious", "safe", "unflagged"], details
     assert details["start"] in bucket["title"] and details["end"] in bucket["title"], (bucket, details)
-    reads_before = sum(entry["name"] == "histogram" for entry in web.trace())
+    reads_before = web.checkpoint()
     web.script("document.querySelector('.timeline-svg').focus();")
     web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "timeline-detail-inspect", "actions": [
         {"type": "keyDown", "value": "\ue012"}, {"type": "keyUp", "value": "\ue012"}]}]})
@@ -133,7 +133,7 @@ def _timeline(web, project_id: str, evidence: Path) -> dict:
         {"type": "pointerMove", "x": 40, "y": 20, "duration": 0, "origin": "viewport"}]}]})
     _settle(web)
     assert web.script("return document.querySelector('.timeline-bucket-detail').dataset.bucketIndex;") == index
-    assert sum(entry["name"] == "histogram" for entry in web.trace()) == reads_before, "Inspecting intervals must not aggregate again"
+    assert not any(entry["name"] == "histogram" for entry in web.trace(after=reads_before)), "Inspecting intervals must not aggregate again"
     intervals = web.script("return document.querySelector('.bucket-list').closest('details').querySelector('summary');")
     web.click(intervals)
     aligned = web.script("const button=document.querySelector('.bucket-list button'),r=button.getBoundingClientRect(),mid=(r.top+r.bottom)/2;return {align:getComputedStyle(button).alignItems,offsets:[...button.children].map(e=>{const b=e.getBoundingClientRect();return Math.abs((b.top+b.bottom)/2-mid);})};")

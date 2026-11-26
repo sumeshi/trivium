@@ -18,7 +18,7 @@ from runtime import IPC_COMMAND_JS, native_driver_default, native_workspace
 
 
 INSTRUMENT = r"""
-window.__workspaceErrors=[];window.__workspaceIpc=[];window.__TRIVIUM_PERF__={pages:[]};
+window.__workspaceErrors=[];window.__workspaceIpc=[];window.__workspaceIpcSequence=0;window.__TRIVIUM_PERF__={pages:[]};
 addEventListener('error',e=>window.__workspaceErrors.push(e.message));
 addEventListener('unhandledrejection',e=>window.__workspaceErrors.push(String(e.reason)));
 const p=window.__renderBenchmark={active:false,frames:[],handlers:[],flushes:[],mutations:0,added:0,removed:0,attributes:0,text:0,childLists:0,queries:[]};
@@ -27,7 +27,7 @@ const wrapped=(input,options,...rest)=>{
  __IPC_COMMAND__
  if(!name||name==='active_jobs'||name.startsWith('plugin:'))return fetch.call(window,input,options,...rest);
  let args={};try{args=JSON.parse(typeof options.body==='string'?options.body:new TextDecoder().decode(options.body));}catch{}
- const entry={name,request:args?.payload??args?.request??args??{},started:performance.now()};
+ const entry={sequence:++window.__workspaceIpcSequence,name,request:args?.payload??args?.request??args??{},started:performance.now()};
  window.__workspaceIpc.push(entry);if(p.active&&name==='query_project_rows')p.queries.push(entry);
  return fetch.call(window,input,options,...rest).then(response=>{
   entry.fetch_received=performance.now();entry.roundtrip_ms=entry.fetch_received-entry.started;
@@ -168,7 +168,7 @@ def run_case(web, case, total, columns, evidence, repeats, steps, report):
             (evidence / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     for fraction in (.25, .5, .75, 1, .25):
         target = max(1, round(total * fraction))
-        before = len(web.trace())
+        before = web.checkpoint()
         web.script(START)
         web.input('.row-jump input[type="number"]', str(target))
         started = time.monotonic()
@@ -177,7 +177,7 @@ def run_case(web, case, total, columns, evidence, repeats, steps, report):
         web.results(total)
         settle(web)
         result = web.script(END)
-        queries = [entry for entry in web.trace()[before:] if entry["name"] == "query_project_rows"]
+        queries = [entry for entry in web.trace(after=before) if entry["name"] == "query_project_rows"]
         nav = {"target": target, "click_to_visible_proxy_ms": (time.monotonic() - started) * 1000,
             "queries": queries, "dom_rows": result["dom_rows"], "data_cells": result["data_cells"], "perf": result["perf"]}
         scenario["navigation"].append(nav)

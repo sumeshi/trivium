@@ -29,7 +29,7 @@ def verify_decimal_filters(web, data: dict, root: Path, report: dict) -> None:
         web.script("const e=document.querySelector('input[aria-label=\"Value\"]');e.value='1.5';e.dispatchEvent(new Event('input',{bubbles:true}));")
         checked = []
         for op, expected in [("ge", [1, 2]), ("gt", [2]), ("lt", [0]), ("le", [0, 1])]:
-            checkpoint = len(web.trace())
+            checkpoint = web.checkpoint()
             web.choose('select[aria-label="Operator"]', op)
             rule = {"column": column, "op": op, "values": ["1.5"], "negated": False}
             web.applied(projectId=owner, condition=rule)

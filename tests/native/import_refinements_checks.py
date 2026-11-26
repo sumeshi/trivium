@@ -66,11 +66,11 @@ def verify_import_refinements(web, data: dict, root: Path, evidence: Path, repor
     _save_picker(web)
     try:
         web.close_drawer()
-        start = len(web.trace())
+        start = web.checkpoint()
         _pick(web, tabbed, csv=True)
         assert not web.script("return document.querySelector('[aria-label=\"Preview import\"]').checked;"), "Preview is opt-in"
         web.async_script("const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));")
-        assert not any(entry["name"] == "preview_import" for entry in web.trace()[start:]), "Disabled preview must not read a file"
+        assert not any(entry["name"] == "preview_import" for entry in web.trace(after=start)), "Disabled preview must not read a file"
         _set_checkbox(web, "Preview import", True)
         wait_for(lambda: web.script("return document.querySelector('.preview-table tbody')?.textContent;"),
                  bool, "enabled preview displays actual sampled values")
