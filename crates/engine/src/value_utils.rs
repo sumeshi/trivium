@@ -1,12 +1,11 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use polars::prelude::{AnyValue, DataFrame};
 use serde_json::Value;
 
-use crate::analysis::{
-    infer::parse_datetime_nanos, infer_column_kinds, temporal::datetime_value_nanos, ColumnKind,
-};
+use crate::analysis::{infer::parse_datetime_nanos, temporal::datetime_value_nanos};
 use crate::models::{Cell, ColumnMeta};
 use crate::project_io::INTERNAL_ORIGINAL;
 
@@ -106,65 +105,44 @@ pub const CELL_PREVIEW_CHARS: usize = 256;
 
 /// Column-level context for the per-cell IPC DTO.
 ///
-/// Kinds are inferred once per column from the given frame and never per cell.
-/// `sources` are the original CSV headers / JSON Pointers; they are only used
-/// to tell an absent JSON key ("missing") from an explicit null.
+/// Original CSV headers / JSON Pointers distinguish absent JSON keys from
+/// explicit nulls and retain per-value source types without scanning the page.
 pub struct CellColumns {
-    kinds: HashMap<String, ColumnKind>,
     sources: HashMap<String, String>,
 }
 
 impl CellColumns {
-    pub fn new(df: &DataFrame, columns: &[ColumnMeta]) -> Self {
-        let kinds = infer_column_kinds(df);
+    pub fn new(columns: &[ColumnMeta]) -> Self {
         let sources = columns
             .iter()
             .map(|column| (column.id.clone(), column.source.clone()))
             .collect();
-        Self { kinds, sources }
+        Self { sources }
     }
 
     /// Builds one list cell with a preview. `original` is the parsed row from
     /// `__original`.
     pub fn build(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
-        preview_cell(self.build_full(column, value, original))
+        build_cell(value, original, self.source(column))
     }
 
     /// Builds one cell with the full text, for the on-demand cell fetch.
     pub fn build_full(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
-        let kind = self
-            .kinds
-            .get(column)
-            .copied()
-            .unwrap_or(ColumnKind::String);
-        let source = self
-            .sources
+        build_full_cell(value, original, self.source(column))
+    }
+
+    fn source<'a>(&'a self, column: &'a str) -> &'a str {
+        self.sources
             .get(column)
             .map(String::as_str)
-            .unwrap_or(column);
-        build_full_cell(value, kind, original, source)
-    }
-}
-
-/// Maps an inferred kind for standalone typed values to the cell DTO kind.
-/// Datetimes keep their display text, so the cell kind is "string".
-pub fn cell_kind_name(kind: ColumnKind) -> &'static str {
-    match kind {
-        ColumnKind::Int => "int",
-        ColumnKind::Float => "float",
-        ColumnKind::String | ColumnKind::Datetime | ColumnKind::Null => "string",
+            .unwrap_or(column)
     }
 }
 
 /// Builds one list cell: full text reduced to a preview plus its original
 /// length.
-pub fn build_cell(
-    value: &AnyValue,
-    column_kind: ColumnKind,
-    original: Option<&Value>,
-    source: &str,
-) -> Cell {
-    preview_cell(build_full_cell(value, column_kind, original, source))
+pub fn build_cell(value: &AnyValue, original: Option<&Value>, source: &str) -> Cell {
+    build_value_cell(value, original, source, Some(CELL_PREVIEW_CHARS))
 }
 
 /// Builds one cell with the full source text and no truncation.
@@ -173,18 +151,21 @@ pub fn build_cell(
 /// `"123"` (string) distinct from `123` (number), preserves booleans, and
 /// keeps arrays/objects in one cell. CSV originals are arrays of strings;
 /// CSV and standalone typed values use the Polars value's own type.
-pub fn build_full_cell(
+pub fn build_full_cell(value: &AnyValue, original: Option<&Value>, source: &str) -> Cell {
+    build_value_cell(value, original, source, None)
+}
+
+fn build_value_cell(
     value: &AnyValue,
-    column_kind: ColumnKind,
     original: Option<&Value>,
     source: &str,
+    preview_chars: Option<usize>,
 ) -> Cell {
-    let text = anyvalue_to_search_string(value);
+    let text = anyvalue_text(value);
     match text {
         Some(text) => {
             let length = text.chars().count();
-            let kind = original_json_kind(original, source)
-                .unwrap_or_else(|| anyvalue_kind(value, column_kind));
+            let kind = original_json_kind(original, source).unwrap_or_else(|| anyvalue_kind(value));
             let nanos = match value {
                 AnyValue::Date(_) | AnyValue::Datetime(_, _, _) => {
                     datetime_value_nanos(value).and_then(|nanos| i64::try_from(nanos).ok())
@@ -194,10 +175,16 @@ pub fn build_full_cell(
                 // value so page and full-cell responses agree in mixed columns.
                 _ => parse_datetime_nanos(text.trim()),
             };
+            let truncated = preview_chars.is_some_and(|limit| length > limit);
+            let text = if truncated {
+                text.chars().take(preview_chars.unwrap()).collect()
+            } else {
+                text.into_owned()
+            };
             Cell {
                 text: Some(text),
                 kind: kind.to_string(),
-                truncated: false,
+                truncated,
                 length: Some(length),
                 datetime_nanos: nanos.map(|nanos| nanos.to_string()),
             }
@@ -247,7 +234,7 @@ fn original_json_field<'a>(original: Option<&'a Value>, source: &str) -> Option<
 }
 
 /// Maps a Polars value to a cell kind when no JSON source type is available.
-fn anyvalue_kind(value: &AnyValue, column_kind: ColumnKind) -> &'static str {
+fn anyvalue_kind(value: &AnyValue) -> &'static str {
     match value {
         AnyValue::Boolean(_) => "bool",
         AnyValue::Int8(_)
@@ -259,27 +246,9 @@ fn anyvalue_kind(value: &AnyValue, column_kind: ColumnKind) -> &'static str {
         | AnyValue::UInt32(_)
         | AnyValue::UInt64(_) => "int",
         AnyValue::Float32(_) | AnyValue::Float64(_) => "float",
-        AnyValue::String(_) | AnyValue::StringOwned(_) => cell_kind_name(ColumnKind::String),
+        AnyValue::String(_) | AnyValue::StringOwned(_) => "string",
         AnyValue::List(_) => "array",
-        _ => cell_kind_name(column_kind),
-    }
-}
-
-/// Reduces a full cell to the list preview. Idempotent for already-short text.
-fn preview_cell(cell: Cell) -> Cell {
-    let Some(text) = cell.text.as_ref() else {
-        return cell;
-    };
-    let length = cell.length.unwrap_or_else(|| text.chars().count());
-    if length <= CELL_PREVIEW_CHARS {
-        return cell;
-    }
-    let preview: String = text.chars().take(CELL_PREVIEW_CHARS).collect();
-    Cell {
-        text: Some(preview),
-        truncated: true,
-        length: Some(length),
-        ..cell
+        _ => "string",
     }
 }
 
@@ -297,11 +266,8 @@ fn null_cell_kind(original: Option<&Value>, source: &str) -> &'static str {
 /// page projections can omit this internal column.
 pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
     let series = df.column(INTERNAL_ORIGINAL).ok()?;
-    match series.get(row_idx).ok()? {
-        AnyValue::Null => None,
-        other => anyvalue_to_search_string(&other)
-            .and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok()),
-    }
+    let value = series.get(row_idx).ok()?;
+    anyvalue_text(&value).and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok())
 }
 
 /// Builds the exact cell map for one row. `cells` must have been built from the
@@ -326,6 +292,15 @@ pub fn build_row_cells(
         result.insert(column.id.clone(), cell);
     }
     result
+}
+
+/// Borrow stored string cells; native typed values keep their text adapter.
+pub(crate) fn anyvalue_text<'a>(value: &'a AnyValue<'_>) -> Option<Cow<'a, str>> {
+    match value {
+        AnyValue::String(text) => Some(Cow::Borrowed(*text)),
+        AnyValue::StringOwned(text) => Some(Cow::Borrowed(text.as_str())),
+        _ => anyvalue_to_search_string(value).map(Cow::Owned),
+    }
 }
 
 pub fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {

@@ -7,7 +7,7 @@ use crate::{
     ioc::load_ioc_entries,
     jobs::JobContext,
     models::{LoadProjectResponse, ProjectSummary},
-    project_io::{read_project_row_count, read_project_schema_columns, ProjectColumns},
+    project_io::{read_project_schema_and_row_count, ProjectColumns},
     storage::load_color_rules,
     store::ProjectsStore,
 };
@@ -34,8 +34,7 @@ pub fn load_column_kinds_with_job(
         .ok_or_else(|| AppError::Message("Project not found.".into()))?;
     let dir = store.project_dir(&meta.id);
     let path = dir.join("data.parquet");
-    let schema = read_project_schema_columns(&path).map_err(AppError::from)?;
-    let rows = read_project_row_count(&path).map_err(AppError::from)?;
+    let (schema, rows) = read_project_schema_and_row_count(&path).map_err(AppError::from)?;
     let columns = ProjectColumns::from_meta(&meta);
     Ok(load_profile(&dir, rows, &schema, &columns, job)?.kinds)
 }
@@ -55,8 +54,7 @@ pub fn load_project_with_job(
     if !path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
-    let schema = read_project_schema_columns(&path).map_err(AppError::from)?;
-    let rows = read_project_row_count(&path).map_err(AppError::from)?;
+    let (schema, rows) = read_project_schema_and_row_count(&path).map_err(AppError::from)?;
     let columns = ProjectColumns::from_meta(&meta);
     let profile = load_profile(&dir, rows, &schema, &columns, job)?;
     job.check_cancelled()?;

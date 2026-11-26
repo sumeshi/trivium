@@ -81,7 +81,7 @@ pub fn materialize_page_rows(
             "Page row count does not match the selected row ids.".into(),
         ));
     }
-    let cell_columns = CellColumns::new(df, columns);
+    let cell_columns = CellColumns::new(columns);
     let mut rows = Vec::with_capacity(row_ids.len());
     for (position, &row_idx) in row_ids.iter().enumerate() {
         let cells = build_row_cells(df, position, columns, &cell_columns);

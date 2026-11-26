@@ -59,6 +59,41 @@ fn distinct_boundary_counts_repeats_and_missing_exactly_but_rejects_partial_resu
 }
 
 #[test]
+fn terminal_string_classification_keeps_all_later_counts_and_budget_checks() {
+    let mut stats = accumulator(4, 4096);
+    observe(
+        &mut stats,
+        &[
+            Some("ordinary text"),
+            Some("7"),
+            Some("1.5"),
+            Some("2026-11-14T00:00:00Z"),
+            Some("7"),
+            None,
+            Some(""),
+        ],
+    )
+    .unwrap();
+    let result = stats.finish(1, &JobContext::none()).unwrap();
+    assert_eq!(result.kind, "string");
+    assert_eq!((result.unique, result.missing), (4, 2));
+    assert_eq!(result.top.iter().map(|value| value.count).sum::<u64>(), 5);
+    assert_eq!(result.top[0].value, "7");
+    assert_eq!(result.top[0].count, 2);
+
+    let mut distinct_limited = accumulator(1, 4096);
+    observe(&mut distinct_limited, &[Some("ordinary text")]).unwrap();
+    assert!(observe(&mut distinct_limited, &[Some("7")]).is_err());
+    assert!(distinct_limited.counts.is_empty());
+
+    let mut byte_limited = accumulator(10, 4096);
+    observe(&mut byte_limited, &[Some("ordinary text")]).unwrap();
+    let oversized = "7".repeat(4096);
+    assert!(observe(&mut byte_limited, &[Some(&oversized)]).is_err());
+    assert!(byte_limited.counts.is_empty());
+}
+
+#[test]
 fn byte_boundary_includes_table_keys_and_output_copies_without_penalizing_repeats() {
     let mut probe = accumulator(100, usize::MAX);
     observe(&mut probe, &[Some("long repeated value")]).unwrap();

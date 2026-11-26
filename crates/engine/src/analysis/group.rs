@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use serde_json::Value;
 
@@ -76,20 +76,23 @@ impl GroupTreeBuilder {
         let mut node = &mut self.root;
         for (index, (label, value)) in labels.iter().zip(values).enumerate() {
             let key = (label.clone(), value.is_null() && label.is_empty());
-            if !node.children.contains_key(&key) {
-                if self.nodes >= max_nodes
-                    || label.len() > max_bytes.saturating_sub(self.label_bytes)
-                {
-                    return Err("Too many group values (limit: 10,000 groups / 32 MiB labels). Add a filter or remove a grouping level.");
+            let child = match node.children.entry(key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    if self.nodes >= max_nodes
+                        || label.len() > max_bytes.saturating_sub(self.label_bytes)
+                    {
+                        return Err("Too many group values (limit: 10,000 groups / 32 MiB labels). Add a filter or remove a grouping level.");
+                    }
+                    self.nodes += 1;
+                    self.label_bytes += label.len();
+                    entry.insert(PartialNode {
+                        value: value.clone(),
+                        range: ranges.get(index).cloned().flatten(),
+                        ..PartialNode::default()
+                    })
                 }
-                self.nodes += 1;
-                self.label_bytes += label.len();
-            }
-            let child = node.children.entry(key).or_insert_with(|| PartialNode {
-                value: value.clone(),
-                range: ranges.get(index).cloned().flatten(),
-                ..PartialNode::default()
-            });
+            };
             child.count += 1;
             node = child;
         }
@@ -165,5 +168,66 @@ mod tests {
         assert!(GroupTreeBuilder::default()
             .add_row(&vec!["a".into(); 9], &vec![json!("a"); 9])
             .is_err());
+    }
+
+    #[test]
+    fn occupied_nodes_retain_the_first_value_and_range_at_exact_limits() {
+        let mut tree = GroupTreeBuilder::default();
+        let first_range = GroupTimeRange {
+            start: "2026-11-14T00:00:00Z".into(),
+            end: "2026-11-15T00:00:00Z".into(),
+        };
+        let later_range = GroupTimeRange {
+            start: "2026-11-15T00:00:00Z".into(),
+            end: "2026-11-16T00:00:00Z".into(),
+        };
+        for (value, range) in [
+            (json!("first"), first_range.clone()),
+            (json!("later"), later_range),
+        ] {
+            tree.add_with_range_limits(&["slot".into()], &[value], &[Some(range)], 1, 4)
+                .unwrap();
+        }
+        assert_eq!((tree.nodes, tree.label_bytes), (1, 4));
+        let nodes = tree.finish();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].count, 2);
+        assert_eq!(nodes[0].value, json!("first"));
+        assert_eq!(nodes[0].range, Some(first_range));
+    }
+
+    #[test]
+    fn null_and_empty_nodes_remain_distinct_when_zero_label_bytes_are_available() {
+        let mut tree = GroupTreeBuilder::default();
+        for _ in 0..2 {
+            for value in [Value::Null, json!("")] {
+                tree.add_with_limits(&[String::new()], &[value], 2, 0)
+                    .unwrap();
+            }
+        }
+        assert_eq!((tree.nodes, tree.label_bytes), (2, 0));
+        let nodes = tree.finish();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().all(|node| node.label.is_empty() && node.count == 2));
+        assert!(nodes.iter().any(|node| node.value == Value::Null));
+        assert!(nodes.iter().any(|node| node.value == json!("")));
+    }
+
+    #[test]
+    fn rejected_vacant_nodes_leave_existing_counts_and_budget_totals_intact() {
+        for (max_nodes, max_bytes) in [(1, 8), (8, 1)] {
+            let mut tree = GroupTreeBuilder::default();
+            tree.add_with_limits(&["a".into()], &[json!("a")], max_nodes, max_bytes)
+                .unwrap();
+            assert!(tree
+                .add_with_limits(&["b".into()], &[json!("b")], max_nodes, max_bytes)
+                .is_err());
+            assert_eq!((tree.nodes, tree.label_bytes), (1, 1));
+            let nodes = tree.finish();
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].label, "a");
+            assert_eq!(nodes[0].value, json!("a"));
+            assert_eq!(nodes[0].count, 1);
+        }
     }
 }

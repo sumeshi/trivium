@@ -11,8 +11,7 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::Cell;
 use crate::project_io::{
-    is_internal_column, read_page_rows_dataframe_with_job, read_project_schema_columns,
-    ProjectColumns, INTERNAL_ORIGINAL,
+    is_internal_column, read_page_rows_dataframe_with_job, INTERNAL_ORIGINAL,
 };
 use crate::store::ProjectsStore;
 use crate::value_utils::{original_record_at, CellColumns};
@@ -34,9 +33,8 @@ pub type GetCellResponse = Cell;
 
 /// Reads one cell with its full text.
 ///
-/// Only the requested column and `__original` are projected, and only the row
-/// range up to `row_index` is read through the page reader. Hidden data
-/// columns are valid; internal storage columns are not.
+/// Only the requested column and, for JSON, `__original` are projected.
+/// Hidden data columns are valid; internal storage columns are not.
 pub fn get_cell(
     store: &ProjectsStore,
     payload: GetCellPayload,
@@ -66,19 +64,14 @@ pub fn get_cell_with_job(
         return Err(AppError::Message("Row not found.".into()));
     }
 
-    // The footer is enough to validate the column; no rows are materialized.
-    let schema_columns = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-    let project_columns = ProjectColumns::from_meta(&meta);
-    let column = project_columns
-        .columns()
+    let column = meta
+        .columns
         .iter()
         .find(|column| column.id == payload.column_id)
-        .filter(|column| schema_columns.iter().any(|name| name == &column.id))
         .ok_or_else(|| AppError::Message("Column not found.".into()))?;
 
-    let has_original = schema_columns.iter().any(|name| name == INTERNAL_ORIGINAL);
     let mut projection = vec![payload.column_id.clone()];
-    if has_original {
+    if meta.source_format.as_deref() != Some("csv") {
         projection.push(INTERNAL_ORIGINAL.to_string());
     }
     let df =
@@ -89,7 +82,7 @@ pub fn get_cell_with_job(
     }
 
     let columns = std::slice::from_ref(column);
-    let cell_columns = CellColumns::new(&df, columns);
+    let cell_columns = CellColumns::new(columns);
     let value = df
         .column(&payload.column_id)
         .ok()

@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use trivium_engine::{
     ops::{
+        cell::{get_cell, GetCellPayload},
         export::{export_project, ExportProjectPayload},
         flags::{update_flag, UpdateFlagPayload},
         projects::{create_project, delete_project, CreateProjectPayload, ProjectRequest},
@@ -140,6 +141,31 @@ fn run_fixture(fixture: &str) -> Result<()> {
         })?;
     }
     anyhow::ensure!(meta.total_records > 0, "fixture must contain rows");
+    let datetime_column = column("ts")?;
+    for (name, offset, row) in [
+        ("first", 0, 0),
+        ("middle", meta.total_records / 2, meta.total_records / 2),
+        (
+            "last",
+            meta.total_records.saturating_sub(PAGE),
+            meta.total_records - 1,
+        ),
+    ] {
+        measure(&format!("query_page_{name}"), trials(), || {
+            query(&store, id, QuerySpec::default(), offset)
+        })?;
+        measure(&format!("full_cell_{name}"), trials(), || {
+            get_cell(
+                &store,
+                GetCellPayload {
+                    project_id: id,
+                    row_index: row,
+                    column_id: datetime_column.clone(),
+                },
+            )
+            .map_err(Into::into)
+        })?;
+    }
     let sparse = [
         meta.total_records - 1,
         0,

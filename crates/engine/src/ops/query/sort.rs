@@ -6,7 +6,7 @@ use crate::analysis::infer::parse_datetime_nanos;
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::number::ExactNumber;
-use crate::value_utils::anyvalue_to_search_string;
+use crate::value_utils::anyvalue_text;
 
 const SORT_RUN_ROWS: usize = 262_144;
 
@@ -47,7 +47,7 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
         AnyValue::Time(nanos) => return SortKey::Datetime(i128::from(nanos)),
         _ => {}
     }
-    let Some(text) = anyvalue_to_search_string(&value) else {
+    let Some(text) = anyvalue_text(&value) else {
         return SortKey::Missing;
     };
     // These are comparison keys only. Never rewrite the stored/displayed cell.
@@ -235,6 +235,7 @@ fn cancellable_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
 
     fn sorted(values: &[Option<&str>], direction: &str) -> Vec<usize> {
         let frame = DataFrame::new(vec![Series::new("value", values)]).unwrap();
@@ -246,6 +247,29 @@ mod tests {
             &JobContext::none(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn source_text_is_borrowed_while_typed_values_keep_their_adapter() {
+        let source = " 9007199254740993.000000000000000001 ".to_string();
+        let borrowed = AnyValue::String(&source);
+        let owned = AnyValue::StringOwned(source.clone().into());
+        for value in [&borrowed, &owned] {
+            let text = anyvalue_text(value).unwrap();
+            assert!(matches!(text, Cow::Borrowed(_)));
+            assert_eq!(text.as_ref(), source);
+            let original = match value {
+                AnyValue::String(text) => *text,
+                AnyValue::StringOwned(text) => text.as_str(),
+                _ => unreachable!(),
+            };
+            assert_eq!(text.as_ptr(), original.as_ptr());
+        }
+        assert!(matches!(
+            anyvalue_text(&AnyValue::Float64(1.5)),
+            Some(Cow::Owned(text)) if text == "1.5"
+        ));
+        assert!(anyvalue_text(&AnyValue::Null).is_none());
     }
 
     #[test]

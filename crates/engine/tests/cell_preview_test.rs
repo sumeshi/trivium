@@ -15,7 +15,8 @@ use trivium_engine::ops::flags::{set_hidden_columns, HiddenColumnsPayload};
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::project_io::{
-    last_page_projection, project_full_reads, project_page_reads, reset_project_read_counters,
+    last_page_projection, project_full_reads, project_page_reads, project_read_stats,
+    reset_project_read_counters,
 };
 use trivium_engine::store::ProjectsStore;
 
@@ -133,8 +134,7 @@ fn long_cell_page_is_a_preview_and_get_cell_returns_the_full_value() {
         "get_cell must use the row-page reader"
     );
     let projection = last_page_projection();
-    assert!(projection.contains(&payload_id));
-    assert!(projection.contains(&"__original".to_string()));
+    assert_eq!(projection.as_slice(), std::slice::from_ref(&payload_id));
     assert!(
         !projection.contains(&id_id),
         "get_cell must project only the requested column"
@@ -143,6 +143,12 @@ fn long_cell_page_is_a_preview_and_get_cell_returns_the_full_value() {
         !projection.contains(&"__rowid".to_string()),
         "get_cell does not need the row-id anchor"
     );
+
+    reset_project_read_counters();
+    let first = get_cell(&store, cell_payload(id, 0, &payload_id)).expect("first cell");
+    assert_eq!(first.text.as_deref(), Some("small"));
+    assert_eq!(project_read_stats().decoded_rows, 1);
+    assert_eq!(last_page_projection(), [payload_id]);
 
     let _ = fs::remove_dir_all(root);
 }
@@ -169,11 +175,14 @@ fn get_cell_keeps_null_missing_and_empty_kinds() {
     for source in ["/nullv", "/empty", "/missing"] {
         let column_id = common::id(&ids, source);
         let page_cell = row.cells.get(&column_id).expect("page cell");
+        reset_project_read_counters();
         let full = get_cell(&store, cell_payload(id, row.row_index, &column_id)).expect("get cell");
         assert_eq!(full.text, page_cell.text, "{source} text differs");
         assert_eq!(full.kind, page_cell.kind, "{source} kind differs");
         assert_eq!(full.length, page_cell.length, "{source} length differs");
         assert!(!full.truncated);
+        assert_eq!(last_page_projection(), [column_id, "__original".into()]);
+        assert_eq!(project_read_stats().decoded_rows, 1);
     }
 
     assert_eq!(
@@ -203,7 +212,8 @@ fn get_cell_rejects_internal_unknown_and_out_of_range_rows() {
     let ids: HashMap<String, String> = common::column_ids(&store, id);
     let payload_id = common::id(&ids, "payload");
 
-    for internal in ["__rowid", "__original"] {
+    reset_project_read_counters();
+    for internal in ["__rowid", "__original", "__trivium_source_record"] {
         assert!(
             get_cell(&store, cell_payload(id, 0, internal)).is_err(),
             "{internal} must be rejected"
@@ -219,6 +229,8 @@ fn get_cell_rejects_internal_unknown_and_out_of_range_rows() {
         get_cell(&store, cell_payload(id, total_rows, &payload_id)).is_err(),
         "out-of-range row must be rejected"
     );
+    assert_eq!(project_page_reads(), 0);
+    assert_eq!(project_read_stats().io_bytes, 0);
     assert!(get_cell(&store, cell_payload(id, 0, &payload_id)).is_ok());
 
     let _ = fs::remove_dir_all(root);

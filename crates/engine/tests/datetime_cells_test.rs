@@ -2,7 +2,7 @@
 use polars::prelude::{AnyValue, TimeUnit};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use trivium_engine::{analysis::ColumnKind, ops, store::ProjectsStore, value_utils::build_cell};
+use trivium_engine::{ops, store::ProjectsStore, value_utils::build_cell};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -26,8 +26,8 @@ fn source_datetime_fixtures_publish_exact_keys_without_rewriting_text() {
         });
         // A string column can contain both timestamps and unparseable values.
         // Recognition belongs to the value, independent of a page's other rows.
-        for kind in [ColumnKind::String, ColumnKind::Datetime] {
-            let cell = build_cell(&AnyValue::String(&fixture.input), kind, None, "value");
+        {
+            let cell = build_cell(&AnyValue::String(&fixture.input), None, "value");
             let wire = serde_json::to_value(&cell).unwrap();
             assert_eq!(
                 wire.get("datetime_nanos").and_then(Value::as_str),
@@ -61,7 +61,7 @@ fn typed_temporal_units_publish_exact_keys_without_guessing_numeric_epochs() {
         (AnyValue::Time(1), None),
         (AnyValue::Null, None),
     ] {
-        let cell = build_cell(&value, ColumnKind::String, None, "value");
+        let cell = build_cell(&value, None, "value");
         assert_eq!(
             serde_json::to_value(cell)
                 .unwrap()

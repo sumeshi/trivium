@@ -116,10 +116,11 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     .unwrap();
     assert_eq!(stats.unique, 1);
     assert_eq!(stats.top[0].count, 6667);
+    let selected_end = ((ROWS - 1) / 3 * 3 + 1) as u64;
     let stats_reads = project_read_stats();
     assert_eq!(
-        stats_reads.decoded_rows, ROWS as u64,
-        "cache hit needs only the statistics target scan"
+        stats_reads.decoded_rows, selected_end,
+        "cache hit scans only through the last matching source row"
     );
     assert!(stats_reads.max_batch_rows <= PROJECT_BATCH_ROWS as u64);
     assert_eq!(project_data_reads(), 0, "no all-column DataFrame reads");
@@ -143,7 +144,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     assert_eq!(result.rows, 6667);
     let reads = project_read_stats();
     assert_eq!(
-        reads.decoded_rows, ROWS as u64,
+        reads.decoded_rows, selected_end,
         "arbitrary sorted export scans projected source once"
     );
     assert!(reads.max_batch_rows <= PROJECT_BATCH_ROWS as u64);
@@ -190,8 +191,8 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     assert_eq!(metadata.hit_rows, 6667);
     assert_eq!(
         project_read_stats().decoded_rows,
-        ROWS as u64,
-        "report shares cached query and scans displayed source columns once"
+        selected_end,
+        "report reuses the query and stops after the last matching source row"
     );
     let html = fs::read_to_string(&report).unwrap();
     let mut expected = [3usize, 9999, 19998];

@@ -65,10 +65,16 @@ pub(crate) struct KindFlags {
 
 impl KindFlags {
     pub(crate) fn observe(&mut self, value: &AnyValue) {
+        if self.saw_string {
+            return;
+        }
         self.observe_kind(classify_any(value));
     }
 
     pub(crate) fn observe_text(&mut self, text: &str) {
+        if self.saw_string {
+            return;
+        }
         self.observe_kind(classify_text(text));
     }
 
@@ -224,6 +230,25 @@ fn is_datetime(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_kind_is_terminal_for_typed_and_text_observations() {
+        let mut typed = KindFlags::default();
+        typed.observe(&AnyValue::String("ordinary text"));
+        typed.observe(&AnyValue::Int64(7));
+        typed.observe(&AnyValue::Float64(1.5));
+        typed.observe(&AnyValue::Date(0));
+        assert!(!typed.saw_int && !typed.saw_float && !typed.saw_datetime);
+        assert_eq!(typed.finish(), ColumnKind::String);
+
+        let mut text = KindFlags::default();
+        text.observe_text("ordinary text");
+        for value in ["7", "1.5", "2026-11-14T00:00:00Z", "", "  "] {
+            text.observe_text(value);
+        }
+        assert!(!text.saw_int && !text.saw_float && !text.saw_datetime);
+        assert_eq!(text.finish(), ColumnKind::String);
+    }
 
     #[test]
     fn year_first_slash_dates_share_exact_utc_nanoseconds_with_iso_forms() {

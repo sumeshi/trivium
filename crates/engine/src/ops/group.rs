@@ -107,6 +107,9 @@ pub fn group_tree_with_job(
     let selected = SelectedRows::new(source.target.total_rows, &source.target.ids);
     let mut reader = source.selected_reader(&resolved)?;
     let mut tree = GroupTreeBuilder::default();
+    let mut labels = Vec::with_capacity(resolved.len());
+    let mut values = Vec::with_capacity(resolved.len());
+    let mut ranges = Vec::with_capacity(resolved.len());
     while let Some(batch) = reader.next_with_job(job) {
         let batch = batch.map_err(AppError::from)?;
         let group_series: Vec<&Series> = resolved
@@ -120,9 +123,6 @@ pub fn group_tree_with_job(
             if !selected.contains(batch.offset + row_idx) {
                 continue;
             }
-            let mut labels = Vec::with_capacity(group_series.len());
-            let mut values = Vec::with_capacity(group_series.len());
-            let mut ranges = Vec::with_capacity(group_series.len());
             for (index, series) in group_series.iter().enumerate() {
                 let value = series.get(row_idx).ok();
                 let label = value
@@ -159,6 +159,9 @@ pub fn group_tree_with_job(
             }
             tree.add_row_with_ranges(&labels, &values, &ranges)
                 .map_err(|message| AppError::Message(message.into()))?;
+            labels.clear();
+            values.clear();
+            ranges.clear();
         }
     }
     job.check_cancelled()?;

@@ -17,8 +17,8 @@ use crate::{
     jobs::JobContext,
     models::FlagEntry,
     project_io::{
-        is_internal_column, read_project_columns_with_job, read_project_row_count,
-        read_project_schema_columns, record_column_read_projection, INTERNAL_ROW_ID,
+        is_internal_column, read_project_columns_with_job, read_project_schema_and_row_count,
+        record_column_read_projection, INTERNAL_ROW_ID,
     },
     storage::load_flag_snapshot,
     store::ProjectsStore,
@@ -53,8 +53,7 @@ pub fn resolve_project_target(
     if !path.exists() {
         return Err(AppError::Message("Project data file missing.".into()));
     }
-    let schema = read_project_schema_columns(&path).map_err(AppError::from)?;
-    let total_rows = read_project_row_count(&path).map_err(AppError::from)?;
+    let (schema, total_rows) = read_project_schema_and_row_count(&path).map_err(AppError::from)?;
     let columns: Vec<String> = schema
         .iter()
         .filter(|name| !is_internal_column(name))

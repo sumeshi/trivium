@@ -176,6 +176,22 @@ pub fn read_project_row_count(path: &Path) -> Result<usize> {
         .context("failed to read parquet row count")
 }
 
+/// Schema names and row count from one cached Parquet footer.
+pub fn read_project_schema_and_row_count(path: &Path) -> Result<(Vec<String>, usize)> {
+    let mut reader = ParquetReader::new(File::open(path)?);
+    let columns = reader
+        .schema()
+        .context("failed to read parquet schema")?
+        .fields
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    let rows = reader
+        .num_rows()
+        .context("failed to read parquet row count")?;
+    Ok((columns, rows))
+}
+
 /// Reads only `columns`, for every row, without the internal record columns
 /// unless they are requested.
 ///

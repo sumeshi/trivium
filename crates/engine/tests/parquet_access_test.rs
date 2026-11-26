@@ -13,8 +13,9 @@ use trivium_engine::{
     jobs::{queue_job, request_cancel, JobContext, JobKind},
     project_io::{
         project_read_stats, read_page_dataframe, read_page_dataframe_with_job,
-        read_page_rows_dataframe, read_project_columns_with_job, reset_project_read_counters,
-        ProjectBatchReader, PROJECT_BATCH_ROWS,
+        read_page_rows_dataframe, read_page_rows_dataframe_with_job, read_project_columns_with_job,
+        read_project_schema_and_row_count, reset_project_read_counters, ProjectBatchReader,
+        PROJECT_BATCH_ROWS,
     },
 };
 
@@ -191,6 +192,9 @@ fn crossing_group_edges_and_sparse_repeated_unsorted_ids_preserve_source_values(
 fn projection_reads_only_requested_column_chunks_and_empty_requests_do_no_io() {
     let _lock = guard();
     let fixture = Fixture::new(5199, 128);
+    let (schema, rows) = read_project_schema_and_row_count(&fixture.path).unwrap();
+    assert_eq!(schema, ["seq", "text", "maybe", "uint", "nanos", "original"]);
+    assert_eq!(rows, 5199);
     reset_project_read_counters();
     let projected = read_page_dataframe(&fixture.path, &["uint".into()], 5100, 5).unwrap();
     assert_eq!(projected.get_column_names(), ["uint"]);
@@ -267,6 +271,8 @@ fn cancellation_before_or_between_batches_stops_further_parquet_io() {
 
     reset_project_read_counters();
     assert!(read_page_dataframe_with_job(&fixture.path, &columns(), 0, 10, &job).is_err());
+    assert_eq!(project_read_stats().io_bytes, 0);
+    assert!(read_page_rows_dataframe_with_job(&fixture.path, &columns(), &[1], &job).is_err());
     assert_eq!(project_read_stats().io_bytes, 0);
     assert!(read_project_columns_with_job(&fixture.path, &columns(), &job).is_err());
     assert_eq!(project_read_stats().io_bytes, 0);
@@ -346,4 +352,24 @@ fn range_limit_is_relative_to_first_selected_group_and_stops_at_requested_end() 
     let sparse = read_page_rows_dataframe(&fixture.path, &columns(), &expected).unwrap();
     assert_rows(&sparse, &expected);
     assert_eq!(project_read_stats().decoded_row_groups, 3);
+}
+
+#[test]
+fn sparse_requests_stop_decoding_at_the_last_requested_row() {
+    let _lock = guard();
+    let fixture = Fixture::new(25_000, 12_500);
+    for (expected, decoded_rows) in [
+        (vec![1, 1], 2),
+        (vec![12_501, 3, 3], PROJECT_BATCH_ROWS + 2),
+        (vec![12_502, 12_501, 12_502], 3),
+        (vec![12_500, 12_499, 12_500], 12_501),
+    ] {
+        reset_project_read_counters();
+        let page = read_page_rows_dataframe(&fixture.path, &columns(), &expected).unwrap();
+        assert_rows(&page, &expected);
+        let stats = project_read_stats();
+        assert_eq!(stats.decoded_rows, decoded_rows as u64, "{stats:?}");
+        assert!(stats.max_batch_rows <= PROJECT_BATCH_ROWS as u64);
+        assert!(page.estimated_size() < 16_384);
+    }
 }

@@ -52,7 +52,7 @@ pub fn materialize_rows(
     row_indices: impl Iterator<Item = usize>,
     flags: &HashMap<usize, FlagEntry>,
 ) -> Vec<ProjectRow> {
-    let cell_columns = CellColumns::new(df, columns);
+    let cell_columns = CellColumns::new(columns);
     let mut rows = Vec::new();
     for row_idx in row_indices {
         let cells = build_row_cells(df, row_idx, columns, &cell_columns);

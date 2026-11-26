@@ -68,12 +68,14 @@ impl ProjectBatchReader {
     }
 
     /// Select groups containing requested original IDs; ordering and duplicates
-    /// are intentionally left to the caller gathering its result.
+    /// are intentionally left to the caller gathering its result. Decoding in
+    /// the final selected group stops after the highest requested ID.
     pub fn for_rows(path: &Path, columns: &[String], rows: &[usize]) -> Result<Self> {
         let mut sorted = rows.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        Self::select(path, columns, None, |range| {
+        let end = sorted.last().map(|row| row.saturating_add(1));
+        Self::select(path, columns, end, |range| {
             let index = sorted.partition_point(|row| *row < range.0);
             sorted.get(index).is_some_and(|row| *row < range.1)
         })

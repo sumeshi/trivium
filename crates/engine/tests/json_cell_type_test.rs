@@ -3,7 +3,6 @@
 use polars::prelude::{AnyValue, DataFrame, NamedFrom, Series};
 use serde_json::{json, Value};
 use trivium_engine::{
-    analysis::ColumnKind,
     models::ColumnMeta,
     value_utils::{build_cell, build_full_cell, build_row_cells, CellColumns, CELL_PREVIEW_CHARS},
 };
@@ -31,7 +30,7 @@ fn stored_object_values_keep_distinct_null_missing_and_scalar_cells() {
         source: "/context".into(),
         order: 0,
     }];
-    let builder = CellColumns::new(&df, &columns);
+    let builder = CellColumns::new(&columns);
     for (index, (text, kind)) in [
         (Some("{\"host\":\"foo\"}"), "object"),
         (Some("bar"), "string"),
@@ -71,30 +70,15 @@ fn stored_json_cells_keep_exact_text_types_and_unicode_preview_lengths() {
         ("/number", "9007199254740993", "int"),
         ("/array", "[null,\"\",1]", "array"),
     ] {
-        let cell = build_full_cell(
-            &AnyValue::String(text),
-            ColumnKind::String,
-            Some(&original),
-            source,
-        );
+        let cell = build_full_cell(&AnyValue::String(text), Some(&original), source);
         assert_eq!(cell.text.as_deref(), Some(text));
         assert_eq!(cell.kind, kind);
         assert_eq!(cell.length, Some(text.chars().count()));
         assert!(!cell.truncated);
     }
     let expected = original["object"].to_string();
-    let full = build_full_cell(
-        &AnyValue::String(&expected),
-        ColumnKind::String,
-        Some(&original),
-        "/object",
-    );
-    let preview = build_cell(
-        &AnyValue::String(&expected),
-        ColumnKind::String,
-        Some(&original),
-        "/object",
-    );
+    let full = build_full_cell(&AnyValue::String(&expected), Some(&original), "/object");
+    let preview = build_cell(&AnyValue::String(&expected), Some(&original), "/object");
     assert_eq!(full.text.as_deref(), Some(expected.as_str()));
     assert_eq!(full.kind, "object");
     assert_eq!(full.length, Some(expected.chars().count()));
@@ -118,28 +102,18 @@ fn flattened_paths_resolve_numeric_object_keys_and_escapes_but_never_array_indic
     let object = json!({"a/b~": {"0": "host"}});
     let array = json!({"a/b~": ["host"]});
     let field = "/a~1b~0/0";
-    let object_cell = build_full_cell(
-        &AnyValue::String("host"),
-        ColumnKind::String,
-        Some(&object),
-        field,
-    );
+    let object_cell = build_full_cell(&AnyValue::String("host"), Some(&object), field);
     assert_eq!(object_cell.text.as_deref(), Some("host"));
     assert_eq!(object_cell.kind, "string");
-    let array_cell = build_full_cell(&AnyValue::Null, ColumnKind::String, Some(&array), field);
+    let array_cell = build_full_cell(&AnyValue::Null, Some(&array), field);
     assert_eq!(array_cell.text, None);
     assert_eq!(array_cell.kind, "missing");
     // Even a non-null stale slot must not acquire a source type from an array
     // index: array elements are not flattened columns.
-    let stale = build_full_cell(
-        &AnyValue::String("123"),
-        ColumnKind::String,
-        Some(&json!({"a": [123]})),
-        "/a/0",
-    );
+    let stale = build_full_cell(&AnyValue::String("123"), Some(&json!({"a": [123]})), "/a/0");
     assert_eq!(stale.kind, "string");
     let csv = json!(["host"]);
-    let csv_null = build_full_cell(&AnyValue::Null, ColumnKind::String, Some(&csv), "/0");
+    let csv_null = build_full_cell(&AnyValue::Null, Some(&csv), "/0");
     assert_eq!(csv_null.text, None);
     assert_eq!(csv_null.kind, "null");
 }
@@ -158,21 +132,11 @@ fn arbitrary_precision_json_number_kinds_follow_spelling_without_rounding_text()
         ("4.2e-400", "float"),
     ] {
         let original: Value = serde_json::from_str(&format!("{{\"n\":{raw}}}")).unwrap();
-        let stored = build_full_cell(
-            &AnyValue::String(raw),
-            ColumnKind::String,
-            Some(&original),
-            "/n",
-        );
+        let stored = build_full_cell(&AnyValue::String(raw), Some(&original), "/n");
         assert_eq!(stored.text.as_deref(), Some(raw));
         assert_eq!(stored.kind, kind, "{raw}");
         let string_record = json!({"n": raw});
-        let string_cell = build_full_cell(
-            &AnyValue::String(raw),
-            ColumnKind::String,
-            Some(&string_record),
-            "/n",
-        );
+        let string_cell = build_full_cell(&AnyValue::String(raw), Some(&string_record), "/n");
         assert_eq!(string_cell.kind, "string");
         assert_eq!(string_cell.text.as_deref(), Some(raw));
     }

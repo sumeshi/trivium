@@ -30,8 +30,7 @@ use crate::{
     models::{ColumnMeta, ProjectRow},
     project_io::{
         is_internal_column, read_page_dataframe_with_job, read_page_rows_dataframe_with_job,
-        read_project_row_count, read_project_schema_columns, ProjectColumns, INTERNAL_ORIGINAL,
-        INTERNAL_ROW_ID,
+        read_project_schema_and_row_count, ProjectColumns, INTERNAL_ORIGINAL, INTERNAL_ROW_ID,
     },
     storage::load_page_flag_snapshot,
     store::ProjectsStore,
@@ -119,8 +118,8 @@ pub fn query_project_rows_with_projection(
     }
 
     job.report_progress(0, Some(3), Some("Reading project metadata".into()));
-    let schema_columns = read_project_schema_columns(&parquet_path).map_err(AppError::from)?;
-    let total_rows = read_project_row_count(&parquet_path).map_err(AppError::from)?;
+    let (schema_columns, total_rows) =
+        read_project_schema_and_row_count(&parquet_path).map_err(AppError::from)?;
     let columns: Vec<String> = schema_columns
         .iter()
         .filter(|name| !is_internal_column(name))
