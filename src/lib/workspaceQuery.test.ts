@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { get } from "svelte/store";
+import { get, type Readable } from "svelte/store";
 import type { Backend, LocateProjectRowResponse, QueryProjectRowsArgs, QueryProjectRowsResponse } from "./backend.ts";
 import type { LoadProjectResponse } from "./types.ts";
 import { PAGE_SIZE } from "./components/project_view/state.ts";
@@ -70,6 +70,27 @@ test("visible rows load before prefetch, with the next page following scroll dir
   calls[1].resolve();
   await settle();
   assert.deepEqual(pages(), [5, 6, 4, 3], "Upward scrolling prefetches the preceding page first");
+  await finish();
+});
+
+test("viewport page checks read each page-status store once", async () => {
+  const { workspace, show, calls, finish } = setup();
+  workspace.queryCountKnown.set(true);
+  workspace.loadedPages.set(new Set([4, 5, 6]));
+  const subscriptions = { viewGeneration: 0, largePages: 0, loadedPages: 0 };
+  const track = <T>(store: Readable<T>, name: keyof typeof subscriptions) => {
+    const subscribe = store.subscribe;
+    store.subscribe = (run, invalidate) => {
+      subscriptions[name] += 1;
+      return subscribe(run, invalidate);
+    };
+  };
+  track(workspace.viewGeneration, "viewGeneration");
+  track(workspace.largePages, "largePages");
+  track(workspace.loadedPages, "loadedPages");
+  show(5);
+  assert.deepEqual(subscriptions, { viewGeneration: 1, largePages: 1, loadedPages: 1 });
+  assert.equal(calls.length, 0, "already loaded pages keep their normal no-read behavior");
   await finish();
 });
 

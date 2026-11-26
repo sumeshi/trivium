@@ -92,7 +92,11 @@
   let resizingRows = false;
   let rowResizeRevision = 0;
   const emptyColumnKinds: Readonly<Record<string, ColumnKind>> = {};
-  $: columnKinds = $projectDetail?.column_kinds ?? emptyColumnKinds;
+  let columnKinds = emptyColumnKinds;
+  $: {
+    const next = $projectDetail?.column_kinds ?? emptyColumnKinds;
+    if (next !== columnKinds) columnKinds = next;
+  }
 
   const resizeRows = async (height: number) => {
     const previous = previousRowHeight;
@@ -450,24 +454,35 @@
     start: number,
     end: number,
     cache: Map<number, CachedRow>,
-    posMap: Map<number, number>
+    posMap: Map<number, number>,
+    previous: VirtualRow[],
   ): VirtualRow[] => {
     if (end <= start) {
-      return [];
+      return previous.length ? [] : previous;
     }
-    const result: VirtualRow[] = [];
+    const previousStart = previous[0]?.position ?? start;
+    let result: VirtualRow[] | undefined;
     // Backend result positions identify the original rows, including after sorting.
     for (let position = start; position < end; position += 1) {
       const rowIndex = posMap.get(position) ?? null;
       const row = rowIndex !== null ? cache.get(rowIndex) ?? null : null;
-      result.push({ position, row });
+      const retained = previous[position - previousStart];
+      const item = retained?.position === position && retained.row === row ? retained : { position, row };
+      const index = position - start;
+      if (!result && item !== previous[index]) result = previous.slice(0, index);
+      result?.push(item);
     }
-    return result;
+    return result ?? (previous.length === end - start ? previous : previous.slice(0, end - start));
   };
 
   // A first response updates spacer geometry before its rows are published.
   // Keep that loading state free of evidence controls; normal paging stays live.
-  $: virtualRows = $queryCountKnown ? buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex) : [];
+  $: {
+    const next = $queryCountKnown
+      ? buildVirtualRows(startIndex, endIndex, $rowsCache, $positionToRowIndex, virtualRows)
+      : virtualRows.length ? [] : virtualRows;
+    if (next !== virtualRows) virtualRows = next;
+  }
   $: {
     const next = recycleSlots(virtualRows, (row) => row.position, rowSlots);
     if (next !== rowSlots) rowSlots = next;

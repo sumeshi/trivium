@@ -261,13 +261,15 @@ export function createWorkspaceQuery(workspace: WorkspaceController, options: Qu
       }
     }
     discardStaleWaiters();
+    const generation = get(workspace.viewGeneration);
+    const large = get(workspace.largePages), loaded = get(workspace.loadedPages);
     for (const page of [...visible, ...prefetch]) {
-      const key = workspace.pendingPageKey(get(workspace.viewGeneration), pageEpoch, page);
+      const key = workspace.pendingPageKey(generation, pageEpoch, page);
       const priority = visible.includes(page) ? 1 : 2 + prefetch.indexOf(page);
       const pending = pageRequests.get(key);
       if (pending) {
         if (!pending.explicit) pending.priority = priority;
-      } else if (!failedPages.has(page) && !get(workspace.largePages).has(page) && !get(workspace.loadedPages).has(page)) {
+      } else if (!failedPages.has(page) && !large.has(page) && !loaded.has(page)) {
         void loadPage(page, false, false);
         const request = pageRequests.get(key);
         if (request) request.priority = priority;

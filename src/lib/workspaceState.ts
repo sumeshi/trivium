@@ -24,7 +24,12 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
    * conditions and search scopes keep using the id; only display code reads
    * this map.
    */
-  const columnLabels = derived(projectDetail, (detail) => {
+  let labelColumns: LoadProjectResponse["columns"] | undefined;
+  let labelMetadata: LoadProjectResponse["columns_meta"] | undefined;
+  const columnLabels = derived(projectDetail, (detail, set) => {
+    if (detail?.columns === labelColumns && detail?.columns_meta === labelMetadata) return;
+    labelColumns = detail?.columns;
+    labelMetadata = detail?.columns_meta;
     const labels = new Map<string, string>();
     for (const meta of detail?.columns_meta ?? []) {
       labels.set(meta.id, meta.label);
@@ -34,8 +39,8 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
         labels.set(id, id);
       }
     }
-    return labels;
-  });
+    set(labels);
+  }, new Map<string, string>());
 
   const currentProjectId = writable<string | null>(null);
   const lastHiddenColumnsRef = writable<string[] | null>(null);
@@ -44,8 +49,14 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
   const frozenThrough = writable<string | undefined>(undefined);
   const columnOrder = writable<string[]>([]);
   const columnFormats = writable<Record<string, ColumnDisplayFormat>>({});
-  const orderedColumns = derived([projectDetail, columnOrder], ([detail, order]) =>
-    displayColumnOrder(detail?.columns ?? [], order));
+  let orderColumns: LoadProjectResponse["columns"] | undefined;
+  let previousOrder: string[] | undefined;
+  const orderedColumns = derived([projectDetail, columnOrder], ([detail, order], set) => {
+    if (detail?.columns === orderColumns && order === previousOrder) return;
+    orderColumns = detail?.columns;
+    previousOrder = order;
+    set(displayColumnOrder(detail?.columns ?? [], order));
+  }, [] as string[]);
 
   const search = writable("");
   const searchColumns = writable<string[]>([]);
