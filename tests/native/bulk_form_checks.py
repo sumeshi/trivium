@@ -94,6 +94,10 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             assert combined[index]["tags"] == original[index]["tags"] + ["combined tag"]
             assert combined[index]["bookmarked"] == original[index]["bookmarked"]
         assert combined[1] == original[1]
+        # The saved-operation status precedes the debounced table refresh.
+        # Select delivered rows only after that refresh, not a disabled header.
+        web.refreshed(start)
+        web.results(2)
         # Keep selection target selected after clearing the selection: Undo
         # still refers to the previous durable operation, not the form target.
         web.click(web.element('input[aria-label="Select visible rows"]'))
