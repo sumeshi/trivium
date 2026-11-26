@@ -29,7 +29,7 @@ fn webp_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     let mut chunk = kind.to_vec();
     chunk.extend_from_slice(&(data.len() as u32).to_le_bytes());
     chunk.extend_from_slice(data);
-    if data.len() % 2 != 0 {
+    if !data.len().is_multiple_of(2) {
         chunk.push(0);
     }
     chunk
