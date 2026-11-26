@@ -35,6 +35,7 @@ import type {
   FlagEntry,
   ViewState,
   ImportOptions,
+  ImportPreview,
 } from "./types";
 
 export type { FlagFilterValue } from "./types";
@@ -55,6 +56,20 @@ export interface CreateProjectArgs extends RequestOwned {
   restoreAnnotations?: boolean;
   importOptions?: ImportOptions;
 }
+
+export interface PreviewImportArgs extends RequestOwned {
+  path: string;
+  delimiter?: string | null;
+  importOptions?: ImportOptions;
+}
+
+export interface ExportImportReportArgs extends RequestOwned {
+  projectId: string;
+  destination: string;
+  allowOverwrite?: boolean;
+}
+
+export type ExportImportReportResult = Wire.ExportImportReportResult;
 
 /** Partial updates preserve omitted fields; explicit memo null clears it. */
 export type AnnotationPatch = Partial<Omit<Wire.AnnotationPatch, "flag" | "tags" | "bookmarked">> & {
@@ -288,6 +303,8 @@ export interface Backend extends ExtractBackend {
   deleteFormat(id: string): Promise<void>;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(args: CreateProjectArgs): Promise<ProjectSummary>;
+  previewImport(args: PreviewImportArgs): Promise<ImportPreview>;
+  exportImportReport(args: ExportImportReportArgs): Promise<ExportImportReportResult>;
   deleteProject(projectId: string): Promise<void>;
   loadProject(projectId: string, requestId?: string): Promise<LoadProjectResponse>;
   validateConditionValues(args: ValidateConditionValuesArgs): Promise<ConditionValuesValidation>;
@@ -397,6 +414,21 @@ class NativeBackend implements Backend {
         ...(args.importOptions ? { importOptions: { ...args.importOptions } } : {}),
       },
     }, args));
+  }
+
+  previewImport(args: PreviewImportArgs): Promise<ImportPreview> {
+    return invokeOwned<ImportPreview>("preview_import", { payload: {
+      path: args.path, delimiter: args.delimiter ?? null,
+      ...(args.importOptions ? { importOptions: { ...args.importOptions } } : {}),
+    } }, args);
+  }
+
+  exportImportReport(args: ExportImportReportArgs): Promise<ExportImportReportResult> {
+    const snapshot = structuredClone(args);
+    return acceptSave(() => invokeOwned<ExportImportReportResult>("export_import_report", { payload: {
+      projectId: snapshot.projectId, destination: snapshot.destination,
+      allowOverwrite: snapshot.allowOverwrite === true,
+    } }, snapshot));
   }
 
   deleteProject(projectId: string): Promise<void> {

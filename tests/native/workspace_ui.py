@@ -30,6 +30,8 @@ from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
 from refinement_imports import verify_import_identity
 from import_recovery_checks import verify_import_recovery
+from import_refinements_checks import verify_import_refinements
+from datetime_flex_checks import verify_datetime_flex
 from scroll_render_checks import verify_scroll_rendering
 from toolbar_checks import verify_toolbar, verify_condition_buttons, verify_drawer_interaction
 from datetime_group_checks import verify_datetime_groups
@@ -1044,6 +1046,8 @@ def main() -> None:
                 ("IOC validation and ordered annotation export", lambda: verify_boundary_integrity(web, data, root, evidence, report)),
                 ("explicit GUI annotation restore", lambda: verify_annotation_restore(web, data, root, evidence, report)),
                 ("explicit import recovery and persisted diagnostics", lambda: verify_import_recovery(web, data, root, evidence, report)),
+                ("opt-in preview, complete diagnostics and encoded recovery", lambda: verify_import_refinements(web, data, root, evidence, report)),
+                ("flexible datetime display and exact comparisons", lambda: verify_datetime_flex(web, data, root, evidence, report)),
                 ("Recent deletion confirmation and committed rows", lambda: verify_recent_delete(web, data, root, evidence, report)),
                 ("responsive storage writes under SQLite lock", lambda: verify_storage_responsiveness(web, data, root, evidence, report)),
                 ("native content security policy", lambda: verify_content_policy(web, report)),
@@ -1081,7 +1085,7 @@ def main() -> None:
                 ("shared patterns and extraction result tabs", lambda: verify_extract(app, data, root, evidence, report)),
                 ("custom themes and managed wallpaper", lambda: verify_appearance(app, data, root, evidence, report)),
             ]:
-                if args.import_recovery_only and stage not in {"explicit import recovery and persisted diagnostics", "explicit GUI annotation restore"}:
+                if args.import_recovery_only and stage not in {"explicit import recovery and persisted diagnostics", "explicit GUI annotation restore", "opt-in preview, complete diagnostics and encoded recovery", "flexible datetime display and exact comparisons"}:
                     continue
                 if args.grouping_only and stage not in {"refined imports, scope, grouping and styling", "UTC datetime grouping", "deep rule history scroll restoration"}:
                     continue

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
   import type { LoadProjectResponse } from '../../types';
+  import type { Backend } from '../../backend';
   import { theme, setTheme, themeOptions } from '../../theme';
   import AppearanceDialog from './AppearanceDialog.svelte';
   import ImportReportDialog from './ImportReportDialog.svelte';
@@ -11,6 +12,7 @@
   import { tableTextSize, TABLE_TEXT_SIZES, DEFAULT_TABLE_TEXT_SIZE, adjustTableTextSize, setTableTextSize } from '../../tableTextSize';
 
   export let projectDetail: LoadProjectResponse | null;
+  export let backend: Backend | undefined = undefined;
 
   const dispatch = createEventDispatcher();
   let menuEl: HTMLDetailsElement;
@@ -178,7 +180,9 @@
 
 {#if appearanceOpen}<AppearanceDialog on:close={() => { appearanceOpen = false; menuEl?.querySelector('summary')?.focus(); }} />{/if}
 {#if importReportOpen && meta?.import_report}
-  <ImportReportDialog report={meta.import_report} {fileName} format={meta.source_format} on:close={() => importReportOpen = false} />
+  {#key meta.id}
+    <ImportReportDialog {backend} projectId={meta.id} report={meta.import_report} {fileName} format={meta.source_format} on:close={() => importReportOpen = false} />
+  {/key}
 {/if}
 
 <style>

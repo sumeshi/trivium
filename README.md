@@ -34,6 +34,10 @@ CSV and JSON imports support up to 4,096 data columns. CSV can also include one 
 
 Imports are strict by default. **Import options** lets you open CSV without a header row, select an encoding, or choose **Recover readable records**. Unicode BOMs are recognized automatically; BOM-less Windows-1252 and Shift JIS require a selection. Recovery retains extra CSV fields, fills missing trailing fields with null, and skips invalid CSV/JSONL records where boundaries are known. A broken JSON array stops at its unreadable remainder. The saved import report shows repair/skip counts and up to 30 issue locations and reasons; the original file and its SHA-256 remain unchanged.
 
+**Preview** is off by default. Enable it to inspect a bounded sample before importing; suggested CSV delimiters are applied only when you choose them. Records are limited to 64MiB while reading, with cancellation checks; JSONL checks both encoded and decoded size. JSONL recovery can also skip invalid UTF-16, UTF-32, or Shift JIS lines without inserting replacement characters.
+
+The import report records the delimiter, recovery mode, and annotation restoration setting. **Export JSONL** writes its summary and all recorded diagnostics; the screen still shows at most 30 examples. Older imports export their retained details and identify any incomplete diagnostic list.
+
 Open multiple files in tabs, reorder and resize columns, hide columns you don't need, and pin important columns in place.
 
 You can also drag and drop files into the window to review the import settings before opening them.
@@ -103,6 +107,8 @@ Right-click a cell or use its record details to create an IOC rule from the exac
 ### Timeline & Analysis
 
 For logs with a datetime column, the timeline shows when events occurred, including event counts broken down by Safe, Suspicious, Critical, and unflagged rows.
+
+Datetime analysis accepts year-first dates with `-`, `/`, or `.`, unpadded components, comma or dot fractions, UTC/GMT and numeric offsets, and English month names with an explicit zone. Missing zones mean UTC. Nanoseconds and source text are preserved; ambiguous month/day ordering and numeric epochs are not guessed.
 
 Zoom in on periods of high activity, or select a time range to narrow down the table. Value counts, rare values, time gaps, and grouping tools provide other ways to explore the data.
 

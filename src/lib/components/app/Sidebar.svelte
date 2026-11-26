@@ -3,13 +3,16 @@
   import { fade, fly } from 'svelte/transition';
   import dayjs from 'dayjs';
   import type { ImportOptions as ImportOptionsData, ProjectSummary } from '../../types';
+  import type { Backend } from '../../backend';
   import ImportOptions from './ImportOptions.svelte';
+  import ImportPreview from './ImportPreview.svelte';
   import { defaultImportOptions } from '../../importOptions';
   import type { ProjectImportFailure } from '../../stores/projects';
 
   const dispatch = createEventDispatcher();
 
   export let projects: ProjectSummary[];
+  export let backend: Backend;
   export let selectedProjectId: string | null;
   export let isLoadingProjects: boolean;
   export let deletingProjectIds: string[] = [];
@@ -142,6 +145,10 @@
 
       <ImportOptions options={pendingImportOptions} csv={csvSettingsRelevant} disabled={creating}
         on:change={(event) => dispatch('importOptionsChange', event.detail)} />
+
+      <ImportPreview {backend} path={pendingFilePaths[0] ?? null} delimiter={pendingDelimiter}
+        options={pendingImportOptions} disabled={creating} multiple={pendingFilePaths.length > 1}
+        on:delimiter={(event) => dispatch('delimiterChange', event.detail)} />
 
       <button
         class="button primary full"

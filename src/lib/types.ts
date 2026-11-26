@@ -5,6 +5,7 @@ import type * as Wire from "./generated/engine";
 export type ColumnMeta = Wire.ColumnMeta;
 export type ImportOptions = Wire.ImportOptions;
 export type ImportReport = Wire.ImportReport;
+export type ImportPreview = Wire.ImportPreview;
 export type TextEncoding = Wire.TextEncoding;
 type LegacyMetaFields = "description" | "source_sha256" | "source_file_name" |
   "source_format" | "source_size" | "source_path" | "storage_version" | "columns";

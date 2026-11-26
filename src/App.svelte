@@ -374,7 +374,7 @@
 <svelte:window on:blur={() => fileDrop.clear()} on:keydown={(event) => { if (event.key === 'Escape') fileDrop.clear(); }} />
 
 <div class="app-shell" inert={!closeReady || $closeState.phase !== 'idle' || Boolean(deleteCandidate)}>
-  <Header projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
+  <Header {backend} projectDetail={$projectState.projectDetail} on:menuClick={() => { if (!editsBlocked()) sidebarOpen = !sidebarOpen; }} on:refreshClick={handleRefreshRequest} />
   <ProjectTabs projects={openProjects} selectedProjectId={$projectState.selectedProjectId}
     temporaryProjectIds={$projectState.temporaryProjectIds} busy={tabCloseBusy}
     on:select={(event) => handleSelectProject(event.detail)} on:close={(event) => handleCloseTab(event.detail)}
@@ -383,6 +383,7 @@
 
   {#if sidebarOpen}
     <Sidebar
+      {backend}
       projects={$projectState.projects.filter(project => !$projectState.temporaryProjectIds.includes(project.meta.id))}
       selectedProjectId={$projectState.selectedProjectId}
       isLoadingProjects={$projectState.isLoadingProjects}
