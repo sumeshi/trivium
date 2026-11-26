@@ -56,6 +56,7 @@ fn setup_project() -> (
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -160,6 +161,7 @@ fn json_page_reads_the_original_record_for_cell_kinds() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: jsonl.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

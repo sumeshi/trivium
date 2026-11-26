@@ -33,6 +33,7 @@ fn jsonl_ndjson_strip_only_file_prefix_bom_and_keep_lines_source_hash_and_values
         let meta = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,
@@ -61,6 +62,7 @@ fn jsonl_ndjson_strip_only_file_prefix_bom_and_keep_lines_source_hash_and_values
         let error = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: invalid.to_string_lossy().into(),
                 description: None,
                 delimiter: None,
@@ -83,6 +85,7 @@ fn jsonl_ndjson_strip_only_file_prefix_bom_and_keep_lines_source_hash_and_values
         let error = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: later.to_string_lossy().into(),
                 description: None,
                 delimiter: None,

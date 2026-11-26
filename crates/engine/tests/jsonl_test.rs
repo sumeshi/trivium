@@ -159,6 +159,7 @@ fn ops_create_project_accepts_jsonl_extension() {
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

@@ -46,6 +46,7 @@ fn entry(flag: &str) -> FlagEntry {
 }
 fn meta(id: Uuid) -> ProjectMeta {
     ProjectMeta {
+        import_report: None,
         id,
         name: "legacy.csv".into(),
         description: None,

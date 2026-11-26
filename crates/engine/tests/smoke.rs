@@ -87,6 +87,7 @@ fn setup_project() -> (PathBuf, ProjectsStore, uuid::Uuid, std::collections::Has
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: Some("smoke".to_string()),
             delimiter: None,
@@ -314,6 +315,7 @@ fn nanosecond_integer_is_not_rounded() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -419,6 +421,7 @@ fn column_stats_match_python_counts() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -550,6 +553,7 @@ fn duplicate_rows_keep_every_occurrence() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -655,6 +659,7 @@ fn duplicate_rows_match_fixture_duplicates() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -823,6 +828,7 @@ fn histogram_places_values_in_equal_width_buckets() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -1062,6 +1068,7 @@ fn time_analysis_finds_fixture_gaps() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -1120,6 +1127,7 @@ fn time_analysis_gap_range_matches_bounds() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -1443,6 +1451,7 @@ fn export_and_reimport_roundtrip() {
     let reimported = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: destination.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -1516,6 +1525,7 @@ ts,note,secret
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: Some("around".to_string()),
             delimiter: None,
@@ -1628,6 +1638,7 @@ ts,EventID,host,user,proc,path,msg
         ops::projects::create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: path.to_string_lossy().to_string(),
                 description: None,
                 delimiter: None,

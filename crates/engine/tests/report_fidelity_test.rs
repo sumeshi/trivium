@@ -52,6 +52,7 @@ fn filtered_report_statistics_cover_matching_rows_including_unannotated_matches(
     let imported = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,
@@ -107,6 +108,7 @@ fn sorted_report_rows_keep_full_unicode_and_escape_source_fields_and_notes() {
     let imported = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,

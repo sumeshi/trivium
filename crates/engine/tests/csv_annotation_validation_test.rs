@@ -17,6 +17,7 @@ const HEADERS: [&str; 5] = [
 
 fn payload(path: &Path, restore: bool) -> CreateProjectPayload {
     CreateProjectPayload {
+        import_options: None,
         path: path.to_string_lossy().into(),
         description: None,
         delimiter: None,

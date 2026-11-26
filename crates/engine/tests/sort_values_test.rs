@@ -48,6 +48,7 @@ fn exact_numeric_and_datetime_sort_survive_reopen_and_export_original_spellings(
         let project = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into_owned(),
                 description: None,
                 delimiter: None,

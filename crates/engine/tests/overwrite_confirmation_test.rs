@@ -31,6 +31,7 @@ fn create(store: &ProjectsStore, path: &Path) -> Uuid {
     create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,

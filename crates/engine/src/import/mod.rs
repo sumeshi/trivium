@@ -1,6 +1,8 @@
 pub mod csv;
 pub mod json;
 pub mod jsonl;
+pub mod options;
+pub mod text_encoding;
 mod json_source;
 mod strict_json;
 mod utf16;

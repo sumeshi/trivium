@@ -1,5 +1,6 @@
 //! Explicit CSV annotation restoration; ordinary imports keep these as data.
-use super::FlagColumns;
+use crate::annotation_columns::{leading_block, TagFormat, ANNOTATION_COLUMNS};
+use crate::models::ColumnMeta;
 use crate::{error::AppError, models::FlagEntry};
 
 fn boolean_cell(
@@ -85,4 +86,64 @@ pub(super) fn flag_entry(
         tags,
         bookmarked,
     }))
+}
+
+/// Source column positions of the optional annotation side channel.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct FlagColumns {
+    safe: Option<usize>,
+    suspicious: Option<usize>,
+    critical: Option<usize>,
+    memo: Option<usize>,
+    tags: Option<usize>,
+    tags_json: Option<usize>,
+    bookmarked: Option<usize>,
+}
+
+impl FlagColumns {
+    fn find(columns: &[ColumnMeta], name: &str) -> Option<usize> {
+        columns
+            .iter()
+            .find(|column| column.source == name)
+            .map(|column| column.order)
+    }
+
+    pub(super) fn from_columns(columns: &[ColumnMeta]) -> Self {
+        if let Some(block) = columns.get(..ANNOTATION_COLUMNS.len()) {
+            let headers = block
+                .iter()
+                .map(|column| column.source.as_str())
+                .collect::<Vec<_>>();
+            if let Some(tags) = leading_block(&headers) {
+                return Self {
+                    safe: Some(block[0].order),
+                    suspicious: Some(block[1].order),
+                    critical: Some(block[2].order),
+                    memo: Some(block[3].order),
+                    tags: matches!(tags, TagFormat::Legacy).then_some(block[4].order),
+                    tags_json: matches!(tags, TagFormat::Json).then_some(block[4].order),
+                    bookmarked: Some(block[5].order),
+                };
+            }
+        }
+        Self {
+            safe: Self::find(columns, "trivium-safe"),
+            suspicious: Self::find(columns, "trivium-suspicious"),
+            critical: Self::find(columns, "trivium-critical"),
+            memo: Self::find(columns, "trivium-memo"),
+            tags: Self::find(columns, "trivium-tags"),
+            tags_json: Self::find(columns, "trivium-tags-json"),
+            bookmarked: Self::find(columns, "trivium-bookmarked"),
+        }
+    }
+
+    pub(super) fn any(self) -> bool {
+        self.safe.is_some()
+            || self.suspicious.is_some()
+            || self.critical.is_some()
+            || self.memo.is_some()
+            || self.tags.is_some()
+            || self.tags_json.is_some()
+            || self.bookmarked.is_some()
+    }
 }

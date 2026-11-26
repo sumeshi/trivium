@@ -49,6 +49,7 @@ fn import(store: &ProjectsStore, path: &Path) -> ProjectMeta {
     create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -246,6 +247,7 @@ fn legacy_typed_initial_page_preserves_original_ids_nulls_and_nanoseconds() {
         .unwrap();
     store
         .insert(ProjectMeta {
+            import_report: None,
             id,
             name: "typed".into(),
             description: None,

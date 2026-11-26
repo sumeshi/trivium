@@ -88,6 +88,7 @@ fn oversized_encoded_output_cannot_replace_a_saved_preset_or_publish_a_new_one()
     let project = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,

@@ -128,6 +128,7 @@ fn imported_cases_can_hide_every_column_without_losing_annotation_controls() {
     let imported = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,

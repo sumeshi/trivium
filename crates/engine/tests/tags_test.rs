@@ -52,6 +52,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid, std::collections::HashMap<String, S
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -411,6 +412,7 @@ fn export_writes_user_tags_as_a_separate_column_and_reimport_restores_them() {
     let reimported = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: destination.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

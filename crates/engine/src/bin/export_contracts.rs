@@ -1,6 +1,8 @@
 //! Deterministic Rust -> TypeScript wire contract generation.
 use std::{env, fs, path::PathBuf};
-use trivium_engine::{analysis, annotation, condition, formats, jobs, models, ops};
+use trivium_engine::{
+    analysis, annotation, condition, formats, import::options, jobs, models, ops,
+};
 use ts_rs::TS;
 
 fn add<T: TS>(out: &mut String) {
@@ -27,6 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         condition::Group,
         condition::Node,
         annotation::AnnotationPatch,
+        options::TextEncoding,
+        options::ImportOptions,
+        options::ImportIssueAction,
+        options::ImportIssue,
+        options::ImportReport,
         models::ColumnMeta,
         models::ProjectMeta,
         models::ProjectSummary,

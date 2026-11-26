@@ -55,6 +55,7 @@ fn csv_fixture() -> (PathBuf, ProjectsStore, Uuid, HashMap<String, String>) {
     let id = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into_owned(),
             description: None,
             delimiter: None,
@@ -267,6 +268,7 @@ fn two_million_row_lookup_reaches_source_start_middle_and_end_without_full_reads
     drop(frame);
     store
         .insert(ProjectMeta {
+            import_report: None,
             id,
             name: "2m source rows".into(),
             description: None,

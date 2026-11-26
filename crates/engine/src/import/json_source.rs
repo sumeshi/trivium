@@ -12,7 +12,11 @@ use serde::de::{Deserializer as _, SeqAccess, Visitor};
 use serde_json::{Deserializer, Value};
 
 use crate::error::AppError;
+use crate::import::options::ImportReport;
 use crate::import::strict_json::{self, ValueSeed};
+use crate::jobs::JobContext;
+
+mod recovery;
 
 /// Record layout of a JSON source. `Json` accepts a single object or one
 /// object per array element; `JsonLines` accepts one object per physical line.
@@ -77,6 +81,7 @@ struct ArrayVisitor<'a, F> {
     visit: &'a mut F,
     error: &'a mut Option<AppError>,
     element: usize,
+    job: &'a JobContext,
 }
 
 impl<'de, 'a, F> Visitor<'de> for ArrayVisitor<'a, F>
@@ -94,6 +99,10 @@ where
         A: SeqAccess<'de>,
     {
         loop {
+            if let Err(err) = self.job.check_cancelled() {
+                *self.error = Some(err);
+                return Err(serde::de::Error::custom("import cancelled"));
+            }
             let record_no = self.element + 1;
             let value = seq
                 .next_element_seed(ValueSeed::new(format!("/{}", self.element)))
@@ -131,11 +140,36 @@ where
 pub(crate) fn for_each_record<F>(
     path: &Path,
     format: RecordFormat,
+    recover: bool,
+    job: &JobContext,
+    mut visit: F,
+) -> Result<ImportReport, AppError>
+where
+    F: FnMut(usize, Value) -> Result<(), AppError>,
+{
+    if recover {
+        return recovery::for_each_record(path, format, job, visit);
+    }
+    let mut report = ImportReport::default();
+    for_each_strict_record(path, format, job, |record_no, value| {
+        visit(record_no, value)?;
+        report.source_records += 1;
+        report.imported_records += 1;
+        Ok(())
+    })?;
+    Ok(report)
+}
+
+fn for_each_strict_record<F>(
+    path: &Path,
+    format: RecordFormat,
+    job: &JobContext,
     mut visit: F,
 ) -> Result<(), AppError>
 where
     F: FnMut(usize, Value) -> Result<(), AppError>,
 {
+    job.check_cancelled()?;
     match format {
         RecordFormat::JsonLines => {
             let file = File::open(path)
@@ -143,6 +177,7 @@ where
             let mut reader = BufReader::new(file);
             strip_utf8_bom(&mut reader)?;
             for (line_no, line) in reader.lines().enumerate() {
+                job.check_cancelled()?;
                 let line =
                     line.map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
                 let trimmed = line.trim();
@@ -177,6 +212,7 @@ where
                     visit: &mut visit,
                     error: &mut error,
                     element: 0,
+                    job,
                 };
                 let mut deserializer = Deserializer::from_reader(reader);
                 let result = deserializer.deserialize_seq(visitor);

@@ -231,6 +231,7 @@ fn stats_histogram_and_time_analysis_infer_types_from_the_same_filtered_rows() {
     let project = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,

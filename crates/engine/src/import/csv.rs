@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::Path;
 
 use polars::prelude::*;
 
-use crate::annotation_columns::{leading_block, TagFormat, ANNOTATION_COLUMNS};
+use crate::annotation_columns::{leading_block, ANNOTATION_COLUMNS};
 use crate::error::AppError;
-use crate::import::utf16::{detect_bom, Encoding, Utf16Reader};
-use crate::import::{column_id, empty_frame};
+use crate::import::empty_frame;
+use crate::import::options::{ImportIssueAction, ImportOptions, ImportReport};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
 use crate::project_io::{INTERNAL_ORIGINAL, INTERNAL_ROW_ID, INTERNAL_SOURCE_RECORD};
@@ -16,7 +15,8 @@ use crate::storage::COLUMN_WIDTH_SAMPLE_ROWS;
 
 mod annotations;
 mod batch_budget;
-use annotations::flag_entry;
+mod reader;
+use annotations::{flag_entry, FlagColumns};
 
 /// Maximum number of records in one import batch. The byte limit can stop a
 /// batch earlier; the row limit keeps narrow tables from growing the batch
@@ -91,79 +91,26 @@ fn invalid_delimiter() -> AppError {
 }
 
 fn validate_column_count(headers: &csv::StringRecord) -> Result<(), AppError> {
+    validate_record_width(headers, headers.len(), "CSV header")
+}
+
+fn validate_record_width(
+    headers: &csv::StringRecord,
+    width: usize,
+    location: &str,
+) -> Result<(), AppError> {
     let leading = headers
         .iter()
         .take(ANNOTATION_COLUMNS.len())
         .collect::<Vec<_>>();
     let annotations = leading_block(&leading).map_or(0, |_| ANNOTATION_COLUMNS.len());
-    let source_columns = headers.len().saturating_sub(annotations);
+    let source_columns = width.saturating_sub(annotations);
     if source_columns > MAX_CSV_COLUMNS {
         return Err(AppError::Message(format!(
-            "CSV header has {source_columns} data columns; the limit is {MAX_CSV_COLUMNS} (plus a complete leading Trivium annotation block). No columns were discarded."
+            "{location} has {source_columns} data columns; the limit is {MAX_CSV_COLUMNS} (plus a complete leading Trivium annotation block). No columns were discarded."
         )));
     }
     Ok(())
-}
-
-/// Internal column id assigned to a source column by its position.
-/// Source column positions of the optional annotation side channel.
-#[derive(Clone, Copy, Debug, Default)]
-struct FlagColumns {
-    safe: Option<usize>,
-    suspicious: Option<usize>,
-    critical: Option<usize>,
-    memo: Option<usize>,
-    tags: Option<usize>,
-    tags_json: Option<usize>,
-    bookmarked: Option<usize>,
-}
-
-impl FlagColumns {
-    fn find(columns: &[ColumnMeta], name: &str) -> Option<usize> {
-        columns
-            .iter()
-            .find(|column| column.source == name)
-            .map(|column| column.order)
-    }
-
-    fn from_columns(columns: &[ColumnMeta]) -> Self {
-        if let Some(block) = columns.get(..ANNOTATION_COLUMNS.len()) {
-            let headers = block
-                .iter()
-                .map(|column| column.source.as_str())
-                .collect::<Vec<_>>();
-            if let Some(tags) = leading_block(&headers) {
-                return Self {
-                    safe: Some(block[0].order),
-                    suspicious: Some(block[1].order),
-                    critical: Some(block[2].order),
-                    memo: Some(block[3].order),
-                    tags: matches!(tags, TagFormat::Legacy).then_some(block[4].order),
-                    tags_json: matches!(tags, TagFormat::Json).then_some(block[4].order),
-                    bookmarked: Some(block[5].order),
-                };
-            }
-        }
-        Self {
-            safe: Self::find(columns, "trivium-safe"),
-            suspicious: Self::find(columns, "trivium-suspicious"),
-            critical: Self::find(columns, "trivium-critical"),
-            memo: Self::find(columns, "trivium-memo"),
-            tags: Self::find(columns, "trivium-tags"),
-            tags_json: Self::find(columns, "trivium-tags-json"),
-            bookmarked: Self::find(columns, "trivium-bookmarked"),
-        }
-    }
-
-    fn any(self) -> bool {
-        self.safe.is_some()
-            || self.suspicious.is_some()
-            || self.critical.is_some()
-            || self.memo.is_some()
-            || self.tags.is_some()
-            || self.tags_json.is_some()
-            || self.bookmarked.is_some()
-    }
 }
 
 /// Summary of a completed streaming import.
@@ -172,6 +119,7 @@ pub struct CsvImportSummary {
     pub rows: usize,
     pub flags: HashMap<usize, FlagEntry>,
     pub column_max_chars: HashMap<String, usize>,
+    pub report: ImportReport,
 }
 
 /// Pull-based CSV importer.
@@ -186,6 +134,8 @@ pub struct CsvImporter {
     columns: Vec<ColumnMeta>,
     flag_columns: FlagColumns,
     restore_annotations: bool,
+    recover: bool,
+    report: ImportReport,
     limits: BatchLimits,
     rows_read: usize,
     flags: HashMap<usize, FlagEntry>,
@@ -196,78 +146,44 @@ pub struct CsvImporter {
 
 impl CsvImporter {
     pub fn open(path: &Path, delimiter: Option<u8>, limits: BatchLimits) -> Result<Self, AppError> {
+        Self::open_with_options(
+            path,
+            delimiter,
+            limits,
+            &ImportOptions::default(),
+            &JobContext::none(),
+        )
+    }
+
+    pub fn open_with_options(
+        path: &Path,
+        delimiter: Option<u8>,
+        limits: BatchLimits,
+        options: &ImportOptions,
+        job: &JobContext,
+    ) -> Result<Self, AppError> {
         let limits = limits.normalized();
-        let separator = delimiter.unwrap_or(b',');
-        if !valid_delimiter(separator) {
-            return Err(invalid_delimiter());
-        }
-        let mut file = File::open(path)
-            .map_err(|e| AppError::Message(format!("Failed to open file: {}", e)))?;
-        let (encoding, skip) = detect_bom(&mut file)
-            .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
-        file.seek(SeekFrom::Start(skip))
-            .map_err(|e| AppError::Message(format!("Failed to read file: {}", e)))?;
-
-        // `None` keeps the existing comma default for the parser. The polars
-        // reader previously performed automatic detection; the raw cell reader
-        // needs a concrete separator, so the same default is applied here.
-        let input: Box<dyn Read> = match encoding {
-            Encoding::Utf8 => Box::new(file),
-            Encoding::Utf16Le => Box::new(Utf16Reader::new(
-                BufReader::with_capacity(limits.read_buffer, file),
-                false,
-            )),
-            Encoding::Utf16Be => Box::new(Utf16Reader::new(
-                BufReader::with_capacity(limits.read_buffer, file),
-                true,
-            )),
-        };
-        let mut reader = csv::ReaderBuilder::new()
-            .delimiter(separator)
-            .flexible(false)
-            .buffer_capacity(limits.read_buffer)
-            .from_reader(input);
-        let headers = reader
-            .headers()
-            .map_err(|_| AppError::Message("Failed to parse the CSV data.".into()))?;
-        validate_column_count(headers)?;
-        let source_headers: Vec<String> = headers.iter().map(|header| header.to_string()).collect();
-        if source_headers.is_empty() {
-            return Err(AppError::Message("The CSV data has no columns.".into()));
-        }
-
-        let columns: Vec<ColumnMeta> = source_headers
-            .iter()
-            .enumerate()
-            .map(|(order, header)| ColumnMeta {
-                id: column_id(order),
-                label: if header.is_empty() {
-                    format!("column {}", order + 1)
-                } else {
-                    header.clone()
-                },
-                source: header.clone(),
-                order,
-            })
-            .collect();
-        let flag_columns = FlagColumns::from_columns(&columns);
-        let column_max_chars = columns
+        let prepared = reader::prepare(path, delimiter, limits, options, job)?;
+        let flag_columns = FlagColumns::from_columns(&prepared.columns);
+        let column_max_chars = prepared
+            .columns
             .iter()
             .map(|column| (column.id.clone(), column.id.chars().count()))
             .collect();
-
         Ok(Self {
-            reader,
+            reader: prepared.reader,
             pending: None,
-            columns,
+            columns: prepared.columns,
             flag_columns,
             restore_annotations: false,
+            recover: options.recover,
             limits,
             rows_read: 0,
             flags: HashMap::new(),
             column_max_chars,
             sample_rows: COLUMN_WIDTH_SAMPLE_ROWS,
             finished: false,
+            report: prepared.report,
         })
     }
 
@@ -297,6 +213,8 @@ impl CsvImporter {
             columns: column_meta,
             flag_columns,
             restore_annotations,
+            recover,
+            report,
             limits,
             rows_read,
             flags,
@@ -305,7 +223,7 @@ impl CsvImporter {
             finished,
         } = self;
 
-        let mut cells: Vec<Vec<String>> = vec![Vec::new(); column_meta.len()];
+        let mut cells: Vec<Vec<Option<String>>> = vec![Vec::new(); column_meta.len()];
         let mut originals: Vec<String> = Vec::new();
         let mut row_ids: Vec<i64> = Vec::new();
         let mut source_records: Vec<i64> = Vec::new();
@@ -316,6 +234,7 @@ impl CsvImporter {
         {
             let mut records = reader.records();
             loop {
+                job.check_cancelled()?;
                 let record = match pending.take() {
                     Some(record) => record,
                     None => match records.next() {
@@ -324,6 +243,28 @@ impl CsvImporter {
                             break;
                         }
                         Some(Err(err)) => {
+                            if *recover {
+                                if let Some(line) = reader::unclosed_quote(&err) {
+                                    report.unreadable_tail = true;
+                                    report.issue(
+                                        Some(line),
+                                        ImportIssueAction::UnreadableTail,
+                                        err.to_string(),
+                                    );
+                                    exhausted = true;
+                                    break;
+                                }
+                                if matches!(err.kind(), csv::ErrorKind::Utf8 { .. }) {
+                                    report.source_records += 1;
+                                    report.skipped_records += 1;
+                                    report.issue(
+                                        err.position().map(|position| position.line() as usize),
+                                        ImportIssueAction::Skipped,
+                                        err.to_string(),
+                                    );
+                                    continue;
+                                }
+                            }
                             return Err(AppError::Message(format!(
                                 "Failed to parse the CSV data: {}",
                                 err
@@ -332,12 +273,50 @@ impl CsvImporter {
                         Some(Ok(record)) => record,
                     },
                 };
-                if record.len() != column_meta.len() {
+                if record.len() > column_meta.len()
+                    || (!*recover && record.len() != column_meta.len())
+                {
                     return Err(AppError::Message(
                         "Failed to parse the CSV data: unequal record length.".into(),
                     ));
                 }
                 let row_index = *rows_read;
+                let source_line = record
+                    .position()
+                    .map(|position| position.line() as usize)
+                    .unwrap_or(
+                        row_index
+                            + if report.has_headers == Some(false) {
+                                1
+                            } else {
+                                2
+                            },
+                    );
+                let annotation = if *restore_annotations && flag_columns.any() {
+                    match flag_entry(*flag_columns, &record) {
+                        Ok(entry) => entry,
+                        Err(error) if *recover => {
+                            report.source_records += 1;
+                            report.skipped_records += 1;
+                            report.issue(
+                                Some(source_line),
+                                ImportIssueAction::Skipped,
+                                format!("Invalid restored annotation: {error}"),
+                            );
+                            continue;
+                        }
+                        Err(error) => {
+                            return Err(AppError::Message(format!(
+                                "Invalid annotation at CSV record {} (line {}): {}",
+                                row_index + 1,
+                                source_line,
+                                error
+                            )))
+                        }
+                    }
+                } else {
+                    None
+                };
                 let values = record.iter().map(str::to_owned).collect::<Vec<_>>();
                 let original_cells: Vec<&str> = record.iter().collect();
                 let original = serde_json::to_string(&original_cells).map_err(|_| {
@@ -373,9 +352,10 @@ impl CsvImporter {
                     }
                 }
 
-                for (column, value) in cells.iter_mut().zip(values) {
+                let mut values = values.into_iter();
+                for column in &mut cells {
                     batch_budget::reserve_next(column)?;
-                    column.push(value);
+                    column.push(values.next());
                 }
                 batch_budget::reserve_next(&mut originals)?;
                 batch_budget::reserve_next(&mut row_ids)?;
@@ -385,30 +365,19 @@ impl CsvImporter {
                 row_ids.push(row_index as i64);
                 // Physical line of the record's first field. The csv reader
                 // accounts for quotes and embedded newlines.
-                source_records.push(
-                    record
-                        .position()
-                        .map(|position| position.line() as i64)
-                        .unwrap_or((row_index as i64) + 2),
-                );
+                source_records.push(source_line as i64);
 
-                if *restore_annotations && flag_columns.any() {
-                    let annotation = flag_entry(*flag_columns, &record).map_err(|e| {
-                        AppError::Message(format!(
-                            "Invalid annotation at CSV record {} (line {}): {}",
-                            row_index + 1,
-                            record
-                                .position()
-                                .map(|position| position.line())
-                                .unwrap_or((row_index as u64) + 2),
-                            e
-                        ))
-                    })?;
-                    if let Some(entry) = annotation {
-                        flags.insert(row_index, entry);
-                    }
+                if let Some(entry) = annotation {
+                    flags.insert(row_index, entry);
                 }
 
+                report.source_records += 1;
+                report.imported_records += 1;
+                if record.len() < column_meta.len() {
+                    report.repaired_records += 1;
+                    report.issue(Some(source_line), ImportIssueAction::Repaired,
+                        format!("Record has {} fields; {} missing trailing fields were retained as null.", record.len(), column_meta.len() - record.len()));
+                }
                 *rows_read += 1;
                 batch_rows += 1;
                 if batch_rows >= limits.max_rows {
@@ -419,6 +388,11 @@ impl CsvImporter {
 
         if exhausted {
             *finished = true;
+            if *rows_read == 0 && (report.skipped_records > 0 || report.unreadable_tail) {
+                return Err(AppError::Message(
+                    "No readable CSV records were found; no project was created.".into(),
+                ));
+            }
         }
         if batch_rows == 0 {
             return Ok(None);
@@ -444,6 +418,7 @@ impl CsvImporter {
             rows: self.rows_read,
             flags: self.flags,
             column_max_chars: self.column_max_chars,
+            report: self.report,
         }
     }
 }

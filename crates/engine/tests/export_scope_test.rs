@@ -35,6 +35,7 @@ fn create(store: &ProjectsStore, root: &Path) -> Uuid {
     projects::create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -333,6 +334,7 @@ fn data_column_with_trivium_name_renames_the_annotation_column() {
     let id = projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -544,6 +546,7 @@ fn export_then_restore_roundtrips_tags_bookmark_and_memo() {
     let reimported = projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: destination.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

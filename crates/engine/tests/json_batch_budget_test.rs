@@ -145,6 +145,7 @@ fn excessive_column_union_is_rejected_without_registering_or_leaving_staging() {
     fs::write(&source, &contents).unwrap();
     let store = ProjectsStore::new(fixture.0.join("projects")).unwrap();
     let payload = || CreateProjectPayload {
+        import_options: None,
         path: source.to_string_lossy().into_owned(),
         description: None,
         delimiter: None,

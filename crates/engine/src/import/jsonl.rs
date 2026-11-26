@@ -6,6 +6,7 @@ use polars::prelude::*;
 
 use crate::error::AppError;
 use crate::import::json_source::{for_each_record, value_to_cell, visit_fields, visit_leaves};
+use crate::import::options::{ImportOptions, ImportReport};
 use crate::import::{column_id, empty_frame};
 use crate::jobs::JobContext;
 use crate::models::{ColumnMeta, FlagEntry, ImportedData};
@@ -65,6 +66,7 @@ pub struct JsonImportSummary {
     pub rows: usize,
     pub flags: HashMap<usize, FlagEntry>,
     pub column_max_chars: HashMap<String, usize>,
+    pub report: ImportReport,
 }
 
 /// Two-pass JSON/JSONL importer.
@@ -84,6 +86,8 @@ pub struct JsonImporter {
     expected_rows: usize,
     column_max_chars: HashMap<String, usize>,
     sample_rows: usize,
+    recover: bool,
+    report: ImportReport,
 }
 
 impl JsonImporter {
@@ -94,6 +98,16 @@ impl JsonImporter {
         limits: BatchLimits,
         job: &JobContext,
     ) -> Result<Self, AppError> {
+        Self::open_with_options(path, format, limits, &ImportOptions::default(), job)
+    }
+
+    pub fn open_with_options(
+        path: &Path,
+        format: RecordFormat,
+        limits: BatchLimits,
+        options: &ImportOptions,
+        job: &JobContext,
+    ) -> Result<Self, AppError> {
         job.check_cancelled()?;
         let metadata = fs::metadata(path)
             .map_err(|e| AppError::Message(format!("Failed to read file metadata: {}", e)))?;
@@ -101,7 +115,7 @@ impl JsonImporter {
         let mut seen: HashMap<String, usize> = HashMap::new();
         let mut rows = 0usize;
 
-        for_each_record(path, format, |record_no, value| {
+        let report = for_each_record(path, format, options.recover, job, |record_no, value| {
             rows += 1;
             let mut too_wide = false;
             visit_leaves(&value, "", &mut |pointer, _| {
@@ -158,6 +172,8 @@ impl JsonImporter {
             expected_rows: rows,
             column_max_chars,
             sample_rows: COLUMN_WIDTH_SAMPLE_ROWS,
+            recover: options.recover,
+            report,
         })
     }
 
@@ -190,6 +206,8 @@ impl JsonImporter {
             expected_rows,
             mut column_max_chars,
             sample_rows,
+            recover,
+            report,
         } = self;
 
         job.check_cancelled()?;
@@ -205,7 +223,7 @@ impl JsonImporter {
         let mut batch = Batch::new(columns.len());
         let mut rows_read = 0usize;
 
-        for_each_record(&path, format, |record_no, value| {
+        let second_report = for_each_record(&path, format, recover, job, |record_no, value| {
             job.check_cancelled()?;
             let mut cells = Vec::new();
             let mut parents = ParentCells::new(DEFAULT_BATCH_BYTES);
@@ -280,7 +298,7 @@ impl JsonImporter {
             job.report_progress(rows_read as u64, None, Some("Reading JSON".into()));
         }
 
-        if rows_read != expected_rows {
+        if rows_read != expected_rows || second_report != report {
             return Err(AppError::Message(
                 "The JSON record count changed between import passes.".into(),
             ));
@@ -291,6 +309,7 @@ impl JsonImporter {
             rows: rows_read,
             flags: HashMap::new(),
             column_max_chars,
+            report,
         })
     }
 }

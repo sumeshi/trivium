@@ -281,6 +281,7 @@ fn operation_respects_search_multiselect_and_bookmark_scope_in_one_source_read()
     let id = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into_owned(),
             description: None,
             delimiter: None,

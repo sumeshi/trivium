@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,11 +9,9 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    import::csv,
-    import::jsonl,
     jobs::JobContext,
-    models::{ColumnMeta, FlagEntry, ProjectMeta, ProjectSummary},
-    project_io::{read_project_schema_columns, BatchDataWriter},
+    models::{ProjectMeta, ProjectSummary},
+    project_io::read_project_schema_columns,
     storage::{save_column_metrics, save_flags},
     store::ProjectsStore,
 };
@@ -23,13 +20,14 @@ use sha2::{Digest, Sha256};
 
 use super::query::cache_remove_project;
 mod load;
+mod parse;
 mod profile;
 mod temporary;
 
 pub use load::{
     load_column_kinds_with_job, load_project, load_project_metadata_with_job, load_project_with_job,
 };
-use profile::{save_import_profile, KindAccumulator};
+use profile::save_import_profile;
 pub use temporary::is_temporary_project;
 
 const COLUMN_METRICS_FILE: &str = "column_max_chars.json";
@@ -77,48 +75,6 @@ struct CopiedSource {
     path: PathBuf,
     sha256: String,
     size: u64,
-}
-
-/// Result of parsing one source file into the staging Parquet file. CSV also
-/// records the leading-sample width estimate so `load_project` does not scan
-/// the full frame again.
-struct ImportedSource {
-    columns: Vec<ColumnMeta>,
-    total_records: usize,
-    flags: HashMap<usize, FlagEntry>,
-    column_max_chars: Option<HashMap<String, usize>>,
-    column_kinds: HashMap<String, String>,
-}
-
-/// Streams JSON/JSONL records through the fixed schema from pass 1 and writes
-/// each bounded batch as its own Parquet row group.
-fn import_json_batches(
-    source: &Path,
-    parquet_path: &Path,
-    format: jsonl::RecordFormat,
-    job: &JobContext,
-) -> Result<ImportedSource, AppError> {
-    let importer = jsonl::JsonImporter::open(source, format, jsonl::BatchLimits::default(), job)?;
-    let columns = importer.columns().to_vec();
-    let mut writer = BatchDataWriter::create(parquet_path, &columns).map_err(AppError::from)?;
-    let ids = columns
-        .iter()
-        .map(|column| column.id.clone())
-        .collect::<Vec<_>>();
-    let mut kinds = KindAccumulator::default();
-    let summary = importer.write_batches(job, |batch| {
-        kinds.observe(batch, &ids, job)?;
-        writer.write_batch(batch).map_err(AppError::from)
-    })?;
-    writer.finish().map_err(AppError::from)?;
-
-    Ok(ImportedSource {
-        columns: summary.columns,
-        total_records: summary.rows,
-        flags: summary.flags,
-        column_max_chars: Some(summary.column_max_chars),
-        column_kinds: kinds.finish(&ids),
-    })
 }
 
 /// Copies the source into the staging directory while hashing the same bytes
@@ -191,6 +147,8 @@ pub struct CreateProjectPayload {
     /// annotations. The columns themselves stay in the data either way.
     #[serde(default)]
     pub restore_annotations: Option<bool>,
+    #[serde(default, rename = "importOptions")]
+    pub import_options: Option<crate::import::options::ImportOptions>,
 }
 
 /// Lists saved projects ordered by creation time (newest first).
@@ -275,46 +233,33 @@ fn create_project_impl(
     // metadata always covers the bytes that were actually imported.
     job.report_progress(1, Some(4), Some("Importing data".into()));
     let parquet_path = staging.path().join("data.parquet");
-    let imported = match source_format {
-        "json" => import_json_batches(&copied.path, &parquet_path, jsonl::RecordFormat::Json, job)?,
-        "jsonl" | "ndjson" => import_json_batches(
-            &copied.path,
-            &parquet_path,
-            jsonl::RecordFormat::JsonLines,
-            job,
-        )?,
-        _ => {
-            // CSV is parsed in bounded batches and written one row group at a
-            // time. Neither the source bytes nor all records stay in memory.
-            let mut importer = csv::CsvImporter::open(
-                &copied.path,
-                csv::build_delimiter(payload.delimiter.as_deref())?,
-                csv::BatchLimits::default(),
-            )?
-            .with_annotations(restore_annotations);
-            let columns = importer.columns().to_vec();
-            let mut writer =
-                BatchDataWriter::create(&parquet_path, &columns).map_err(AppError::from)?;
-            let ids = columns
-                .iter()
-                .map(|column| column.id.clone())
-                .collect::<Vec<_>>();
-            let mut kinds = KindAccumulator::default();
-            while let Some(batch) = importer.next_batch(job)? {
-                kinds.observe(&batch, &ids, job)?;
-                writer.write_batch(&batch).map_err(AppError::from)?;
-            }
-            writer.finish().map_err(AppError::from)?;
-            let summary = importer.into_summary();
-            ImportedSource {
-                columns: summary.columns,
-                total_records: summary.rows,
-                flags: summary.flags,
-                column_max_chars: Some(summary.column_max_chars),
-                column_kinds: kinds.finish(&ids),
-            }
-        }
-    };
+    let options = payload.import_options.clone().unwrap_or_default();
+    if source_format == "csv" && restore_annotations && !options.has_headers {
+        return Err(AppError::Message(
+            "Restoring Trivium annotations requires a header row.".into(),
+        ));
+    }
+    let prepared = crate::import::text_encoding::prepare_source(
+        &copied.path,
+        &staging.path().join("decoded-source"),
+        options.encoding,
+        job,
+    )?;
+    let mut imported = parse::import_batches(
+        &prepared.path,
+        &parquet_path,
+        source_format,
+        payload.delimiter.as_deref(),
+        restore_annotations,
+        &options,
+        job,
+    )?;
+    imported.report.encoding = prepared.encoding;
+    imported.report.bom = prepared.bom;
+    if prepared.decoded {
+        fs::remove_file(&prepared.path)
+            .map_err(|e| AppError::Message(format!("Failed to remove decoded import file: {e}")))?;
+    }
     job.check_cancelled()?;
 
     let metadata = ProjectMeta {
@@ -347,6 +292,7 @@ fn create_project_impl(
             .to_string_lossy()
             .to_string(),
         ),
+        import_report: Some(imported.report),
         hidden_columns: Vec::new(),
         // New projects always use internal column ids and the `__original`
         // record column. Legacy version 0 projects are only read.

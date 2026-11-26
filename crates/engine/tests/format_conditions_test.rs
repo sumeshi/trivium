@@ -34,6 +34,7 @@ impl Fixture {
         let id = ops::projects::create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into_owned(),
                 description: None,
                 delimiter: None,

@@ -16,7 +16,7 @@ fn bytes<T>(values: &Vec<T>, grow: bool) -> usize {
 }
 
 pub(super) fn retained_bytes(
-    cells: &Vec<Vec<String>>,
+    cells: &Vec<Vec<Option<String>>>,
     originals: &Vec<String>,
     row_ids: &Vec<i64>,
     source_records: &Vec<i64>,

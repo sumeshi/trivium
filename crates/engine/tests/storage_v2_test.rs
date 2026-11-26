@@ -76,6 +76,7 @@ fn create_new_format_project(root: &Path) -> (ProjectsStore, Uuid) {
         .expect("failed to write new format parquet");
 
     let meta = ProjectMeta {
+        import_report: None,
         id,
         name: "storage-v2".to_string(),
         description: None,
@@ -338,6 +339,7 @@ fn legacy_project_loads_with_synthesized_column_metadata() {
         .expect("failed to write legacy parquet");
     store
         .insert(ProjectMeta {
+            import_report: None,
             id,
             name: "legacy".to_string(),
             description: None,

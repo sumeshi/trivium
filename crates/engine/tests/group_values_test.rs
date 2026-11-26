@@ -24,6 +24,7 @@ fn setup(body: &str, extension: &str) -> (PathBuf, ProjectsStore, Uuid, Vec<Stri
     let project = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into_owned(),
             description: None,
             delimiter: None,

@@ -65,6 +65,7 @@ impl Fixture {
         let meta = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,

@@ -27,6 +27,7 @@ impl Fixture {
         let id = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,

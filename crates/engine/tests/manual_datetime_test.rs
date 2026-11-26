@@ -49,6 +49,7 @@ fn mixed_datetime_analysis_counts_invalid_and_missing_without_changing_source_va
         let id = ops::projects::create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: path.to_string_lossy().into(),
                 description: None,
                 delimiter: None,
@@ -172,6 +173,7 @@ fn explicit_datetime_analysis_reports_all_unparseable_rows_and_validates_bounds(
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,

@@ -20,6 +20,7 @@ impl Drop for Fixture {
 }
 fn payload(path: &std::path::Path) -> CreateProjectPayload {
     CreateProjectPayload {
+        import_options: None,
         path: path.to_string_lossy().into(),
         description: None,
         delimiter: None,

@@ -98,6 +98,7 @@ fn run_fixture(fixture: &str) -> Result<()> {
         let summary = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: fixture.to_string(),
                 description: None,
                 delimiter: None,

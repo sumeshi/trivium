@@ -215,6 +215,7 @@ impl Fixture {
         let id = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: path.to_string_lossy().into_owned(),
                 description: None,
                 delimiter: None,

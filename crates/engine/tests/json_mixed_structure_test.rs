@@ -38,6 +38,7 @@ fn existing_case_reads_preserve_storage_original_records_and_saved_annotations()
     let meta = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,
@@ -122,6 +123,7 @@ fn excessive_parent_duplication_rejects_import_atomically_without_limiting_a_lar
     let error = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,
@@ -145,6 +147,7 @@ fn excessive_parent_duplication_rejects_import_atomically_without_limiting_a_lar
     let imported = create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: leaf.to_string_lossy().into(),
             description: None,
             delimiter: None,
@@ -166,6 +169,7 @@ fn exact_large_numbers_keep_their_spelling_and_kind_through_import_page_and_full
         let meta = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,
@@ -250,6 +254,7 @@ fn mixed_parent_objects_and_arrays_match_in_pages_cells_search_export_and_reopen
         let meta = create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,

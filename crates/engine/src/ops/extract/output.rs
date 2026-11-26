@@ -64,6 +64,7 @@ pub(super) fn open_csv(
     create_temporary_project_with_job(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: Some(table.description),
             delimiter: Some(",".into()),

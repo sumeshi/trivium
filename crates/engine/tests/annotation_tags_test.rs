@@ -39,6 +39,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

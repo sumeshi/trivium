@@ -40,6 +40,7 @@ fn annotation_only_and_constant_group_queries_work_on_legacy_parquet_without_row
     write_project_dataframe(&store.project_dir(&id).join("data.parquet"), &mut frame).unwrap();
     store
         .insert(ProjectMeta {
+            import_report: None,
             id,
             name: "legacy".into(),
             description: None,
@@ -128,6 +129,7 @@ fn csv_and_jsonl_preserve_raw_values_and_share_cached_ids_without_mixing_annotat
         fs::write(&path, source).unwrap();
         let store = ProjectsStore::new(root.clone()).unwrap();
         let id = ops::projects::create_project(&store, CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into_owned(), description: None, delimiter: None, restore_annotations: None,
         }).unwrap().meta.id;
         let columns = common::column_ids(&store, id);
@@ -191,6 +193,7 @@ fn single_and_selected_bulk_annotations_never_decode_source_cells() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,

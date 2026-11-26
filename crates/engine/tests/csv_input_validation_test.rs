@@ -12,6 +12,7 @@ use trivium_engine::{
 
 fn payload(path: &Path, delimiter: Option<String>) -> CreateProjectPayload {
     CreateProjectPayload {
+        import_options: None,
         path: path.to_string_lossy().into(),
         description: None,
         delimiter,
@@ -119,43 +120,44 @@ fn utf32_bytes(text: &str, big_endian: bool) -> Vec<u8> {
 }
 
 #[test]
-fn utf32_boms_reject_without_garbled_rows_or_published_cases_and_valid_import_recovers() {
+fn unicode_boms_import_exact_values_and_invalid_utf32_leaves_no_partial_case() {
     let root = tempfile::tempdir().unwrap();
-    let store = ProjectsStore::new(root.path().join("workspace")).unwrap();
     for big_endian in [false, true] {
+        let store =
+            ProjectsStore::new(root.path().join(format!("workspace-{big_endian}"))).unwrap();
         let path = root.path().join("utf32.csv");
         let bytes = utf32_bytes("value\n00123\n調査😀\n", big_endian);
-        fs::write(&path, &bytes).unwrap();
+        let mut broken = bytes.clone();
+        broken.push(1);
+        fs::write(&path, &broken).unwrap();
         let error = create_project(&store, payload(&path, None)).unwrap_err();
-        assert!(
-            error.to_string().contains("UTF-32 CSV is not supported"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("Invalid utf-32"), "{error}");
         assert_no_partial_case(&store);
+        assert_eq!(fs::read(&path).unwrap(), broken);
+        fs::write(&path, &bytes).unwrap();
+        let imported = create_project(&store, payload(&path, None)).unwrap();
+        let loaded = load_project(
+            &store,
+            ProjectRequest {
+                project_id: imported.meta.id,
+            },
+        )
+        .unwrap();
+        assert_eq!(loaded.project.meta.total_records, 2);
+        assert_eq!(loaded.columns_meta[0].source, "value");
+        assert_eq!(loaded.initial_rows[0].row_index, 0);
+        assert_eq!(
+            loaded.initial_rows[0].cells["c000001"].text.as_deref(),
+            Some("00123")
+        );
+        assert_eq!(loaded.initial_rows[1].row_index, 1);
+        assert_eq!(
+            loaded.initial_rows[1].cells["c000001"].text.as_deref(),
+            Some("調査😀")
+        );
         assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(loaded.project.meta.import_report.unwrap().bom);
     }
-    let path = root.path().join("valid.csv");
-    fs::write(&path, "\u{feff}value\n00123\n調査😀\n").unwrap();
-    let imported = create_project(&store, payload(&path, None)).unwrap();
-    let loaded = load_project(
-        &store,
-        ProjectRequest {
-            project_id: imported.meta.id,
-        },
-    )
-    .unwrap();
-    assert_eq!(loaded.project.meta.total_records, 2);
-    assert_eq!(loaded.columns_meta[0].source, "value");
-    assert_eq!(loaded.initial_rows[0].row_index, 0);
-    assert_eq!(
-        loaded.initial_rows[0].cells["c000001"].text.as_deref(),
-        Some("00123")
-    );
-    assert_eq!(loaded.initial_rows[1].row_index, 1);
-    assert_eq!(
-        loaded.initial_rows[1].cells["c000001"].text.as_deref(),
-        Some("調査😀")
-    );
 }
 
 #[test]

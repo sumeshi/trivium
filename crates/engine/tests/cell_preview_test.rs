@@ -43,6 +43,7 @@ fn create(store: &ProjectsStore, path: &std::path::Path) -> Uuid {
     ops::projects::create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

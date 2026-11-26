@@ -37,6 +37,7 @@ fn setup() -> (PathBuf, ProjectsStore, Uuid) {
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -372,6 +373,7 @@ fn note_text_survives_update_reopen_query_export_and_restore() {
         let restored = ops::projects::create_project(
             &reopened,
             CreateProjectPayload {
+                import_options: None,
                 path: destination.to_string_lossy().to_string(),
                 description: None,
                 delimiter: None,

@@ -226,6 +226,7 @@ fn ops_create_project_accepts_tab_delimiter() {
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: Some("\t".to_string()),
@@ -258,6 +259,7 @@ fn create_project_records_source_sha256() {
     let summary = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

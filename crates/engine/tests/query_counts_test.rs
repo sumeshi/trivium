@@ -36,6 +36,7 @@ fn setup_project() -> (std::path::PathBuf, ProjectsStore, Uuid, std::collections
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

@@ -58,6 +58,7 @@ fn analyses_and_sorted_export_share_cached_scope_and_decode_only_requested_colum
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,

@@ -43,6 +43,7 @@ fn spreadsheet_formula_candidates_keep_source_values_and_notes_on_csv_roundtrip(
     let project = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: source.to_string_lossy().into(),
             description: None,
             delimiter: None,
@@ -99,6 +100,7 @@ fn spreadsheet_formula_candidates_keep_source_values_and_notes_on_csv_roundtrip(
         let restored = ops::projects::create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: destination.to_string_lossy().into(),
                 description: None,
                 delimiter: None,
@@ -146,6 +148,7 @@ fn export_preserves_managed_files_and_aliases_and_supports_real_legacy_annotatio
         ops::projects::create_project(
             &store,
             CreateProjectPayload {
+                import_options: None,
                 path: source.to_string_lossy().into(),
                 description: None,
                 delimiter: None,

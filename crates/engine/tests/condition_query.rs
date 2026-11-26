@@ -41,6 +41,7 @@ fn query_accepts_condition_and_keeps_search_syntax() {
     let id = ops::projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: csv.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

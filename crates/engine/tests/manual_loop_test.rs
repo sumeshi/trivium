@@ -44,6 +44,7 @@ fn import(
     let summary = ops::projects::create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: fixture(name).to_string_lossy().to_string(),
             description: None,
             delimiter: None,

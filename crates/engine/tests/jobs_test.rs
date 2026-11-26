@@ -205,6 +205,7 @@ fn cancelled_query_stops_before_reading_project_data() {
     let error = trivium_engine::ops::projects::create_project_with_job(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: root.join("missing.csv").to_string_lossy().to_string(),
             description: None,
             delimiter: None,

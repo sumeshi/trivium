@@ -50,6 +50,7 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     );
 
     let build_create = || CreateProjectPayload {
+        import_options: None,
         path: fixture.to_string(),
         description: None,
         delimiter: None,

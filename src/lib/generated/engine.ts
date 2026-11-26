@@ -38,6 +38,15 @@ remove_tags: Array<string>,
  * `None` keeps the stored bookmark state; `Some(false)` clears it.
  */
 bookmarked?: boolean | null, };
+export type TextEncoding = "auto" | "utf-8" | "utf-16le" | "utf-16be" | "utf-32le" | "utf-32be" | "windows-1252" | "shift-jis";
+export type ImportOptions = { encoding: TextEncoding, hasHeaders: boolean, recover: boolean, };
+export type ImportIssueAction = "skipped" | "repaired" | "unreadableTail";
+export type ImportIssue = {
+/**
+ * Physical CSV/JSONL line or 1-based JSON array element, when known.
+ */
+sourceRecord: number | null, action: ImportIssueAction, reason: string, };
+export type ImportReport = { encoding: string, bom: boolean, hasHeaders: boolean | null, sourceRecords: number, importedRecords: number, skippedRecords: number, repairedRecords: number, generatedColumns: number, unreadableTail: boolean, issueCount: number, issues: Array<ImportIssue>, };
 export type ColumnMeta = {
 /**
  * Internal column id. `c000001` for the new storage format, the original
@@ -75,7 +84,11 @@ source_size: number | null,
  * created. Export refuses to overwrite this file. Legacy projects and
  * hand-built fixtures have none.
  */
-source_path: string | null, hidden_columns: Array<string>,
+source_path: string | null,
+/**
+ * Decoding choices and recovery diagnostics. Absent for older cases.
+ */
+import_report?: ImportReport, hidden_columns: Array<string>,
 /**
  * 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
  */

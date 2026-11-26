@@ -63,6 +63,10 @@ pub struct ProjectMeta {
     /// hand-built fixtures have none.
     #[serde(default)]
     pub source_path: Option<String>,
+    /// Decoding choices and recovery diagnostics. Absent for older cases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub import_report: Option<crate::import::options::ImportReport>,
     pub hidden_columns: Vec<String>,
     /// 0/1 = legacy typed Parquet, 2 = internal column ids and `__original`.
     #[serde(default)]

@@ -35,6 +35,7 @@ fn create(store: &ProjectsStore, root: &Path) -> uuid::Uuid {
     let summary = projects::create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,
@@ -211,6 +212,7 @@ fn input_flag_and_memo_columns_survive_export_with_annotations() {
     let summary = projects::create_project(
         &store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().to_string(),
             description: None,
             delimiter: None,

@@ -33,6 +33,7 @@ fn import(store: &ProjectsStore, path: &Path, restore: bool) -> Result<Uuid, Str
     create_project(
         store,
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,

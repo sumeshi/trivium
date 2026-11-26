@@ -45,6 +45,7 @@ fn write_file(root: &Path, name: &str, body: &str) -> PathBuf {
 
 fn payload(path: &Path) -> CreateProjectPayload {
     CreateProjectPayload {
+        import_options: None,
         path: path.to_string_lossy().to_string(),
         description: None,
         delimiter: None,

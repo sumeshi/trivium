@@ -28,6 +28,7 @@ impl Fixture {
         let path = self.0.join(name);
         fs::write(&path, body).unwrap();
         CreateProjectPayload {
+            import_options: None,
             path: path.to_string_lossy().into(),
             description: None,
             delimiter: None,
