@@ -68,9 +68,15 @@ pub fn locate_project_row_with_job(
         });
     }
 
-    let revision = crate::storage::project_revision(&project_dir).map_err(AppError::from)?;
-    let annotation_token =
-        result_cache::spec_depends_on_annotations(&payload.spec).then(|| revision.to_string());
+    let annotation_token = if result_cache::spec_depends_on_annotations(&payload.spec) {
+        Some(
+            crate::storage::project_revision(&project_dir)
+                .map_err(AppError::from)?
+                .to_string(),
+        )
+    } else {
+        None
+    };
     let cache_key =
         result_cache::query_cache_key(meta.id, &payload.spec, &parquet_path, annotation_token);
     let ids = match cache_key
@@ -87,15 +93,24 @@ pub fn locate_project_row_with_job(
 
     job.check_cancelled()?;
     job.report_progress(2, Some(3), Some("Finding original row in result".into()));
-    // Reuse the cached Arc<Vec<usize>> rather than retaining a second inverse
-    // map. Chunk checkpoints also keep an already cached long scan cancellable.
+    // Source-order results are already sorted by original ID. User-sorted
+    // results keep the cancellable scan without retaining an inverse map.
     let mut position = None;
     if payload.row_index < total_rows {
-        for (chunk_index, chunk) in ids.chunks(4096).enumerate() {
-            job.check_cancelled()?;
-            if let Some(index) = chunk.iter().position(|id| *id == payload.row_index) {
-                position = Some(chunk_index * 4096 + index);
-                break;
+        if payload
+            .spec
+            .sort_key
+            .as_deref()
+            .is_none_or(|key| key.trim().is_empty())
+        {
+            position = ids.binary_search(&payload.row_index).ok();
+        } else {
+            for (chunk_index, chunk) in ids.chunks(4096).enumerate() {
+                job.check_cancelled()?;
+                if let Some(index) = chunk.iter().position(|id| *id == payload.row_index) {
+                    position = Some(chunk_index * 4096 + index);
+                    break;
+                }
             }
         }
     }

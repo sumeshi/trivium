@@ -231,13 +231,11 @@ pub fn query_project_rows_with_projection(
     // The annotation revision is part of the key only when the resolved ids
     // depend on annotations. Data-only results keep their ids but compare the
     // revision on a hit to refresh the result-internal annotated count.
-    let annotation_revision =
-        crate::storage::project_revision(&project_dir).map_err(AppError::from)?;
-    let annotation_token = if result_cache::spec_depends_on_annotations(&payload.spec) {
-        Some(annotation_revision.to_string())
-    } else {
-        None
-    };
+    let annotation_revision = result_cache::spec_depends_on_annotations(&payload.spec)
+        .then(|| crate::storage::project_revision(&project_dir))
+        .transpose()
+        .map_err(AppError::from)?;
+    let annotation_token = annotation_revision.map(|revision| revision.to_string());
     let cache_key =
         result_cache::query_cache_key(meta.id, &payload.spec, &parquet_path, annotation_token);
 
@@ -257,8 +255,8 @@ pub fn query_project_rows_with_projection(
             load_page_flag_snapshot(&database_path, &row_ids).map_err(AppError::from)?;
         // A concurrent annotation edit must not combine old membership/counts
         // with new page flags. The shared snapshot resolver handles that case.
-        let membership_current = !result_cache::spec_depends_on_annotations(&payload.spec)
-            || page_revision == annotation_revision;
+        let membership_current =
+            annotation_revision.is_none_or(|revision| page_revision == revision);
         if membership_current
             && (cached.ids.len() == total_rows || cached.annotation_revision == page_revision)
         {
@@ -290,7 +288,14 @@ pub fn query_project_rows_with_projection(
         }
     }
 
-    let target = resolve_project_target(store, payload.project_id, &payload.spec, job)?;
+    let target = project_target::resolve_project_target_with_metadata(
+        store,
+        payload.project_id,
+        &payload.spec,
+        columns,
+        total_rows,
+        job,
+    )?;
     job.check_cancelled()?;
     let filtered_ids = target.ids;
     let annotated_filtered = target.annotated_filtered;

@@ -59,6 +59,21 @@ pub fn resolve_project_target(
         .filter(|name| !is_internal_column(name))
         .cloned()
         .collect();
+    resolve_project_target_with_metadata(store, project_id, &spec, columns, total_rows, job)
+}
+
+/// Reuse the caller's validated columns, row count and resolved search labels
+/// within this operation. Nothing is retained across requests.
+pub(super) fn resolve_project_target_with_metadata(
+    store: &ProjectsStore,
+    project_id: Uuid,
+    spec: &QuerySpec,
+    columns: Vec<String>,
+    total_rows: usize,
+    job: &JobContext,
+) -> Result<ResolvedProjectTarget, AppError> {
+    job.check_cancelled()?;
+    let path = store.project_dir(&project_id).join("data.parquet");
     let (flags, revision) =
         load_flag_snapshot(&store.database_path(&project_id)).map_err(AppError::from)?;
     let flags = Arc::new(flags);
@@ -66,7 +81,7 @@ pub fn resolve_project_target(
         .iter()
         .filter(|(index, entry)| **index < total_rows && flag_population(&entry.flag) != 8)
         .count();
-    if is_unconditional_page(&spec) {
+    if is_unconditional_page(spec) {
         job.check_cancelled()?;
         return Ok(ResolvedProjectTarget {
             total_rows,
@@ -78,8 +93,8 @@ pub fn resolve_project_target(
             annotation_revision: revision,
         });
     }
-    let token = result_cache::spec_depends_on_annotations(&spec).then(|| revision.to_string());
-    let key = result_cache::query_cache_key(project_id, &spec, &path, token);
+    let token = result_cache::spec_depends_on_annotations(spec).then(|| revision.to_string());
+    let key = result_cache::query_cache_key(project_id, spec, &path, token);
     let result = singleflight::resolve_once(key.clone(), job, || {
         let prepared = PreparedQuery::prepare(
             &columns,
@@ -95,15 +110,7 @@ pub fn resolve_project_target(
             .is_none_or(|key| key.trim().is_empty())
         {
             record_column_read_projection(&projection);
-            resolve_source_order(
-                &path,
-                total_rows,
-                &projection,
-                &spec,
-                &prepared,
-                &flags,
-                job,
-            )?
+            resolve_source_order(&path, total_rows, &projection, spec, &prepared, &flags, job)?
         } else {
             // Sorting retains the current materialized path. Only source-order
             // queries switch to streaming until sorted keys can be bounded too.
@@ -126,7 +133,7 @@ pub fn resolve_project_target(
             } else {
                 read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?
             };
-            resolve_target_prepared(&frame, &spec, &flags, &prepared, job)?
+            resolve_target_prepared(&frame, spec, &flags, &prepared, job)?
         };
         job.check_cancelled()?;
         if store

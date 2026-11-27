@@ -106,6 +106,12 @@ pub fn read_page_rows_dataframe_with_job(
             reader.skip_current_row_group();
         }
     }
+    // The gathered frame is already in strictly increasing source order.
+    // Only duplicates or a different requested order need another take.
+    if rows.windows(2).all(|pair| pair[0] < pair[1]) {
+        job.check_cancelled()?;
+        return Ok(output);
+    }
     let order = UInt32Chunked::from_iter_values(
         "take",
         rows.iter().map(|row| {
