@@ -111,12 +111,3 @@ pub fn remove_project_meta(project_dir: &Path) -> Result<()> {
 pub fn project_revision(project_dir: &Path) -> Result<u64> {
     revision(&connect(project_dir)?)
 }
-
-pub fn bump_project_revision(project_dir: &Path) -> Result<u64> {
-    let db = connect(project_dir)?;
-    db.execute(
-        "UPDATE project_state SET revision=revision+1 WHERE singleton=1",
-        [],
-    )?;
-    revision(&db)
-}

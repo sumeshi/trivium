@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use trivium_engine::search::{
-    build_search_mask_boolean, to_rpn, tokenize_search_query, SearchToken,
-};
+use serde_json::Value;
+use trivium_engine::condition::{eval, search_to_node};
+use trivium_engine::search::{to_rpn, tokenize_search_query, SearchToken};
 
 fn term(text: &str) -> SearchToken {
     SearchToken::Term {
@@ -46,7 +46,12 @@ fn tokenize_readme_examples_and_implementation_behaviour() {
         ),
         (
             "beacon -test",
-            vec![term("beacon"), SearchToken::And, SearchToken::Not, term("test")],
+            vec![
+                term("beacon"),
+                SearchToken::And,
+                SearchToken::Not,
+                term("test"),
+            ],
         ),
         (
             "eventid:4624 user:administrator",
@@ -102,24 +107,19 @@ fn tokenize_readme_examples_and_implementation_behaviour() {
         ),
         (
             "com:WS01|WS02",
-            vec![term_col("com", "ws01"), SearchToken::Or, term_col("com", "ws02")],
+            vec![
+                term_col("com", "ws01"),
+                SearchToken::Or,
+                term_col("com", "ws02"),
+            ],
         ),
         // README special-character examples
         ("\"hoge:fuga\"", vec![quoted("hoge:fuga")]),
-        (
-            "data:\"hoge:fuga\"",
-            vec![quoted_col("data", "hoge:fuga")],
-        ),
+        ("data:\"hoge:fuga\"", vec![quoted_col("data", "hoge:fuga")]),
         // Consecutive pipes are collapsed by the tokenizer
-        (
-            "a|||b",
-            vec![term("a"), SearchToken::Or, term("b")],
-        ),
+        ("a|||b", vec![term("a"), SearchToken::Or, term("b")]),
         // col:"phrase with spaces" is merged into one quoted term
-        (
-            "data:\"two words\"",
-            vec![quoted_col("data", "two words")],
-        ),
+        ("data:\"two words\"", vec![quoted_col("data", "two words")]),
         // Inside quotes, '|' and '-' are literal characters
         ("\"a|b -c\"", vec![quoted("a|b -c")]),
         // Terms (including column names) are lowercased
@@ -147,11 +147,7 @@ fn tokenize_readme_examples_and_implementation_behaviour() {
     ];
 
     for (input, expected) in cases {
-        assert_eq!(
-            tokenize_search_query(input),
-            expected,
-            "input: {input:?}"
-        );
+        assert_eq!(tokenize_search_query(input), expected, "input: {input:?}");
     }
 }
 
@@ -161,12 +157,24 @@ fn rpn_operator_precedence_is_not_then_and_then_or() {
         // AND has higher precedence than OR
         (
             "a b|c",
-            vec![term("a"), term("b"), SearchToken::And, term("c"), SearchToken::Or],
+            vec![
+                term("a"),
+                term("b"),
+                SearchToken::And,
+                term("c"),
+                SearchToken::Or,
+            ],
         ),
         // Same expression with the OR written first
         (
             "a|b c",
-            vec![term("a"), term("b"), term("c"), SearchToken::And, SearchToken::Or],
+            vec![
+                term("a"),
+                term("b"),
+                term("c"),
+                SearchToken::And,
+                SearchToken::Or,
+            ],
         ),
         // NOT applies to the following operand before AND
         (
@@ -196,7 +204,13 @@ fn rpn_operator_precedence_is_not_then_and_then_or() {
         // Left-associative OR
         (
             "a|b|c",
-            vec![term("a"), term("b"), SearchToken::Or, term("c"), SearchToken::Or],
+            vec![
+                term("a"),
+                term("b"),
+                SearchToken::Or,
+                term("c"),
+                SearchToken::Or,
+            ],
         ),
         ("", vec![]),
     ];
@@ -207,57 +221,31 @@ fn rpn_operator_precedence_is_not_then_and_then_or() {
     }
 }
 
-fn operand_terms(tokens: &[SearchToken]) -> Vec<(Option<String>, String)> {
-    tokens
-        .iter()
-        .filter_map(|token| match token {
-            SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } => {
-                Some((col.clone(), text.clone()))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn evaluate(
-    query: &str,
-    searchable_text: &[String],
-    per_column: &HashMap<String, Vec<String>>,
-) -> Vec<bool> {
-    let rpn = to_rpn(&tokenize_search_query(query));
-    let terms = operand_terms(&rpn);
-    build_search_mask_boolean(&rpn, &terms, searchable_text, Some(per_column))
-}
-
 #[test]
-fn build_search_mask_boolean_evaluates_operators_and_column_scopes() {
-    let searchable_text = vec![
-        "administrator malware beacon ws01".to_string(),
-        "guest error test ws02".to_string(),
-        "administrator warn ws01".to_string(),
-    ];
-
-    let mut per_column: HashMap<String, Vec<String>> = HashMap::new();
-    per_column.insert(
-        "user".to_string(),
-        vec![
-            "administrator".to_string(),
-            "guest".to_string(),
-            "administrator".to_string(),
+fn search_conditions_evaluate_operators_and_column_scopes() {
+    let rows = [
+        [
+            ("user", "administrator"),
+            ("command", "malware beacon"),
+            ("host", "ws01"),
         ],
-    );
-    per_column.insert(
-        "command".to_string(),
-        vec![
-            "malware beacon".to_string(),
-            "error test".to_string(),
-            "warn".to_string(),
+        [
+            ("user", "guest"),
+            ("command", "error test"),
+            ("host", "ws02"),
         ],
-    );
-    per_column.insert(
-        "host".to_string(),
-        vec!["ws01".to_string(), "ws02".to_string(), "ws01".to_string()],
-    );
+        [
+            ("user", "administrator"),
+            ("command", "warn"),
+            ("host", "ws01"),
+        ],
+    ]
+    .map(|cells| {
+        cells
+            .into_iter()
+            .map(|(column, value)| (column.to_string(), Value::String(value.to_string())))
+            .collect::<HashMap<_, _>>()
+    });
 
     let cases: Vec<(&str, Vec<bool>)> = vec![
         // Implicit AND
@@ -287,7 +275,11 @@ fn build_search_mask_boolean_evaluates_operators_and_column_scopes() {
     ];
 
     for (query, expected) in cases {
-        let mask = evaluate(query, &searchable_text, &per_column);
-        assert_eq!(mask, expected, "query: {query:?}");
+        let node = search_to_node(query).unwrap().expect("search condition");
+        let actual = rows
+            .iter()
+            .map(|row| eval(&node, row).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "query: {query:?}");
     }
 }

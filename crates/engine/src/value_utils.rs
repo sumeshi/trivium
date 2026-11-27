@@ -5,7 +5,7 @@ use std::sync::{Mutex, OnceLock};
 use polars::prelude::{AnyValue, DataFrame, Series};
 use serde_json::Value;
 
-use crate::analysis::{infer::parse_datetime_nanos, temporal::datetime_value_nanos};
+use crate::analysis::{datetime::parse_datetime_nanos, temporal::datetime_value_nanos};
 use crate::models::{Cell, ColumnMeta};
 use crate::project_io::INTERNAL_ORIGINAL;
 
@@ -21,11 +21,6 @@ static STRINGIFIED_COLUMNS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::ne
 
 fn stringified_columns() -> &'static Mutex<HashMap<String, u64>> {
     STRINGIFIED_COLUMNS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Records one test-instrumentation stringification for a column.
-pub fn record_stringified_column(column: &str) {
-    record_stringified_column_count(column, 1);
 }
 
 /// Batch recording keeps instrumentation allocation/locking out of hot loops.

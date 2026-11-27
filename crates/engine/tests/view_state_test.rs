@@ -255,7 +255,6 @@ fn atomic_save_replaces_the_sqlite_setting() {
 
     let project_dir = store.project_dir(&id);
     assert!(project_database_path(&project_dir).exists());
-    assert!(!project_dir.join("view_state.json").exists());
     assert_eq!(
         load_setting_bytes(&project_dir, "view_state")
             .unwrap()
@@ -308,7 +307,6 @@ fn failed_save_keeps_existing_canonical_view_state() {
             .unwrap(),
         serde_json::to_vec(&original).unwrap()
     );
-    assert!(!project_dir.join("view_state.json").exists());
     drop(connection);
     drop(store);
     let reopened = ProjectsStore::new(root.clone()).unwrap();

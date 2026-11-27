@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::{analysis::infer::parse_datetime_nanos, number::ExactNumber};
+use crate::{analysis::datetime::parse_datetime_nanos, number::ExactNumber};
 
 use super::EvalError;
 

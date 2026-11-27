@@ -6,23 +6,6 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::value_utils::anyvalue_to_search_string;
 
-/// Row indexes whose key appears more than once (`duplicates`) or exactly once.
-/// A key that appears three times contributes three indexes.
-pub fn matching_row_indices(columns: &[&Series], duplicates: bool) -> Vec<usize> {
-    matching_row_indices_with_job(columns, duplicates, &JobContext::none())
-        .expect("an unregistered duplicate scan cannot be cancelled")
-}
-
-pub fn matching_row_indices_with_job(
-    columns: &[&Series],
-    duplicates: bool,
-    job: &JobContext,
-) -> Result<Vec<usize>, AppError> {
-    let mut index = DuplicateIndex::default();
-    index.push(columns, 0, job)?;
-    index.finish(duplicates, job)
-}
-
 /// Exact compound-key groups; batches can be released immediately after push.
 #[derive(Default)]
 pub(crate) struct DuplicateIndex {

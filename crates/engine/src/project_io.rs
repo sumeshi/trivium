@@ -116,8 +116,7 @@ pub fn last_page_projection() -> Vec<String> {
         .clone()
 }
 
-/// Column projection of the most recent [`read_project_columns`] call.
-/// Test-only.
+/// Column projection of the most recent projected column read. Test-only.
 pub fn last_column_read_projection() -> Vec<String> {
     last_column_read_projection_store()
         .lock()
@@ -190,20 +189,6 @@ pub fn read_project_schema_and_row_count(path: &Path) -> Result<(Vec<String>, us
         .num_rows()
         .context("failed to read parquet row count")?;
     Ok((columns, rows))
-}
-
-/// Reads only `columns`, for every row, without the internal record columns
-/// unless they are requested.
-///
-/// The query resolver uses this for search, condition, and sort columns. It is
-/// a column projection, not a full-frame read, and does not increment the
-/// full-read counter.
-pub fn read_project_columns(path: &Path, columns: &[String]) -> Result<DataFrame> {
-    record_projection(last_column_read_projection_store(), columns);
-    ParquetReader::new(File::open(path)?)
-        .with_columns(Some(columns.to_vec()))
-        .finish()
-        .context("failed to read parquet columns")
 }
 
 /// Materialize a projected frame with cancellation between bounded batches.

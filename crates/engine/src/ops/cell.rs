@@ -1,4 +1,4 @@
-//! On-demand full-cell fetch for T20c.
+//! On-demand full-cell fetch.
 //!
 //! List pages carry truncated previews. The detail dialog and Copy call this
 //! operation with the project id, original row id, and column id to obtain the

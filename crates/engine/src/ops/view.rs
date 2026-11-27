@@ -8,9 +8,9 @@ use crate::store::ProjectsStore;
 
 /// Result of reading a project's view state.
 ///
-/// `status` distinguishes a genuinely missing file (`missing`) from a file the
+/// `status` distinguishes a missing setting (`missing`) from a saved value the
 /// frontend must not overwrite (`unreadable` or `newer`). The caller can show
-/// defaults without immediately replacing the original file.
+/// defaults without immediately replacing the saved value.
 #[derive(Debug, Serialize, ts_rs::TS)]
 pub struct ViewStateLoad {
     pub state: Option<ViewState>,
@@ -35,8 +35,8 @@ pub struct SaveViewStatePayload {
 /// Loads the reusable view state for one project.
 ///
 /// A missing view is normal for a new project. Unreadable or unsupported
-/// saved views are left untouched so the
-/// project, its evidence, and its annotations still open.
+/// saved views are left untouched so the project, its evidence, and its
+/// annotations still open.
 pub fn load_view_state(
     store: &ProjectsStore,
     request: ViewStateRequest,

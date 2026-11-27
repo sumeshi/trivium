@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn sqlite_cases_persist_annotations_settings_and_metadata_without_migration_state() {
+fn sqlite_cases_persist_annotations_settings_and_metadata() {
     let fixture = Fixture::new();
     let id = Uuid::new_v4();
     let store = ProjectsStore::new(fixture.path().into()).unwrap();
@@ -29,53 +29,6 @@ fn sqlite_cases_persist_annotations_settings_and_metadata_without_migration_stat
             .unwrap()["value"],
         42
     );
-    let db = sqlite::connect(&store.project_dir(&id)).unwrap();
-    let tables: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='migrations'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(tables, 0);
-}
-
-#[test]
-fn existing_sqlite_cases_ignore_obsolete_markers_and_sidecar_files() {
-    let fixture = Fixture::new();
-    let id = Uuid::new_v4();
-    let store = ProjectsStore::new(fixture.path().into()).unwrap();
-    store.insert(meta(id)).unwrap();
-    let directory = store.project_dir(&id);
-    let db = sqlite::connect(&directory).unwrap();
-    db.execute_batch(
-        "CREATE TABLE migrations (key TEXT PRIMARY KEY);
-        INSERT INTO migrations VALUES('annotations'),('setting:fixture');",
-    )
-    .unwrap();
-    drop(db);
-    let stale = b"unused sidecar bytes";
-    fs::write(directory.join("flags.json"), stale).unwrap();
-    fs::write(directory.join("fixture.json"), stale).unwrap();
-    patch_flag_atomic(&store.database_path(&id), 5, &patch("safe")).unwrap();
-    save_setting(&directory, "fixture", &serde_json::json!({"current": true})).unwrap();
-    assert_eq!(
-        load_setting(&directory, "fixture").unwrap().unwrap()["current"],
-        true
-    );
-    remove_setting(&directory, "fixture").unwrap();
-    let reopened = ProjectsStore::new(fixture.path().into()).unwrap();
-    assert_eq!(reopened.try_find(&id).unwrap().unwrap().flagged_records, 1);
-    assert_eq!(
-        load_flag(&reopened.database_path(&id), 5)
-            .unwrap()
-            .unwrap()
-            .flag,
-        "safe"
-    );
-    assert!(load_setting(&directory, "fixture").unwrap().is_none());
-    assert_eq!(fs::read(directory.join("flags.json")).unwrap(), stale);
-    assert_eq!(fs::read(directory.join("fixture.json")).unwrap(), stale);
 }
 
 #[test]

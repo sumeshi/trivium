@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-
-use polars::prelude::{AnyValue, DataFrame, DataType, Series};
+use polars::prelude::{AnyValue, DataType, Series};
 use serde::{Deserialize, Serialize};
 
-use crate::project_io::is_internal_column;
 use crate::value_utils::anyvalue_to_search_string;
 
-/// Column type used by the condition editor and, later, column stats.
+use super::datetime::parse_datetime_nanos;
+
+/// Column type used by the condition editor and column stats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColumnKind {
@@ -27,15 +26,6 @@ impl ColumnKind {
             Self::String => "string",
         }
     }
-}
-
-/// One pass over the frame. Integer text is parsed as `i64` before `f64`.
-pub fn infer_column_kinds(df: &DataFrame) -> HashMap<String, ColumnKind> {
-    df.get_columns()
-        .iter()
-        .filter(|series| !is_internal_column(series.name()))
-        .map(|series| (series.name().to_string(), series_kind(series)))
-        .collect()
 }
 
 pub(crate) fn dtype_kind(dtype: &DataType) -> Option<ColumnKind> {
@@ -100,10 +90,6 @@ impl KindFlags {
             _ => ColumnKind::String,
         }
     }
-}
-
-pub(crate) fn series_kind(series: &Series) -> ColumnKind {
-    series_kind_with_job(series, &crate::jobs::JobContext::none()).expect("uncancelled inference")
 }
 
 pub(crate) fn series_kind_with_job(
@@ -220,8 +206,6 @@ fn looks_integer(text: &str) -> bool {
         .unwrap_or(text);
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }
-
-pub(crate) use super::datetime::parse_datetime_nanos;
 
 fn is_datetime(text: &str) -> bool {
     parse_datetime_nanos(text).is_some()

@@ -1,4 +1,4 @@
-//! Page-read helpers for T20a.
+//! Page-read helpers.
 //!
 //! The query entry point in `mod.rs` uses these to decide which columns the
 //! resolver needs, which page rows to read, and how to obtain page annotations
@@ -46,7 +46,7 @@ pub(super) fn collect_node_columns(node: &Node, visit: &mut impl FnMut(&str)) {
 }
 
 pub(super) fn load_page_color_rules(project_dir: &Path) -> Vec<ColorRule> {
-    // Colors are decorative: a missing or malformed colors.json must never
+    // Colors are decorative: a missing or malformed colors setting must never
     // fail a query, so fall back to "no rules" instead of propagating.
     match load_color_rules(project_dir) {
         Ok(rules) => rules.unwrap_or_default(),

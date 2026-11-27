@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use polars::prelude::*;
+use polars::prelude::Series;
 use serde_json::Value;
 
 use crate::condition::eval;
 use crate::error::AppError;
-use crate::flags::normalize_flag_value;
-use crate::models::{ColorRule, ColumnMeta, FlagEntry, ProjectRow};
-use crate::value_utils::{anyvalue_to_json, CellColumns};
+use crate::models::ColorRule;
+use crate::value_utils::anyvalue_to_json;
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
 
@@ -44,33 +43,4 @@ pub fn matched_rule_color(
         }
     }
     Ok(None)
-}
-
-pub fn materialize_rows(
-    df: &DataFrame,
-    columns: &[ColumnMeta],
-    row_indices: impl Iterator<Item = usize>,
-    flags: &HashMap<usize, FlagEntry>,
-) -> Vec<ProjectRow> {
-    let cell_columns = CellColumns::new(df, columns);
-    let mut rows = Vec::new();
-    for row_idx in row_indices {
-        let cells = cell_columns.build_row(row_idx);
-        let flag_entry = flags.get(&row_idx);
-        rows.push(ProjectRow {
-            row_index: row_idx,
-            cells,
-            flag: flag_entry
-                .as_ref()
-                .map(|entry| normalize_flag_value(&entry.flag))
-                .unwrap_or_default(),
-            memo: flag_entry.and_then(|entry| entry.memo.clone()),
-            tags: flag_entry
-                .map(|entry| entry.tags.clone())
-                .unwrap_or_default(),
-            bookmarked: flag_entry.is_some_and(|entry| entry.bookmarked),
-            color: None,
-        });
-    }
-    rows
 }

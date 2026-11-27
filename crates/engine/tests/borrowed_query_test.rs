@@ -1,4 +1,4 @@
-//! Compare the borrowed Polars path with the previous owned-row adapter and
+//! Compare indexed Polars evaluation with the scalar condition evaluator and
 //! measure real heap allocations independently of timing and mocked counters.
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -9,12 +9,9 @@ use std::{
 use polars::prelude::*;
 use serde_json::Value;
 use trivium_engine::{
-    condition::{
-        and_nodes, search_tokens_to_node, Condition, Group, GroupKind, Node, Op, PreparedNode,
-    },
+    condition::{and_nodes, search_to_node, Condition, Group, GroupKind, Node, Op, PreparedNode},
     jobs::JobContext,
     ops::rows::{resolve_target, QuerySpec},
-    search::{push_searchable_value, tokenize_search_query},
     value_utils::anyvalue_to_search_string,
 };
 
@@ -56,10 +53,9 @@ fn condition(column: &str, op: Op, values: &[&str], negated: bool) -> Node {
     })
 }
 
-// Compare the owned HashMap/JSON evaluator with the indexed-column adapter.
-fn owned_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
-    let tokens = tokenize_search_query(spec.search.as_deref().unwrap_or_default());
-    let search = search_tokens_to_node(&tokens).unwrap();
+// Use the current scalar evaluator to check the indexed-column adapter.
+fn scalar_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
+    let search = search_to_node(spec.search.as_deref().unwrap_or_default())?;
     let node = match (search, spec.condition.clone()) {
         (Some(search), Some(condition)) => Some(and_nodes(search, condition)),
         (Some(node), None) | (None, Some(node)) => Some(node),
@@ -69,11 +65,6 @@ fn owned_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
         return Ok((0..df.height()).collect());
     };
     let prepared = PreparedNode::prepare(&node).map_err(|error| error.to_string())?;
-    let needs_joined = prepared.columns().contains(&"");
-    let scope = spec
-        .search_columns
-        .as_ref()
-        .filter(|scope| !scope.is_empty());
     let mut output = Vec::new();
     for index in 0..df.height() {
         let mut row = HashMap::new();
@@ -81,15 +72,6 @@ fn owned_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
             if let Some(text) = anyvalue_to_search_string(&column.get(index).unwrap()) {
                 row.insert(column.name().to_string(), Value::String(text));
             }
-        }
-        if needs_joined {
-            let mut joined = String::new();
-            for column in df.get_columns() {
-                if scope.is_none_or(|scope| scope.iter().any(|name| name == column.name())) {
-                    push_searchable_value(&mut joined, &column.get(index).unwrap());
-                }
-            }
-            row.insert(String::new(), Value::String(joined));
         }
         if prepared.eval(&row).map_err(|error| error.to_string())? {
             output.push(index);
@@ -110,7 +92,7 @@ fn borrowed_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String>
 }
 
 #[test]
-fn strings_null_unicode_negation_groups_and_typed_values_match_owned_adapter() {
+fn strings_null_unicode_negation_groups_and_typed_values_match_scalar_evaluator() {
     let df = DataFrame::new(vec![
         Series::new(
             "text",
@@ -150,7 +132,7 @@ fn strings_null_unicode_negation_groups_and_typed_values_match_owned_adapter() {
                 };
                 assert_eq!(
                     borrowed_rows(&df, &spec),
-                    owned_rows(&df, &spec),
+                    scalar_rows(&df, &spec),
                     "{spec:?}"
                 );
             }
@@ -171,7 +153,7 @@ fn strings_null_unicode_negation_groups_and_typed_values_match_owned_adapter() {
         };
         assert_eq!(
             borrowed_rows(&df, &spec),
-            owned_rows(&df, &spec),
+            scalar_rows(&df, &spec),
             "{spec:?}"
         );
     }
@@ -191,12 +173,12 @@ fn strings_null_unicode_negation_groups_and_typed_values_match_owned_adapter() {
         })),
         ..Default::default()
     };
-    assert_eq!(borrowed_rows(&df, &spec), owned_rows(&df, &spec));
+    assert_eq!(borrowed_rows(&df, &spec), scalar_rows(&df, &spec));
     assert_eq!(borrowed_rows(&df, &spec).unwrap(), vec![3, 4, 5]);
 }
 
 #[test]
-fn raw_large_integers_datetime_offsets_ns_and_errors_match_owned_adapter() {
+fn raw_large_integers_datetime_offsets_ns_and_errors_match_scalar_evaluator() {
     for (values, operands) in [
         (
             vec![
@@ -239,7 +221,7 @@ fn raw_large_integers_datetime_offsets_ns_and_errors_match_owned_adapter() {
                 };
                 assert_eq!(
                     borrowed_rows(&df, &spec),
-                    owned_rows(&df, &spec),
+                    scalar_rows(&df, &spec),
                     "{spec:?}"
                 );
             }
@@ -250,7 +232,7 @@ fn raw_large_integers_datetime_offsets_ns_and_errors_match_owned_adapter() {
         condition: Some(condition("value", Op::Regex, &["["], false)),
         ..Default::default()
     };
-    assert_eq!(borrowed_rows(&df, &bad), owned_rows(&df, &bad));
+    assert_eq!(borrowed_rows(&df, &bad), scalar_rows(&df, &bad));
 }
 
 #[test]
@@ -312,14 +294,14 @@ fn string_query_allocations_are_bounded_as_row_count_increases() {
             large_allocations <= small_allocations + 8,
             "per-row allocations returned: {small_allocations} -> {large_allocations}, {spec:?}"
         );
-        let (_, former_allocations) = allocations(|| owned_rows(&large, &spec).unwrap());
+        let (_, scalar_allocations) = allocations(|| scalar_rows(&large, &spec).unwrap());
         if spec.condition.is_some() || spec.search.is_some() {
             assert!(
-                former_allocations > large_allocations * 100,
-                "owned={former_allocations}, borrowed={large_allocations}"
+                scalar_allocations > large_allocations * 100,
+                "scalar={scalar_allocations}, borrowed={large_allocations}"
             );
         }
-        eprintln!("1000/20000-row allocations: {small_allocations}/{large_allocations}; owned adapter={former_allocations}");
+        eprintln!("1000/20000-row allocations: {small_allocations}/{large_allocations}; scalar evaluator={scalar_allocations}");
     }
 }
 

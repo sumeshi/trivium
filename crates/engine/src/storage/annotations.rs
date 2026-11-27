@@ -70,10 +70,6 @@ pub fn load_flags(path: &Path) -> Result<HashMap<usize, FlagEntry>> {
     Ok(load_flag_snapshot(path)?.0)
 }
 
-pub fn load_flags_for_rows(path: &Path, rows: &[usize]) -> Result<HashMap<usize, FlagEntry>> {
-    Ok(load_page_flag_snapshot(path, rows)?.0)
-}
-
 pub fn load_page_flag_snapshot(
     path: &Path,
     rows: &[usize],
@@ -142,10 +138,6 @@ pub fn apply_flag_batch(path: &Path, changes: &[(usize, Option<FlagEntry>)]) -> 
 
 pub fn upsert_flag(path: &Path, index: usize, entry: &FlagEntry) -> Result<()> {
     apply_flag_batch(path, &[(index, Some(entry.clone()))])
-}
-
-pub fn remove_flag(path: &Path, index: usize) -> Result<()> {
-    apply_flag_batch(path, &[(index, None)])
 }
 
 pub fn count_flagged(path: &Path) -> Result<usize> {

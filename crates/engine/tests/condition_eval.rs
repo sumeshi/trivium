@@ -3,9 +3,6 @@ use std::collections::HashMap;
 use serde_json::{Number, Value};
 
 use trivium_engine::condition::{eval, search_to_node, Condition, Group, GroupKind, Node, Op};
-use trivium_engine::search::{
-    build_search_mask_boolean, to_rpn, tokenize_search_query, SearchToken,
-};
 
 fn condition(column: &str, op: Op, values: &[&str], negated: bool) -> Node {
     Node::Condition(Condition {
@@ -35,71 +32,15 @@ fn contains(column: &str, text: &str) -> Node {
 }
 
 fn row(cells: &[(&str, &str)]) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    let mut joined = String::new();
-    for (column, value) in cells {
-        if !value.is_empty() {
-            if !joined.is_empty() {
-                joined.push(' ');
-            }
-            joined.push_str(&value.to_lowercase());
-        }
-        out.insert((*column).to_string(), Value::String((*value).to_string()));
-    }
-    out.insert(String::new(), Value::String(joined));
-    out
-}
-
-fn search_mask(rows: &[HashMap<String, Value>], query: &str) -> Vec<bool> {
-    let tokens = tokenize_search_query(query);
-    let mut terms: Vec<(Option<String>, String)> = Vec::new();
-    for token in &tokens {
-        if let SearchToken::Term { col, text } | SearchToken::QuotedTerm { col, text } = token {
-            if !text.is_empty() {
-                let key = (col.clone(), text.clone());
-                if !terms.contains(&key) {
-                    terms.push(key);
-                }
-            }
-        }
-    }
-    let joined: Vec<String> = rows
+    cells
         .iter()
-        .map(|cells| {
-            cells
-                .get("")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .to_string()
-        })
-        .collect();
-    let mut per_column: HashMap<String, Vec<String>> = HashMap::new();
-    if let Some(first) = rows.first() {
-        for column in first.keys() {
-            if column.is_empty() {
-                continue;
-            }
-            per_column.insert(
-                column.to_lowercase(),
-                rows.iter()
-                    .map(|cells| {
-                        cells
-                            .get(column)
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("")
-                            .to_lowercase()
-                    })
-                    .collect(),
-            );
-        }
-    }
-    let rpn = to_rpn(&tokens);
-    build_search_mask_boolean(&rpn, &terms, &joined, Some(&per_column))
+        .map(|(column, value)| ((*column).to_string(), Value::String((*value).to_string())))
+        .collect()
 }
 
 #[test]
-fn contains_and_or_not_match_search_mask() {
-    let rows = vec![
+fn contains_and_or_not_match_expected_rows() {
+    let rows = [
         row(&[
             ("eventid", "4624"),
             ("user", "Administrator"),
@@ -134,10 +75,12 @@ fn contains_and_or_not_match_search_mask() {
         (
             "malware beacon",
             and(vec![contains("", "malware"), contains("", "beacon")]),
+            vec![true, false, false, false],
         ),
         (
             "error|warn",
             or(vec![contains("", "error"), contains("", "warn")]),
+            vec![false, false, true, true],
         ),
         (
             "beacon -test",
@@ -145,6 +88,7 @@ fn contains_and_or_not_match_search_mask() {
                 contains("", "beacon"),
                 condition("", Op::Contains, &["test"], true),
             ]),
+            vec![true, false, false, false],
         ),
         (
             "eventid:4624 user:administrator",
@@ -152,24 +96,26 @@ fn contains_and_or_not_match_search_mask() {
                 contains("eventid", "4624"),
                 contains("user", "administrator"),
             ]),
+            vec![true, false, true, false],
         ),
         (
             "command:\"powershell -enc\"",
             contains("command", "powershell -enc"),
+            vec![true, false, false, false],
         ),
         (
             "host:WS01|WS02",
             or(vec![contains("host", "ws01"), contains("host", "ws02")]),
+            vec![true, true, false, false],
         ),
     ];
 
-    for (query, node) in cases {
-        let mask = search_mask(&rows, query);
+    for (query, node, expected) in cases {
         let evaluated: Vec<bool> = rows
             .iter()
             .map(|cells| eval(&node, cells).expect("eval"))
             .collect();
-        assert_eq!(evaluated, mask, "parity failed for {query}");
+        assert_eq!(evaluated, expected, "condition failed for {query}");
         let converted = search_to_node(query)
             .unwrap()
             .unwrap_or_else(|| panic!("no node for {query}"));
@@ -177,7 +123,7 @@ fn contains_and_or_not_match_search_mask() {
             .iter()
             .map(|cells| eval(&converted, cells).expect("eval"))
             .collect();
-        assert_eq!(from_syntax, mask, "search syntax diverged for {query}");
+        assert_eq!(from_syntax, expected, "search syntax failed for {query}");
     }
 }
 

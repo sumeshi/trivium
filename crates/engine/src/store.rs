@@ -108,23 +108,6 @@ impl ProjectsStore {
         storage::update_project_meta(&self.project_dir(id), |meta| meta.hidden_columns = columns)
     }
 
-    pub fn update_flagged_records(&self, id: &Uuid, count: usize) -> Result<()> {
-        storage::update_project_meta(&self.project_dir(id), |meta| meta.flagged_records = count)
-    }
-
-    pub fn set_flagged_records_override(&self, id: &Uuid, count: usize) {
-        if let Err(error) = self.update_flagged_records(id, count) {
-            eprintln!("[store] {error:#}");
-        }
-    }
-
-    pub fn next_revision(&self, id: &Uuid) -> u64 {
-        storage::bump_project_revision(&self.project_dir(id)).unwrap_or_else(|error| {
-            eprintln!("[store] {error:#}");
-            0
-        })
-    }
-
     pub fn current_revision(&self, id: &Uuid) -> u64 {
         storage::project_revision(&self.project_dir(id)).unwrap_or_else(|error| {
             eprintln!("[store] {error:#}");

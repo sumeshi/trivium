@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use polars::prelude::Series;
 
-use crate::analysis::infer::{parse_datetime_nanos, series_kind_for_rows_with_job, ColumnKind};
+use crate::analysis::{
+    datetime::parse_datetime_nanos,
+    infer::{series_kind_for_rows_with_job, ColumnKind},
+};
 use crate::models::FlagEntry;
 
 use super::integer::IntegerBins;

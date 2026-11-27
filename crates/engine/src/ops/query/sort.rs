@@ -2,7 +2,7 @@ use std::{borrow::Cow, cmp::Ordering};
 
 use polars::prelude::*;
 
-use crate::analysis::infer::parse_datetime_nanos;
+use crate::analysis::datetime::parse_datetime_nanos;
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::number::ExactNumber;

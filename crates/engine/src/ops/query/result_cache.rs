@@ -1,4 +1,4 @@
-//! Process-local cache of resolved row ids for repeated page requests (T19).
+//! Process-local cache of resolved row ids for repeated page requests.
 //!
 //! Only query keys, original row ids and annotation counts are kept; page data,
 //! output columns, and cell values never enter this cache. The key omits
@@ -56,7 +56,7 @@ fn entry_bytes(key: &QueryCacheKey, result: &CachedResult) -> usize {
         .saturating_add(key.annotation_token.as_ref().map_or(0, String::capacity))
 }
 
-/// Statistics for tests and the T27 measurement.
+/// Statistics for tests and benchmark measurements.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResultCacheStats {
     pub entries: usize,

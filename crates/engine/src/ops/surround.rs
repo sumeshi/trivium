@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::analysis::infer::{dtype_kind, parse_datetime_nanos, ColumnKind, KindFlags};
+use crate::analysis::{
+    datetime::parse_datetime_nanos,
+    infer::{dtype_kind, ColumnKind, KindFlags},
+};
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::ProjectRow;

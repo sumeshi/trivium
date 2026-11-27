@@ -6,12 +6,11 @@ mod undo;
 
 pub use annotations::{
     apply_flag_batch, count_flagged, load_flag, load_flag_snapshot, load_flags,
-    load_flags_for_rows, load_page_flag_snapshot, patch_flag_atomic, remove_flag, save_flags,
-    upsert_flag,
+    load_page_flag_snapshot, patch_flag_atomic, save_flags, upsert_flag,
 };
 pub use metadata::{
-    bump_project_revision, insert_project_meta, project_revision, project_was_registered,
-    read_project_meta, remove_project_meta, update_project_meta,
+    insert_project_meta, project_revision, project_was_registered, read_project_meta,
+    remove_project_meta, update_project_meta,
 };
 pub use settings::{
     load_setting, load_setting_bytes, remove_setting, save_setting, save_setting_bytes,

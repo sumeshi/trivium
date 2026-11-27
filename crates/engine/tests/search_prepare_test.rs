@@ -14,9 +14,6 @@ use trivium_engine::jobs::{self, JobContext, JobKind};
 use trivium_engine::ops;
 use trivium_engine::ops::projects::CreateProjectPayload;
 use trivium_engine::ops::rows::{query_project_rows_with_job, QueryRowsPayload, QuerySpec};
-use trivium_engine::search::{
-    reset_searchable_text_build_count, searchable_text_build_count,
-};
 use trivium_engine::store::ProjectsStore;
 use trivium_engine::value_utils::{reset_stringified_columns, stringified_column_count};
 
@@ -145,7 +142,11 @@ fn condition_on_one_column_does_not_stringify_unrelated_columns() {
     let mut body = String::from("small,big\n");
     for index in 0..100 {
         let small = if index % 2 == 0 { "keep" } else { "drop" };
-        let big = if index == 0 { big_value.as_str() } else { "tiny" };
+        let big = if index == 0 {
+            big_value.as_str()
+        } else {
+            "tiny"
+        };
         body.push_str(&format!("{small},{big}\n"));
     }
     let fixture = Fixture::create(&body);
@@ -168,18 +169,6 @@ fn condition_on_one_column_does_not_stringify_unrelated_columns() {
         0,
         "a condition on `small` must not stringify the large `big` column"
     );
-}
-
-#[test]
-fn unconditional_display_builds_no_full_text_cache() {
-    let _guard = HOOK_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::create(&hundred_rows());
-
-    reset_searchable_text_build_count();
-    let matched = fixture.query(spec(None, None, None)).expect("query failed");
-
-    assert_eq!(matched, 100);
-    assert_eq!(searchable_text_build_count(), 0);
 }
 
 #[test]
@@ -244,8 +233,8 @@ fn cancelled_job_stops_the_search() {
     }
     let fixture = Fixture::create(&body);
 
-    let guard = jobs::queue_job(JobKind::Query, Some(fixture.id))
-        .expect("failed to begin query job");
+    let guard =
+        jobs::queue_job(JobKind::Query, Some(fixture.id)).expect("failed to begin query job");
     jobs::request_cancel(guard.id());
     let job = JobContext::with_job(guard, None);
 

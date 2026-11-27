@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    analysis::infer::parse_datetime_nanos,
+    analysis::datetime::parse_datetime_nanos,
     condition::{Condition, Node, Op, PreparedNode},
     error::AppError,
     number::ExactNumber,

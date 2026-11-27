@@ -70,7 +70,7 @@ pub const VIEW_STATE_VERSION: u32 = 1;
 
 /// Rebuildable view settings for one project.
 ///
-/// This file is independent from annotations: a missing, broken, or newer
+/// This setting is independent from annotations: a missing, broken, or newer
 /// view state must never prevent the evidence or annotations from loading.
 /// `condition` keeps the frontend editor tree as-is; the engine does not
 /// interpret it.

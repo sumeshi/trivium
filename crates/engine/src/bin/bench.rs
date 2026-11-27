@@ -1,4 +1,4 @@
-//! T27 engine benchmark: import, reopen, page, search, annotation, export,
+//! Engine benchmark: import, reopen, page, search, annotation, export,
 //! cancellation, cache, and peak-RSS measurements.
 //!
 //! Fixtures come from `scripts/gen_fixture.py`; run with release builds:

@@ -1,4 +1,4 @@
-//! Shared helpers for the T27 benchmark binary. Split out so each file stays
+//! Shared helpers for the benchmark binary. Split out so each file stays
 //! under the 500-line Rust size guard.
 
 use std::fs;

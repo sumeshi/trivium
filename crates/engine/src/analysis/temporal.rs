@@ -3,7 +3,7 @@ use polars::prelude::{AnyValue, TimeUnit};
 
 use crate::value_utils::anyvalue_to_search_string;
 
-use super::infer::parse_datetime_nanos;
+use super::datetime::parse_datetime_nanos;
 
 pub(crate) fn datetime_value_nanos(value: &AnyValue<'_>) -> Option<i128> {
     match value {

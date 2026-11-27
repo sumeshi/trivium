@@ -1,7 +1,7 @@
 use chrono::{Datelike, Duration, SecondsFormat, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::infer::parse_datetime_nanos;
+use super::datetime::parse_datetime_nanos;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
