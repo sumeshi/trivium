@@ -55,7 +55,8 @@
   });
 </script>
 
-<svelte:window on:mousedown={outside} on:scroll|capture={scrolling} on:resize={() => close()} on:blur={() => close()} />
+<svelte:window on:keydown={(event) => { if (event.key === 'Escape') keydown(event); }}
+  on:mousedown={outside} on:scroll|capture={scrolling} on:resize={() => close()} on:blur={() => close()} />
 
 <div class="row-tags-menu" id={menuId} bind:this={menu} use:portal
   use:protectRecycledActivation={identity} style={`left: ${left}px; top: ${top}px;`}

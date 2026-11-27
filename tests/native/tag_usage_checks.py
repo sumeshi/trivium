@@ -58,10 +58,20 @@ def verify_tag_usage(web, data, root: Path, evidence: Path, report: dict) -> Non
         _key(web, "\ue004")
         assert web.script("return document.activeElement.classList.contains('row-tags-button');")
         _key(web, "\ue00d")
-        wait_for(lambda: web.script("return !!document.querySelector('.row-tags-menu');"), bool, "Space opens the row's tags")
+        wait_for(lambda: web.script("return !!document.querySelector('.row-tags-menu')?.contains(document.activeElement);"),
+                 bool, "Space opens the row's tags and focuses its menu")
         _key(web, "\ue00c")
         wait_for(lambda: web.script("return !document.querySelector('.row-tags-menu');"), bool, "Escape closes tags")
         assert web.script("return document.activeElement.classList.contains('row-tags-button');")
+        _key(web, "\ue00d")
+        wait_for(lambda: web.script("return !!document.querySelector('.row-tags-menu')?.contains(document.activeElement);"),
+                 bool, "the second keyboard-open finishes moving focus into the tag menu")
+        trigger = _badge(web, 0)
+        assert web.script("arguments[0].focus({preventScroll:true});return document.activeElement===arguments[0]&&!!document.querySelector('.row-tags-menu');",
+                          trigger), "The open tag menu must survive returning focus to its own trigger"
+        _key(web, "\ue00c")
+        wait_for(lambda: web.script("return !document.querySelector('.row-tags-menu')&&document.activeElement===arguments[0];", trigger),
+                 bool, "Escape also closes tags while focus is still on their trigger")
         _key(web, "\ue004")
         wait_for(lambda: web.script("return document.activeElement.dataset.columnId;"),
                  lambda value: value == columns["id"], "Tab after tags reaches the first logical data column")
@@ -145,7 +155,7 @@ def verify_tag_usage(web, data, root: Path, evidence: Path, report: dict) -> Non
         report["tag_usage"] = {"tag_only_row": first, "sticky": sticky, "metadata_rows": [0, 1],
                               "ordinary_tag_column_rows": [1, 2], "analysis": groups,
                               "quoted_label_search": True, "cached_membership_after_remove_and_undo": True,
-                              "keyboard": True, "source_unchanged": True}
+                              "keyboard": True, "escape_from_trigger": True, "source_unchanged": True}
         web.screenshot(evidence / "tag-usage.png")
     finally:
         web.close_drawer()
