@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 
 use polars::prelude::*;
 
@@ -10,15 +10,15 @@ use crate::value_utils::anyvalue_text;
 
 const SORT_RUN_ROWS: usize = 262_144;
 
-enum SortKey {
+enum SortKey<'a> {
     Int(i128),
     Number(Box<ExactNumber>),
     Datetime(i128),
     Missing,
-    Text(String),
+    Text(Cow<'a, str>),
 }
 
-fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
+fn build_sort_key(series: &Series, row_index: usize) -> SortKey<'_> {
     let Ok(value) = series.get(row_index) else {
         return SortKey::Missing;
     };
@@ -45,28 +45,50 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey {
             return SortKey::Datetime(i128::from(days) * 86_400 * 1_000_000_000);
         }
         AnyValue::Time(nanos) => return SortKey::Datetime(i128::from(nanos)),
+        AnyValue::String(text) => {
+            let text = text.trim();
+            if let Some(key) = parsed_text_key(text) {
+                return key;
+            }
+            // ASCII lowercase is byte-for-byte unchanged. Other strings keep
+            // Rust's whole-string lowercase, including contextual Unicode.
+            return SortKey::Text(
+                if text
+                    .bytes()
+                    .all(|byte| byte.is_ascii() && !byte.is_ascii_uppercase())
+                {
+                    Cow::Borrowed(text)
+                } else {
+                    Cow::Owned(text.to_lowercase())
+                },
+            );
+        }
         _ => {}
     }
     let Some(text) = anyvalue_text(&value) else {
         return SortKey::Missing;
     };
-    // These are comparison keys only. Never rewrite the stored/displayed cell.
     let text = text.trim();
+    parsed_text_key(text).unwrap_or_else(|| SortKey::Text(Cow::Owned(text.to_lowercase())))
+}
+
+// These are comparison keys only. Never rewrite the stored/displayed cell.
+fn parsed_text_key(text: &str) -> Option<SortKey<'static>> {
     // Share ordered conditions' numeric grammar; punctuation inside source
     // text must not silently become a different number during sorting.
     if let Ok(integer) = text.parse::<i128>() {
-        return SortKey::Int(integer);
+        return Some(SortKey::Int(integer));
     }
     if let Some(number) = ExactNumber::parse(text) {
-        return SortKey::Number(Box::new(number));
+        return Some(SortKey::Number(Box::new(number)));
     }
     if let Some(nanos) = parse_datetime_nanos(text) {
-        return SortKey::Datetime(i128::from(nanos));
+        return Some(SortKey::Datetime(i128::from(nanos)));
     }
-    SortKey::Text(text.to_lowercase())
+    None
 }
 
-fn compare_keys(a: &SortKey, b: &SortKey) -> Ordering {
+fn compare_keys(a: &SortKey<'_>, b: &SortKey<'_>) -> Ordering {
     match (a, b) {
         (SortKey::Int(a), SortKey::Int(b)) => a.cmp(b),
         (SortKey::Int(a), SortKey::Number(b)) => b.cmp_integer(*a).reverse(),
@@ -82,7 +104,7 @@ fn compare_keys(a: &SortKey, b: &SortKey) -> Ordering {
     }
 }
 
-fn key_rank(key: &SortKey) -> u8 {
+fn key_rank(key: &SortKey<'_>) -> u8 {
     match key {
         SortKey::Int(_) | SortKey::Number(_) => 0,
         SortKey::Datetime(_) => 1,
@@ -235,7 +257,6 @@ fn cancellable_order(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::borrow::Cow;
 
     fn sorted(values: &[Option<&str>], direction: &str) -> Vec<usize> {
         let frame = DataFrame::new(vec![Series::new("value", values)]).unwrap();
@@ -250,26 +271,76 @@ mod tests {
     }
 
     #[test]
-    fn source_text_is_borrowed_while_typed_values_keep_their_adapter() {
-        let source = " 9007199254740993.000000000000000001 ".to_string();
-        let borrowed = AnyValue::String(&source);
-        let owned = AnyValue::StringOwned(source.clone().into());
-        for value in [&borrowed, &owned] {
-            let text = anyvalue_text(value).unwrap();
-            assert!(matches!(text, Cow::Borrowed(_)));
-            assert_eq!(text.as_ref(), source);
-            let original = match value {
-                AnyValue::String(text) => *text,
-                AnyValue::StringOwned(text) => text.as_str(),
-                _ => unreachable!(),
-            };
-            assert_eq!(text.as_ptr(), original.as_ptr());
+    fn text_sort_keys_borrow_lowercase_ascii_and_keep_other_text_owned() {
+        let text = "lowercase-command-".repeat(4096);
+        let padded = format!("\t{text} \n");
+        let series = Series::new(
+            "value",
+            [padded.as_str(), "UPPER", "ΟΣ", "ǅelta", "İSTANBUL"],
+        );
+        let keys: Vec<_> = (0..series.len())
+            .map(|row| build_sort_key(&series, row))
+            .collect();
+        let SortKey::Text(Cow::Borrowed(borrowed)) = &keys[0] else {
+            panic!("ASCII key was copied");
+        };
+        assert_eq!(*borrowed, text);
+        assert_eq!(
+            borrowed.as_ptr(),
+            series.str().unwrap().get(0).unwrap().trim().as_ptr()
+        );
+        for (key, expected) in keys[1..]
+            .iter()
+            .zip(["upper", "ος", "ǆelta", "i\u{307}stanbul"])
+        {
+            assert!(matches!(key, SortKey::Text(Cow::Owned(value)) if value == expected));
         }
-        assert!(matches!(
-            anyvalue_text(&AnyValue::Float64(1.5)),
-            Some(Cow::Owned(text)) if text == "1.5"
-        ));
-        assert!(anyvalue_text(&AnyValue::Null).is_none());
+        let owned_bytes: usize = keys
+            .iter()
+            .map(|key| match key {
+                SortKey::Text(Cow::Owned(value)) => value.capacity(),
+                _ => 0,
+            })
+            .sum();
+        assert!(
+            owned_bytes > 0 && owned_bytes < text.len(),
+            "long ASCII key is not retained twice"
+        );
+        let typed = Series::new("value", [true]);
+        assert!(
+            matches!(build_sort_key(&typed, 0), SortKey::Text(Cow::Owned(value)) if value == "true")
+        );
+    }
+
+    #[test]
+    fn borrowed_keys_keep_owned_lowercase_order_and_stable_unicode_ties() {
+        let values = [
+            Some("lower"),
+            Some(" UPPER "),
+            Some("upper"),
+            Some("ΟΣ"),
+            Some("ος"),
+            Some("ǅelta"),
+            Some("ǆelta"),
+            Some("İSTANBUL"),
+            Some("i\u{307}stanbul"),
+            Some(""),
+            None,
+        ];
+        for direction in ["asc", "desc"] {
+            let mut expected: Vec<_> = (0..values.len()).collect();
+            expected.sort_by(|a, b| {
+                let order = values[*a]
+                    .map(|value| value.trim().to_lowercase())
+                    .cmp(&values[*b].map(|value| value.trim().to_lowercase()));
+                if direction == "desc" {
+                    order.reverse()
+                } else {
+                    order
+                }
+            });
+            assert_eq!(sorted(&values, direction), expected);
+        }
     }
 
     #[test]
