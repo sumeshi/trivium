@@ -11,6 +11,7 @@ from column_pin_checks import _key, _menu_items, _prefix, _saved
 from feedback_checks import _horizontal_to, _settle
 from fixture_cleanup import delete_fixture_project
 from row_navigation import open_project, wait_for
+from runtime import context_click
 
 
 def _menu(web, column: str) -> list[str]:
@@ -207,7 +208,159 @@ def _fit_visible(web, column: str) -> dict:
         web.script("arguments[0].removeEventListener('dblclick',window.__columnFitListener);delete window.__columnFit;delete window.__columnFitListener;", handle)
 
 
+def _click_points(web, points: list[dict]) -> None:
+    web.request("POST", web.route("actions"), {"actions": [{"type": "pointer", "id": "column-visibility",
+        "parameters": {"pointerType": "mouse"}, "actions": [action for point in points for action in (
+            {"type": "pointerMove", **point, "origin": "viewport", "duration": 0},
+            {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0})]}]})
+
+
+def _blocked_restore_actions(web, project_id: str, first: str) -> dict:
+    checkpoint = web.checkpoint()
+    points = web.script("""
+      const point=e=>{const r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};};
+      window.__columnRestoreEvents=[];
+      window.__columnRestoreAudit=e=>window.__columnRestoreEvents.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY});
+      for(const name of ['contextmenu','pointerup','click'])document.addEventListener(name,window.__columnRestoreAudit,true);
+      return {header:point(document.querySelector('.data-header [data-column-id="'+arguments[0]+'"] .column-sort')),
+        picker:point(document.querySelector('[aria-label="Choose visible columns"]'))};
+    """, first)
+    try:
+        method = context_click(web, points["header"])
+        _settle(web)
+        assert not web.script("return !!document.querySelector('.column-context-menu');"), \
+            "A header must not open editable column actions while its saved view is restoring"
+        _key(web, "\ue00c")  # Dismiss any platform context menu before the next real input.
+        _click_points(web, [points["picker"]])
+        _settle(web)
+        assert not web.script("return !!document.querySelector('#visible-column-menu');"), \
+            "The visibility picker must wait for saved-view restoration"
+        events = web.script("return window.__columnRestoreEvents;")
+        for point in points.values():
+            assert any(event["trusted"] and event["x"] == point["x"] and event["y"] == point["y"]
+                       for event in events), (point, events)
+        assert not [entry for entry in web.trace(after=checkpoint)
+                    if entry["name"] in {"set_hidden_columns", "save_view_state"}
+                    and entry["request"].get("projectId") == project_id], "Early input must not persist an unrestored view"
+        assert web.script("return document.querySelector('.project-view').inert&&document.querySelector('.project-view').getAttribute('aria-busy')==='true';")
+        return {"input": method, "trusted_inputs": events, "menus_and_writes_blocked": True}
+    finally:
+        web.script("for(const name of ['contextmenu','pointerup','click'])document.removeEventListener(name,window.__columnRestoreAudit,true);delete window.__columnRestoreAudit;delete window.__columnRestoreEvents;")
+
+
+def _hide_and_close(web, project_id: str, second: str) -> dict:
+    points = web.script("""
+      const checkbox=document.getElementById('column-'+arguments[1]),
+        close=document.getElementById('project-tab-'+arguments[0]).parentElement.querySelector('.tab-close');
+      if(!checkbox.checked)throw Error('The second source column must start visible');
+      window.__columnCloseEvents=[];
+      window.__columnCloseAudit=e=>{
+        const kind=e.type==='change'&&e.target===checkbox?'hide':e.type==='click'&&close.contains(e.target)?'close':null;
+        if(kind)window.__columnCloseEvents.push({kind,trusted:e.isTrusted,sequence:window.__workspaceIpcSequence});
+      };
+      for(const name of ['change','click'])document.addEventListener(name,window.__columnCloseAudit,true);
+      return [checkbox,close].map(e=>{const r=e.getBoundingClientRect(),x=Math.round(r.left+r.width/2),y=Math.round(r.top+r.height/2);
+        if(!e.contains(document.elementFromPoint(x,y)))throw Error('The visibility/close input must reach its real control');
+        return {x,y};});
+    """, project_id, second)
+    try:
+        # One native action stream has no polling, pause or driver round trip
+        # between the final checkbox change and tab close.
+        _click_points(web, points)
+        wait_for(lambda: web.script("return !document.getElementById('project-tab-'+arguments[0]);", project_id),
+                 bool, "the visibility fixture closes immediately after its final checkbox change")
+        events = web.script("return window.__columnCloseEvents;")
+        assert [event["kind"] for event in events] == ["hide", "close"] and all(event["trusted"] for event in events), events
+        assert not [entry for entry in web.trace(after=events[0]["sequence"])
+                    if entry["sequence"] <= events[1]["sequence"] and entry["name"] == "save_view_state"
+                    and entry["request"].get("projectId") == project_id], "Close must arrive before the final edit's view debounce fires"
+        return {"trusted_events": events, "same_zero_pause_action_stream": True, "closed_before_view_debounce": True}
+    finally:
+        web.script("for(const name of ['change','click'])document.removeEventListener(name,window.__columnCloseAudit,true);delete window.__columnCloseAudit;delete window.__columnCloseEvents;")
+
+
+def _hidden_columns_reopen(web, data: dict, root: Path, evidence: Path) -> dict:
+    source = root / f"column-visibility-{uuid.uuid4().hex[:8]}.csv"
+    source.write_text("first,second,next,last\na,b,c,d\ne,f,g,h\n", encoding="utf-8")
+    original = source.read_bytes()
+    case = web.command("create_project", {"path": str(source)})
+    project_id = case["meta"]["id"]
+    try:
+        open_project(web, case["meta"]["name"])
+        web.applied(projectId=project_id)
+        web.results(2)
+        detail = web.command("load_project", {"projectId": project_id}, request=True)
+        first, second, following, last = detail["columns"]
+        _saved(web, project_id, lambda state: not state["hiddenColumns"] and state.get("frozenThrough") is None,
+               "the existing visibility fixture starts with the default frozen first column")
+        web.named(f"Close {source.name}")
+        web.script("window.__workspaceHold={name:'load_view_state',projectId:arguments[0],ready:false};", project_id)
+        open_project(web, case["meta"]["name"])
+        wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "the existing project's real saved view is held during restoration")
+        blocked = _blocked_restore_actions(web, project_id, first)
+        assert _order(web) == [first, second, following, last], "Early input cannot change the unrestored column set"
+        web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
+        web.applied(projectId=project_id)
+        web.results(2)
+        wait_for(lambda: web.script("return !document.querySelector('.project-view').inert;"), bool, "saved-view restoration enables the workspace")
+
+        checks = {}
+        expected = {first, second}
+        for held_name in ("set_hidden_columns", "save_view_state"):
+            if held_name == "set_hidden_columns":
+                web.script("window.__workspaceHold={name:arguments[0],projectId:arguments[1],ready:false};", held_name, project_id)
+            _action(web, first, "Hide this column")
+            web.named("Choose visible columns")
+            if held_name == "save_view_state":
+                _saved(web, project_id, lambda state: set(state["hiddenColumns"]) == {first}, "the first hide finishes saving before holding the close-time view")
+                web.script("window.__workspaceHold={name:arguments[0],projectId:arguments[1],ready:false};", held_name, project_id)
+            else:
+                wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "the first header hide's real metadata response is held")
+            closed = _hide_and_close(web, project_id, second)
+            wait_for(lambda: web.script("return !!window.__workspaceHold?.ready;"), bool, "the closed visibility fixture has a real save response pending")
+            held = web.script("return window.__workspaceHold.request;")
+            assert set(held["hidden_columns"] if held_name == "set_hidden_columns" else held["state"]["hiddenColumns"]) == ({first} if held_name == "set_hidden_columns" else expected), held
+            web.script("window.__workspaceHold.release();delete window.__workspaceHold;")
+
+            open_project(web, case["meta"]["name"])
+            web.applied(projectId=project_id)
+            web.results(2)
+            mounted = web.script("""
+              return {headers:[...document.querySelectorAll('.data-header>[data-column-id]')].map(e=>e.dataset.columnId),
+                rows:[...document.querySelectorAll('.data-row')].map(row=>[...row.querySelectorAll('[data-column-id]')].map(e=>e.dataset.columnId))};
+            """)
+            assert mounted["headers"] == [following, last] and mounted["rows"] \
+                and all(row == [following, last] for row in mounted["rows"]), mounted
+            metadata = web.command("load_project", {"projectId": project_id}, request=True)["hidden_columns"]
+            saved = _saved(web, project_id, lambda state: set(state["hiddenColumns"]) == expected, "reopening Recent retains the same hidden-column set in the saved view")
+            assert set(metadata) == set(saved["hiddenColumns"]) == expected, (metadata, saved)
+            assert saved.get("frozenThrough") is None, saved
+            _prefix(web, [following], "the next visible data column retains the default sticky behavior")
+            checks[held_name] = {**closed, "hidden_columns": sorted(expected), "mounted_columns": mounted,
+                "metadata_matches_saved_view": True, "next_visible_column_sticky": following}
+            if held_name == "set_hidden_columns":
+                web.named("Choose visible columns")
+                web.named("Select all", "#visible-column-menu")
+                web.named("Done", "#visible-column-menu")
+                _saved(web, project_id, lambda state: not state["hiddenColumns"], "the second pending-save scenario starts with visible columns")
+        assert source.read_bytes() == original
+        web.screenshot(evidence / "columns-hidden-existing-project-reopened.png")
+        return {"restore_guard": blocked, "pending_save_reopen": checks, "source_unchanged": True}
+    finally:
+        web.script("window.__workspaceHold?.release?.();delete window.__workspaceHold;")
+        web.request("DELETE", web.route("actions"))
+        web.close_drawer()
+        if web.script("return !!document.querySelector('.workspace-drawer');"):
+            web.named("Close workspace menu", ".workspace-drawer")
+        web.tab(data["id"])
+        web.results(data["total"])
+        if web.script("return !!document.getElementById('project-tab-'+arguments[0]);", project_id):
+            web.named(f"Close {source.name}")
+        delete_fixture_project(web, project_id)
+
+
 def verify_column_presentation(web, data, root: Path, evidence: Path, report: dict) -> None:
+    hidden_reopen = _hidden_columns_reopen(web, data, root, evidence)
     source = root / f"column-presentation-{uuid.uuid4().hex[:8]}.csv"
     timestamps = ["2024/04/01 09:02:03.123456789+09:00", "2024-04-01 00:02:04.000000001Z", "2024-04-01T00:03:00Z"]
     with source.open("w", encoding="utf-8", newline="") as handle:
@@ -341,7 +494,7 @@ def verify_column_presentation(web, data, root: Path, evidence: Path, report: di
             "frozen_prefix": [item["id"] for item in frozen["headers"] if item["pinned"]],
             "iso_nanoseconds_and_offset": True, "raw_get_cell_and_export_preserved": True,
             "non_datetime_iso_not_offered": True, "stale_text_iso_setting_ignored": True, "query_and_selection_unchanged": True,
-            "saved_order_width_format_reopened": True}
+            "saved_order_width_format_reopened": True, "hidden_columns_existing_project_reopened": hidden_reopen}
     finally:
         web.close_drawer()
         web.tab(data["id"])

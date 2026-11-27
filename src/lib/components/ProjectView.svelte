@@ -822,7 +822,8 @@
   };
 </script>
 
-<section class="project-view" style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
+<section class="project-view" inert={!initialized} aria-busy={!initialized}
+  style={`--filter-status-height: ${Math.max(26, filterStatusHeight)}px;`}>
   <FilterControls bind:this={filterControls} {columnWidths} {defaultColumnWidths}
     {extractPending} {extractError}
     extractSession={session?.projectId === projectDetail.project.meta.id ? session.extractPanel ?? null : null}
