@@ -89,6 +89,15 @@ pub struct PreparedGroup {
 }
 
 impl PreparedNode {
+    pub(crate) fn contains_text_comparison(&self) -> Option<(&str, &PreparedCondition, bool)> {
+        match self {
+            Self::Condition(condition) if condition.op == Op::Contains => {
+                Some((&condition.column, condition, condition.negated))
+            }
+            _ => None,
+        }
+    }
+
     /// A lone exact-text predicate can use a string column's equality kernel.
     /// Ordered numeric/datetime operations deliberately keep the exact scalar
     /// evaluator; parsing raw source text must never introduce float coercion.
@@ -321,7 +330,7 @@ impl PreparedCondition {
         self.column.is_empty() && self.op == Op::Contains
     }
 
-    pub(super) fn contains_text(&self, cell: Option<&str>) -> bool {
+    pub(crate) fn contains_text(&self, cell: Option<&str>) -> bool {
         text_any(cell, &self.lower_values, Op::Contains)
     }
 
@@ -362,9 +371,7 @@ fn text_any(cell: Option<&str>, values: &[String], op: Op) -> bool {
                 let hay = text.as_bytes();
                 let needle = value.as_bytes();
                 match op {
-                    Op::Contains => hay
-                        .windows(needle.len())
-                        .any(|part| part.eq_ignore_ascii_case(needle)),
+                    Op::Contains => ascii_contains(hay, needle),
                     Op::StartsWith => hay
                         .get(..needle.len())
                         .is_some_and(|part| part.eq_ignore_ascii_case(needle)),
@@ -385,6 +392,35 @@ fn text_any(cell: Option<&str>, values: &[String], op: Op) -> bool {
             Op::EndsWith => hay.ends_with(value),
             _ => unreachable!("text operator"),
         })
+}
+
+/// Find candidate positions before comparing the whole ASCII literal. A
+/// repeated leading byte uses the first different byte as its anchor, avoiding
+/// a full comparison at every position in inputs such as `aaaa...aaab`.
+fn ascii_contains(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let Some(last_start) = hay.len().checked_sub(needle.len()) else {
+        return false;
+    };
+    let pivot = if needle.len() > 1 && needle[0] == needle[1] {
+        needle
+            .iter()
+            .position(|&byte| byte != needle[0])
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let anchor = needle[pivot];
+    // An offset in this slice is also the start of a complete candidate in hay.
+    let candidates = &hay[pivot..pivot + last_start + 1];
+    memchr::memchr2_iter(
+        anchor.to_ascii_lowercase(),
+        anchor.to_ascii_uppercase(),
+        candidates,
+    )
+    .any(|start| hay[start..start + needle.len()].eq_ignore_ascii_case(needle))
 }
 
 fn lookup<'a>(row: &'a HashMap<String, Value>, column: &str) -> Option<&'a Value> {

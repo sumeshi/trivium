@@ -1,5 +1,5 @@
 Trivium third-party copyright notices and license terms
-Cargo.lock SHA256: a956eb1943a973562027c2616d73cee322cdb347cecfb6b39da159e583e32a9e
+Cargo.lock SHA256: d35dc3bb82d50c6d39b5dff5f2ef58e36a403139e8867d4113d04df6269a7c6b
 package-lock.json SHA256: 06099339361752806bdb5a47afa7c40e446eaba27a65ec1d39190381df3889b8
 rust-toolchain.toml SHA256: f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1
 Includes Rust dependencies for Linux/Windows (including build tools) and npm production dependencies.

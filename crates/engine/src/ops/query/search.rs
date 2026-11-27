@@ -160,6 +160,58 @@ impl PreparedQuery {
             }
         }
         let join_series = self.series(df, &self.join_columns)?;
+        // A lone literal can scan string columns directly, without retrieving
+        // every cell in a row before discovering that an earlier cell matched.
+        if let Some((column, condition, inverted)) = node.contains_text_comparison() {
+            let source = if column.is_empty() {
+                &join_series
+            } else {
+                &required_series
+            };
+            if source
+                .iter()
+                .all(|(_, series)| series.dtype() == &DataType::String)
+            {
+                let mut mask = vec![false; df.height()];
+                let mut remaining = df.height();
+                for (name, series) in source {
+                    let mut count = 0;
+                    for (index, cell) in series
+                        .str()
+                        .expect("validated string column")
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if index.is_multiple_of(EVAL_BATCH_ROWS) {
+                            job.check_cancelled()?;
+                        }
+                        if !mask[index] {
+                            if let Some(cell) = cell {
+                                count += 1;
+                                // Keep long-cell cancellation as responsive as
+                                // the general evaluator; null cells need no scan.
+                                job.check_cancelled()?;
+                                if condition.contains_text(Some(cell)) {
+                                    mask[index] = true;
+                                    remaining -= 1;
+                                }
+                            }
+                        }
+                    }
+                    record_stringified_column_count(name, count);
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+                if inverted {
+                    for matched in &mut mask {
+                        *matched = !*matched;
+                    }
+                }
+                job.check_cancelled()?;
+                return Ok(Some(mask));
+            }
+        }
         let bound = node.bind_columns(&|column| {
             self.required_columns
                 .iter()

@@ -5456,6 +5456,7 @@ dependencies = [
  "csv",
  "encoding_rs",
  "libc",
+ "memchr",
  "parking_lot",
  "polars",
  "polars-parquet",
