@@ -26,8 +26,8 @@ export function estimateAnnotationBytes(row: Pick<CachedRow, "memo" | "tags">): 
 
 /**
  * Approximate the bytes retained for one page. Normalization conservatively
- * counts both text views and exact datetime keys once; raw source text is not
- * added on top. Only note/tag sizes can change without new source cells.
+ * counts source/display text and exact datetime keys once. Only note/tag sizes
+ * can change without new source cells.
  * Character count remains the proxy for bytes used by the eviction bound.
  */
 export function estimatePageBytes(rows: readonly CachedRow[]): number {

@@ -103,7 +103,7 @@ test("a late annotation remains persisted by its backend but cannot repopulate a
   mutation.resolve({ entry: null, revision: 1, flaggedRecords: 100 });
   await updating;
   assert.equal(get(a.workspace.rowsCache).size, 0);
-  assert.equal(get(b.workspace.rowsCache).get(2)?.previewCache.c1, "B");
+  assert.equal(get(b.workspace.rowsCache).get(2)?.cells.c1.text, "B");
   assert.equal(get(b.workspace.flaggedCount), 0);
   b.workspace.dispose();
 });

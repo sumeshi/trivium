@@ -14,11 +14,11 @@ export function displayText(cell: Cell | null | undefined): string {
 }
 
 /**
- * Text copied from a full cell value and used as a filter value.
+ * Source text used for a dialog hint, copying, or filtering.
  *
  * This is the source representation, not the display decoration: an explicit
- * null copies as "null", while a missing key has no value to copy. A list
- * preview must never be passed here; it comes from `getCell` instead.
+ * null copies as "null", while a missing key has no value to copy. Truncated
+ * previews are initial hints only; copying and filtering require the full value.
  */
 export function copyText(cell: Cell | null | undefined): string {
   if (!cell) return "";
@@ -29,32 +29,28 @@ export function copyText(cell: Cell | null | undefined): string {
 
 export type CellCaches = {
   displayCache: Record<string, string>;
-  /** Preview text only; the detail dialog fetches the full value on demand. */
-  previewCache: Record<string, string>;
-  /** Conservative text estimate for both views and exact datetime metadata. */
+  /** Conservative estimate for source/display text and exact datetime metadata. */
   cellBytes: number;
 };
 
 /**
- * Builds the display/preview caches from the backend cell DTOs.
+ * Builds the display cache from the backend cell DTOs.
  *
  * A truncated display value gets a trailing "…" so the table never presents a
- * preview as a complete value. The preview cache stores the raw prefix without
- * decoration; it is an initial hint, not a copy/filter source.
+ * preview as a complete value. The source cells retain the raw prefix for the
+ * dialog's initial hint; copying and filtering fetch the full value on demand.
  */
 export function buildCellCaches(
   cells: Record<string, Cell> | null | undefined
 ): CellCaches {
   const displayCache: Record<string, string> = Object.create(null);
-  const previewCache: Record<string, string> = Object.create(null);
   let cellBytes = 0;
   for (const [column, cell] of Object.entries(cells ?? {})) {
     const text = displayText(cell);
     const display = cell.truncated ? `${text}…` : text;
     const preview = copyText(cell);
     displayCache[column] = display;
-    previewCache[column] = preview;
     cellBytes += display.length + preview.length + (cell.datetime_nanos?.length ?? 0);
   }
-  return { displayCache, previewCache, cellBytes };
+  return { displayCache, cellBytes };
 }

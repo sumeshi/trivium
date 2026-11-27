@@ -35,7 +35,6 @@ test("annotation responses update notes losslessly without changing source cells
     assert.equal(updated.memo, memo);
     assert.equal(updated.displayCache, row.displayCache);
     assert.equal(updated.cells, row.cells);
-    assert.equal(updated.previewCache, row.previewCache);
     assert.equal(applyAnnotationEntry(updated, entry).memo, memo, "read/edit responses must not strip again");
   }
   const cleared = applyAnnotationEntry(row, null);
@@ -47,6 +46,6 @@ test("notes never replace a source column whose id is memo", () => {
   const updated = applyAnnotationEntry(row, { flag: "safe", memo: "investigation note", tags: [], bookmarked: false });
   assert.equal(updated.memo, "investigation note");
   assert.equal(updated.displayCache.memo, "source field");
-  assert.equal(updated.previewCache.memo, "source field");
+  assert.equal(updated.cells.memo.text, "source field");
   assert.equal(updated.displayCache, row.displayCache);
 });

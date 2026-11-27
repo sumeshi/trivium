@@ -56,9 +56,7 @@ export type CachedRow = ProjectRow & {
   memo: string;
   /** Text rendered in the table/detail view (null/missing are distinguished). */
   displayCache: Record<string, string>;
-  /** List preview only; full cell text is fetched per open cell. */
-  previewCache: Record<string, string>;
-  /** Stable source-cell estimate, calculated while the text caches are built. */
+  /** Stable source-cell estimate, calculated while the display cache is built. */
   readonly cellBytes: number;
 };
 
@@ -120,13 +118,12 @@ export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
 }
 
 export function normalizeRow(incoming: ProjectRow): CachedRow {
-  const { displayCache, previewCache, cellBytes } = buildCellCaches(incoming.cells);
+  const { displayCache, cellBytes } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
     flag: normalizeFlag(incoming.flag) || "",
     memo: incoming.memo ?? "",
     displayCache,
-    previewCache,
     cellBytes,
   };
 }

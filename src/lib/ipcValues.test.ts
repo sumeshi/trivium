@@ -71,20 +71,20 @@ test("table, detail, copy, and filter share the same exact string", () => {
     c000003: { truncated: false, length: null,  text: null, kind: "missing" },
     c000004: { truncated: false, length: Array.from("").length,  text: "", kind: "string" },
   });
-  const { displayCache, previewCache } = buildCellCaches(row.cells);
+  const { displayCache } = buildCellCaches(row.cells);
 
   // Table and detail both read displayCache.
   assert.equal(displayCache.c000001, "9007199254740993");
-  // The preview cache holds the same text for an untruncated cell.
-  assert.equal(previewCache.c000001, "9007199254740993");
-  assert.equal(previewCache.c000001, displayCache.c000001);
+  // The source cell provides the same hint for an untruncated cell.
+  assert.equal(copyText(row.cells.c000001), "9007199254740993");
+  assert.equal(copyText(row.cells.c000001), displayCache.c000001);
 
   assert.equal(displayCache.c000002, "null");
-  assert.equal(previewCache.c000002, "null");
+  assert.equal(copyText(row.cells.c000002), "null");
   assert.equal(displayCache.c000003, "—");
-  assert.equal(previewCache.c000003, "");
+  assert.equal(copyText(row.cells.c000003), "");
   assert.equal(displayCache.c000004, "");
-  assert.equal(previewCache.c000004, "");
+  assert.equal(copyText(row.cells.c000004), "");
 });
 
 test("a truncated cell is marked as a preview, not shown as the full value", () => {
@@ -97,13 +97,13 @@ test("a truncated cell is marked as a preview, not shown as the full value", () 
       length: 300_000,
     },
   });
-  const { displayCache, previewCache } = buildCellCaches(row.cells);
+  const { displayCache } = buildCellCaches(row.cells);
 
   // The table ends the preview with an ellipsis; the raw prefix stays
   // available as the dialog's initial hint.
   assert.equal(displayCache.c000001, `${preview}…`);
-  assert.equal(previewCache.c000001, preview);
-  assert.notEqual(previewCache.c000001, displayCache.c000001);
+  assert.equal(copyText(row.cells.c000001), preview);
+  assert.notEqual(copyText(row.cells.c000001), displayCache.c000001);
 });
 
 test("cell estimates preserve both text views, preview decorations and exact datetime metadata", () => {
@@ -122,9 +122,8 @@ test("cell estimates preserve both text views, preview decorations and exact dat
 
 test("empty cell collections have no retained source-text estimate", () => {
   for (const cells of [null, undefined, {}]) {
-    const { cellBytes, displayCache, previewCache } = buildCellCaches(cells);
+    const { cellBytes, displayCache } = buildCellCaches(cells);
     assert.equal(cellBytes, 0);
     assert.deepEqual(Object.keys(displayCache), []);
-    assert.deepEqual(Object.keys(previewCache), []);
   }
 });

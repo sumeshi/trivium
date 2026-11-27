@@ -9,6 +9,7 @@
   import { isTabKey } from '../../keyboard';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { formatIsoCell } from '../../dateDisplay';
+  import { copyText } from '../../ipcValues';
   import { tagSearch } from '../../tagSearch';
   import RowTagsMenu from './RowTagsMenu.svelte';
   import { displayRowColor } from '../../skin';
@@ -198,10 +199,6 @@
         row && column.id in row.displayCache
           ? row.displayCache[column.id]
           : null}
-      {@const previewValue =
-        row && column.id in row.previewCache
-          ? row.previewCache[column.id]
-          : ''}
       {@const formatted = columnKinds[column.id] === 'datetime' && $columnFormats[column.id] === 'iso' && row ? formatIsoCell(row.cells[column.id]) : null}
       <button
         type="button"
@@ -226,7 +223,7 @@
         }
         on:click={() => {
           if (!row || !projectId) return;
-          openCell(projectId, column.id, previewValue, row);
+          openCell(projectId, column.id, copyText(row.cells[column.id]), row);
         }}
         on:contextmenu={(event) => {
           if (!row) return;
@@ -239,7 +236,7 @@
             event,
             projectId,
             column.id,
-            previewValue,
+            copyText(row.cells[column.id]),
             row
           );
         }}

@@ -6,6 +6,7 @@
   import { recycleSlots } from '../../renderSlots';
   import type { RenderSlot } from '../../renderSlots';
   import { isTabKey } from '../../keyboard';
+  import { copyText } from '../../ipcValues';
   import { protectRecycledActivation } from '../../recycledActivation';
   import { moveDisplayColumn } from '../../columnLayoutActions';
   import { visibleColumnWidth } from '../../columnAutoFit';
@@ -232,7 +233,7 @@
       projectId,
       rowIndex: row.row_index,
       columnId: column,
-      preview: row.previewCache[column] ?? '',
+      preview: copyText(row.cells[column]),
       truncated: row.cells?.[column]?.truncated === true,
       kind: row.cells?.[column]?.kind ?? 'string',
       row,

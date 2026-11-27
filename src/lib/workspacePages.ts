@@ -30,8 +30,8 @@ export function createWorkspacePages(currentVisiblePage: () => number) {
     const updated = updater(existing);
     // Annotation updates preserve source caches, so even very wide rows only
     // need a note/tag delta. Keep the general updater correct if cells change.
-    const byteDelta = updated.displayCache === existing.displayCache
-      && updated.previewCache === existing.previewCache
+    const byteDelta = updated.cells === existing.cells
+      && updated.displayCache === existing.displayCache
       ? estimateAnnotationBytes(updated) - estimateAnnotationBytes(existing)
       : estimatePageBytes([updated]) - estimatePageBytes([existing]);
     rowsCache.update((cache) => {

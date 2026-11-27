@@ -118,7 +118,7 @@ test("page loads and annotation updates use normalized sizes without scanning so
     c1: { kind: "string", text: "source value", truncated: false, length: 12 },
   } });
   const initial = { ...source, cells: tracked(source.cells),
-    displayCache: tracked(source.displayCache), previewCache: tracked(source.previewCache) };
+    displayCache: tracked(source.displayCache) };
   const pages = createWorkspacePages(() => 0);
   pages.registerLoadedPage(0, 0, [initial]);
   assert.equal(scans, 0, "registering a normalized page must not enumerate source cells or text views");
@@ -127,7 +127,7 @@ test("page loads and annotation updates use normalized sizes without scanning so
       flag: "critical", memo, tags: ["tag"], bookmarked: true,
     }));
     assert.equal(updated?.displayCache, initial.displayCache);
-    assert.equal(updated?.previewCache, initial.previewCache);
+    assert.equal(updated?.cells, initial.cells);
     assert.equal(updated?.cellBytes, initial.cellBytes);
     assert.equal(updated?.displayCache.memo, "source note field");
     assert.equal(updated?.memo, memo);
