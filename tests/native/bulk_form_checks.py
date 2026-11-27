@@ -12,9 +12,14 @@ def _rows(web, project_id: str) -> list[dict]:
     return web.command("query_project_rows", {"projectId": project_id, "offset": 0, "limit": 10})["rows"]
 
 
-def _status(web, expected: str) -> None:
+def _bulk_action(web, action: str, expected: str) -> int:
+    start = web.checkpoint()
+    web.named(action, ".bulk-form")
     wait_for(lambda: web.script("return document.querySelector('.bulk-form [role=status]')?.textContent;"),
         lambda text: text == expected, expected)
+    # The status appears before the debounced annotation refresh completes.
+    web.refreshed(start)
+    return start
 
 
 def _calls(web, start: int, project_id: str, name: str) -> list[dict]:
@@ -49,9 +54,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert not web.script("return !!document.querySelector('[aria-label=\"Bulk flag\"] [aria-pressed=true]');"), "Clicking an active optional flag removes the requested flag change"
         assert web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Apply').disabled;")
         web.write('input[aria-label="Bulk tag"]', "review, exact")
-        start = web.checkpoint()
-        web.named("Apply", ".bulk-form")
-        _status(web, "2 rows applied")
+        start = _bulk_action(web, "Apply", "2 rows applied")
         assert len(_calls(web, start, project_id, "bulk_preview")) == len(_calls(web, start, project_id, "bulk_update")) == 1
         tag_only = _rows(web, project_id)
         for index in [0, 2]:
@@ -59,15 +62,14 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             assert tag_only[index]["tags"] == original[index]["tags"] + ["review, exact"], tag_only[index]
             assert tag_only[index]["bookmarked"] == original[index]["bookmarked"]
         assert tag_only[1] == original[1]
-        web.named("Apply", ".bulk-form"); _status(web, "0 rows applied")
+        _bulk_action(web, "Apply", "0 rows applied")
         assert _rows(web, project_id) == tag_only, "Reapplying an identical patch changes no rows"
-        web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
+        _bulk_action(web, "Undo", "2 rows restored")
         assert _rows(web, project_id) == original
 
         web.choose('select[aria-label="Bulk tag action"]', "clear")
         assert web.script("return document.querySelector('[aria-label=\"Bulk tag\"]').disabled;"), "Clear tags does not require or consume a tag name"
-        start = web.checkpoint()
-        web.named("Apply", ".bulk-form"); _status(web, "1 rows applied")
+        start = _bulk_action(web, "Apply", "1 rows applied")
         updates = _calls(web, start, project_id, "bulk_update")
         assert len(updates) == 1 and updates[0]["request"]["tags"] == [], updates
         assert not {"flag", "memo", "add_tags", "remove_tags"}.intersection(updates[0]["request"]), updates
@@ -76,15 +78,14 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             assert cleared_tags[index]["tags"] == []
             assert {key: value for key, value in cleared_tags[index].items() if key != "tags"} == {key: value for key, value in original[index].items() if key != "tags"}
         assert cleared_tags[1] == original[1]
-        web.named("Undo", ".bulk-form"); _status(web, "1 rows restored")
+        _bulk_action(web, "Undo", "1 rows restored")
         assert _rows(web, project_id) == original
         web.choose('select[aria-label="Bulk tag action"]', "add")
 
         web.named("Set bulk flag Critical", ".bulk-form")
         web.write('input[aria-label="Bulk note"]', "combined note")
         web.write('input[aria-label="Bulk tag"]', "combined tag")
-        start = web.checkpoint()
-        web.named("Apply", ".bulk-form"); _status(web, "2 rows applied")
+        start = _bulk_action(web, "Apply", "2 rows applied")
         updates = _calls(web, start, project_id, "bulk_update")
         assert len(updates) == 1 and updates[0]["request"]["flag"] == "critical" and updates[0]["request"]["memo"] == "combined note", updates
         assert updates[0]["request"]["add_tags"] == ["combined tag"]
@@ -94,9 +95,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
             assert combined[index]["tags"] == original[index]["tags"] + ["combined tag"]
             assert combined[index]["bookmarked"] == original[index]["bookmarked"]
         assert combined[1] == original[1]
-        # The saved-operation status precedes the debounced table refresh.
-        # Select delivered rows only after that refresh, not a disabled header.
-        web.refreshed(start)
+        # Select delivered rows after the completed annotation refresh.
         web.results(2)
         # Keep selection target selected after clearing the selection: Undo
         # still refers to the previous durable operation, not the form target.
@@ -106,7 +105,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.click(web.element('input[aria-label="Select visible rows"]'))
         wait_for(web.state, lambda state: state["selectionTotal"] == 0, "selection becomes empty")
         assert not web.script("return [...document.querySelectorAll('.bulk-actions button')].find(e=>e.textContent.trim()==='Undo').disabled;")
-        web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
+        _bulk_action(web, "Undo", "2 rows restored")
         assert _rows(web, project_id) == original
 
         web.choose('select[aria-label="Bulk target"]', "filtered")
@@ -114,13 +113,13 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         web.click(web.element('.bulk-clear input'))
         web.write('input[aria-label="Bulk tag"]', "manual")
         web.choose('select[aria-label="Bulk tag action"]', "remove")
-        web.named("Apply", ".bulk-form"); _status(web, "2 rows applied")
+        _bulk_action(web, "Apply", "2 rows applied")
         cleared = _rows(web, project_id)
         for index in [0, 2]:
             assert cleared[index]["flag"] == "" and cleared[index]["memo"] is None and cleared[index]["tags"] == []
             assert cleared[index]["bookmarked"] == original[index]["bookmarked"]
         assert cleared[1] == original[1]
-        web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
+        _bulk_action(web, "Undo", "2 rows restored")
         assert _rows(web, project_id) == original
 
         web.named("Clear bulk flags", ".bulk-form")
@@ -145,7 +144,7 @@ def verify_bulk_form(web, data, root: Path, evidence: Path, report: dict) -> Non
         assert after_close[1] == original[1], "Closing and changing the visible query cannot retarget a requested mutation"
         web.tab(project_id); web.applied(projectId=project_id, search="other"); web.results(1)
         web.drawer("Bulk annotation")
-        web.named("Undo", ".bulk-form"); _status(web, "2 rows restored")
+        _bulk_action(web, "Undo", "2 rows restored")
         assert _rows(web, project_id) == original
 
         web.write('input[aria-label="Bulk tag"]', "stale target")
