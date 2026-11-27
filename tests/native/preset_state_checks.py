@@ -13,21 +13,10 @@ def _end_native_select(web) -> None:
     # Finish WebKit's native select interaction before subsequent XTest input.
     if os.name == "nt":
         return
-    from ctypes import CDLL, c_int, c_ubyte, c_uint, c_ulong, c_void_p
+    from column_pin_checks import _key
     from feedback_checks import _settle
-    from runtime import _x11_open
 
-    x11, display = _x11_open()
-    xtest = CDLL("libXtst.so.6")
-    x11.XKeysymToKeycode.argtypes, x11.XKeysymToKeycode.restype = [c_void_p, c_ulong], c_ubyte
-    xtest.XTestFakeKeyEvent.argtypes = [c_void_p, c_uint, c_int, c_ulong]
-    try:
-        escape = x11.XKeysymToKeycode(display, 0xFF1B)
-        assert escape and xtest.XTestFakeKeyEvent(display, escape, 1, 0)
-        assert xtest.XTestFakeKeyEvent(display, escape, 0, 0)
-        x11.XSync(display, 0)
-    finally:
-        x11.XCloseDisplay(display)
+    _key(web, "\ue00c")
     _settle(web)
     web.drawer("Conditions")
 

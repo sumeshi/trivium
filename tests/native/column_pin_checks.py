@@ -1,6 +1,7 @@
 """Real header-menu column visibility and cumulative frozen-prefix checks."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import time
 import uuid
@@ -85,6 +86,25 @@ def _unchanged_query(web, start: int, before: dict) -> None:
 
 def _key(web, key: str, count: int = 1) -> None:
     if count < 1:
+        return
+    if os.name != "nt" and key == "\ue00c":
+        # WebKit can drop Escape keydown from WebDriver actions.
+        from ctypes import CDLL, c_int, c_ubyte, c_uint, c_ulong, c_void_p
+        from runtime import _x11_open
+
+        xtest = CDLL("libXtst.so.6")
+        x11, display = _x11_open()
+        try:
+            x11.XKeysymToKeycode.argtypes, x11.XKeysymToKeycode.restype = [c_void_p, c_ulong], c_ubyte
+            xtest.XTestFakeKeyEvent.argtypes, xtest.XTestFakeKeyEvent.restype = [c_void_p, c_uint, c_int, c_ulong], c_int
+            keycode = x11.XKeysymToKeycode(display, 0xFF1B)
+            assert keycode, "The native keyboard must support Escape"
+            for _ in range(count):
+                assert xtest.XTestFakeKeyEvent(display, keycode, 1, 0)
+                assert xtest.XTestFakeKeyEvent(display, keycode, 0, 0)
+            x11.XSync(display, 0)
+        finally:
+            x11.XCloseDisplay(display)
         return
     web.request("POST", web.route("actions"), {"actions": [{"type": "key", "id": "column-pin-keyboard", "actions": [
         action for _ in range(count) for action in ({"type": "keyDown", "value": key}, {"type": "keyUp", "value": key})]}]})
