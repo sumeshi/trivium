@@ -2,9 +2,11 @@
   import { createEventDispatcher } from 'svelte';
   import { useWorkspace } from '../../workspaceContext';
   import { SEARCH_EXAMPLES, SEARCH_SYNTAX_HELP } from '../../searchHelp';
+  import { createCompositionGuard } from '../../keyboard';
   import PatternPicker from './PatternPicker.svelte';
   const { search, searchColumns, projectDetail, columnLabels, patternSnippets, addPatternSnippet, removePatternSnippet } = useWorkspace();
-  const dispatch = createEventDispatcher<{ open: void }>();
+  const dispatch = createEventDispatcher<{ open: void; submit: void }>();
+  const searchComposition = createCompositionGuard();
   let searchToolsEl: HTMLDivElement | null = null;
   let scopeOpen = false;
   let helpOpen = false;
@@ -43,6 +45,11 @@
     (scopeOpen ? scopeTrigger : patternsOpen ? patternsTrigger : helpTrigger)?.focus();
     close();
   };
+  const handleSearchKeydown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' || searchComposition.blocksShortcut(event)) return;
+    event.preventDefault();
+    dispatch('submit');
+  };
 </script>
 
 <svelte:document on:click={outside} on:keydown={escape} />
@@ -54,7 +61,9 @@
     </svg>
     <input placeholder='Search: error timeout · error | warning · -noise' aria-label="Search rows"
       title={SEARCH_SYNTAX_HELP}
-      bind:this={searchInput} bind:value={$search} type="search" />
+      bind:this={searchInput} bind:value={$search} type="search"
+      on:compositionstart={searchComposition.start} on:compositionend={searchComposition.end}
+      on:keydown={handleSearchKeydown} />
     {#if $patternSnippets.length}
       <div class="pattern-chips" aria-label="Active search patterns">
         {#each $patternSnippets as snippet (snippet.id)}

@@ -560,26 +560,35 @@
       clearTimeout(filterTimeout);
     }
     if (closing) return;
-    filterTimeout = setTimeout(() => {
-      const scheduled = pendingFilters;
-      pendingFilters = null;
-      filterTimeout = null;
-      if (!scheduled) {
-        return;
-      }
-      void applyFilters(
-        {
-          search: scheduled.search,
-          flag: scheduled.flag,
-          bookmarkedOnly: scheduled.bookmarkedOnly,
-          searchColumns: scheduled.searchColumns,
-          condition: scheduled.condition,
-        },
-        scheduled.resetScroll,
-        false,
-        scheduled.restoredRow
-      );
-    }, 160);
+    filterTimeout = setTimeout(flushPendingFilters, 160);
+  };
+
+  const flushPendingFilters = () => {
+    if (filterTimeout) clearTimeout(filterTimeout);
+    filterTimeout = null;
+    if (!initialized || destroyed || closing) return;
+    const scheduled = pendingFilters;
+    pendingFilters = null;
+    if (!scheduled) return;
+    void applyFilters(
+      {
+        search: scheduled.search,
+        flag: scheduled.flag,
+        bookmarkedOnly: scheduled.bookmarkedOnly,
+        searchColumns: scheduled.searchColumns,
+        condition: scheduled.condition,
+      },
+      scheduled.resetScroll,
+      false,
+      scheduled.restoredRow
+    );
+  };
+
+  const submitSearch = async () => {
+    const projectId = $currentProjectId;
+    // Let bound inputs and the filter observer publish their latest snapshot.
+    await tick();
+    if (projectId === $currentProjectId) flushPendingFilters();
   };
 
   const forceRefreshFilteredRows = (resetScroll: boolean) => {
@@ -821,7 +830,7 @@
     groupReady={initialized}
     on:extract={(event) => dispatch('extract', event.detail)}
     on:columnWidths={event => applyPresetColumnWidths(event.detail)}
-    on:export={openExportDialog} on:refresh={queueAnnotationRefresh}>
+    on:export={openExportDialog} on:refresh={queueAnnotationRefresh} on:submit={submitSearch}>
 
   <HistoryButtons slot="history" />
   <div slot="navigation" class="table-navigation">

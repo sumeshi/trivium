@@ -365,7 +365,7 @@
 
     </div>
     <div class="filter-secondary">
-    <SearchControls bind:this={searchControls} on:open={() => { flagMenuOpen = columnsOpen = false; }} />
+    <SearchControls bind:this={searchControls} on:open={() => { flagMenuOpen = columnsOpen = false; }} on:submit />
 
     <div class="column-picker" bind:this={columnPickerEl}>
       <button
