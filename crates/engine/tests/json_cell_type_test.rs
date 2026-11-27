@@ -4,7 +4,7 @@ use polars::prelude::{AnyValue, DataFrame, NamedFrom, Series};
 use serde_json::{json, Value};
 use trivium_engine::{
     models::ColumnMeta,
-    value_utils::{build_cell, build_full_cell, build_row_cells, CellColumns, CELL_PREVIEW_CHARS},
+    value_utils::{build_cell, build_full_cell, CellColumns, CELL_PREVIEW_CHARS},
 };
 
 #[test]
@@ -30,7 +30,7 @@ fn stored_object_values_keep_distinct_null_missing_and_scalar_cells() {
         source: "/context".into(),
         order: 0,
     }];
-    let builder = CellColumns::new(&columns);
+    let builder = CellColumns::new(&df, &columns);
     for (index, (text, kind)) in [
         (Some("{\"host\":\"foo\"}"), "object"),
         (Some("bar"), "string"),
@@ -40,11 +40,11 @@ fn stored_object_values_keep_distinct_null_missing_and_scalar_cells() {
     .into_iter()
     .enumerate()
     {
-        let page = build_row_cells(&df, index, &columns, &builder);
-        let full = builder.build_full(
-            "c000001",
+        let page = builder.build_row(index);
+        let full = build_full_cell(
             &df.column("c000001").unwrap().get(index).unwrap(),
             Some(&records[index]),
+            "/context",
         );
         assert_eq!(page["c000001"], full);
         assert_eq!(full.text.as_deref(), text);

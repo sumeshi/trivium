@@ -10,11 +10,9 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::Cell;
-use crate::project_io::{
-    is_internal_column, read_page_rows_dataframe_with_job, INTERNAL_ORIGINAL,
-};
+use crate::project_io::{is_internal_column, read_page_rows_dataframe_with_job, INTERNAL_ORIGINAL};
 use crate::store::ProjectsStore;
-use crate::value_utils::{original_record_at, CellColumns};
+use crate::value_utils::{build_full_cell, original_record_at};
 
 #[derive(Debug, Deserialize)]
 pub struct GetCellPayload {
@@ -81,15 +79,13 @@ pub fn get_cell_with_job(
         return Err(AppError::Message("Row not found.".into()));
     }
 
-    let columns = std::slice::from_ref(column);
-    let cell_columns = CellColumns::new(columns);
     let value = df
         .column(&payload.column_id)
         .ok()
         .and_then(|series| series.get(0).ok())
         .unwrap_or(polars::prelude::AnyValue::Null);
-    let original = original_record_at(&df, 0);
-    let cell = cell_columns.build_full(&payload.column_id, &value, original.as_ref());
+    let original = original_record_at(df.column(INTERNAL_ORIGINAL).ok(), 0);
+    let cell = build_full_cell(&value, original.as_ref(), &column.source);
     job.check_cancelled()?;
     Ok(cell)
 }

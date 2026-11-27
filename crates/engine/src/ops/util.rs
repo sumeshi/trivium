@@ -7,7 +7,7 @@ use crate::condition::eval;
 use crate::error::AppError;
 use crate::flags::normalize_flag_value;
 use crate::models::{ColorRule, ColumnMeta, FlagEntry, ProjectRow};
-use crate::value_utils::{anyvalue_to_json, build_row_cells, CellColumns};
+use crate::value_utils::{anyvalue_to_json, CellColumns};
 
 pub const DEFAULT_PAGE_SIZE: usize = 250;
 
@@ -52,10 +52,10 @@ pub fn materialize_rows(
     row_indices: impl Iterator<Item = usize>,
     flags: &HashMap<usize, FlagEntry>,
 ) -> Vec<ProjectRow> {
-    let cell_columns = CellColumns::new(columns);
+    let cell_columns = CellColumns::new(df, columns);
     let mut rows = Vec::new();
     for row_idx in row_indices {
-        let cells = build_row_cells(df, row_idx, columns, &cell_columns);
+        let cells = cell_columns.build_row(row_idx);
         let flag_entry = flags.get(&row_idx);
         rows.push(ProjectRow {
             row_index: row_idx,

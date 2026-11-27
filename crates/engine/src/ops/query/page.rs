@@ -5,7 +5,7 @@ use polars::prelude::*;
 use crate::error::AppError;
 use crate::flags::normalize_flag_value;
 use crate::models::{ColumnMeta, FlagEntry, ProjectRow};
-use crate::value_utils::{build_row_cells, CellColumns};
+use crate::value_utils::CellColumns;
 
 /// Parse once per query population, rather than splitting a combination for
 /// every row. Unknown options must never expand a filtered operation to all rows.
@@ -85,10 +85,10 @@ pub fn materialize_page_rows(
             "Page row count does not match the selected row ids.".into(),
         ));
     }
-    let cell_columns = CellColumns::new(columns);
+    let cell_columns = CellColumns::new(df, columns);
     let mut rows = Vec::with_capacity(row_ids.len());
     for (position, &row_idx) in row_ids.iter().enumerate() {
-        let cells = build_row_cells(df, position, columns, &cell_columns);
+        let cells = cell_columns.build_row(position);
         let entry = flags.get(&row_idx);
         rows.push(ProjectRow {
             row_index: row_idx,

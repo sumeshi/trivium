@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use polars::prelude::{AnyValue, DataFrame};
+use polars::prelude::{AnyValue, DataFrame, Series};
 use serde_json::Value;
 
 use crate::analysis::{infer::parse_datetime_nanos, temporal::datetime_value_nanos};
@@ -103,46 +103,63 @@ pub fn value_display_length(value: &Value) -> usize {
 /// `char`, so a multi-byte character is never split.
 pub const CELL_PREVIEW_CHARS: usize = 256;
 
-/// Column-level context for the per-cell IPC DTO.
+/// Column bindings for cells built from this exact frame.
 ///
 /// Original CSV headers / JSON Pointers distinguish absent JSON keys from
 /// explicit nulls and retain per-value source types without scanning the page.
-pub struct CellColumns {
-    sources: HashMap<String, String>,
+pub struct CellColumns<'a> {
+    columns: Vec<CellColumn<'a>>,
+    original: Option<&'a Series>,
 }
 
-impl CellColumns {
-    pub fn new(columns: &[ColumnMeta]) -> Self {
-        let sources = columns
+struct CellColumn<'a> {
+    id: &'a str,
+    series: Option<&'a Series>,
+    path: Option<Vec<String>>,
+}
+
+impl<'a> CellColumns<'a> {
+    pub fn new(df: &'a DataFrame, columns: &'a [ColumnMeta]) -> Self {
+        let original = df.column(INTERNAL_ORIGINAL).ok();
+        let columns = columns
             .iter()
-            .map(|column| (column.id.clone(), column.source.clone()))
+            .map(|column| CellColumn {
+                id: &column.id,
+                series: df.column(&column.id).ok(),
+                path: original.and_then(|_| decode_json_path(&column.source)),
+            })
             .collect();
-        Self { sources }
+        Self { columns, original }
     }
 
-    /// Builds one list cell with a preview. `original` is the parsed row from
-    /// `__original`.
-    pub fn build(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
-        build_cell(value, original, self.source(column))
-    }
-
-    /// Builds one cell with the full text, for the on-demand cell fetch.
-    pub fn build_full(&self, column: &str, value: &AnyValue, original: Option<&Value>) -> Cell {
-        build_full_cell(value, original, self.source(column))
-    }
-
-    fn source<'a>(&'a self, column: &'a str) -> &'a str {
-        self.sources
-            .get(column)
-            .map(String::as_str)
-            .unwrap_or(column)
+    /// Parses the original once, then builds cells at the bound frame position.
+    pub fn build_row(&self, row_idx: usize) -> HashMap<String, Cell> {
+        let original = original_record_at(self.original, row_idx);
+        let mut result = HashMap::with_capacity(self.columns.len());
+        for column in &self.columns {
+            let value = column
+                .series
+                .and_then(|series| series.get(row_idx).ok())
+                .unwrap_or(AnyValue::Null);
+            let cell = build_value_cell(
+                &value,
+                original.as_ref(),
+                column.path.as_deref(),
+                Some(CELL_PREVIEW_CHARS),
+            );
+            result.insert(column.id.to_owned(), cell);
+        }
+        result
     }
 }
 
 /// Builds one list cell: full text reduced to a preview plus its original
 /// length.
 pub fn build_cell(value: &AnyValue, original: Option<&Value>, source: &str) -> Cell {
-    build_value_cell(value, original, source, Some(CELL_PREVIEW_CHARS))
+    let path = original
+        .filter(|value| value.is_object())
+        .and_then(|_| decode_json_path(source));
+    build_value_cell(value, original, path.as_deref(), Some(CELL_PREVIEW_CHARS))
 }
 
 /// Builds one cell with the full source text and no truncation.
@@ -152,20 +169,23 @@ pub fn build_cell(value: &AnyValue, original: Option<&Value>, source: &str) -> C
 /// keeps arrays/objects in one cell. CSV originals are arrays of strings;
 /// CSV and standalone typed values use the Polars value's own type.
 pub fn build_full_cell(value: &AnyValue, original: Option<&Value>, source: &str) -> Cell {
-    build_value_cell(value, original, source, None)
+    let path = original
+        .filter(|value| value.is_object())
+        .and_then(|_| decode_json_path(source));
+    build_value_cell(value, original, path.as_deref(), None)
 }
 
 fn build_value_cell(
     value: &AnyValue,
     original: Option<&Value>,
-    source: &str,
+    path: Option<&[String]>,
     preview_chars: Option<usize>,
 ) -> Cell {
     let text = anyvalue_text(value);
     match text {
         Some(text) => {
             let length = text.chars().count();
-            let kind = original_json_kind(original, source).unwrap_or_else(|| anyvalue_kind(value));
+            let kind = original_json_kind(original, path).unwrap_or_else(|| anyvalue_kind(value));
             let nanos = match value {
                 AnyValue::Date(_) | AnyValue::Datetime(_, _, _) => {
                     datetime_value_nanos(value).and_then(|nanos| i64::try_from(nanos).ok())
@@ -191,7 +211,7 @@ fn build_value_cell(
         }
         None => Cell {
             text: None,
-            kind: null_cell_kind(original, source).to_string(),
+            kind: null_cell_kind(original, path).to_string(),
             truncated: false,
             length: None,
             datetime_nanos: None,
@@ -200,13 +220,13 @@ fn build_value_cell(
 }
 
 /// Returns the JSON type for a key present in a JSON source record.
-fn original_json_kind(original: Option<&Value>, source: &str) -> Option<&'static str> {
-    match original_json_field(original, source)? {
+fn original_json_kind(original: Option<&Value>, path: Option<&[String]>) -> Option<&'static str> {
+    match original_json_field(original, path)? {
         Value::Null => Some("null"),
         Value::Bool(_) => Some("bool"),
         // is_i64/is_u64 test the machine-sized range, not whether an
         // arbitrary-precision JSON number was written as an integer.
-        Value::Number(number) => Some(if number.to_string().contains(['.', 'e', 'E']) {
+        Value::Number(number) => Some(if number.as_str().contains(['.', 'e', 'E']) {
             "float"
         } else {
             "int"
@@ -220,17 +240,28 @@ fn original_json_kind(original: Option<&Value>, source: &str) -> Option<&'static
 /// Resolves a flattened object path without descending into arrays, which
 /// remain whole leaf cells. A numeric object key and an array index must not
 /// become the same field when records have different shapes.
-fn original_json_field<'a>(original: Option<&'a Value>, source: &str) -> Option<&'a Value> {
+fn original_json_field<'a>(
+    original: Option<&'a Value>,
+    path: Option<&[String]>,
+) -> Option<&'a Value> {
     let mut value = original?;
-    let path = source.strip_prefix('/')?;
-    for token in path.split('/') {
+    for token in path? {
         let Value::Object(object) = value else {
             return None;
         };
-        let token = token.replace("~1", "/").replace("~0", "~");
-        value = object.get(&token)?;
+        value = object.get(token)?;
     }
     Some(value)
+}
+
+fn decode_json_path(source: &str) -> Option<Vec<String>> {
+    Some(
+        source
+            .strip_prefix('/')?
+            .split('/')
+            .map(|token| token.replace("~1", "/").replace("~0", "~"))
+            .collect(),
+    )
 }
 
 /// Maps a Polars value to a cell kind when no JSON source type is available.
@@ -255,43 +286,18 @@ fn anyvalue_kind(value: &AnyValue) -> &'static str {
 /// A JSON object whose pointer is absent means "missing"; a present key with a
 /// JSON null means "null". CSV originals are arrays; CSV and standalone typed
 /// nulls have no absent-key distinction.
-fn null_cell_kind(original: Option<&Value>, source: &str) -> &'static str {
+fn null_cell_kind(original: Option<&Value>, path: Option<&[String]>) -> &'static str {
     match original {
-        Some(Value::Object(_)) if original_json_field(original, source).is_none() => "missing",
+        Some(Value::Object(_)) if original_json_field(original, path).is_none() => "missing",
         _ => "null",
     }
 }
 
 /// Parses the `__original` value for one row. Standalone DataFrames and CSV
 /// page projections can omit this internal column.
-pub fn original_record_at(df: &DataFrame, row_idx: usize) -> Option<Value> {
-    let series = df.column(INTERNAL_ORIGINAL).ok()?;
-    let value = series.get(row_idx).ok()?;
+pub(crate) fn original_record_at(series: Option<&Series>, row_idx: usize) -> Option<Value> {
+    let value = series?.get(row_idx).ok()?;
     anyvalue_text(&value).and_then(|text| crate::import::parse_json_value(text.as_bytes()).ok())
-}
-
-/// Builds the exact cell map for one row. `cells` must have been built from the
-/// same frame/columns; `df` may be a page-sized slice taken from it.
-pub fn build_row_cells(
-    df: &DataFrame,
-    row_idx: usize,
-    columns: &[ColumnMeta],
-    cells: &CellColumns,
-) -> HashMap<String, Cell> {
-    let original = original_record_at(df, row_idx);
-    let mut result = HashMap::with_capacity(columns.len());
-    for column in columns {
-        let value = df
-            .column(&column.id)
-            .ok()
-            .and_then(|series| series.get(row_idx).ok());
-        let cell = match value {
-            Some(value) => cells.build(&column.id, &value, original.as_ref()),
-            None => cells.build(&column.id, &AnyValue::Null, original.as_ref()),
-        };
-        result.insert(column.id.clone(), cell);
-    }
-    result
 }
 
 /// Borrow stored string cells; native typed values keep their text adapter.
