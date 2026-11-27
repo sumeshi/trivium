@@ -1,12 +1,15 @@
-"""Exercise row navigation in the actual Tauri/WebKit application.
+"""Exercise row navigation in the actual Tauri application.
 
-Build with embedded assets, then run under Xvfb, for example:
+Build with embedded assets; on Linux run under Xvfb, for example:
   xvfb-run -a python3 tests/native/row_navigation.py --binary target/release/trivium-desktop
 
-Requires tauri-driver and WebKitWebDriver (Linux) or matching msedgedriver (Windows). Uses only Python's standard library.
+Requires tauri-driver and WebKitWebDriver (Linux) or matching msedgedriver
+(Windows). Windows checks require a dedicated debug test binary.
+Uses only Python's standard library.
 Every input, project and annotation belongs to an isolated temporary profile.
-The session starts through tauri-driver; subsequent commands go directly to its
-owned WebKitWebDriver to avoid intermittent EOFs in tauri-driver's HTTP proxy.
+Linux apps launch through tauri-driver; Windows test apps launch explicitly
+and expose an owned DevTools port for attachment. Both platforms create their
+sessions through tauri-driver, then send commands to the owned native WebDriver.
 """
 from __future__ import annotations
 

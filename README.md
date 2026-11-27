@@ -122,7 +122,7 @@ Export **all rows, the current results, or selected rows** to CSV, optionally in
 
 CSV exports preserve source values. Spreadsheet software can interpret cells starting with `=`, `+`, `-`, or `@` as formulas; review untrusted exports in a text viewer.
 
-The Save dialog asks for confirmation before replacing an existing file. Automation requests must set `allowOverwrite: true` to overwrite a file.
+The Save dialog asks for confirmation before replacing an existing file.
 
 ## Appearance
 
@@ -159,6 +159,8 @@ The example uses only the Python standard library. Run it from the repository ro
 ```sh
 python examples/automate.py --cli /path/to/trivium-cli --workspace ./investigation --source /path/to/events.csv --search powershell
 ```
+
+Automation exports require `allowOverwrite: true` to replace an existing file.
 
 ## Installation
 

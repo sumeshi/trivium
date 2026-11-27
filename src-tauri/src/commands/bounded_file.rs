@@ -64,7 +64,7 @@ pub(super) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, String>
 fn read_text(path: &Path, kind: ImportTextKind) -> Result<String, String> {
     let text = String::from_utf8(read_bounded(path, kind.limit())?)
         .map_err(|_| "Choose a UTF-8 JSON file.".to_owned())?;
-    // Match the former browser TextDecoder's UTF-8 BOM handling.
+    // Accept an optional UTF-8 BOM before parsing the JSON definition.
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 

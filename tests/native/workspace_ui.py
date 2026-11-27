@@ -1,9 +1,9 @@
-"""Real Tauri/WebKit regression for workspace, filters, analysis and themes.
+"""Real Tauri regression for workspace, filters, analysis and themes.
 
-Run under Xvfb with the same embedded native binary and drivers as
-row_navigation.py. All projects and app settings use an isolated profile.
-Native file-picker interaction is excluded: the actual export dialog is
-checked, then its applied UI QuerySpec is exported through real native IPC.
+Use the same embedded native binary and drivers as row_navigation.py; Linux
+checks run under Xvfb. All projects and app settings use an isolated profile.
+Log import and CSV export checks supply selected picker paths. Linux filesystem
+permission checks also exercise the actual GTK open and save dialogs.
 """
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from refinement_checks import verify_refinements
 from column_pin_checks import verify_column_pinning
 from detail_timeline_checks import verify_detail_timeline
 from compact_detail_checks import verify_compact_detail
-from refinement_imports import verify_import_identity
 from import_recovery_checks import verify_import_recovery
 from import_refinements_checks import verify_import_refinements
 from datetime_flex_checks import verify_datetime_flex
@@ -734,7 +733,7 @@ def timeline_gestures(web: WorkspaceView, data: dict[str, Any], report: dict[str
         if not any(word in str(error).lower() for word in ["unsupported", "unknown action", "wheel"]):
             raise
         wheel_supported = False
-        report["unverified"].append(f"Native wheel action unavailable in WebKitWebDriver: {error}")
+        report["unverified"].append(f"Native wheel action unavailable in WebDriver: {error}")
     if wheel_supported:
         events = web.script("return window.__workspaceWheelEvents;")
         assert len(events) == 10 and all(event["trusted"] for event in events), events
@@ -1070,7 +1069,6 @@ def main() -> None:
     selection.add_argument("--boundary-only", action="store_true")
     selection.add_argument("--ioc-only", action="store_true")
     selection.add_argument("--close-only", action="store_true")
-    selection.add_argument("--review-fixes-only", action="store_true")
     selection.add_argument("--file-drop-only", action="store_true")
     selection.add_argument("--extensions-only", action="store_true")
     selection.add_argument("--grouping-only", action="store_true")
@@ -1080,7 +1078,7 @@ def main() -> None:
     evidence = args.output.resolve() / uuid.uuid4().hex[:12]
     evidence.mkdir(parents=True)
     report: dict[str, Any] = {"started_utc": datetime.now(timezone.utc).isoformat(), "passed": False,
-                              "unverified": ["Native GTK export destination picker", "Native OS import picker (only its selected-path response is substituted)"], "stages": []}
+                              "unverified": ["Log import and CSV export picker interaction (selected paths are supplied by the harness)"], "stages": []}
     with native_workspace(prefix="trivium-native-workspace-") as temporary:
         root = Path(temporary)
         app = None
@@ -1109,7 +1107,6 @@ def main() -> None:
                 ("scoped native filesystem access", lambda: verify_fs_scope(web, root, report)),
                 ("failed annotation reconciliation", lambda: verify_annotation_failures(web, data, root, report)),
                 ("analysis preserves investigation rules", lambda: verify_investigation_filters(web, data, root, evidence, report)),
-                ("multiple-file import options and failure isolation", lambda: verify_import_identity(web, data, root, report)),
                 ("compact responsive toolbar", lambda: verify_toolbar(web, data, evidence, report)),
                 ("drawer switching and blank-area dismissal", lambda: verify_drawer_interaction(web, data, evidence, report)),
                 ("condition add button affordance", lambda: verify_condition_buttons(web, evidence, report)),
@@ -1147,10 +1144,6 @@ def main() -> None:
                 if args.extensions_only and stage not in {"project tab close menu", "shared patterns and extraction result tabs", "custom themes and managed wallpaper", "scoped native filesystem access"}:
                     continue
                 if args.file_drop_only and stage not in {"native external file drop and manual import", "column ordering, widths and ISO display"}:
-                    continue
-                if stage == "multiple-file import options and failure isolation" and not args.review_fixes_only:
-                    continue  # Covered by the full refinement checks below.
-                if args.review_fixes_only and stage not in {"review query feedback, note width and row navigation", "compact scrollable row detail", "multiple-file import options and failure isolation"}:
                     continue
                 if args.close_only and stage != "normal close drains saves before exit":
                     continue

@@ -83,9 +83,9 @@ jobs:
         run: |
           rm -rf target/artifacts
           app_version=$(node -p "require('./package.json').version")
-          python scripts/package_artifacts.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-deb target/release/bundle/deb/*_"$app_version"_*.deb
-          python scripts/package_artifacts.py --kind desktop-app --platform linux-x86_64 --output target/artifacts/trivium-appimage target/release/bundle/appimage/*_"$app_version"_*.AppImage
-          python scripts/package_artifacts.py --kind automation-cli --platform linux-x86_64 --output target/artifacts/trivium-cli-linux target/release/trivium-cli
+          python scripts/package_artifacts.py --output target/artifacts/trivium-deb target/release/bundle/deb/*_"$app_version"_*.deb
+          python scripts/package_artifacts.py --output target/artifacts/trivium-appimage target/release/bundle/appimage/*_"$app_version"_*.AppImage
+          python scripts/package_artifacts.py --output target/artifacts/trivium-cli-linux target/release/trivium-cli
 
       - name: Upload Debian application
         uses: actions/upload-artifact@v5

@@ -9,8 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--kind', choices=('desktop-app', 'automation-cli'), required=True)
-    parser.add_argument('--platform', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('files', type=Path, nargs='+')
     args = parser.parse_args()
@@ -23,7 +21,7 @@ def main():
         target = args.output / source.name
         if source.resolve() != target.resolve():
             shutil.copy2(source, target)
-    print(f'Packaged {args.kind} for {args.platform}: {len(args.files)} binary file(s) and license notices')
+    print(f'Packaged {len(args.files)} binary file(s) and license notices')
 
 
 if __name__ == '__main__':

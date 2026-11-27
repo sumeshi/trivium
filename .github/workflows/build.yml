@@ -152,8 +152,8 @@ jobs:
         shell: bash
         run: |
           rm -rf target/artifacts
-          python scripts/package_artifacts.py --kind desktop-app --platform windows-x86_64 --output target/artifacts/trivium-windows "target/release/Trivium-v${{ steps.version.outputs.version }}.exe"
-          python scripts/package_artifacts.py --kind automation-cli --platform windows-x86_64 --output target/artifacts/trivium-cli-windows target/release/trivium-cli.exe
+          python scripts/package_artifacts.py --output target/artifacts/trivium-windows "target/release/Trivium-v${{ steps.version.outputs.version }}.exe"
+          python scripts/package_artifacts.py --output target/artifacts/trivium-cli-windows target/release/trivium-cli.exe
 
       - name: Upload desktop application
         uses: actions/upload-artifact@v5
