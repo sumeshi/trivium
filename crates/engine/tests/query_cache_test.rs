@@ -9,7 +9,6 @@ use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 use trivium_engine::annotation::AnnotationPatch;
-use trivium_engine::jobs::JobContext;
 use trivium_engine::ops;
 use trivium_engine::ops::bulk::{
     bulk_preview, bulk_undo, bulk_update, BulkAnnotatePayload, BulkUndoPayload,
@@ -17,8 +16,8 @@ use trivium_engine::ops::bulk::{
 use trivium_engine::ops::flags::UpdateFlagPayload;
 use trivium_engine::ops::projects::{CreateProjectPayload, ProjectRequest};
 use trivium_engine::ops::rows::{
-    clear_result_cache, query_project_rows, reset_resolve_count, resolve_count,
-    resolve_project_target, result_cache_stats, QueryRowsPayload, QueryRowsResponse, QuerySpec,
+    clear_result_cache, query_project_rows, reset_resolve_count, resolve_count, result_cache_stats,
+    QueryRowsPayload, QueryRowsResponse, QuerySpec,
 };
 use trivium_engine::store::ProjectsStore;
 
@@ -264,49 +263,47 @@ fn memo_and_flag_updates_keep_a_data_only_result_cached() {
 }
 
 #[test]
-fn cache_keeps_two_results_and_evicts_the_oldest() {
+fn eight_recent_searches_are_reused_and_the_ninth_evicts_the_lru() {
     let _guard = cache_test_guard();
     let (root, store, id) = setup_project();
-
-    let mut allocations = Vec::new();
-    for value in ["value00", "value01", "value02"] {
-        let spec = QuerySpec {
-            search: Some(value.to_string()),
-            ..Default::default()
-        };
-        query(&store, id, spec.clone(), 0, PAGE);
-        let target = resolve_project_target(&store, id, &spec, &JobContext::none()).unwrap();
-        assert_eq!(target.ids.len(), 1);
-        // Streaming selection grows a Vec; its reserved capacity is retained
-        // by the cache even when only one source row matched.
-        allocations.push(target.ids.capacity() * std::mem::size_of::<usize>() + 64);
+    let spec = |row| QuerySpec {
+        search: Some(format!("r{row:02}")),
+        ..Default::default()
+    };
+    for row in 0..8 {
+        assert_eq!(row_ids(&query(&store, id, spec(row), 0, PAGE)), vec![row]);
     }
-
     let stats = result_cache_stats();
-    assert_eq!(stats.entries, 2);
-    assert_eq!(stats.max_entries, 2);
-    assert_eq!(stats.evictions, 1);
-    assert_eq!(stats.misses, 3);
-    assert_eq!(
-        stats.total_bytes,
-        allocations.iter().rev().take(2).sum::<usize>()
-    );
+    assert_eq!(stats.entries, 8);
+    assert_eq!(stats.max_entries, 8);
+    assert_eq!(stats.evictions, 0);
+    assert_eq!(stats.misses, 8);
     assert!(stats.total_bytes <= stats.max_bytes);
-    assert_eq!(resolve_count(), 3);
+    assert_eq!(resolve_count(), 8);
 
-    let first_again = query(
-        &store,
-        id,
-        QuerySpec {
-            search: Some("value00".to_string()),
-            ..Default::default()
-        },
-        0,
-        PAGE,
+    // Walk investigation history backwards without rerunning its searches.
+    for row in (0..8).rev() {
+        assert_eq!(row_ids(&query(&store, id, spec(row), 0, PAGE)), vec![row]);
+    }
+    assert_eq!(resolve_count(), 8);
+    assert_eq!(result_cache_stats().hits, 8);
+
+    assert_eq!(row_ids(&query(&store, id, spec(8), 0, PAGE)), vec![8]);
+    assert_eq!(result_cache_stats().evictions, 1);
+    assert_eq!(resolve_count(), 9);
+    // The reverse history walk made row 0 newest and row 7 least recent.
+    assert_eq!(row_ids(&query(&store, id, spec(0), 0, PAGE)), vec![0]);
+    assert_eq!(resolve_count(), 9);
+    assert_eq!(row_ids(&query(&store, id, spec(7), 0, PAGE)), vec![7]);
+    assert_eq!(
+        resolve_count(),
+        10,
+        "the evicted history entry must run again"
     );
-    assert_eq!(row_ids(&first_again), vec![0]);
-    assert_eq!(resolve_count(), 4, "the evicted result is a miss");
-    assert_eq!(result_cache_stats().entries, 2);
+    let stats = result_cache_stats();
+    assert_eq!(stats.entries, 8);
+    assert_eq!(stats.evictions, 2);
+    assert!(stats.total_bytes <= stats.max_bytes);
 
     let _ = fs::remove_dir_all(root);
 }

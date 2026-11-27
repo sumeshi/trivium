@@ -1,6 +1,6 @@
 //! Process-local cache of resolved row ids for repeated page requests (T19).
 //!
-//! Only the original row ids and two annotation counts are kept; page data,
+//! Only query keys, original row ids and annotation counts are kept; page data,
 //! output columns, and cell values never enter this cache. The key omits
 //! offset/limit so moving between pages of the same result is a hit.
 
@@ -11,9 +11,12 @@ use uuid::Uuid;
 
 use super::{page::is_unrestricted_flag_filter, target::QuerySpec};
 
-pub(crate) const MAX_RESULTS: usize = 2;
+pub(crate) const MAX_RESULTS: usize = 8;
 pub(crate) const MAX_RESULT_BYTES: usize = 64 * 1024 * 1024;
-const ENTRY_OVERHEAD_BYTES: usize = 64;
+// Entry metadata plus the Arc counters and Vec header. Owned buffers are
+// counted by capacity; allocator bookkeeping is outside this estimate.
+const ENTRY_OVERHEAD_BYTES: usize =
+    size_of::<(QueryCacheKey, CachedResult)>() + size_of::<Vec<usize>>() + 2 * size_of::<usize>();
 
 #[derive(Debug, Clone)]
 pub(crate) struct CachedResult {
@@ -24,6 +27,7 @@ pub(crate) struct CachedResult {
     /// keeps its ids across annotation edits, but its result-internal count
     /// must be refreshed when this no longer matches the project revision.
     pub annotation_revision: u64,
+    /// Row-id allocation and fixed entry overhead; key buffers are added on insert.
     pub estimated_bytes: usize,
 }
 
@@ -45,10 +49,18 @@ impl CachedResult {
     }
 }
 
+fn entry_bytes(key: &QueryCacheKey, result: &CachedResult) -> usize {
+    result
+        .estimated_bytes
+        .saturating_add(key.spec.capacity())
+        .saturating_add(key.annotation_token.as_ref().map_or(0, String::capacity))
+}
+
 /// Statistics for tests and the T27 measurement.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResultCacheStats {
     pub entries: usize,
+    /// Retained buffer capacities and entry metadata, excluding allocator overhead.
     pub total_bytes: usize,
     pub max_entries: usize,
     pub max_bytes: usize,
@@ -117,7 +129,7 @@ impl ResultCache {
 
     pub(crate) fn insert(&mut self, key: QueryCacheKey, result: CachedResult) {
         self.remove_key(&key);
-        let bytes = result.estimated_bytes;
+        let bytes = entry_bytes(&key, &result);
 
         // Never hold an entry that by itself exceeds the budget: a later
         // request must not be able to report a hit for it.
@@ -126,14 +138,17 @@ impl ResultCache {
         }
 
         while !self.entries.is_empty()
-            && (self.entries.len() >= self.max_entries || self.total_bytes + bytes > self.max_bytes)
+            && (self.entries.len() >= self.max_entries
+                || self.total_bytes.saturating_add(bytes) > self.max_bytes)
         {
-            let (_, evicted) = self.entries.remove(0);
-            self.total_bytes = self.total_bytes.saturating_sub(evicted.estimated_bytes);
+            let (key, evicted) = self.entries.remove(0);
+            self.total_bytes = self.total_bytes.saturating_sub(entry_bytes(&key, &evicted));
             self.evictions += 1;
         }
 
-        if self.entries.len() >= self.max_entries || self.total_bytes + bytes > self.max_bytes {
+        if self.entries.len() >= self.max_entries
+            || self.total_bytes.saturating_add(bytes) > self.max_bytes
+        {
             return;
         }
 
@@ -146,7 +161,7 @@ impl ResultCache {
         self.entries.retain(|(key, result)| {
             let keep = key.project_id != *project_id;
             if !keep {
-                removed_bytes += result.estimated_bytes;
+                removed_bytes += entry_bytes(key, result);
             }
             keep
         });
@@ -179,8 +194,8 @@ impl ResultCache {
 
     fn remove_key(&mut self, key: &QueryCacheKey) {
         if let Some(position) = self.entries.iter().position(|(known, _)| known == key) {
-            let (_, old) = self.entries.remove(position);
-            self.total_bytes = self.total_bytes.saturating_sub(old.estimated_bytes);
+            let (key, old) = self.entries.remove(position);
+            self.total_bytes = self.total_bytes.saturating_sub(entry_bytes(&key, &old));
         }
     }
 
@@ -327,162 +342,4 @@ pub fn clear_result_cache() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn key(project_id: Uuid, spec: &str) -> QueryCacheKey {
-        QueryCacheKey {
-            project_id,
-            spec: spec.to_string(),
-            data_revision: DataRevision {
-                len: 10,
-                modified_nanos: 20,
-            },
-            annotation_token: None,
-        }
-    }
-
-    fn result(rows: usize) -> CachedResult {
-        CachedResult::new((0..rows).collect(), 0, 0, 0)
-    }
-
-    #[test]
-    fn lru_keeps_two_results_and_reports_first_as_miss() {
-        let mut cache = ResultCache::new(2, MAX_RESULT_BYTES);
-        let project = Uuid::new_v4();
-        cache.insert(key(project, "a"), result(4));
-        cache.insert(key(project, "b"), result(4));
-        assert_eq!(cache.get(&key(project, "a")).map(|c| c.ids.len()), Some(4));
-        cache.insert(key(project, "c"), result(4));
-
-        assert_eq!(cache.stats().entries, 2);
-        assert!(cache.get(&key(project, "b")).is_none());
-        assert!(cache.get(&key(project, "a")).is_some());
-    }
-
-    #[test]
-    fn oversized_result_is_not_retained_or_reported_as_hit() {
-        let mut cache = ResultCache::new(2, 1024);
-        let project = Uuid::new_v4();
-        // A selective result may retain much more allocation than its length.
-        let mut ids = Vec::with_capacity(1024);
-        ids.push(0);
-        let large = CachedResult::new(ids, 0, 0, 0);
-        assert_eq!(large.ids.len(), 1);
-        assert!(large.estimated_bytes > 1024);
-        cache.insert(key(project, "large"), large);
-
-        assert_eq!(cache.stats().entries, 0);
-        assert_eq!(cache.stats().total_bytes, 0);
-        assert!(cache.get(&key(project, "large")).is_none());
-    }
-
-    #[test]
-    fn total_budget_evicts_the_oldest_result() {
-        let mut cache = ResultCache::new(2, 256);
-        let project = Uuid::new_v4();
-        // Two 8-row results need 2 * (64 + 64) = 256 bytes; a third must evict.
-        cache.insert(key(project, "a"), result(8));
-        cache.insert(key(project, "b"), result(8));
-        cache.insert(key(project, "c"), result(8));
-
-        let stats = cache.stats();
-        assert_eq!(stats.entries, 2);
-        assert!(stats.total_bytes <= 256);
-        assert_eq!(stats.evictions, 1);
-        assert!(cache.get(&key(project, "a")).is_none());
-    }
-
-    #[test]
-    fn deleting_a_project_keeps_other_projects() {
-        let mut cache = ResultCache::new(2, MAX_RESULT_BYTES);
-        let first = Uuid::new_v4();
-        let second = Uuid::new_v4();
-        cache.insert(key(first, "a"), result(4));
-        cache.insert(key(second, "a"), result(4));
-        cache.remove_project(&first);
-
-        assert_eq!(cache.stats().entries, 1);
-        assert!(cache.get(&key(first, "a")).is_none());
-        assert!(cache.get(&key(second, "a")).is_some());
-    }
-
-    #[test]
-    fn normalization_matches_equivalent_specs() {
-        let empty_scope = QuerySpec {
-            search_columns: Some(Vec::new()),
-            ..Default::default()
-        };
-        let omitted_scope = QuerySpec::default();
-        assert_eq!(
-            normalized_spec_json(&empty_scope),
-            normalized_spec_json(&omitted_scope)
-        );
-
-        let defaults_spelled_out = QuerySpec {
-            flag_filter: Some("all".to_string()),
-            bookmarked_only: Some(false),
-            sort_direction: Some("asc".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            normalized_spec_json(&defaults_spelled_out),
-            normalized_spec_json(&omitted_scope)
-        );
-        assert!(!spec_depends_on_annotations(&defaults_spelled_out));
-        assert!(spec_depends_on_annotations(&QuerySpec {
-            bookmarked_only: Some(true),
-            ..Default::default()
-        }));
-    }
-
-    #[test]
-    fn annotation_dependencies_follow_tag_operands_not_literal_source_text() {
-        for search in [
-            "@tag:review",
-            "-@tag:*",
-            "@TAG:\"triage: mail|review\"",
-            "@tag:one|two",
-        ] {
-            assert!(
-                spec_depends_on_annotations(&QuerySpec {
-                    search: Some(search.into()),
-                    ..Default::default()
-                }),
-                "{search}"
-            );
-        }
-        for search in ["tag:review", "\"@tag:review\"", "message:@tag:review"] {
-            assert!(
-                !spec_depends_on_annotations(&QuerySpec {
-                    search: Some(search.into()),
-                    ..Default::default()
-                }),
-                "{search}"
-            );
-        }
-    }
-
-    #[test]
-    fn late_annotation_count_refresh_cannot_roll_back_a_newer_snapshot_or_copy_ids() {
-        let mut cache = ResultCache::new(2, MAX_RESULT_BYTES);
-        let key = key(Uuid::new_v4(), "data-only");
-        let entry = result(8);
-        let ids = entry.ids.clone();
-        let bytes = entry.estimated_bytes;
-        cache.insert(key.clone(), entry);
-        cache.refresh_counts(&key, 3, 2, 1);
-        cache.refresh_counts(&key, 2, 99, 99);
-        let refreshed = cache.get(&key).unwrap();
-        assert_eq!(
-            (
-                refreshed.annotation_revision,
-                refreshed.annotated_total,
-                refreshed.annotated_filtered
-            ),
-            (3, 2, 1)
-        );
-        assert!(std::sync::Arc::ptr_eq(&ids, &refreshed.ids));
-        assert_eq!(cache.stats().total_bytes, bytes);
-    }
-}
+mod tests;
