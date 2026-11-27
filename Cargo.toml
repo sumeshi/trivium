@@ -16,7 +16,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.dev]
 debug = 0
-incremental = false
+incremental = true
 
 [profile.release]
 # Measured against opt-level=s; prioritize investigation latency over binary size.

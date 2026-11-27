@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: linux-build-${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+
 jobs:
   build-deb:
     # Build against glibc 2.35 so newer Linux hosts can use the AppImage.
@@ -68,7 +72,6 @@ jobs:
           npm run lint
           npm run lint:test
           npm run test:ui
-          npm run build
 
       - name: Include bundled Linux dependency licenses
         run: python scripts/third_party_licenses.py --include-system
@@ -129,6 +132,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.rust.outputs.version }}
+
+      - name: Cache native app driver
+        uses: swatinem/rust-cache@v2
+        with:
+          key: tauri-driver-2.1.0
+          cache-targets: false
+          cache-on-failure: true
 
       - name: Install native test dependencies
         run: |

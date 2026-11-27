@@ -8,6 +8,10 @@ on:
     paths-ignore: ['**/*.md', 'assets/**']
   workflow_dispatch:
 
+concurrency:
+  group: native-smoke-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/develop') }}
+
 jobs:
   native:
     strategy:

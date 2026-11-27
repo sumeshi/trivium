@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-build-${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+
 jobs:
   build:
     strategy:
