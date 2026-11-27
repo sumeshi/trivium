@@ -5,24 +5,22 @@ import { get } from "svelte/store";
 import { estimatePageBytes, selectEvictions } from "./pageCache.ts";
 import type { PageCacheEntry } from "./pageCache.ts";
 import type { CachedRow } from "./components/project_view/state.ts";
-import { applyAnnotationEntry, PAGE_SIZE } from "./components/project_view/state.ts";
+import { applyAnnotationEntry, normalizeRow, PAGE_SIZE } from "./components/project_view/state.ts";
 import { createWorkspacePages } from "./workspacePages.ts";
 
 const MIB = 1024 * 1024;
 const MAX_BYTES = 16 * MIB;
 
 function rowWithText(text: string): CachedRow {
-  return { color: null,
+  return normalizeRow({
+    color: null,
     row_index: 0,
-
-    cells: {},
+    cells: { column: { kind: "string", text, truncated: false, length: text.length } },
     flag: "",
     tags: [],
     bookmarked: false,
     memo: "",
-    displayCache: { column: text },
-    previewCache: { column: text },
-  } as CachedRow;
+  });
 }
 
 function cachePages(entries: Array<[number, number]>): Map<number, PageCacheEntry> {
@@ -36,22 +34,22 @@ function cachePages(entries: Array<[number, number]>): Map<number, PageCacheEntr
 test("estimatePageBytes counts the rendered cell strings", () => {
   const text = "x".repeat(10_000);
   const bytes = estimatePageBytes([rowWithText(text)]);
-  // displayCache and previewCache each retain the text, plus row overhead.
+  // The conservative estimate counts both text views, plus row overhead.
   assert.ok(bytes >= 20_000);
 });
 
 test("page estimates count exact datetime metadata once per retained cell", () => {
   const source = { length: Array.from("preview").length,  text: "preview", kind: "string" as const, truncated: true };
-  const row = { ...rowWithText("preview"), cells: { first: source, second: source, ordinary: source } };
+  const row = normalizeRow({ ...rowWithText("preview"), cells: { first: source, second: source, ordinary: source } });
   const initial = estimatePageBytes([row]);
-  const datetimeRow = {
+  const datetimeRow = normalizeRow({
     ...row,
     cells: {
       first: { ...source, datetime_nanos: "1794625445123456789" },
       second: { ...source, datetime_nanos: "-9223372036854775808" },
       ordinary: source,
     },
-  };
+  });
   const retainedNanosBytes = 19 + 20;
   assert.equal(estimatePageBytes([datetimeRow]), initial + retainedNanosBytes);
   assert.deepEqual(selectEvictions(new Map([[0, { at: 1, bytes: estimatePageBytes([datetimeRow]) }]]),
@@ -110,25 +108,31 @@ test("annotation shrink and growth update retained page bytes before LRU evictio
   assert.deepEqual([...get(pages.positionToRowIndex).keys()], [0, 2 * PAGE_SIZE]);
 });
 
-test("flag and note updates preserve cell caches without scanning wide source columns", () => {
+test("page loads and annotation updates use normalized sizes without scanning source cells", () => {
   let scans = 0;
-  const cells = new Proxy({ memo: "source note field", c1: "source value" }, {
+  const tracked = <T extends object>(value: T): T => new Proxy(value, {
     ownKeys(target) { scans += 1; return Reflect.ownKeys(target); },
   });
+  const source = normalizeRow({ ...rowWithText(""), cells: {
+    memo: { kind: "string", text: "source note field", truncated: false, length: 17 },
+    c1: { kind: "string", text: "source value", truncated: false, length: 12 },
+  } });
+  const initial = { ...source, cells: tracked(source.cells),
+    displayCache: tracked(source.displayCache), previewCache: tracked(source.previewCache) };
   const pages = createWorkspacePages(() => 0);
-  const initial = { ...rowWithText(""), displayCache: cells, previewCache: cells };
   pages.registerLoadedPage(0, 0, [initial]);
-  const loadScans = scans;
+  assert.equal(scans, 0, "registering a normalized page must not enumerate source cells or text views");
   for (const memo of ["", "changed note", ""]) {
     const updated = pages.updateCachedRow(0, (row) => applyAnnotationEntry(row, {
       flag: "critical", memo, tags: ["tag"], bookmarked: true,
     }));
-    assert.equal(updated?.displayCache, cells);
-    assert.equal(updated?.previewCache, cells);
+    assert.equal(updated?.displayCache, initial.displayCache);
+    assert.equal(updated?.previewCache, initial.previewCache);
+    assert.equal(updated?.cellBytes, initial.cellBytes);
     assert.equal(updated?.displayCache.memo, "source note field");
     assert.equal(updated?.memo, memo);
   }
-  assert.equal(scans, loadScans, "annotation updates must not enumerate source cells");
+  assert.equal(scans, 0, "annotation updates must not enumerate source cells or text views");
   assert.deepEqual([...get(pages.loadedPages)], [0]);
 });
 

@@ -73,9 +73,10 @@ code=code.replace(/((?:^|\n)import(?:\s+[^;]+?\s+from)?\s*)(['"])([^'"]+)\2/g,(_
  return prefix+JSON.stringify(url);
 });
 const {default:Row}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+const {normalizeRow}=await import('./src/lib/components/project_view/state.ts');
 const raw='2026-11-19T09:00:00.123456789+09:00';
-const row={row_index:0,cells:{c1:{kind:'string',text:raw,truncated:false,datetime_nanos:'1795046400123456789'}},displayCache:{c1:raw},previewCache:{c1:raw},
- flag:'',memo:'',tags:[],bookmarked:false};
+const row=normalizeRow({row_index:0,cells:{c1:{kind:'string',text:raw,truncated:false,datetime_nanos:'1795046400123456789'}},
+ flag:'',memo:'',tags:[],bookmarked:false});
 const props={row,position:0,projectId:'case',columns:[{id:'c1',index:0,frozen:false}],columnCount:1,gridTemplate:'',
  frozenOffsets:new Map(),frozenPan:0,lastFrozen:null,focusColumn(){},openCellMenu(){},columnTab(){}};
 const text=html=>html.match(/class="cell-text">([^<]*)</)?.[1].trim();

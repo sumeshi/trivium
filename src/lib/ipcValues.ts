@@ -31,6 +31,8 @@ export type CellCaches = {
   displayCache: Record<string, string>;
   /** Preview text only; the detail dialog fetches the full value on demand. */
   previewCache: Record<string, string>;
+  /** Conservative text estimate for both views and exact datetime metadata. */
+  cellBytes: number;
 };
 
 /**
@@ -45,10 +47,14 @@ export function buildCellCaches(
 ): CellCaches {
   const displayCache: Record<string, string> = Object.create(null);
   const previewCache: Record<string, string> = Object.create(null);
+  let cellBytes = 0;
   for (const [column, cell] of Object.entries(cells ?? {})) {
     const text = displayText(cell);
-    displayCache[column] = cell.truncated ? `${text}…` : text;
-    previewCache[column] = copyText(cell);
+    const display = cell.truncated ? `${text}…` : text;
+    const preview = copyText(cell);
+    displayCache[column] = display;
+    previewCache[column] = preview;
+    cellBytes += display.length + preview.length + (cell.datetime_nanos?.length ?? 0);
   }
-  return { displayCache, previewCache };
+  return { displayCache, previewCache, cellBytes };
 }

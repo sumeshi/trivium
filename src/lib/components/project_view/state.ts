@@ -58,6 +58,8 @@ export type CachedRow = ProjectRow & {
   displayCache: Record<string, string>;
   /** List preview only; full cell text is fetched per open cell. */
   previewCache: Record<string, string>;
+  /** Stable source-cell estimate, calculated while the text caches are built. */
+  readonly cellBytes: number;
 };
 
 export type VirtualRow = { position: number; row: CachedRow | null };
@@ -118,13 +120,14 @@ export function normalizeFlag(f: string | null | undefined): FlagSymbol | "" {
 }
 
 export function normalizeRow(incoming: ProjectRow): CachedRow {
-  const { displayCache, previewCache } = buildCellCaches(incoming.cells);
+  const { displayCache, previewCache, cellBytes } = buildCellCaches(incoming.cells);
   return {
     ...incoming,
     flag: normalizeFlag(incoming.flag) || "",
     memo: incoming.memo ?? "",
     displayCache,
     previewCache,
+    cellBytes,
   };
 }
 

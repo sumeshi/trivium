@@ -105,3 +105,26 @@ test("a truncated cell is marked as a preview, not shown as the full value", () 
   assert.equal(previewCache.c000001, preview);
   assert.notEqual(previewCache.c000001, displayCache.c000001);
 });
+
+test("cell estimates preserve both text views, preview decorations and exact datetime metadata", () => {
+  const row = rowFromIpc({
+    unicode: { text: "é😀", kind: "string", truncated: false },
+    preview: { text: "raw", kind: "string", truncated: true, length: 50_000 },
+    null: { text: null, kind: "null", truncated: false },
+    missing: { text: null, kind: "missing", truncated: false },
+    empty: { text: "", kind: "string", truncated: false },
+    datetime: { text: "time", kind: "string", truncated: false, datetime_nanos: "1794625445123456789" },
+  });
+  const { cellBytes } = buildCellCaches(row.cells);
+  // UTF-16 units match the existing page budget: 6 + 7 + 8 + 1 + 0 + 27.
+  assert.equal(cellBytes, 49);
+});
+
+test("empty cell collections have no retained source-text estimate", () => {
+  for (const cells of [null, undefined, {}]) {
+    const { cellBytes, displayCache, previewCache } = buildCellCaches(cells);
+    assert.equal(cellBytes, 0);
+    assert.deepEqual(Object.keys(displayCache), []);
+    assert.deepEqual(Object.keys(previewCache), []);
+  }
+});

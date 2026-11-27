@@ -25,24 +25,15 @@ export function estimateAnnotationBytes(row: Pick<CachedRow, "memo" | "tags">): 
 }
 
 /**
- * Approximate the bytes retained for one page. The rendered cell strings
- * (`displayCache` and `previewCache`), exact datetime keys and note/tag text
- * are counted; raw source text in `cells` is not added on top. Character count
- * is used as a proxy for bytes, which is close enough for an eviction bound.
+ * Approximate the bytes retained for one page. Normalization conservatively
+ * counts both text views and exact datetime keys once; raw source text is not
+ * added on top. Only note/tag sizes can change without new source cells.
+ * Character count remains the proxy for bytes used by the eviction bound.
  */
 export function estimatePageBytes(rows: readonly CachedRow[]): number {
   let bytes = 0;
   for (const row of rows) {
-    bytes += ROW_OVERHEAD_BYTES + estimateAnnotationBytes(row);
-    for (const value of Object.values(row.displayCache)) {
-      bytes += value.length;
-    }
-    for (const value of Object.values(row.previewCache)) {
-      bytes += value.length;
-    }
-    for (const cell of Object.values(row.cells)) {
-      bytes += cell.datetime_nanos?.length ?? 0;
-    }
+    bytes += ROW_OVERHEAD_BYTES + row.cellBytes + estimateAnnotationBytes(row);
   }
   return bytes;
 }
