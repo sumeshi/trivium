@@ -89,6 +89,23 @@ pub struct PreparedGroup {
 }
 
 impl PreparedNode {
+    pub(crate) fn contains_text_group(&self) -> Option<(GroupKind, &[PreparedNode])> {
+        match self {
+            Self::Condition(condition) if condition.op == Op::Contains => {
+                Some((GroupKind::And, std::slice::from_ref(self)))
+            }
+            Self::Group(group)
+                if group
+                    .children
+                    .iter()
+                    .all(|child| child.contains_text_comparison().is_some()) =>
+            {
+                Some((group.kind, &group.children))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn contains_text_comparison(&self) -> Option<(&str, &PreparedCondition, bool)> {
         match self {
             Self::Condition(condition) if condition.op == Op::Contains => {
@@ -125,9 +142,22 @@ impl PreparedNode {
     }
 
     pub(crate) fn and(self, other: Self) -> Self {
+        Self::group(GroupKind::And, vec![self, other])
+    }
+
+    fn group(kind: GroupKind, children: Vec<Self>) -> Self {
+        let mut flattened = Vec::new();
+        for child in children {
+            match child {
+                Self::Group(group) if group.kind == kind => flattened.extend(group.children),
+                child => flattened.push(child),
+            }
+        }
+        // Preparation validates the original tree's budget first. Flatten only
+        // associative groups, keeping source order and mixed-group boundaries.
         Self::Group(PreparedGroup {
-            kind: GroupKind::And,
-            children: vec![self, other],
+            kind,
+            children: flattened,
         })
     }
 
@@ -179,14 +209,14 @@ impl PreparedNode {
             Node::Format(condition) => PreparedFormat::new(condition)
                 .map(Box::new)
                 .map(Self::Format),
-            Node::Group(group) => Ok(Self::Group(PreparedGroup {
-                kind: group.kind,
-                children: group
+            Node::Group(group) => Ok(Self::group(
+                group.kind,
+                group
                     .children
                     .iter()
                     .map(|node| Self::prepare_inner(node, metadata))
                     .collect::<Result<Vec<_>, _>>()?,
-            })),
+            )),
         }
     }
 

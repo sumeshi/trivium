@@ -145,21 +145,47 @@ pub(super) fn append_matching_rows(
     output: &mut Vec<usize>,
     job: &JobContext,
 ) -> Result<usize, AppError> {
-    let mask = prepared.evaluate(frame, flags, row_offset, job)?;
     let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref())?;
+    // Unflagged selections commonly include most rows. Keep their late filter
+    // rather than adding an annotation lookup for every nonmatching text row.
+    let eligible = if prepared.has_predicate()
+        && (spec.bookmarked_only == Some(true) || !flag_filter.matches_population(8))
+    {
+        let mut eligible = Vec::with_capacity(frame.height());
+        for index in 0..frame.height() {
+            if index.is_multiple_of(1024) {
+                job.check_cancelled()?;
+            }
+            let entry = flags.get(&(row_offset + index));
+            eligible.push(
+                flag_filter
+                    .matches_population(entry.map_or(8, |entry| flag_population(&entry.flag)))
+                    && (spec.bookmarked_only != Some(true)
+                        || entry.is_some_and(|entry| entry.bookmarked)),
+            );
+        }
+        Some(eligible)
+    } else {
+        None
+    };
+    let mask = prepared.evaluate(frame, flags, row_offset, eligible.as_deref(), job)?;
     let mut annotated = 0;
     for index in 0..frame.height() {
         if index.is_multiple_of(1024) {
             job.check_cancelled()?;
         }
-        if mask.as_ref().is_some_and(|mask| !mask[index]) {
+        if eligible.as_ref().is_some_and(|eligible| !eligible[index])
+            || mask.as_ref().is_some_and(|mask| !mask[index])
+        {
             continue;
         }
         let row_id = row_offset + index;
         let entry = flags.get(&row_id);
         let population = entry.map_or(8, |entry| flag_population(&entry.flag));
-        if !flag_filter.matches_population(population)
-            || (spec.bookmarked_only == Some(true) && !entry.is_some_and(|entry| entry.bookmarked))
+        if eligible.is_none()
+            && (!flag_filter.matches_population(population)
+                || (spec.bookmarked_only == Some(true)
+                    && !entry.is_some_and(|entry| entry.bookmarked)))
         {
             continue;
         }

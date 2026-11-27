@@ -47,6 +47,10 @@ impl FlagFilterMask {
     pub(super) fn matches_population(&self, population: u8) -> bool {
         self.0 == Self::ALL.0 || self.0 & population != 0
     }
+
+    pub(super) fn is_unrestricted(&self) -> bool {
+        matches!(self.0, 15 | u8::MAX)
+    }
 }
 
 /// Match canonical persisted flags without allocating a String.
@@ -62,7 +66,7 @@ pub(super) fn flag_population(flag: &str) -> u8 {
 /// No selection and selecting every normalized flag population are both
 /// unrestricted, while the UI can retain their distinct checkbox state.
 pub(super) fn is_unrestricted_flag_filter(filter: Option<&str>) -> bool {
-    FlagFilterMask::parse(filter).is_ok_and(|filter| matches!(filter.0, 15 | u8::MAX))
+    FlagFilterMask::parse(filter).is_ok_and(|filter| filter.is_unrestricted())
 }
 
 /// Materializes a page from an already page-sized frame in display order.

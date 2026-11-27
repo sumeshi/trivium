@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+mod text;
+
 use polars::prelude::*;
 
 use crate::condition::{search_tokens_to_node, Node, PreparedNode};
@@ -115,11 +117,16 @@ impl PreparedQuery {
         columns
     }
 
+    pub(super) fn has_predicate(&self) -> bool {
+        self.node.is_some()
+    }
+
     pub(super) fn evaluate(
         &self,
         df: &DataFrame,
         flags: &HashMap<usize, FlagEntry>,
         row_offset: usize,
+        eligible: Option<&[bool]>,
         job: &JobContext,
     ) -> Result<Option<Vec<bool>>, AppError> {
         let Some(node) = &self.node else {
@@ -154,63 +161,26 @@ impl PreparedQuery {
                         *matched = !*matched;
                     }
                 }
+                if let Some(eligible) = eligible {
+                    for (matched, eligible) in mask.iter_mut().zip(eligible) {
+                        *matched &= *eligible;
+                    }
+                }
                 record_stringified_column_count(name, (series.len() - series.null_count()) as u64);
                 job.check_cancelled()?;
                 return Ok(Some(mask));
             }
         }
         let join_series = self.series(df, &self.join_columns)?;
-        // A lone literal can scan string columns directly, without retrieving
-        // every cell in a row before discovering that an earlier cell matched.
-        if let Some((column, condition, inverted)) = node.contains_text_comparison() {
-            let source = if column.is_empty() {
-                &join_series
-            } else {
-                &required_series
-            };
-            if source
-                .iter()
-                .all(|(_, series)| series.dtype() == &DataType::String)
-            {
-                let mut mask = vec![false; df.height()];
-                let mut remaining = df.height();
-                for (name, series) in source {
-                    let mut count = 0;
-                    for (index, cell) in series
-                        .str()
-                        .expect("validated string column")
-                        .into_iter()
-                        .enumerate()
-                    {
-                        if index.is_multiple_of(EVAL_BATCH_ROWS) {
-                            job.check_cancelled()?;
-                        }
-                        if !mask[index] {
-                            if let Some(cell) = cell {
-                                count += 1;
-                                // Keep long-cell cancellation as responsive as
-                                // the general evaluator; null cells need no scan.
-                                job.check_cancelled()?;
-                                if condition.contains_text(Some(cell)) {
-                                    mask[index] = true;
-                                    remaining -= 1;
-                                }
-                            }
-                        }
-                    }
-                    record_stringified_column_count(name, count);
-                    if remaining == 0 {
-                        break;
-                    }
-                }
-                if inverted {
-                    for matched in &mut mask {
-                        *matched = !*matched;
-                    }
-                }
-                job.check_cancelled()?;
-                return Ok(Some(mask));
-            }
+        if let Some(mask) = text::evaluate(
+            node,
+            &required_series,
+            &join_series,
+            df.height(),
+            eligible,
+            job,
+        )? {
+            return Ok(Some(mask));
         }
         let bound = node.bind_columns(&|column| {
             self.required_columns
@@ -239,6 +209,9 @@ impl PreparedQuery {
                 // This index addresses several parallel column series and the mask.
                 #[allow(clippy::needless_range_loop)]
                 for row_idx in batch_start..batch_end {
+                    if eligible.is_some_and(|eligible| !eligible[row_idx]) {
+                        continue;
+                    }
                     cells.clear();
                     for (slot, (_, series)) in required_series.iter().enumerate() {
                         let text = series.get(row_idx).ok().and_then(borrow_text);

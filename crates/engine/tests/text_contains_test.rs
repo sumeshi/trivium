@@ -175,10 +175,13 @@ fn column_scan_matches_row_evaluation_across_chunks_scopes_and_negation() {
                         )
                         .unwrap()
                     };
-                    // A one-child group uses the general row evaluator.
+                    // A nested group uses the general row evaluator.
                     let reference = query(Node::Group(Group {
                         kind: GroupKind::And,
-                        children: vec![node.clone()],
+                        children: vec![Node::Group(Group {
+                            kind: GroupKind::Or,
+                            children: vec![node.clone()],
+                        })],
                     }));
                     assert_eq!(query(node.clone()), reference, "{node:?}, scope={scope:?}");
                 }
