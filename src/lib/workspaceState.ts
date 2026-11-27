@@ -502,5 +502,3 @@ export function createWorkspaceState(notifyError = (message: string) => showToas
     dispose
   };
 }
-
-export type WorkspaceState = ReturnType<typeof createWorkspaceState>;

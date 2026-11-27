@@ -1,8 +1,4 @@
-import { shortTimelineLabel } from "./timelineRange.ts";
 import type { TimeSpan } from "./types";
-
-/** Display-only shortening of source labels; tooltips retain original timestamps. */
-export const compactTimestamp = shortTimelineLabel;
 
 /** Count-based ranking also ranks gaps, whose count is elapsed whole seconds. */
 export function rankedSpans<T extends { count: number; duration_nanos: string }>(

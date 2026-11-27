@@ -7,7 +7,7 @@ export const FLAG_HINTS: Record<FlagSymbol, string> = {
   critical: "!",
 };
 
-// 条件色パレット。name は colors.json に保存しない識別子で、
+// 条件色パレット。name は表示用の識別子で、
 // definitions/themes の CSS 変数 --rule-<name> と対応する。
 // 両テーマの hex は保存済み色の識別にも使うため維持する。
 interface ConditionColorEntry {
@@ -29,7 +29,7 @@ const CONDITION_COLORS: ReadonlyArray<ConditionColorEntry> = [
 
 // 保存済み hex（dark/light のどちらで保存されたか不明）を UI 表示用の
 // CSS 変数参照に変換する。パレット外の hex はそのまま返す。
-// colors.json には hex のまま保存し、var(...) は保存しない。
+// SQLite の colors 設定には hex のまま保存し、var(...) は保存しない。
 export function displayRowColor(color: string): string {
   const normalized = color.trim().toLowerCase();
   const entry = CONDITION_COLORS.find(

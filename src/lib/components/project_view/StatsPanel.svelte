@@ -5,7 +5,7 @@
   import type { Backend } from "../../backend";
   import type { ColumnStats, Histogram } from "../../types";
   import { shouldRequestPanel } from "../../panelRequest";
-  import { compactTimestamp } from "../../panelPresentation";
+  import { shortTimelineLabel } from "../../timelineRange";
   import ValueCountList from "./ValueCountList.svelte";
   import { annotationVersions } from './state';
   import type { AppliedFilters } from "./state";
@@ -241,7 +241,7 @@
           {/each}
           <line x1="0" y1="105" x2="400" y2="105" />
         </svg>
-        <div class="histogram-boundaries"><span title={histogram.buckets[0].start}>{compactTimestamp(histogram.buckets[0].start)}</span><span title={histogram.buckets[histogram.buckets.length - 1].end}>{compactTimestamp(histogram.buckets[histogram.buckets.length - 1].end)}</span></div>
+        <div class="histogram-boundaries"><span title={histogram.buckets[0].start}>{shortTimelineLabel(histogram.buckets[0].start)}</span><span title={histogram.buckets[histogram.buckets.length - 1].end}>{shortTimelineLabel(histogram.buckets[histogram.buckets.length - 1].end)}</span></div>
         <p class="condition-count">{histogramTotal.toLocaleString()} values · Missing {histogram.missing.toLocaleString()}{histogram.invalid ? ` · Unparseable ${histogram.invalid.toLocaleString()}` : ""}{histogram.outside ? ` · Outside ${histogram.outside.toLocaleString()}` : ""}</p>
       {:else if histogram}
         <p class="condition-count">No values in this result. Missing {histogram.missing.toLocaleString()} · Unparseable {histogram.invalid.toLocaleString()}</p>

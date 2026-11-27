@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isLightTheme, parseTheme } from "./themeModel.ts";
+import { parseTheme } from "./themeModel.ts";
 import { displayRowColor } from "./skin.ts";
 import { BUILTIN_THEMES } from "./themeCatalog.generated.ts";
 
@@ -23,7 +23,7 @@ test("existing saved row colours follow the selected theme without rewriting sto
 // Opaque row surfaces also prevent scrolling content from bleeding through a
 // pinned cell when the table uses these theme backgrounds.
 import { readFileSync } from "node:fs";
-import { createThemePreference, DEFAULT_THEME, PASTEL_THEME_OPTIONS, parseSavedTheme, THEME_OPTIONS } from "./themeModel.ts";
+import { createThemePreference, DEFAULT_THEME, parseSavedTheme, THEME_OPTIONS } from "./themeModel.ts";
 
 const stylesheet = readFileSync(new URL("./themeCatalog.generated.css", import.meta.url), "utf8")
   + readFileSync(new URL("../app.css", import.meta.url), "utf8");
@@ -74,15 +74,15 @@ test("neutral Light and the retained palettes keep their current names and disti
   assert.equal(DEFAULT_THEME, "light");
   const retained = ["trivium", "light", "dark", "toki", "sakura", "kohaku", "hisui", "nagi", "sora", "yukari", "sumire", "yozora", "shion", "kasumi"];
   assert.deepEqual(THEME_OPTIONS.map(({ value }) => value).filter(value => retained.includes(value)), retained);
-  assert.deepEqual(PASTEL_THEME_OPTIONS.map(({ value }) => value), BUILTIN_THEMES.filter(definition => definition.pastel).map(definition => definition.id));
   for (const { value } of THEME_OPTIONS) assert.equal(parseTheme(value), value);
   assert.equal(parseTheme(null) ?? DEFAULT_THEME, "light");
   assert.equal(parseTheme("removed-theme") ?? DEFAULT_THEME, "light");
-  for (const { value } of PASTEL_THEME_OPTIONS) assert.equal(isLightTheme(value), true);
-  assert.equal(isLightTheme("shion"), false);
+  const pastelThemes = BUILTIN_THEMES.filter(definition => definition.pastel);
+  for (const definition of pastelThemes) assert.equal(definition.mode, "light");
+  assert.equal(BUILTIN_THEMES.find(definition => definition.id === "shion")?.mode, "dark");
   const baselinePastels = ["yukari", "sakura", "sora", "kohaku", "hisui", "toki", "nagi"];
-  const palettes = new Set(PASTEL_THEME_OPTIONS.filter(({ value }) => baselinePastels.includes(value)).map(({ value }) => {
-    const tokens = cssTokens(value);
+  const palettes = new Set(pastelThemes.filter(({ id }) => baselinePastels.includes(id)).map(({ id }) => {
+    const tokens = cssTokens(id);
     return colour(tokens, "bg") + colour(tokens, "accent");
   }));
   assert.equal(palettes.size, 7);
@@ -135,8 +135,8 @@ test("flag meanings retain consistent colours and readable selected symbols in e
   const dark = cssTokens("trivium"), light = cssTokens("light");
   const backgrounds = ["surface", "surface-weak", "surface-soft", "surface-strong",
     "rule-red", "rule-orange", "rule-amber", "rule-green", "rule-teal", "rule-blue", "rule-purple", "rule-pink", "bookmark-soft"];
-  for (const { value } of THEME_OPTIONS) {
-    const tokens = cssTokens(value), family = isLightTheme(value) ? light : dark;
+  for (const { id: value, mode } of BUILTIN_THEMES) {
+    const tokens = cssTokens(value), family = mode === "light" ? light : dark;
     for (const flag of semantic) {
       assert.equal(colour(tokens, flag), colour(family, flag), `${value} must preserve the ${flag} meaning`);
       const key = flag === "positive" ? "safe" : flag === "warning" ? "suspicious" : "critical";
@@ -178,7 +178,7 @@ test("colour stays on pastel headers and accents while main backgrounds remain w
 test("new night palettes are dark and bookmarks remain a subtle surface tint", () => {
   for (const name of ["yozora", "kasumi", "shion"] as const) {
     assert.equal(parseTheme(name), name);
-    assert.equal(isLightTheme(name), false);
+    assert.equal(BUILTIN_THEMES.find(definition => definition.id === name)?.mode, "dark");
     assert.ok(luminance(colour(cssTokens(name), "bg")) < .03);
   }
   for (const { value } of THEME_OPTIONS) {
@@ -223,7 +223,7 @@ test("Trivium follows the near-black blue reference and Shion inherits the purpl
 test("Sumire is an offered light neutral with restrained silver surfaces and dark accents", () => {
   assert.equal(THEME_OPTIONS.find(({ value }) => value === "sumire")?.label, "Sumire");
   assert.equal(parseTheme("sumire"), "sumire");
-  assert.equal(isLightTheme("sumire"), true);
+  assert.equal(BUILTIN_THEMES.find(definition => definition.id === "sumire")?.mode, "light");
   const tokens = cssTokens("sumire");
   const surface = colour(tokens, "surface");
   const accent = colour(tokens, "accent");

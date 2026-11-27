@@ -8,8 +8,6 @@ import type { Theme, UserTheme } from "./themeModel";
 import { acceptSave, trackAcceptedSave } from "./saveDrain.ts";
 import { readImportText } from "./boundedText.ts";
 
-export { THEME_OPTIONS } from "./themeModel.ts";
-export type { Theme } from "./themeModel";
 const THEME_KEY = "trivium:theme";
 const MAX_USER_THEMES = 128;
 let themeRevision = 0;

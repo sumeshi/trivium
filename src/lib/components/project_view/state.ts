@@ -103,9 +103,9 @@ export type MemoEditorTarget = {
   /** Original row id, independent of page-cache lifetime. */
   rowIndex: number;
   /**
-   * Row snapshot taken when editing started, used as the rollback baseline.
+   * Row snapshot supplying the editor's initial values and patch baseline.
    * It is not part of the page cache and survives page eviction. The explicit
-   * selection (T22) is kept by row id in a separate store for the same reason.
+   * selection is kept by row id in a separate store for the same reason.
    */
   row: CachedRow;
 };

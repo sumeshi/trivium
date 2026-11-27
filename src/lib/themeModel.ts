@@ -5,8 +5,6 @@ export const THEME_PREFERENCE_VERSION = 2 as const;
 export type BuiltinTheme = (typeof BUILTIN_THEMES)[number]["id"];
 export type Theme = BuiltinTheme | `user:${string}`;
 export const THEME_OPTIONS = BUILTIN_THEMES.map(({ id, name }) => ({ value: id, label: name }));
-export const PASTEL_THEME_OPTIONS = BUILTIN_THEMES.filter(definition => definition.pastel)
-  .map(({ id, name }) => ({ value: id, label: name }));
 
 // Opaque palette values keep fixed cells opaque. Geometry, fonts, semantic flag
 // colours, URLs and CSS expressions are deliberately outside a user theme.
@@ -100,6 +98,3 @@ export function parseSavedTheme(value: unknown): Theme | null {
     ? parseTheme((record as ThemePreference).theme) : null;
 }
 export function createThemePreference(value: Theme): ThemePreference { return { version: THEME_PREFERENCE_VERSION, theme: value }; }
-export function isLightTheme(value: Theme): boolean {
-  return BUILTIN_THEMES.find(definition => definition.id === themeBase(value))?.mode === "light";
-}

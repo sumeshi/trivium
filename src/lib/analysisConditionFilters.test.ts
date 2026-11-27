@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { get } from "svelte/store";
 import { appendEmptyColumnRule } from "./appliedFilterSummary.ts";
-import { appendGroupPath } from "./grouping.ts";
 import { createConditionState, presetCondition } from "./stores/condition.ts";
 import type { EditorCondition, EditorGroup } from "./stores/condition.ts";
 import type { ConditionNode } from "./types";
@@ -65,7 +64,7 @@ test("adjusting a timeline range updates only its own group after other drilldow
   const hostId = (get(state.conditionTree).children[0] as EditorCondition).id;
   state.filterByRange("Timestamp", "start-1", "end-1");
   state.filterByValue("EventID", "4624");
-  state.conditionTree.update(root => appendGroupPath(root, ["user"], [{ value: "alice", label: "alice", count: 1, children: [] }]));
+  state.filterByGroupPath(["user"], [{ value: "alice", label: "alice", count: 1, children: [] }]);
   let ruleId = "";
   state.conditionTree.update(root => {
     const added = appendEmptyColumnRule(root, "command");

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compactTimestamp, durationLabel, durationNanos, rankedSpans } from "./panelPresentation.ts";
+import { durationLabel, durationNanos, rankedSpans } from "./panelPresentation.ts";
+import { shortTimelineLabel } from "./timelineRange.ts";
 import type { TimeSpan } from "./types";
 import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
 
@@ -70,7 +71,7 @@ test("flexible and long padded timestamp labels do not affect engine duration ra
   assert.equal(durationNanos(spans[0]), 60_000_000_001n);
   assert.equal(rankedSpans(spans, "duration")[0], spans[1]);
   assert.deepEqual(spans, original);
-  assert.equal(compactTimestamp(spans[0].start), spans[0].start);
+  assert.equal(shortTimelineLabel(spans[0].start), spans[0].start);
 });
 
 test("mounted time spans filter by engine UTC bounds while retaining raw labels", () => runSvelteTest(String.raw`
@@ -88,8 +89,8 @@ try{
  const state=list.$capture_state();
  assert.equal(state.sorted[0].start,rawStart);
  assert.equal(state.sorted[0].end,rawEnd);
- assert.equal(state.compactTimestamp(state.sorted[0].start),rawStart);
- assert.equal(state.compactTimestamp(state.sorted[0].end),rawEnd);
+ assert.equal(state.shortTimelineLabel(state.sorted[0].start),rawStart);
+ assert.equal(state.shortTimelineLabel(state.sorted[0].end),rawEnd);
  assert.equal(state.durationLabel(state.durationNanos(state.sorted[0])),'1ns');
  state.selectSpan(state.sorted[0]);
  assert.deepEqual(calls,[['Timestamp',span.start_utc,span.end_utc,'time-analysis']]);

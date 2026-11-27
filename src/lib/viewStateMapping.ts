@@ -185,24 +185,3 @@ export function viewStateWarnings(
   if (state.noteColumnWidth !== undefined && (!Number.isFinite(state.noteColumnWidth) || state.noteColumnWidth <= 0)) warnings.push('note column width');
   return warnings;
 }
-
-/** Converts the component view model to the engine DTO, including version. */
-export function savedViewToViewState(view: SavedView): ViewState {
-  return {
-    version: 1,
-    search: view.search,
-    searchColumns: [...view.searchColumns],
-    condition: view.condition as unknown as Record<string, unknown>,
-    flagFilter: view.flagFilter,
-    bookmarkedOnly: view.bookmarkedOnly,
-    sortKey: view.sortKey,
-    sortDirection: view.sortDirection,
-    hiddenColumns: [...view.hiddenColumns],
-    ...(view.frozenThrough !== undefined ? { frozenThrough: view.frozenThrough } : {}),
-    columnWidths: { ...view.columnWidths },
-    ...(view.noteColumnWidth !== undefined ? { noteColumnWidth: view.noteColumnWidth } : {}),
-    ...(view.columnOrder ? { columnOrder: [...view.columnOrder] } : {}),
-    ...(view.columnFormats ? { columnFormats: { ...view.columnFormats } } : {}),
-    logicalRow: view.logicalRow,
-  };
-}

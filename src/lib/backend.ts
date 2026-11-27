@@ -38,8 +38,6 @@ import type {
   ImportPreview,
 } from "./types";
 
-export type { FlagFilterValue } from "./types";
-
 /** Transport ownership never participates in query/result identity. */
 export type ValidateConditionValuesArgs = Wire.ValidateConditionValuesPayload;
 export type ConditionValuesValidation = Wire.ConditionValuesValidation;

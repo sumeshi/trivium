@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendGroupPath, groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities, sortGroupTree } from "./grouping.ts";
+import { groupDisplayValue, groupPathKey, groupRowsPage, selectedGroupGranularities, sortGroupTree } from "./grouping.ts";
 import type { GroupTreeNode } from "./types";
 import type { EditorGroup } from "./stores/condition";
 import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
@@ -28,8 +28,9 @@ test("group ordering sorts siblings by name or count without flattening or chang
   const originalPath = [nodes[1], nodes[1].children[0]];
   const sortedPath = [sorted[1], sorted[1].children[0]];
   assert.equal(groupPathKey(sortedPath), groupPathKey(originalPath));
-  const root: EditorGroup = { type: "group", id: "root", kind: "and", collapsed: false, children: [] };
-  const filtered = appendGroupPath(root, ["parent", "large"], sortedPath);
+  const state = createConditionState();
+  state.filterByGroupPath(["parent", "large"], sortedPath);
+  const filtered = get(state.conditionTree);
   assert.equal(filtered.children[1].type === "condition" && filtered.children[1].value, "9007199254740993");
   assert.deepEqual(nodes, original);
 });
@@ -100,9 +101,11 @@ test("nested drilldown narrows an existing OR without losing exact values", () =
     type: "group", id: "root", kind: "or", collapsed: false,
     children: [{ type: "condition", id: "old", column: "x", op: "eq", value: "yes", negated: false }],
   };
-  let id = 0;
-  const next = appendGroupPath(root, ["parent", "child", "absent"],
-    [node("a,b"), node("9007199254740993", [], 9007199254740992), node("", [], null)], () => `id-${++id}`);
+  const state = createConditionState();
+  state.conditionTree.set(root);
+  state.filterByGroupPath(["parent", "child", "absent"],
+    [node("a,b"), node("9007199254740993", [], 9007199254740992), node("", [], null)]);
+  const next = get(state.conditionTree);
   assert.equal(next.kind, "and");
   assert.equal(next.children[0].type === "group" && next.children[0].kind, "or");
   assert.deepEqual(next.children.slice(1).map((row) => row.type === "condition" ? [row.column, row.op, row.value] : []),
@@ -111,20 +114,26 @@ test("nested drilldown narrows an existing OR without losing exact values", () =
 });
 
 test("empty group paths leave existing conditions untouched", () => {
-  const root: EditorGroup = { type: "group", id: "root", kind: "and", collapsed: false, children: [] };
-  assert.equal(appendGroupPath(root, [], []), root);
-  const next = appendGroupPath(root, ["x"], [node("")]);
+  const state = createConditionState();
+  const root = get(state.conditionTree);
+  state.filterByGroupPath([], []);
+  assert.equal(get(state.conditionTree), root);
+  state.filterByGroupPath(["x"], [node("")]);
+  const next = get(state.conditionTree);
   assert.equal(next.children[0].type === "condition" && next.children[0].value, "");
   assert.equal(next.children[0].type === "condition" && next.children[0].op, "eq");
-  const special = appendGroupPath(root, ["x"], [node("NaN", [], null)]);
+  state.filterByGroupPath(["x"], [node("NaN", [], null)]);
+  const special = get(state.conditionTree);
   assert.equal(special.children.length, 1);
   assert.equal(special.children[0].type === "condition" && special.children[0].value, "NaN");
 });
 
 test("calendar drilldown adds an exact half-open range after excluding blank timestamps", () => {
-  const root: EditorGroup = { type: "group", id: "root", kind: "and", collapsed: false, children: [] };
+  const state = createConditionState();
+  const root = get(state.conditionTree);
   const day = { ...node("2026-11-14"), range: { start: "2026-11-14T00:00:00Z", end: "2026-11-15T00:00:00Z" } };
-  const next = appendGroupPath(root, ["host", "timestamp"], [node("host-a"), day]);
+  state.filterByGroupPath(["host", "timestamp"], [node("host-a"), day]);
+  const next = get(state.conditionTree);
   assert.deepEqual(next.children.map((row) => row.type === "condition" ? [row.column, row.op, row.value] : []), [
     ["host", "eq", "host-a"], ["timestamp", "regex", "\\S"],
     ["timestamp", "ge", day.range.start], ["timestamp", "lt", day.range.end],
@@ -137,8 +146,10 @@ test("time ranges narrow an existing OR group without replacing its filters", ()
   const root: EditorGroup = { type: "group", id: "root", kind: "or", collapsed: false,
     children: [{ type: "condition", id: "keep", column: "message", op: "contains", value: "logon", negated: false }] };
   const hour = { ...node("2026-11-14T23:00Z"), range: { start: "2026-11-14T23:00:00Z", end: "2026-11-15T00:00:00Z" } };
-  let id = 0;
-  const next = appendGroupPath(root, ["timestamp"], [hour], () => `time-${++id}`);
+  const state = createConditionState();
+  state.conditionTree.set(root);
+  state.filterByGroupPath(["timestamp"], [hour]);
+  const next = get(state.conditionTree);
   assert.equal(next.kind, "and");
   assert.equal(next.children[0].type === "group" && next.children[0].kind, "or");
   assert.deepEqual(next.children.slice(1).map((row) => row.type === "condition" ? row.op : "group"), ["regex", "ge", "lt"]);

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { get } from "svelte/store";
-import { EDITABLE_THEME_COLORS, exportTheme, getUserTheme, isLightTheme, parseSavedTheme, parseUserTheme,
-  registerUserTheme, THEME_OPTIONS, themeTokens } from "./themeModel.ts";
+import { EDITABLE_THEME_COLORS, exportTheme, getUserTheme, parseSavedTheme, parseUserTheme,
+  registerUserTheme, THEME_OPTIONS, themeBase, themeTokens } from "./themeModel.ts";
 import type { UserTheme } from "./themeModel.ts";
 import { initTheme, importThemeFile, setTheme, theme } from "./theme.ts";
 import { clearWallpaper, importWallpaper, initWallpaper, setWallpaperSettings, wallpaper } from "./appearance.ts";
@@ -27,7 +27,7 @@ test("theme templates round-trip all offered bases without exposing semantic or 
     assert.equal(definition.base, option.value);
     assert.deepEqual(Object.keys(definition.colors).sort(), [...EDITABLE_THEME_COLORS].sort());
     const registered = registerUserTheme(definition);
-    assert.equal(isLightTheme(registered), isLightTheme(option.value));
+    assert.equal(themeBase(registered), option.value);
     assert.equal(parseSavedTheme({ version: 2, theme: registered }), registered);
     const inherited = themeTokens(registered), original = themeTokens(option.value);
     for (const key of ["positive", "warning", "danger", "flag-safe-selected-bg", "rule-red"]) assert.equal(inherited[key], original[key]);

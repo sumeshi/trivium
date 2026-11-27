@@ -44,5 +44,3 @@ export function createOwnedRequests() {
     },
   };
 }
-
-export type OwnedRequests = ReturnType<typeof createOwnedRequests>;

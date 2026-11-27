@@ -19,8 +19,6 @@ export type FlagFilterSelection = FlagSymbol | "none";
 export type FlagFilterValue = "all" | FlagFilterSelection |
   `${FlagFilterSelection}|${string}`;
 export type CompareOp = Wire.Op;
-export type ConditionLeaf = Wire.Condition;
-export type ConditionGroup = Wire.Group;
 export type ConditionNode = Wire.Node;
 /** Normalized UI query; omission/null remain supported in the wire input. */
 export type QuerySpec = { [K in keyof Required<Wire.QuerySpec>]:

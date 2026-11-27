@@ -3,7 +3,6 @@ import { formatTimelineNanos, parseTimelineNanos } from "./timelineRange.ts";
 import type { TimelineRange } from "./timelineRange";
 
 export const TIMELINE_MARKER_FLAGS = ["safe", "suspicious", "critical"] as const;
-export type TimelineMarkerFlag = typeof TIMELINE_MARKER_FLAGS[number];
 
 /** Presence indicators are separate from the proportional count bars. */
 export function timelineFlagMarkers(bucket: HistogramBucket) {

@@ -32,7 +32,8 @@ function setup(api: Partial<Backend> = {}, id = "view-test") {
   workspace.projectDetail.set(detail(id));
   workspace.setHistoryProject(id);
   const view = createWorkspaceView(workspace, { backend, isReady: () => true,
-    columnWidths: () => new Map([["c1", 155]]), logicalRow: () => 2999, scrollLeft: () => 200,
+    columnWidths: () => new Map([["c1", 155]]), noteColumnWidth: () => 154,
+    logicalRow: () => 2999, scrollLeft: () => 200,
     signature: () => "applied scope", notify: (message) => notices.push(message) });
   return { workspace, view, writes, notices, backend };
 }
@@ -42,6 +43,7 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   workspace.search.set("query");
   workspace.searchColumns.set(["c1"]);
   workspace.flagFilter.set("critical");
+  workspace.bookmarkedOnly.set(true);
   workspace.sortKey.set("c1");
   workspace.sortDirection.set("desc");
   workspace.filterByValue("c1", "filter");
@@ -49,6 +51,8 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   workspace.selectedRowIds.set(new Set([2, 4567]));
   workspace.columnOrder.set(['c1']);
   workspace.columnFormats.set({ c1: 'iso' });
+  workspace.hiddenColumns.set(new Set(["c1"]));
+  workspace.frozenThrough.set("");
   workspace.registerLoadedPage(0, 0, [normalizeRow({ color: null,  row_index: 2,
     cells: { c1: { truncated: false, length: Array.from("never retain this row").length,  kind: "string", text: "never retain this row" } }, flag: "", memo: "", tags: [], bookmarked: false })]);
   const snapshot = view.snapshotSession()!;
@@ -64,7 +68,11 @@ test("workspace snapshots capture owned controls/history/IDs and flush a stable 
   assert.equal(snapshot.history.index, 1);
   assert.equal(snapshot.scrollLeft, 200);
   assert.equal(JSON.stringify(snapshot).includes("never retain this row"), false);
-  assert.equal(writes[0].search, "query");
+  assert.deepEqual(writes[0], {
+    version: 1, search: "query", searchColumns: ["c1"], flagFilter: "critical", bookmarkedOnly: true,
+    condition: snapshot.view.condition, sortKey: "c1", sortDirection: "desc", hiddenColumns: ["c1"], frozenThrough: "",
+    columnWidths: { c1: 155 }, noteColumnWidth: 154, columnOrder: ["c1"], columnFormats: { c1: "iso" }, logicalRow: 2999,
+  });
   assert.equal((writes[0].condition!.children as unknown[]).length, 1);
   assert.equal(view.snapshotSession(), null);
 });

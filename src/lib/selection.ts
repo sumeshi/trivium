@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the explicit row selection (T22).
+ * Pure helpers for the explicit row selection.
  *
  * Selection is a set of original row ids. It never stores row objects, so page
  * cache eviction and virtual-row replacement cannot change which rows are

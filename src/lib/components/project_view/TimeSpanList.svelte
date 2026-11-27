@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TimeSpan } from "../../types";
-  import { compactTimestamp, durationLabel, durationNanos, rankedSpans } from "../../panelPresentation";
+  import { durationLabel, durationNanos, rankedSpans } from "../../panelPresentation";
+  import { shortTimelineLabel } from "../../timelineRange";
   import { useWorkspace } from "../../workspaceContext";
   const { filterByRange } = useWorkspace();
 
@@ -38,7 +39,7 @@
           title={`Filter ${column}: ${span.start} – ${span.end}; ${kind === "gap" ? `${span.count.toLocaleString()} elapsed seconds` : `${span.count.toLocaleString()} events`}`}
           on:click={() => selectSpan(span)}
         >
-          <span class="span-dates"><span>{compactTimestamp(span.start)}</span><span>{compactTimestamp(span.end)}</span></span>
+          <span class="span-dates"><span>{shortTimelineLabel(span.start)}</span><span>{shortTimelineLabel(span.end)}</span></span>
           <span class="span-measures">
             {#if kind !== "gap"}<strong>{span.count.toLocaleString()} <small>events</small></strong>{/if}
             <span>{durationLabel(durationNanos(span))}</span>

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { get } from "svelte/store";
 import { frozenColumnLayout, frozenColumnViewport, horizontalScrollForColumn } from "./frozenColumns.ts";
-import { savedViewFromUnknown, savedViewToViewState, viewStateToSavedView, viewStateWarnings } from "./viewStateMapping.ts";
+import { savedViewFromUnknown, viewStateToSavedView, viewStateWarnings } from "./viewStateMapping.ts";
 import { createWorkspaceController } from "./workspaceController.ts";
 import { createWorkspaceView } from "./workspaceView.ts";
 import { copyWorkspaceSession } from "./workspaceSession.ts";
@@ -67,7 +67,6 @@ test("wire/view parsing preserves explicit unfreeze and hidden boundaries, defau
     const source = { ...saved(), hiddenColumns: ["TimeCreated"], frozenThrough: boundary };
     const restored = viewStateToSavedView(source, columns)!;
     assert.equal(restored.frozenThrough, boundary);
-    assert.equal(savedViewToViewState(restored).frozenThrough, boundary);
   }
   const unknown = { ...saved(), frozenThrough: "removed-column" };
   assert.equal(viewStateToSavedView(unknown, columns)?.frozenThrough, undefined);

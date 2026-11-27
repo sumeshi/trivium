@@ -1,6 +1,5 @@
-import { appendConditionsAnd } from "./conditionFilters.ts";
 import type { GroupTreeNode } from "./types";
-import type { EditorCondition, EditorGroup } from "./stores/condition";
+import type { EditorCondition } from "./stores/condition";
 import type * as Wire from "./generated/engine";
 
 export const MAX_GROUP_LEVELS = 8;
@@ -134,14 +133,4 @@ export function groupPathConditions(
     }
   });
   return children;
-}
-
-/** Append an exact group path while preserving the current AND/OR expression. */
-export function appendGroupPath(
-  root: EditorGroup,
-  columns: string[],
-  path: GroupTreeNode[],
-  createId: () => string = () => crypto.randomUUID(),
-): EditorGroup {
-  return appendConditionsAnd(root, groupPathConditions(columns, path, createId), createId);
 }
