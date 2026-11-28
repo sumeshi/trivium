@@ -152,7 +152,7 @@ Choose a local PNG, JPEG, or WebP image as the table wallpaper. It covers the ta
 
 ## Automation
 
-The standalone `trivium-cli` executable provides an interface for scripts and LLM-assisted investigations. See the [Python example](examples/automate.py) to get started.
+The standalone `trivium-cli` executable provides an interface for scripts and LLM-assisted investigations. Give an AI client the single-file [CLI reference](CLI.md), or use the [Python example](examples/automate.py) to get started.
 
 The example uses only the Python standard library. Run it from the repository root to import a log into a workspace and print matching rows:
 
