@@ -41,6 +41,7 @@ from bulk_form_checks import verify_bulk_form
 from tag_usage_checks import verify_tag_usage
 from table_text_checks import verify_table_text
 from wide_table_checks import verify_wide_table
+from export_focus_checks import verify_export_focus
 from memo_ime_checks import verify_memo_ime
 from history_scroll_checks import verify_history_scroll
 from decimal_filter_checks import verify_decimal_filters
@@ -473,9 +474,14 @@ def flag_filters(web: WorkspaceView, data: dict[str, Any], root: Path, report: d
         web.results(expected)
         query = web.query()
         assert query["flagFilter"] == wire and not query.get("search") and query.get("condition") is None, query
+        if step == 0:
+            web.script("document.querySelector('[aria-label=\"Export rows\"]').focus();")
         web.named("Export rows", ".filters")
         wait_for(lambda: web.script("return document.querySelector('.export-dialog')?.textContent;"), lambda value: bool(value and f"Current results ({expected})" in value), "export uses applied flag count")
-        web.named("Close", ".export-dialog")
+        if step == 0:
+            verify_export_focus(web, report)
+        else:
+            web.named("Close", ".export-dialog")
         destination = root / f"flags-{mask}.csv"
         result = web.command("export_project", {**query, "destination": str(destination), "scope": "filtered", "includeAnnotations": True})
         rows = list(csv.DictReader(destination.open(encoding="utf-8", newline="")))

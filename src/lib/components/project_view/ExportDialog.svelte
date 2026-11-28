@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { isTabKey } from '../../keyboard';
   import type { ExportOptions, ExportSnapshot } from './state';
 
   export let snapshot: ExportSnapshot;
@@ -13,6 +14,48 @@
   let scope: ExportOptions['scope'] = 'filtered';
   let columnMode: 'all' | 'visible' = 'all';
   let includeAnnotations = true;
+  let dialogEl: HTMLDivElement;
+  let closeButton: HTMLButtonElement;
+  let previousFocus: HTMLElement | null = null;
+  let alive = true;
+
+  const mountDialog = () => {
+    if (!alive) return;
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton?.focus({ preventScroll: true });
+  };
+  onMount(mountDialog);
+  onDestroy(() => {
+    alive = false;
+    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+  });
+
+  const keyboard = (event: KeyboardEvent) => {
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      dispatch('close');
+      return;
+    }
+    if ((!isTabKey(event) && event.keyCode !== 9) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const controls = [...dialogEl.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    )].filter(control => control.tabIndex >= 0 && control.getClientRects().length);
+    const first = controls[0], last = controls.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      dialogEl.focus({ preventScroll: true });
+    } else if (!controls.includes(document.activeElement as HTMLElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus({ preventScroll: true });
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  };
 
   const submit = () => {
     dispatch('export', {
@@ -26,13 +69,16 @@
 <div class="cell-dialog-backdrop" role="presentation">
   <div
     class="cell-dialog export-dialog"
+    bind:this={dialogEl}
     role="dialog"
     aria-modal="true"
     aria-labelledby="export-dialog-title"
+    tabindex="-1"
+    on:keydown={keyboard}
   >
     <div class="cell-dialog-header">
       <h3 id="export-dialog-title">Export CSV</h3>
-      <button type="button" class="ghost dialog-close" aria-label="Close" title="Close export dialog"
+      <button type="button" class="ghost dialog-close" bind:this={closeButton} aria-label="Close" title="Close export dialog"
         on:click={() => dispatch('close')}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
