@@ -159,7 +159,7 @@ test("a race during Apply asks the user to apply again, with no visible preview 
   }, args(), { isCurrent: () => true }), error => error === failure);
 });
 
-test("bulk Undo reports same-case failures after query changes without reviving stale owners", () => runSvelteTest(String.raw`
+test("bulk operations report same-case failures after query changes without reviving stale owners", () => runSvelteTest(String.raw`
 import { createWorkspaceController } from './src/lib/workspaceController.ts';
 const Panel=await compileHeadless('BulkControls');
 for(const operation of ['undo','apply']){
@@ -180,11 +180,39 @@ for(const operation of ['undo','apply']){
   const message='Annotation changed since the bulk operation; undo would overwrite it.';
   reject(Error(message));await running;await tick();
   const state=panel.$capture_state();
-  const visible=mode==='same'||operation==='undo'&&['query-changed','query-loading'].includes(mode);
+  const visible=['same','query-changed','query-loading'].includes(mode);
   assert.equal(state.error,visible?message:'',operation+'/'+mode);
   assert.equal(refreshes,0,'a failed mutation must never publish successful annotation changes');
   if(mode!=='disposed')assert.equal(state.busy,false);
   panel.$destroy();workspace.dispose();
  }
 }
+`));
+
+test("an accepted bulk write failure remains visible after its target's search changes", () => runSvelteTest(String.raw`
+import { createWorkspaceController } from './src/lib/workspaceController.ts';
+import { createBackend } from './src/lib/backend.ts';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+globalThis.window={};
+let rejectWrite;const pending=new Promise((resolve,reject)=>{rejectWrite=reject;});
+const calls=[];
+mockIPC(async command=>{
+ calls.push(command);
+ if(command==='bulk_preview')return {count:1,previewToken:'checked-target'};
+ assert.equal(command,'bulk_update');return pending;
+});
+const workspace=createWorkspaceController();globalThis.__workspace=workspace;
+workspace.currentProjectId.set('case');workspace.projectDetail.set({project:{meta:{id:'case',total_records:1}},columns:[]});
+workspace.queryCountKnown.set(true);workspace.totalFilteredRows.set(1);workspace.backend.set(createBackend());
+const Panel=await compileHeadless('BulkControls');const panel=await mountHeadless(Panel);
+panel.$capture_state().chooseFlag('critical');await tick();
+const applying=panel.$capture_state().run('apply');
+for(let turn=0;turn<24&&!calls.includes('bulk_update');turn++)await Promise.resolve();
+assert.deepEqual(calls,['bulk_preview','bulk_update'],'the backend dispatched the accepted update after its preview');
+workspace.search.set('a later search');
+rejectWrite(Error('synthetic database write failed'));await applying;await tick();
+assert.equal(panel.$capture_state().error,'synthetic database write failed');
+assert.equal(panel.$capture_state().busy,false);
+assert.deepEqual(calls,['bulk_preview','bulk_update'],'failure cannot retry or retarget the write');
+panel.$destroy();workspace.dispose();clearMocks();
 `));
