@@ -68,8 +68,7 @@
 
 <div class="import-report-backdrop">
   <!-- The modal owns its keyboard focus and lets the report scroll with arrow keys. -->
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <section class="import-report-dialog" role="dialog" aria-modal="true" aria-labelledby="import-report-title"
+  <div class="import-report-dialog" role="dialog" aria-modal="true" aria-labelledby="import-report-title"
     tabindex="-1" on:keydown={keyboard}>
     <header>
       <h3 id="import-report-title">Import report</h3>
@@ -123,7 +122,7 @@
           on:click={exportReport}>{exporting ? 'Exporting…' : 'Export JSONL'}</button>
       </footer>
     {/if}
-  </section>
+  </div>
 </div>
 
 <style>

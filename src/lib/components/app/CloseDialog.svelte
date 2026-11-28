@@ -21,8 +21,7 @@
 
 <div class="close-backdrop">
   <!-- The modal owns its keyboard focus loop. -->
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <section class="close-dialog" bind:this={dialog} role="alertdialog" aria-modal="true"
+  <div class="close-dialog" bind:this={dialog} role="alertdialog" aria-modal="true"
     aria-labelledby="app-close-title" aria-describedby="app-close-message" tabindex="-1" on:keydown={keyboard}>
     <h3 id="app-close-title">{startupError ? 'Could not prepare the app' : phase === 'failed' || phase === 'recovering' ? 'Could not close safely' : 'Closing Trivium'}</h3>
     <p id="app-close-message">{message}</p>
@@ -37,7 +36,7 @@
         <button type="button" class="primary" on:click={() => dispatch('retry')}>{startupError ? 'Retry' : 'Try closing again'}</button>
       {/if}
     </div>
-  </section>
+  </div>
 </div>
 
 <style>

@@ -30,8 +30,7 @@
 
 <div class="delete-project-backdrop">
   <!-- The modal owns its keyboard focus loop. -->
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <section class="delete-project-dialog" bind:this={dialog} role="alertdialog" aria-modal="true"
+  <div class="delete-project-dialog" bind:this={dialog} role="alertdialog" aria-modal="true"
     aria-labelledby="delete-project-title" aria-describedby="delete-project-name delete-project-message" tabindex="-1" on:keydown={keyboard}>
     <h3 id="delete-project-title">Delete project?</h3>
     <p id="delete-project-name" class="delete-project-name" title={name}>{name}</p>
@@ -40,7 +39,7 @@
       <button type="button" class="cancel" bind:this={cancelButton} on:click={() => dispatch('cancel')}>Cancel</button>
       <button type="button" class="delete" on:click={() => dispatch('confirm')}>Delete</button>
     </div>
-  </section>
+  </div>
 </div>
 
 <style>

@@ -114,8 +114,7 @@
 
 <div class="appearance-backdrop" role="presentation">
   <!-- This modal owns the keyboard focus loop and prevents table shortcuts. -->
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <section bind:this={dialog} class="appearance-dialog" role="dialog" aria-modal="true" aria-labelledby="appearance-title" tabindex="-1" on:keydown={keydown} on:compositionstart={composition.start} on:compositionend={composition.end}>
+  <div bind:this={dialog} class="appearance-dialog" role="dialog" aria-modal="true" aria-labelledby="appearance-title" tabindex="-1" on:keydown={keydown} on:compositionstart={composition.start} on:compositionend={composition.end}>
     <header><h2 id="appearance-title">Appearance</h2>
       <button class="close" aria-label="Close appearance" title="Close" disabled={busy} on:click={() => dispatch('close')}>×</button>
     </header>
@@ -167,7 +166,7 @@
       {#if message}<p class:error={failed} class="status" role="status">{message}</p>{/if}
       {#if $themeCatalogWarning || $wallpaperWarning}<p class="status error" role="status">{$themeCatalogWarning || $wallpaperWarning}</p>{/if}
     </div>
-  </section>
+  </div>
 </div>
 
 <style>

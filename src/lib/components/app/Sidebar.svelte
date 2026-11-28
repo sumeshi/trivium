@@ -56,7 +56,7 @@
     aria-label="Close workspace menu"
     on:click={() => dispatch('close')}
   ></button>
-  <aside
+  <div
     class="workspace-drawer"
     role="dialog"
     aria-modal="true"
@@ -243,7 +243,7 @@
         </ul>
       {/if}
     </section>
-  </aside>
+  </div>
 </div>
 
 <style>
