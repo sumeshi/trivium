@@ -114,7 +114,13 @@ pub fn group_tree_with_job(
         let batch = batch.map_err(AppError::from)?;
         let group_series: Vec<&Series> = resolved
             .iter()
-            .map(|name| batch.frame.column(name).expect("projected column"))
+            .map(|name| {
+                batch
+                    .frame
+                    .column(name)
+                    .expect("projected column")
+                    .as_materialized_series()
+            })
             .collect();
         for row_idx in 0..batch.frame.height() {
             if row_idx % 1024 == 0 {

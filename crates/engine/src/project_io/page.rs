@@ -43,7 +43,7 @@ pub fn read_page_dataframe_with_job(
         let stop = end.saturating_sub(batch.offset).min(batch.frame.height());
         if start < stop {
             let indices =
-                UInt32Chunked::from_iter_values("take", (start..stop).map(|row| row as u32));
+                UInt32Chunked::from_iter_values("take".into(), (start..stop).map(|row| row as u32));
             output.vstack_mut(&batch.frame.take(&indices)?)?;
         }
         if batch.offset.saturating_add(batch.frame.height()) >= end {
@@ -91,7 +91,7 @@ pub fn read_page_rows_dataframe_with_job(
         let last = next + sorted[next..].partition_point(|row| *row < end);
         if last > next {
             let indices = UInt32Chunked::from_iter_values(
-                "take",
+                "take".into(),
                 sorted[next..last]
                     .iter()
                     .map(|row| (row - batch.offset) as u32),
@@ -113,7 +113,7 @@ pub fn read_page_rows_dataframe_with_job(
         return Ok(output);
     }
     let order = UInt32Chunked::from_iter_values(
-        "take",
+        "take".into(),
         rows.iter().map(|row| {
             sorted
                 .binary_search(row)

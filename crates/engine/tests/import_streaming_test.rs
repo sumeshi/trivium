@@ -249,7 +249,10 @@ fn cancelled_import_leaves_no_staging_or_project() {
     let error = create_project_with_job(&store, payload(&path), &job)
         .expect_err("cancelled import must fail");
     assert_eq!(error.to_string(), "Cancelled.");
-    assert!(store.try_all().unwrap().is_empty(), "no project may be registered");
+    assert!(
+        store.try_all().unwrap().is_empty(),
+        "no project may be registered"
+    );
     assert!(
         fs::read_dir(store.staging_root())
             .expect("staging root")
@@ -298,7 +301,8 @@ fn width_estimate_scans_only_the_leading_sample() {
         .map(|_| "short".to_string())
         .collect();
     values.push("z".repeat(500));
-    let df = DataFrame::new(vec![Series::new("c000001", values)]).expect("build frame");
+    let df = DataFrame::new_infer_height(vec![Series::new("c000001".into(), values).into()])
+        .expect("build frame");
 
     let metrics = compute_column_max_chars(&df);
     assert_eq!(

@@ -80,7 +80,7 @@ impl KindAccumulator {
                 continue;
             }
             if let Ok(series) = frame.column(name) {
-                let kind = series_kind_with_job(series, job)?;
+                let kind = series_kind_with_job(series.as_materialized_series(), job)?;
                 self.0
                     .entry(name.clone())
                     .and_modify(|old| *old = merge(*old, kind))

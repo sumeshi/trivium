@@ -8,11 +8,13 @@ static DECODED_ROWS: AtomicU64 = AtomicU64::new(0);
 static COLUMN_BYTES: AtomicU64 = AtomicU64::new(0);
 static MAX_BATCH_ROWS: AtomicU64 = AtomicU64::new(0);
 
-/// Actual work of the bounded Parquet reader, not just API call counts.
+/// Observed I/O and output batches of the bounded Parquet reader.
 ///
 /// `io_bytes` includes footer reads. `column_bytes` is the compressed size of
 /// projected column chunks loaded from the selected groups. The maximum is
 /// one decoded output batch; callers may deliberately retain several batches.
+/// `decoded_rows` counts emitted rows, not dictionary values or compressed
+/// pages inspected internally while applying a decoder range filter.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProjectReadStats {
     pub io_bytes: u64,

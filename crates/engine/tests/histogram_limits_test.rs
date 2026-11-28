@@ -16,9 +16,12 @@ use uuid::Uuid;
 fn public_histogram_entries_reject_excess_buckets_for_numeric_and_datetime_columns() {
     let too_many = MAX_HISTOGRAM_BUCKETS + 1;
     for series in [
-        Series::new("n", &[1_i64, 2]),
-        Series::new("n", &[1.5_f64, 2.5]),
-        Series::new("ts", &["2026-11-18T00:00:00Z", "2026-11-18T00:00:01Z"]),
+        Series::new("n".into(), &[1_i64, 2]),
+        Series::new("n".into(), &[1.5_f64, 2.5]),
+        Series::new(
+            "ts".into(),
+            &["2026-11-18T00:00:00Z", "2026-11-18T00:00:01Z"],
+        ),
     ] {
         for result in [
             histogram_series(series.name(), &series, &[0, 1], too_many),
@@ -45,8 +48,11 @@ fn public_histogram_entries_reject_excess_buckets_for_numeric_and_datetime_colum
 #[test]
 fn accepted_library_bucket_counts_keep_counts_and_zero_means_one_bucket() {
     for series in [
-        Series::new("n", &[1_i64, 2]),
-        Series::new("ts", &["2026-11-18T00:00:00Z", "2026-11-18T00:00:01Z"]),
+        Series::new("n".into(), &[1_i64, 2]),
+        Series::new(
+            "ts".into(),
+            &["2026-11-18T00:00:00Z", "2026-11-18T00:00:01Z"],
+        ),
     ] {
         for buckets in [0, 1, 200, MAX_HISTOGRAM_BUCKETS] {
             let histogram = histogram_series_annotated(

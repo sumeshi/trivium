@@ -136,7 +136,7 @@ fn unicode_jsonl_recovers_an_invalid_middle_line_without_shifting_source_positio
                 .unwrap()
                 .i64()
                 .unwrap()
-                .into_no_null_iter()
+                .no_null_iter()
                 .collect::<Vec<_>>(),
             [1, 4]
         );
@@ -145,7 +145,8 @@ fn unicode_jsonl_recovers_an_invalid_middle_line_without_shifting_source_positio
             .unwrap()
             .str()
             .unwrap()
-            .into_no_null_iter()
+            .iter()
+            .map(|value| value.expect("original record is present"))
             .all(|text| !text.contains('\u{fffd}')));
         assert_eq!(fs::read(&source).unwrap(), bytes);
     }

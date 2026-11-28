@@ -68,7 +68,7 @@ fn scalar_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String> {
     let mut output = Vec::new();
     for index in 0..df.height() {
         let mut row = HashMap::new();
-        for column in df.get_columns() {
+        for column in df.columns() {
             if let Some(text) = anyvalue_to_search_string(&column.get(index).unwrap()) {
                 row.insert(column.name().to_string(), Value::String(text));
             }
@@ -93,9 +93,9 @@ fn borrowed_rows(df: &DataFrame, spec: &QuerySpec) -> Result<Vec<usize>, String>
 
 #[test]
 fn strings_null_unicode_negation_groups_and_typed_values_match_scalar_evaluator() {
-    let df = DataFrame::new(vec![
+    let df = DataFrame::new_infer_height(vec![
         Series::new(
-            "text",
+            "text".into(),
             [
                 Some(""),
                 None,
@@ -104,9 +104,14 @@ fn strings_null_unicode_negation_groups_and_typed_values_match_scalar_evaluator(
                 Some("Alpha beta"),
                 Some("0007"),
             ],
-        ),
-        Series::new("integer", [0i64, -1, 7, i64::MAX, 9007199254740993, 6]),
-        Series::new("bool", [true, false, true, false, true, false]),
+        )
+        .into(),
+        Series::new(
+            "integer".into(),
+            [0i64, -1, 7, i64::MAX, 9007199254740993, 6],
+        )
+        .into(),
+        Series::new("bool".into(), [true, false, true, false, true, false]).into(),
     ])
     .unwrap();
     for op in [
@@ -212,7 +217,8 @@ fn raw_large_integers_datetime_offsets_ns_and_errors_match_scalar_evaluator() {
             vec!["1", "not-an-integer"],
         ),
     ] {
-        let df = DataFrame::new(vec![Series::new("value", values)]).unwrap();
+        let df =
+            DataFrame::new_infer_height(vec![Series::new("value".into(), values).into()]).unwrap();
         for op in [Op::Eq, Op::Ne, Op::Gt, Op::Ge, Op::Lt, Op::Le] {
             for negated in [false, true] {
                 let spec = QuerySpec {
@@ -227,7 +233,7 @@ fn raw_large_integers_datetime_offsets_ns_and_errors_match_scalar_evaluator() {
             }
         }
     }
-    let df = DataFrame::new(vec![Series::new("value", ["a"])]).unwrap();
+    let df = DataFrame::new_infer_height(vec![Series::new("value".into(), ["a"]).into()]).unwrap();
     let bad = QuerySpec {
         condition: Some(condition("value", Op::Regex, &["["], false)),
         ..Default::default()
@@ -237,9 +243,9 @@ fn raw_large_integers_datetime_offsets_ns_and_errors_match_scalar_evaluator() {
 
 #[test]
 fn exact_column_names_take_precedence_over_case_insensitive_aliases() {
-    let df = DataFrame::new(vec![
-        Series::new("Name", ["a", "b"]),
-        Series::new("name", ["x", "y"]),
+    let df = DataFrame::new_infer_height(vec![
+        Series::new("Name".into(), ["a", "b"]).into(),
+        Series::new("name".into(), ["x", "y"]).into(),
     ])
     .unwrap();
     let spec = QuerySpec {
@@ -265,8 +271,17 @@ fn allocations<T>(operation: impl FnOnce() -> T) -> (T, usize) {
 
 #[test]
 fn string_query_allocations_are_bounded_as_row_count_increases() {
-    let small = DataFrame::new(vec![Series::new("value", vec!["keep needle"; 1000])]).unwrap();
-    let large = DataFrame::new(vec![Series::new("value", vec!["keep needle"; 20000])]).unwrap();
+    let small =
+        DataFrame::new_infer_height(vec![
+            Series::new("value".into(), vec!["keep needle"; 1000]).into()
+        ])
+        .unwrap();
+    let large = DataFrame::new_infer_height(vec![Series::new(
+        "value".into(),
+        vec!["keep needle"; 20000],
+    )
+    .into()])
+    .unwrap();
     for spec in [
         QuerySpec::default(),
         QuerySpec {
@@ -314,9 +329,9 @@ fn selective_sort_allocations_follow_matches_instead_of_source_rows() {
             selected[index] = "keep";
             rank[index] = value;
         }
-        DataFrame::new(vec![
-            Series::new("selected", selected),
-            Series::new("rank", rank),
+        DataFrame::new_infer_height(vec![
+            Series::new("selected".into(), selected).into(),
+            Series::new("rank".into(), rank).into(),
         ])
         .unwrap()
     };

@@ -38,37 +38,41 @@ impl Fixture {
         let nanos: Vec<i64> = (0..rows)
             .map(|row| 1_700_000_000_000_000_000 + row as i64)
             .collect();
-        let frame = DataFrame::new(vec![
-            Series::new("seq", (0..rows as u64).collect::<Vec<_>>()),
-            Series::new("text", (0..rows).map(text).collect::<Vec<_>>()),
+        let frame = DataFrame::new_infer_height(vec![
+            Series::new("seq".into(), (0..rows as u64).collect::<Vec<_>>()).into(),
+            Series::new("text".into(), (0..rows).map(text).collect::<Vec<_>>()).into(),
             Series::new(
-                "maybe",
+                "maybe".into(),
                 (0..rows)
                     .map(|row| (row % 3 != 0).then_some(if row % 3 == 1 { "" } else { "value" }))
                     .collect::<Vec<_>>(),
-            ),
+            )
+            .into(),
             Series::new(
-                "uint",
+                "uint".into(),
                 (0..rows)
                     .map(|row| u64::MAX - row as u64)
                     .collect::<Vec<_>>(),
-            ),
-            Series::new("nanos", nanos)
+            )
+            .into(),
+            Series::new("nanos".into(), nanos)
                 .cast(&DataType::Datetime(TimeUnit::Nanoseconds, None))
-                .unwrap(),
+                .unwrap()
+                .into(),
             Series::new(
-                "original",
+                "original".into(),
                 (0..rows)
                     .map(|row| {
                         format!(r#"{{"large":18446744073709551615,"row":{row},"explicit":null}}"#)
                     })
                     .collect::<Vec<_>>(),
-            ),
+            )
+            .into(),
         ])
         .unwrap();
         let mut writer = ParquetWriter::new(File::create(&path).unwrap())
-            .with_statistics(false)
-            .batched(&frame.schema())
+            .with_statistics(StatisticsOptions::empty())
+            .batched(frame.schema())
             .unwrap();
         for start in (0..rows).step_by(group_size) {
             writer
@@ -129,7 +133,7 @@ fn assert_rows(frame: &DataFrame, expected: &[usize]) {
             AnyValue::Datetime(
                 1_700_000_000_000_000_000 + source as i64,
                 TimeUnit::Nanoseconds,
-                &None
+                None
             )
         );
         assert_eq!(
@@ -193,7 +197,10 @@ fn projection_reads_only_requested_column_chunks_and_empty_requests_do_no_io() {
     let _lock = guard();
     let fixture = Fixture::new(5199, 128);
     let (schema, rows) = read_project_schema_and_row_count(&fixture.path).unwrap();
-    assert_eq!(schema, ["seq", "text", "maybe", "uint", "nanos", "original"]);
+    assert_eq!(
+        schema,
+        ["seq", "text", "maybe", "uint", "nanos", "original"]
+    );
     assert_eq!(rows, 5199);
     reset_project_read_counters();
     let projected = read_page_dataframe(&fixture.path, &["uint".into()], 5100, 5).unwrap();
@@ -208,12 +215,18 @@ fn projection_reads_only_requested_column_chunks_and_empty_requests_do_no_io() {
     assert!(project_read_stats().column_bytes > projected_bytes);
 
     reset_project_read_counters();
-    assert!(read_page_dataframe(&fixture.path, &columns(), 0, 0)
-        .unwrap()
-        .is_empty());
-    assert!(read_page_rows_dataframe(&fixture.path, &columns(), &[])
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        read_page_dataframe(&fixture.path, &columns(), 0, 0)
+            .unwrap()
+            .height(),
+        0
+    );
+    assert_eq!(
+        read_page_rows_dataframe(&fixture.path, &columns(), &[])
+            .unwrap()
+            .height(),
+        0
+    );
     assert_eq!(project_read_stats().io_bytes, 0);
     let beyond = read_page_dataframe(&fixture.path, &columns(), 8000, 5).unwrap();
     assert_eq!(beyond.width(), columns().len());
@@ -244,6 +257,25 @@ fn large_row_groups_stream_bounded_chunks_with_original_global_offsets() {
     assert_eq!(stats.decoded_row_groups, 2);
     assert_eq!(stats.decoded_rows, 25_000);
     assert_eq!(stats.max_batch_rows, PROJECT_BATCH_ROWS as u64);
+}
+
+#[test]
+fn partial_string_batches_do_not_retain_unselected_dictionary_text() {
+    let _lock = guard();
+    let fixture = Fixture::new(25_000, 25_000);
+    let mut reader = ProjectBatchReader::open(&fixture.path, &["text".into()]).unwrap();
+    let batch = reader.next().unwrap().unwrap();
+    assert_eq!(batch.frame.height(), PROJECT_BATCH_ROWS);
+    let strings = batch.frame.column("text").unwrap().str().unwrap();
+    let visible_bytes: usize = strings.no_null_iter().map(str::len).sum();
+    let retained_bytes: usize = strings
+        .downcast_iter()
+        .map(|array| array.total_buffer_len())
+        .sum();
+    assert!(
+        retained_bytes <= visible_bytes + 8192,
+        "partial batches must release unselected row-group text: {retained_bytes} retained for {visible_bytes} visible bytes"
+    );
 }
 
 #[test]
@@ -289,16 +321,17 @@ fn two_million_row_first_middle_last_pages_have_constant_group_io() {
         path: root.join("data.parquet"),
         root,
     };
-    let frame = DataFrame::new(vec![Series::new(
-        "exact",
+    let frame = DataFrame::new_infer_height(vec![Series::new(
+        "exact".into(),
         (0..rows)
             .map(|row| u64::MAX - row as u64)
             .collect::<Vec<_>>(),
-    )])
+    )
+    .into()])
     .unwrap();
     let mut writer = ParquetWriter::new(File::create(&fixture.path).unwrap())
-        .with_statistics(false)
-        .batched(&frame.schema())
+        .with_statistics(StatisticsOptions::empty())
+        .batched(frame.schema())
         .unwrap();
     for start in (0..rows).step_by(group_rows) {
         writer
@@ -318,7 +351,7 @@ fn two_million_row_first_middle_last_pages_have_constant_group_io() {
             .unwrap()
             .u64()
             .unwrap()
-            .into_iter()
+            .iter()
             .enumerate()
         {
             assert_eq!(value, Some(u64::MAX - (offset + index) as u64));

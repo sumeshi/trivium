@@ -33,9 +33,9 @@ fn unscoped(op: Op, text: &str, negated: bool) -> Node {
 
 #[test]
 fn phrase_boundaries_negation_and_selected_scope_share_the_prepared_query() {
-    let frame = DataFrame::new(vec![
+    let frame = DataFrame::new_infer_height(vec![
         Series::new(
-            "first",
+            "first".into(),
             [
                 Some("failed"),
                 Some("failed login"),
@@ -47,9 +47,10 @@ fn phrase_boundaries_negation_and_selected_scope_share_the_prepared_query() {
                 Some("ΟΣ"),
                 None,
             ],
-        ),
+        )
+        .into(),
         Series::new(
-            "second",
+            "second".into(),
             [
                 Some("login"),
                 Some("none"),
@@ -61,9 +62,10 @@ fn phrase_boundaries_negation_and_selected_scope_share_the_prepared_query() {
                 Some("Α Β"),
                 None,
             ],
-        ),
+        )
+        .into(),
         Series::new(
-            "hidden",
+            "hidden".into(),
             [
                 Some("nothing"),
                 Some("other"),
@@ -75,7 +77,8 @@ fn phrase_boundaries_negation_and_selected_scope_share_the_prepared_query() {
                 Some(""),
                 None,
             ],
-        ),
+        )
+        .into(),
     ])
     .unwrap();
     let columns = vec!["first".into(), "second".into(), "hidden".into()];

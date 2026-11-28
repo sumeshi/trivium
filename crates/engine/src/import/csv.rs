@@ -416,12 +416,12 @@ impl CsvImporter {
 
         let mut series: Vec<Series> = Vec::with_capacity(column_meta.len() + 3);
         for (column, values) in column_meta.iter().zip(cells) {
-            series.push(Series::new(column.id.as_str(), values));
+            series.push(Series::new(column.id.as_str().into(), values));
         }
-        series.push(Series::new(INTERNAL_ORIGINAL, originals));
-        series.push(Series::new(INTERNAL_ROW_ID, row_ids));
-        series.push(Series::new(INTERNAL_SOURCE_RECORD, source_records));
-        let frame = DataFrame::new(series)
+        series.push(Series::new(INTERNAL_ORIGINAL.into(), originals));
+        series.push(Series::new(INTERNAL_ROW_ID.into(), row_ids));
+        series.push(Series::new(INTERNAL_SOURCE_RECORD.into(), source_records));
+        let frame = DataFrame::new_infer_height(series.into_iter().map(Into::into).collect())
             .map_err(|_| AppError::Message("Failed to build the dataset.".into()))?;
 
         job.report_progress(*rows_read as u64, None, Some("Reading CSV".into()));

@@ -33,7 +33,7 @@ fn build_sort_key(series: &Series, row_index: usize) -> SortKey<'_> {
         AnyValue::UInt16(value) => return SortKey::Int(i128::from(value)),
         AnyValue::UInt32(value) => return SortKey::Int(i128::from(value)),
         AnyValue::UInt64(value) => return SortKey::Int(i128::from(value)),
-        AnyValue::Datetime(value, unit, _) => {
+        AnyValue::Datetime(value, unit, _) | AnyValue::DatetimeOwned(value, unit, _) => {
             let scale = match unit {
                 TimeUnit::Nanoseconds => 1,
                 TimeUnit::Microseconds => 1_000,
@@ -129,12 +129,13 @@ pub fn sort_row_indices(
     // the same column here. Standalone DataFrames can contain both `Value`
     // and `value`, so prefer an exact match before ignoring case.
     let Some(series) = df.column(sort_key).ok().or_else(|| {
-        df.get_columns()
+        df.columns()
             .iter()
             .find(|series| series.name().eq_ignore_ascii_case(sort_key))
     }) else {
         return Ok(indices);
     };
+    let series = series.as_materialized_series();
     // Query targets already arrive in source order. Normalize only an unusual
     // caller-provided subset, then stable value comparisons retain that order
     // without making every equal value a distinct key.
@@ -259,7 +260,8 @@ mod tests {
     use super::*;
 
     fn sorted(values: &[Option<&str>], direction: &str) -> Vec<usize> {
-        let frame = DataFrame::new(vec![Series::new("value", values)]).unwrap();
+        let frame =
+            DataFrame::new_infer_height(vec![Series::new("value".into(), values).into()]).unwrap();
         sort_row_indices(
             &frame,
             (0..values.len()).collect(),
@@ -275,7 +277,7 @@ mod tests {
         let text = "lowercase-command-".repeat(4096);
         let padded = format!("\t{text} \n");
         let series = Series::new(
-            "value",
+            "value".into(),
             [padded.as_str(), "UPPER", "ΟΣ", "ǅelta", "İSTANBUL"],
         );
         let keys: Vec<_> = (0..series.len())
@@ -306,7 +308,7 @@ mod tests {
             owned_bytes > 0 && owned_bytes < text.len(),
             "long ASCII key is not retained twice"
         );
-        let typed = Series::new("value", [true]);
+        let typed = Series::new("value".into(), [true]);
         assert!(
             matches!(build_sort_key(&typed, 0), SortKey::Text(Cow::Owned(value)) if value == "true")
         );
@@ -393,10 +395,10 @@ mod tests {
 
     #[test]
     fn native_datetime_units_and_selected_indices_keep_source_ties() {
-        let values = Series::new("value", &[3_i64, 1, 2, 1])
+        let values = Series::new("value".into(), &[3_i64, 1, 2, 1])
             .cast(&DataType::Datetime(TimeUnit::Nanoseconds, None))
             .unwrap();
-        let frame = DataFrame::new(vec![values]).unwrap();
+        let frame = DataFrame::new_infer_height(vec![values.into()]).unwrap();
         let selected = vec![3, 0, 1];
         assert_eq!(
             sort_row_indices(
@@ -430,9 +432,9 @@ mod tests {
 
     #[test]
     fn case_insensitive_sort_lookup_prefers_an_exact_source_name() {
-        let frame = DataFrame::new(vec![
-            Series::new("Value", [2_i64, 1, 1]),
-            Series::new("value", [1_i64, 2, 3]),
+        let frame = DataFrame::new_infer_height(vec![
+            Series::new("Value".into(), [2_i64, 1, 1]).into(),
+            Series::new("value".into(), [1_i64, 2, 3]).into(),
         ])
         .unwrap();
         for (key, expected) in [

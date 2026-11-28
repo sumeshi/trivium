@@ -75,9 +75,9 @@ pub(super) fn apply_page_colors(
         .map(|name| name.to_string())
         .collect();
     let series_map: HashMap<&str, &Series> = df
-        .get_columns()
+        .columns()
         .iter()
-        .map(|series| (series.name(), series))
+        .map(|column| (column.name().as_str(), column.as_materialized_series()))
         .collect();
     for (position, row) in rows.iter_mut().enumerate() {
         let record = collect_row_record_from_series(&series_map, &column_names, position);

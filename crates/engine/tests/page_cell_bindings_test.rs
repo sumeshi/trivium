@@ -33,23 +33,24 @@ fn bindings_follow_each_sliced_or_reordered_frame_and_metadata_projection() {
     let names = ["zero", "one", "two"];
     let numbers = ["1", "0007", "1e100"];
     let kinds = ["int", "string", "float"];
-    let frame = DataFrame::new(vec![
-        Series::new("unrelated", [9_u32, 8, 7]),
-        Series::new("number", numbers),
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("unrelated".into(), [9_u32, 8, 7]).into(),
+        Series::new("number".into(), numbers).into(),
         Series::new(
-            "__original",
+            "__original".into(),
             [
                 r#"{"number":1,"name":"zero"}"#,
                 r#"{"number":"0007","name":"one"}"#,
                 r#"{"number":1e100,"name":"two"}"#,
             ],
-        ),
-        Series::new("name", names),
+        )
+        .into(),
+        Series::new("name".into(), names).into(),
     ])
     .unwrap();
     // Metadata order deliberately differs from the physical frame order.
     let columns = [column("name", "/name"), column("number", "/number")];
-    let order = UInt32Chunked::from_slice("order", &[2, 0, 2]);
+    let order = UInt32Chunked::from_slice("order".into(), &[2, 0, 2]);
     for (page, originals) in [
         (frame.slice(1, 2), vec![1, 2]),
         (frame.take(&order).unwrap(), vec![2, 0, 2]),
@@ -66,18 +67,18 @@ fn bindings_follow_each_sliced_or_reordered_frame_and_metadata_projection() {
 
 #[test]
 fn decoded_paths_keep_empty_escaped_keys_and_do_not_descend_into_arrays() {
-    let frame = DataFrame::new(vec![
-        Series::new("escaped", [Some("object-zero"), None, None]),
-        Series::new("empty_key", [Some("tilde-one"), Some("tilde-two"), None]),
-        Series::new("parent", [r#"{"0":"object-zero"}"#, r#"["array-zero"]"#, "{}"]),
-        Series::new("empty_root", [r#"{"~1":"tilde-one"}"#, r#"{"~1":"tilde-two"}"#, r#"{"~1":null}"#]),
-        Series::new("nullv", [None::<&str>, None, None]),
-        Series::new("number", ["18446744073709551616", "4.2e-400", "18446744073709551616"]),
-        Series::new("__original", [
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("escaped".into(), [Some("object-zero"), None, None]).into(),
+        Series::new("empty_key".into(), [Some("tilde-one"), Some("tilde-two"), None]).into(),
+        Series::new("parent".into(), [r#"{"0":"object-zero"}"#, r#"["array-zero"]"#, "{}"]).into(),
+        Series::new("empty_root".into(), [r#"{"~1":"tilde-one"}"#, r#"{"~1":"tilde-two"}"#, r#"{"~1":null}"#]).into(),
+        Series::new("nullv".into(), [None::<&str>, None, None]).into(),
+        Series::new("number".into(), ["18446744073709551616", "4.2e-400", "18446744073709551616"]).into(),
+        Series::new("__original".into(), [
             r#"{"a/b~":{"0":"object-zero"},"":{"~1":"tilde-one"},"nullv":null,"number":18446744073709551616}"#,
             r#"{"a/b~":["array-zero"],"":{"~1":"tilde-two"},"nullv":null,"number":4.2e-400}"#,
             r#"{"a/b~":{},"":{"~1":null},"number":"18446744073709551616"}"#,
-        ]),
+        ]).into(),
     ]).unwrap();
     let columns = [
         column("escaped", "/a~1b~0/0"),
@@ -123,7 +124,9 @@ fn omitted_series_and_original_columns_keep_the_existing_null_fallbacks() {
         column("absent", "/present"),
         column("missing", "/missing"),
     ];
-    let csv = DataFrame::new(vec![Series::new("real", [Some("0007"), None])]).unwrap();
+    let csv =
+        DataFrame::new_infer_height(vec![Series::new("real".into(), [Some("0007"), None]).into()])
+            .unwrap();
     let cells = CellColumns::new(&csv, &columns);
     expect(&cells.build_row(0), "real", Some("0007"), "string");
     for name in ["absent", "missing"] {
@@ -131,9 +134,9 @@ fn omitted_series_and_original_columns_keep_the_existing_null_fallbacks() {
     }
     expect(&cells.build_row(1), "real", None, "null");
 
-    let json = DataFrame::new(vec![
-        Series::new("real", ["kept"]),
-        Series::new("__original", [r#"{"present":"kept"}"#]),
+    let json = DataFrame::new_infer_height(vec![
+        Series::new("real".into(), ["kept"]).into(),
+        Series::new("__original".into(), [r#"{"present":"kept"}"#]).into(),
     ])
     .unwrap();
     let row = CellColumns::new(&json, &columns).build_row(0);
@@ -143,17 +146,18 @@ fn omitted_series_and_original_columns_keep_the_existing_null_fallbacks() {
 
 #[test]
 fn original_records_still_use_strict_duplicate_and_arbitrary_precision_parsing() {
-    let frame = DataFrame::new(vec![
-        Series::new("value", ["true", "true", "true"]),
-        Series::new("private", [Some("42"), None, None]),
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("value".into(), ["true", "true", "true"]).into(),
+        Series::new("private".into(), [Some("42"), None, None]).into(),
         Series::new(
-            "__original",
+            "__original".into(),
             [
                 r#"{"x":true,"$serde_json::private::Number":"42"}"#,
                 r#"{"x":true,"x":false}"#,
                 r#"{"x":true}"#,
             ],
-        ),
+        )
+        .into(),
     ])
     .unwrap();
     let columns = [

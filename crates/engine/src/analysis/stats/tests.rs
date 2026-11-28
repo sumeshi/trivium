@@ -5,7 +5,7 @@ fn accumulator(distinct: usize, bytes: usize) -> StatsAccumulator {
     StatsAccumulator::with_limits("value", &DataType::String, StatsLimits { distinct, bytes })
 }
 fn observe(stats: &mut StatsAccumulator, values: &[Option<&str>]) -> Result<(), AppError> {
-    let series = Series::new("value", values);
+    let series = Series::new("value".into(), values);
     stats.observe(&series, 0..series.len(), &JobContext::none())
 }
 
@@ -132,7 +132,7 @@ fn growing_table_is_budgeted_before_old_and_new_tables_coexist() {
 
 #[test]
 fn bounded_text_matches_scalar_and_list_search_text() {
-    let list = Series::new("list", &[None, Some(""), Some("x"), None]);
+    let list = Series::new("list".into(), &[None, Some(""), Some("x"), None]);
     let values = [
         AnyValue::UInt64(u64::MAX),
         AnyValue::Float32(0.1),
@@ -146,10 +146,10 @@ fn bounded_text_matches_scalar_and_list_search_text() {
             .map(|value| value.into_owned());
         assert_eq!(actual, expected);
     }
-    let list = AnyValue::List(Series::new("list", &[Some("ab"), None, Some("cd")]));
+    let list = AnyValue::List(Series::new("list".into(), &[Some("ab"), None, Some("cd")]));
     assert_eq!(text::present_text(&list, 5).unwrap().unwrap(), "ab,cd");
     assert!(text::present_text(&list, 4).is_err());
-    let trailing_null = AnyValue::List(Series::new("list", &[Some("ab"), None]));
+    let trailing_null = AnyValue::List(Series::new("list".into(), &[Some("ab"), None]));
     assert_eq!(
         text::present_text(&trailing_null, 2).unwrap().unwrap(),
         "ab"
@@ -167,7 +167,7 @@ fn oversized_borrowed_value_is_rejected_before_key_allocation() {
 
 #[test]
 fn formatted_numeric_repeats_fit_the_exact_budget_too() {
-    let series = Series::new("value", &[17i64, 17]);
+    let series = Series::new("value".into(), &[17i64, 17]);
     let mut probe = StatsAccumulator::with_limits(
         "value",
         series.dtype(),

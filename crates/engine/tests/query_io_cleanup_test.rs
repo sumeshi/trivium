@@ -275,13 +275,13 @@ fn ascending_sparse_pages_and_arbitrary_duplicate_pages_keep_exact_values() {
         Some("<alice@example.org>"),
         Some("last"),
     ];
-    let frame = DataFrame::new(vec![
-        Series::new("value", values),
-        Series::new("seq", (0..values.len() as u64).collect::<Vec<_>>()),
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("value".into(), values).into(),
+        Series::new("seq".into(), (0..values.len() as u64).collect::<Vec<_>>()).into(),
     ])
     .unwrap();
     let mut writer = ParquetWriter::new(File::create(&path).unwrap())
-        .batched(&frame.schema())
+        .batched(frame.schema())
         .unwrap();
     for offset in (0..frame.height()).step_by(2) {
         writer

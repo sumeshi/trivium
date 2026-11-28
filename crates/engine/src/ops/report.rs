@@ -166,7 +166,11 @@ pub fn build_report_with_job(
             let batch = batch.map_err(AppError::from)?;
             for (column, acc) in display.iter().zip(&mut stats) {
                 acc.observe(
-                    batch.frame.column(column).expect("projected report column"),
+                    batch
+                        .frame
+                        .column(column)
+                        .expect("projected report column")
+                        .as_materialized_series(),
                     (0..batch.frame.height()).filter(|&row| selected.contains(batch.offset + row)),
                     job,
                 )?;

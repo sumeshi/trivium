@@ -138,16 +138,19 @@ impl Batch {
     pub fn take_frame(&mut self, columns: &[ColumnMeta]) -> Result<DataFrame, AppError> {
         let mut series = Vec::with_capacity(columns.len() + 3);
         for (column, cells) in columns.iter().zip(&mut self.cells) {
-            series.push(Series::new(column.id.as_str(), take(cells)));
+            series.push(Series::new(column.id.as_str().into(), take(cells)));
         }
-        series.push(Series::new(INTERNAL_ORIGINAL, take(&mut self.originals)));
-        series.push(Series::new(INTERNAL_ROW_ID, take(&mut self.row_ids)));
         series.push(Series::new(
-            INTERNAL_SOURCE_RECORD,
+            INTERNAL_ORIGINAL.into(),
+            take(&mut self.originals),
+        ));
+        series.push(Series::new(INTERNAL_ROW_ID.into(), take(&mut self.row_ids)));
+        series.push(Series::new(
+            INTERNAL_SOURCE_RECORD.into(),
             take(&mut self.source_records),
         ));
         self.text_bytes = 0;
-        DataFrame::new(series)
+        DataFrame::new_infer_height(series.into_iter().map(Into::into).collect())
             .map_err(|_| AppError::Message("Failed to build the JSON dataset.".into()))
     }
 }

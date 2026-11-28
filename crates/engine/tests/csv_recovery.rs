@@ -67,7 +67,7 @@ fn headerless_keeps_first_record_and_generates_stable_source_names() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
@@ -107,7 +107,7 @@ fn unequal_records_require_recovery_and_missing_is_distinct_from_empty() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![0, 1, 2]
     );
@@ -117,7 +117,7 @@ fn unequal_records_require_recovery_and_missing_is_distinct_from_empty() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![2, 4, 5]
     );
@@ -146,7 +146,7 @@ fn invalid_utf8_is_skipped_at_a_complete_csv_record_boundary_only() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![2, 5]
     );
@@ -156,7 +156,7 @@ fn invalid_utf8_is_skipped_at_a_complete_csv_record_boundary_only() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![0, 1]
     );
@@ -248,7 +248,7 @@ fn recovery_reopens_headerless_input_without_losing_the_first_readable_row() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_no_null_iter()
+            .no_null_iter()
             .collect::<Vec<_>>(),
         vec![2, 3]
     );

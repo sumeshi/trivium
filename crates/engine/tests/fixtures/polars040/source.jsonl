@@ -1,0 +1,2 @@
+{"integer":18446744073709551615,"time":"2026-11-28T01:02:03.000000001Z","text":"  00123  ","nested":{"url":"https://example.test/a"},"null":null}
+{"integer":9007199254740993,"time":"2026-11-28T01:02:03.000000002Z","text":"line\nnext","nested":"legacy"}

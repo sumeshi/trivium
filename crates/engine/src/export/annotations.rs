@@ -113,18 +113,18 @@ pub(crate) fn build_annotations(
 pub(crate) fn annotation_series(
     annotations: AnnotationSeries,
     planned: &[PlannedColumn],
-) -> Vec<Series> {
+) -> Vec<polars::prelude::Column> {
     let series = [
-        Series::new("safe", annotations.safe),
-        Series::new("suspicious", annotations.suspicious),
-        Series::new("critical", annotations.critical),
-        Series::new("memo", annotations.memo),
-        Series::new("tags", annotations.tags),
-        Series::new("bookmarked", annotations.bookmarked),
+        Series::new("safe".into(), annotations.safe),
+        Series::new("suspicious".into(), annotations.suspicious),
+        Series::new("critical".into(), annotations.critical),
+        Series::new("memo".into(), annotations.memo),
+        Series::new("tags".into(), annotations.tags),
+        Series::new("bookmarked".into(), annotations.bookmarked),
     ];
     planned
         .iter()
         .zip(series)
-        .map(|(planned, series)| series.with_name(&planned.internal))
+        .map(|(planned, series)| series.with_name(planned.internal.clone().into()).into())
         .collect()
 }

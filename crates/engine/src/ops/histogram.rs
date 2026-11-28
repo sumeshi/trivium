@@ -85,7 +85,7 @@ pub fn histogram_with_job(
         .map(|range| (range.min.as_str(), range.max.as_str()));
     histogram_series_annotated_with_job(
         &payload.column,
-        series,
+        series.as_materialized_series(),
         &source.target.ids,
         bucket_count,
         range,

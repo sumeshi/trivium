@@ -58,14 +58,7 @@ fn payload(path: &Path, options: Option<ImportOptions>) -> CreateProjectPayload 
 fn ids(frames: &[DataFrame], column: &str) -> Vec<i64> {
     frames
         .iter()
-        .flat_map(|frame| {
-            frame
-                .column(column)
-                .unwrap()
-                .i64()
-                .unwrap()
-                .into_no_null_iter()
-        })
+        .flat_map(|frame| frame.column(column).unwrap().i64().unwrap().no_null_iter())
         .collect()
 }
 

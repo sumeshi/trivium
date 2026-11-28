@@ -21,7 +21,7 @@ fn timestamp_series(unit: TimeUnit) -> Series {
         TimeUnit::Milliseconds => 1_000,
     };
     Series::new(
-        "Timestamp",
+        "Timestamp".into(),
         [
             Some((base_seconds + 120) * scale),
             None,
@@ -35,7 +35,7 @@ fn timestamp_series(unit: TimeUnit) -> Series {
 
 fn date_series() -> Series {
     Series::new(
-        "Timestamp",
+        "Timestamp".into(),
         [Some(20_773_i32), None, Some(20_771), Some(20_772)],
     )
     .cast(&DataType::Date)
@@ -101,7 +101,7 @@ fn native_datetime_units_and_date_share_histogram_and_time_analysis_points() {
 #[test]
 fn native_nanosecond_ordering_does_not_round_through_seconds_or_floats() {
     let raw = [Some(1_i64), Some(-1), Some(0), None];
-    let series = Series::new("Timestamp", raw)
+    let series = Series::new("Timestamp".into(), raw)
         .cast(&DataType::Datetime(TimeUnit::Nanoseconds, None))
         .unwrap();
     let result = analyze_series("Timestamp", &series, &[0, 1, 2, 3], 0, 0, 0, 10).unwrap();
@@ -123,7 +123,7 @@ fn native_nanosecond_ordering_does_not_round_through_seconds_or_floats() {
             .unwrap()
             .i64()
             .unwrap()
-            .into_iter()
+            .iter()
             .collect::<Vec<_>>(),
         raw
     );
@@ -131,7 +131,7 @@ fn native_nanosecond_ordering_does_not_round_through_seconds_or_floats() {
 
 #[test]
 fn calendarless_time_and_out_of_range_native_values_are_invalid_without_formatting() {
-    let time = Series::new("Timestamp", [Some(0_i64), Some(1), None])
+    let time = Series::new("Timestamp".into(), [Some(0_i64), Some(1), None])
         .cast(&DataType::Time)
         .unwrap();
     let result = analyze_series("Timestamp", &time, &[0, 1, 2], 1, 1, 1, 1).unwrap();
@@ -149,14 +149,14 @@ fn calendarless_time_and_out_of_range_native_values_are_invalid_without_formatti
     assert_eq!((histogram.missing, histogram.invalid), (1, 2));
     assert!(result.sessions.is_empty() && result.gaps.is_empty() && result.bursts.is_empty());
     for unit in [TimeUnit::Microseconds, TimeUnit::Milliseconds] {
-        let series = Series::new("Timestamp", [Some(i64::MAX), None])
+        let series = Series::new("Timestamp".into(), [Some(i64::MAX), None])
             .cast(&DataType::Datetime(unit, None))
             .unwrap();
         let result = analyze_series("Timestamp", &series, &[0, 1], 1, 1, 1, 1).unwrap();
         assert_eq!((result.missing, result.invalid), (1, 1));
         assert!(result.sessions.is_empty());
     }
-    let dates = Series::new("Timestamp", [Some(i32::MAX), None])
+    let dates = Series::new("Timestamp".into(), [Some(i32::MAX), None])
         .cast(&DataType::Date)
         .unwrap();
     let result = analyze_series("Timestamp", &dates, &[0, 1], 1, 1, 1, 1).unwrap();
@@ -164,7 +164,7 @@ fn calendarless_time_and_out_of_range_native_values_are_invalid_without_formatti
 }
 
 fn saved_case(store: &ProjectsStore, mut series: Series) -> Uuid {
-    series.rename("c000001");
+    series.rename("c000001".into());
     let rows = series.len();
     let originals = (0..rows)
         .map(|row| {
@@ -176,11 +176,15 @@ fn saved_case(store: &ProjectsStore, mut series: Series) -> Uuid {
     let id = Uuid::new_v4();
     let directory = store.project_dir(&id);
     fs::create_dir_all(&directory).unwrap();
-    let mut frame = DataFrame::new(vec![
-        series,
-        Series::new("__original", originals),
-        Series::new("__rowid", (0..rows as i64).collect::<Vec<_>>()),
-        Series::new("__trivium_source_record", (1..=rows as i64).collect::<Vec<_>>()),
+    let mut frame = DataFrame::new_infer_height(vec![
+        series.into(),
+        Series::new("__original".into(), originals).into(),
+        Series::new("__rowid".into(), (0..rows as i64).collect::<Vec<_>>()).into(),
+        Series::new(
+            "__trivium_source_record".into(),
+            (1..=rows as i64).collect::<Vec<_>>(),
+        )
+        .into(),
     ])
     .unwrap();
     write_project_dataframe(&directory.join("data.parquet"), &mut frame).unwrap();
@@ -275,7 +279,7 @@ fn modern_source_strings_keep_their_spelling_and_numeric_text_is_not_an_epoch() 
     let id = saved_case(
         &store,
         Series::new(
-            "Timestamp",
+            "Timestamp".into(),
             [Some(raw), Some("1700000000"), Some("not a date"), None],
         ),
     );

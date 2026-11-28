@@ -127,7 +127,7 @@ fn scan(
         } else {
             scan_column(
                 condition,
-                strings.into_iter().enumerate(),
+                strings.iter().enumerate(),
                 &mut mask,
                 &mut remaining,
                 job,

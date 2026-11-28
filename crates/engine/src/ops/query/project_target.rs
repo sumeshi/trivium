@@ -124,11 +124,12 @@ pub(super) fn resolve_project_target_with_metadata(
                 }
             }
             let frame = if projection.is_empty() {
-                DataFrame::new(vec![Series::full_null(
-                    INTERNAL_ROW_ID,
+                DataFrame::new_infer_height(vec![Series::full_null(
+                    INTERNAL_ROW_ID.into(),
                     total_rows,
                     &DataType::Null,
-                )])
+                )
+                .into()])
                 .map_err(|error| AppError::from(anyhow::Error::from(error)))?
             } else {
                 read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?

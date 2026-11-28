@@ -130,15 +130,21 @@ fn column_scan_matches_row_evaluation_across_chunks_scopes_and_negation() {
         ops::rows::{resolve_target, QuerySpec},
     };
 
-    let mut first = Series::new("first", [Some("failed"), None, Some("failed login")]);
+    let mut first = Series::new("first".into(), [Some("failed"), None, Some("failed login")]);
     first
-        .append(&Series::new("first", [Some("ΟΣ"), Some(""), Some("aaaab")]))
+        .append(&Series::new(
+            "first".into(),
+            [Some("ΟΣ"), Some(""), Some("aaaab")],
+        ))
         .unwrap();
-    let mut second = Series::new("second", [Some("login"), Some("FAILED LOGIN"), None]);
+    let mut second = Series::new("second".into(), [Some("login"), Some("FAILED LOGIN"), None]);
     second
-        .append(&Series::new("second", [Some("İstanbul"), None, Some("x")]))
+        .append(&Series::new(
+            "second".into(),
+            [Some("İstanbul"), None, Some("x")],
+        ))
         .unwrap();
-    let frame = DataFrame::new(vec![first, second]).unwrap();
+    let frame = DataFrame::new_infer_height(vec![first.into(), second.into()]).unwrap();
     let columns = vec!["first".into(), "second".into()];
     for column in ["", "first", "SECOND"] {
         for values in [

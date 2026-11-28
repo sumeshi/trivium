@@ -60,15 +60,19 @@ fn create_project_fixture(root: &Path) -> (ProjectsStore, Uuid) {
         json!(["00123", "a,b", "9007199254740993"]).to_string(),
     ];
 
-    let mut df = DataFrame::new(vec![
-        Series::new("c000001", &["alpha", "beta", "gamma"]),
-        Series::new("c000002", &["x", "y", "z"]),
+    let mut df = DataFrame::new_infer_height(vec![
+        Series::new("c000001".into(), &["alpha", "beta", "gamma"]).into(),
+        Series::new("c000002".into(), &["x", "y", "z"]).into(),
         // This source name matches an internal column, but its internal id is
         // c000003, so metadata must keep it as ordinary data.
-        Series::new("c000003", &["reserved-a", "reserved-b", "reserved-c"]),
-        Series::new("__rowid", &[0_i64, 1, 2]),
-        Series::new("__trivium_source_record", &[1_i64, 2, 3]),
-        Series::new("__original", originals),
+        Series::new(
+            "c000003".into(),
+            &["reserved-a", "reserved-b", "reserved-c"],
+        )
+        .into(),
+        Series::new("__rowid".into(), &[0_i64, 1, 2]).into(),
+        Series::new("__trivium_source_record".into(), &[1_i64, 2, 3]).into(),
+        Series::new("__original".into(), originals).into(),
     ])
     .expect("failed to build project frame");
     write_project_dataframe(&project_dir.join("data.parquet"), &mut df)
@@ -108,7 +112,11 @@ fn condition(column: &str, value: &str) -> Node {
     })
 }
 
-fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> trivium_engine::ops::rows::QueryRowsResponse {
+fn query(
+    store: &ProjectsStore,
+    id: Uuid,
+    spec: QuerySpec,
+) -> trivium_engine::ops::rows::QueryRowsResponse {
     query_project_rows(
         store,
         QueryRowsPayload {
@@ -253,10 +261,7 @@ fn original_records_preserve_types_nulls_and_missing_keys() {
         Some(&json!(2))
     );
 
-    assert_eq!(
-        records[2],
-        json!(["00123", "a,b", "9007199254740993"])
-    );
+    assert_eq!(records[2], json!(["00123", "a,b", "9007199254740993"]));
 
     let _ = fs::remove_dir_all(root);
 }

@@ -16,12 +16,13 @@ fn stored_object_values_keep_distinct_null_missing_and_scalar_cells() {
         json!({}),
     ];
     let originals: Vec<_> = records.iter().map(Value::to_string).collect();
-    let df = DataFrame::new(vec![
+    let df = DataFrame::new_infer_height(vec![
         Series::new(
-            "c000001",
+            "c000001".into(),
             &[Some("{\"host\":\"foo\"}"), Some("bar"), None, None],
-        ),
-        Series::new("__original", originals),
+        )
+        .into(),
+        Series::new("__original".into(), originals).into(),
     ])
     .unwrap();
     let columns = [ColumnMeta {

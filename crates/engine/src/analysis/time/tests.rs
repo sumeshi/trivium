@@ -3,7 +3,10 @@ use polars::prelude::NamedFrom;
 
 #[test]
 fn interval_budget_is_shared_and_never_returns_a_partial_analysis() {
-    let series = Series::new("time", vec!["2026-11-18T00:00:00Z"; MAX_SPANS / 2 + 2]);
+    let series = Series::new(
+        "time".into(),
+        vec!["2026-11-18T00:00:00Z"; MAX_SPANS / 2 + 2],
+    );
     let rows = (0..series.len()).collect::<Vec<_>>();
     // Each list fits separately, but their combined result would not.
     let error = analyze_series("time", &series, &rows, 0, 0, 60, 10).unwrap_err();
@@ -17,7 +20,7 @@ fn interval_budget_is_shared_and_never_returns_a_partial_analysis() {
 #[test]
 fn many_events_with_few_intervals_remain_analyzable() {
     let series = Series::new(
-        "time",
+        "time".into(),
         vec!["2026-11-18T00:00:00.123456789Z"; MAX_SPANS + 1],
     );
     let rows = (0..series.len()).collect::<Vec<_>>();
@@ -93,7 +96,7 @@ fn intervals_publish_engine_normalized_bounds_and_exact_durations_with_original_
             vec![i64::MIN, i64::MAX],
         ),
     ] {
-        let series = Series::new("time", &values);
+        let series = Series::new("time".into(), &values);
         let rows = (0..values.len()).collect::<Vec<_>>();
         let result = analyze_series("time", &series, &rows, 0, u64::MAX, u64::MAX, 0).unwrap();
         assert_eq!(result.gaps.len(), values.len() - 1);

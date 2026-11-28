@@ -160,11 +160,7 @@ pub fn read_project_dataframe(path: &Path) -> Result<DataFrame> {
 pub fn read_project_schema_columns(path: &Path) -> Result<Vec<String>> {
     let mut reader = ParquetReader::new(File::open(path)?);
     let schema = reader.schema().context("failed to read parquet schema")?;
-    Ok(schema
-        .fields
-        .iter()
-        .map(|field| field.name.clone())
-        .collect())
+    Ok(schema.iter_names().map(ToString::to_string).collect())
 }
 
 /// Row count from the parquet footer, without materializing any column.
@@ -181,9 +177,8 @@ pub fn read_project_schema_and_row_count(path: &Path) -> Result<(Vec<String>, us
     let columns = reader
         .schema()
         .context("failed to read parquet schema")?
-        .fields
-        .iter()
-        .map(|field| field.name.clone())
+        .iter_names()
+        .map(ToString::to_string)
         .collect();
     let rows = reader
         .num_rows()
@@ -219,7 +214,7 @@ pub fn write_project_dataframe(path: &Path, df: &mut DataFrame) -> Result<()> {
 
 /// Writes project Parquet one bounded batch at a time.
 ///
-/// polars 0.40 exposes [`ParquetWriter::batched`], which writes every
+/// [`ParquetWriter::batched`] writes every
 /// [`write_batch`](Self::write_batch) call as its own row group and only
 /// writes the footer on [`finish`](Self::finish). The schema is fixed from the
 /// CSV header so every batch has the same columns: the imported data columns,
@@ -232,11 +227,11 @@ impl BatchDataWriter {
     pub fn create(path: &Path, columns: &[ColumnMeta]) -> Result<Self> {
         let fields: Vec<Field> = columns
             .iter()
-            .map(|column| Field::new(&column.id, DataType::String))
+            .map(|column| Field::new(column.id.clone().into(), DataType::String))
             .chain([
-                Field::new(INTERNAL_ORIGINAL, DataType::String),
-                Field::new(INTERNAL_ROW_ID, DataType::Int64),
-                Field::new(INTERNAL_SOURCE_RECORD, DataType::Int64),
+                Field::new(INTERNAL_ORIGINAL.into(), DataType::String),
+                Field::new(INTERNAL_ROW_ID.into(), DataType::Int64),
+                Field::new(INTERNAL_SOURCE_RECORD.into(), DataType::Int64),
             ])
             .collect();
         let schema: Schema = fields.into_iter().collect();

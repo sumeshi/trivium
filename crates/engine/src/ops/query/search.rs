@@ -152,7 +152,7 @@ impl PreparedQuery {
                 for value in values {
                     job.check_cancelled()?;
                     let equal = strings.equal(value.as_str());
-                    for (index, matches) in equal.into_iter().enumerate() {
+                    for (index, matches) in equal.iter().enumerate() {
                         mask[index] |= matches.unwrap_or(false);
                     }
                 }
@@ -267,7 +267,7 @@ impl PreparedQuery {
             .iter()
             .map(|name| {
                 df.column(name.as_str())
-                    .map(|series| (name.as_str(), series))
+                    .map(|column| (name.as_str(), column.as_materialized_series()))
                     .map_err(|_| AppError::Message(format!("Unknown column: {}", name)))
             })
             .collect()

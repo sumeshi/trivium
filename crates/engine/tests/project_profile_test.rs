@@ -14,8 +14,8 @@ use trivium_engine::{
     jobs::JobContext,
     models::ProjectMeta,
     ops::projects::{
-        create_project, load_column_kinds_with_job, load_project_with_job,
-        CreateProjectPayload, ProjectRequest,
+        create_project, load_column_kinds_with_job, load_project_with_job, CreateProjectPayload,
+        ProjectRequest,
     },
     project_io::{project_full_reads, project_read_stats, reset_project_read_counters},
     storage::{
@@ -170,14 +170,15 @@ fn missing_profile_is_built_once_then_invalidated_by_data_signature() {
 
     // Changed data invalidates the cached profile for the same column IDs.
     let values = ["changed", "text", "rows"];
-    let mut replacement = DataFrame::new(vec![
-        Series::new(&meta.columns[0].id, values),
+    let mut replacement = DataFrame::new_infer_height(vec![
+        Series::new(meta.columns[0].id.as_str().into(), values).into(),
         Series::new(
-            "__original",
+            "__original".into(),
             values.map(|value| serde_json::json!([value]).to_string()),
-        ),
-        Series::new("__rowid", [0_i64, 1, 2]),
-        Series::new("__trivium_source_record", [2_i64, 3, 4]),
+        )
+        .into(),
+        Series::new("__rowid".into(), [0_i64, 1, 2]).into(),
+        Series::new("__trivium_source_record".into(), [2_i64, 3, 4]).into(),
     ])
     .unwrap();
     ParquetWriter::new(File::create(dir.join("data.parquet")).unwrap())

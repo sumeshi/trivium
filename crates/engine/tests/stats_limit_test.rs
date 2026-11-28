@@ -11,7 +11,7 @@ use trivium_engine::analysis::stats::summarize_series;
 fn top_and_rare_lists_are_capped() {
     let values: Vec<String> = (0..50).map(|index| format!("value-{index}")).collect();
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    let series = Series::new("token", &refs);
+    let series = Series::new("token".into(), &refs);
 
     let stats = summarize_series("token", &series, 100).unwrap();
 
@@ -37,7 +37,7 @@ fn bounded_ranking_retains_historical_count_then_lexical_order() {
         }
     }
     values.extend([None, Some(String::new())]);
-    let stats = summarize_series("token", &Series::new("token", values), 3).unwrap();
+    let stats = summarize_series("token", &Series::new("token".into(), values), 3).unwrap();
     let mut expected = counts.into_iter().collect::<Vec<_>>();
     expected.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let actual = stats

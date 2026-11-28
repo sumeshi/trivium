@@ -150,7 +150,7 @@ fn sort_search_and_export_keep_i64_max_precision() {
 
 #[test]
 fn nanosecond_datetime_search_string_keeps_full_precision() {
-    let ns = AnyValue::Datetime(1700000000123456789i64, TimeUnit::Nanoseconds, &None);
+    let ns = AnyValue::Datetime(1700000000123456789i64, TimeUnit::Nanoseconds, None);
     let text = anyvalue_to_search_string(&ns).expect("datetime must stringify");
     assert!(
         text.ends_with(".123456789"),
@@ -158,7 +158,7 @@ fn nanosecond_datetime_search_string_keeps_full_precision() {
         text
     );
 
-    let micros = AnyValue::Datetime(1700000000123456i64, TimeUnit::Microseconds, &None);
+    let micros = AnyValue::Datetime(1700000000123456i64, TimeUnit::Microseconds, None);
     let text = anyvalue_to_search_string(&micros).expect("datetime must stringify");
     assert!(
         text.ends_with(".123456"),

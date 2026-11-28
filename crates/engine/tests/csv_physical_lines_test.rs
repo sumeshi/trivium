@@ -49,7 +49,7 @@ fn source_lines(frame: &DataFrame) -> Vec<i64> {
         .unwrap()
         .i64()
         .unwrap()
-        .into_no_null_iter()
+        .no_null_iter()
         .collect()
 }
 

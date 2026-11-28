@@ -84,7 +84,12 @@ pub fn get_cell_with_job(
         .ok()
         .and_then(|series| series.get(0).ok())
         .unwrap_or(polars::prelude::AnyValue::Null);
-    let original = original_record_at(df.column(INTERNAL_ORIGINAL).ok(), 0);
+    let original = original_record_at(
+        df.column(INTERNAL_ORIGINAL)
+            .ok()
+            .map(|column| column.as_materialized_series()),
+        0,
+    );
     let cell = build_full_cell(&value, original.as_ref(), &column.source);
     job.check_cancelled()?;
     Ok(cell)

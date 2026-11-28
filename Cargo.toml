@@ -6,7 +6,7 @@ members = ["src-tauri", "crates/engine"]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 parking_lot = "0.12"
-polars = { version = "0.40", features = ["parquet"] }
+polars = { version = "0.55.2", default-features = false, features = ["parquet", "csv", "temporal", "dtype-slim"] }
 serde = { version = "1.0", features = ["derive"] }
 # The engine needs exact JSON number text. The desktop crate can share the
 # same build; the extra features do not change its command payloads.

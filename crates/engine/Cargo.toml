@@ -12,7 +12,8 @@ encoding_rs = "0.8.35"
 memchr = "2"
 parking_lot.workspace = true
 polars.workspace = true
-polars-parquet = { version = "0.40", default-features = false }
+polars-buffer = "0.55.2"
+polars-parquet = { version = "0.55.2", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 same-file = "1"
 tempfile = "3.27"

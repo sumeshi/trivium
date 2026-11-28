@@ -45,9 +45,7 @@ fn anyvalue_to_search_string_converts_scalar_variants() {
 
 #[test]
 fn anyvalue_to_search_string_converts_temporal_variants() {
-    let no_timezone: Option<String> = None;
-
-    let datetime = AnyValue::Datetime(0, TimeUnit::Milliseconds, &no_timezone);
+    let datetime = AnyValue::Datetime(0, TimeUnit::Milliseconds, None);
     assert_eq!(
         anyvalue_to_search_string(&datetime),
         Some("1970-01-01 00:00:00".to_string())
@@ -67,15 +65,12 @@ fn anyvalue_to_search_string_converts_temporal_variants() {
 fn anyvalue_to_search_string_joins_list_values_with_commas() {
     // AnyValue::List owns its Series, so build the Series with Series::new and
     // move it into the variant rather than trying to obtain it from a frame.
-    let list = AnyValue::List(Series::new("values", &[1i32, 2, 3]));
-    assert_eq!(
-        anyvalue_to_search_string(&list),
-        Some("1,2,3".to_string())
-    );
+    let list = AnyValue::List(Series::new("values".into(), &[1i32, 2, 3]));
+    assert_eq!(anyvalue_to_search_string(&list), Some("1,2,3".to_string()));
 
     // Null elements are skipped by the recursive conversion.
     let list_with_null = AnyValue::List(Series::new(
-        "values",
+        "values".into(),
         &[Some(1i32), None, Some(3i32)],
     ));
     assert_eq!(
@@ -84,6 +79,6 @@ fn anyvalue_to_search_string_joins_list_values_with_commas() {
     );
 
     // An empty list has no parts to join, so it converts to None.
-    let empty = AnyValue::List(Series::new("values", &[] as &[i32]));
+    let empty = AnyValue::List(Series::new("values".into(), &[] as &[i32]));
     assert_eq!(anyvalue_to_search_string(&empty), None);
 }

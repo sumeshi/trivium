@@ -79,7 +79,13 @@ pub fn duplicate_rows_with_job(
         let columns = payload
             .columns
             .iter()
-            .map(|name| batch.frame.column(name).expect("validated key column"))
+            .map(|name| {
+                batch
+                    .frame
+                    .column(name)
+                    .expect("validated key column")
+                    .as_materialized_series()
+            })
             .collect::<Vec<_>>();
         index.push(&columns, batch.offset, job)?;
         job.report_progress(
@@ -108,7 +114,7 @@ pub fn duplicate_rows_with_job(
                 .collect::<Vec<_>>();
             let frame = batch
                 .frame
-                .take(&UInt32Chunked::from_vec("rows", local))
+                .take(&UInt32Chunked::from_vec("rows".into(), local))
                 .map_err(|error| AppError::from(anyhow::Error::from(error)))?;
             rows.extend(materialize_page_rows(
                 &frame,

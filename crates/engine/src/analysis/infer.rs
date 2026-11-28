@@ -150,9 +150,10 @@ fn classify_any(value: &AnyValue) -> Option<ColumnKind> {
         | AnyValue::UInt64(_) => Some(ColumnKind::Int),
         AnyValue::Float32(value) => Some(numeric_kind(f64::from(*value))),
         AnyValue::Float64(value) => Some(numeric_kind(*value)),
-        AnyValue::Date(_) | AnyValue::Datetime(_, _, _) | AnyValue::Time(_) => {
-            Some(ColumnKind::Datetime)
-        }
+        AnyValue::Date(_)
+        | AnyValue::Datetime(_, _, _)
+        | AnyValue::DatetimeOwned(_, _, _)
+        | AnyValue::Time(_) => Some(ColumnKind::Datetime),
         _ => anyvalue_to_search_string(value).and_then(|text| classify_text(&text)),
     }
 }
@@ -214,6 +215,25 @@ fn is_datetime(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_and_borrowed_native_datetimes_have_the_same_kind() {
+        use polars::prelude::{TimeUnit, TimeZone};
+        use std::sync::Arc;
+
+        for unit in [
+            TimeUnit::Nanoseconds,
+            TimeUnit::Microseconds,
+            TimeUnit::Milliseconds,
+        ] {
+            for value in [
+                AnyValue::Datetime(1, unit, Some(&TimeZone::UTC)),
+                AnyValue::DatetimeOwned(1, unit, Some(Arc::new(TimeZone::UTC))),
+            ] {
+                assert_eq!(classify_any(&value), Some(ColumnKind::Datetime));
+            }
+        }
+    }
 
     #[test]
     fn string_kind_is_terminal_for_typed_and_text_observations() {

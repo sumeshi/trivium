@@ -60,13 +60,14 @@ fn or_column_scope_is_consumed_by_the_next_operand() {
 
 #[test]
 fn mixed_or_scopes_find_expected_rows_in_search_and_converted_conditions() {
-    let frame = DataFrame::new(vec![
+    let frame = DataFrame::new_infer_height(vec![
         Series::new(
-            "host",
+            "host".into(),
             ["ws01", "ws02", "ws02", "ws02", "ws03", "ws03", "ws04"],
-        ),
+        )
+        .into(),
         Series::new(
-            "user",
+            "user".into(),
             [
                 "alice",
                 "bob",
@@ -76,9 +77,10 @@ fn mixed_or_scopes_find_expected_rows_in_search_and_converted_conditions() {
                 "bob smith",
                 "alice",
             ],
-        ),
+        )
+        .into(),
         Series::new(
-            "command",
+            "command".into(),
             [
                 "notepad",
                 "powershell",
@@ -88,7 +90,8 @@ fn mixed_or_scopes_find_expected_rows_in_search_and_converted_conditions() {
                 "notepad",
                 "powershell -enc",
             ],
-        ),
+        )
+        .into(),
     ])
     .unwrap();
     let columns = vec!["host".into(), "user".into(), "command".into()];
@@ -144,10 +147,10 @@ fn mixed_or_scopes_find_expected_rows_in_search_and_converted_conditions() {
 
 #[test]
 fn unscoped_conditions_use_the_selected_search_columns() {
-    let frame = DataFrame::new(vec![
-        Series::new("host", ["ws01", "powershell", "ws02"]),
-        Series::new("user", ["alice", "bob", "bob"]),
-        Series::new("command", ["notepad", "notepad", "powershell"]),
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("host".into(), ["ws01", "powershell", "ws02"]).into(),
+        Series::new("user".into(), ["alice", "bob", "bob"]).into(),
+        Series::new("command".into(), ["notepad", "notepad", "powershell"]).into(),
     ])
     .unwrap();
     let columns = vec!["host".into(), "user".into(), "command".into()];

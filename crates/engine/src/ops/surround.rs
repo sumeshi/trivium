@@ -103,7 +103,7 @@ pub fn surrounding_rows_with_job(
                     inferred.observe(&value);
                 }
             }
-            if let Some(nanos) = nanos_at(series, index) {
+            if let Some(nanos) = nanos_at(series.as_materialized_series(), index) {
                 timed.push(TimedRow {
                     index: batch.offset + index,
                     nanos,

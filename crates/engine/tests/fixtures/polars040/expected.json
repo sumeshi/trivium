@@ -1,0 +1,136 @@
+{
+  "columns": [
+    {
+      "id": "c000001",
+      "label": "integer",
+      "source": "/integer",
+      "order": 0
+    },
+    {
+      "id": "c000002",
+      "label": "time",
+      "source": "/time",
+      "order": 1
+    },
+    {
+      "id": "c000003",
+      "label": "text",
+      "source": "/text",
+      "order": 2
+    },
+    {
+      "id": "c000004",
+      "label": "nested/url",
+      "source": "/nested/url",
+      "order": 3
+    },
+    {
+      "id": "c000005",
+      "label": "null",
+      "source": "/null",
+      "order": 4
+    },
+    {
+      "id": "c000006",
+      "label": "nested",
+      "source": "/nested",
+      "order": 5
+    }
+  ],
+  "rows": [
+    {
+      "row_index": 0,
+      "cells": {
+        "c000002": {
+          "text": "2026-11-28T01:02:03.000000001Z",
+          "kind": "string",
+          "truncated": false,
+          "length": 30,
+          "datetime_nanos": "1795827723000000001"
+        },
+        "c000003": {
+          "text": "  00123  ",
+          "kind": "string",
+          "truncated": false,
+          "length": 9
+        },
+        "c000006": {
+          "text": "{\"url\":\"https://example.test/a\"}",
+          "kind": "object",
+          "truncated": false,
+          "length": 32
+        },
+        "c000004": {
+          "text": "https://example.test/a",
+          "kind": "string",
+          "truncated": false,
+          "length": 22
+        },
+        "c000005": {
+          "text": null,
+          "kind": "null",
+          "truncated": false,
+          "length": null
+        },
+        "c000001": {
+          "text": "18446744073709551615",
+          "kind": "int",
+          "truncated": false,
+          "length": 20
+        }
+      },
+      "flag": "",
+      "memo": null,
+      "tags": [],
+      "bookmarked": false,
+      "color": null
+    },
+    {
+      "row_index": 1,
+      "cells": {
+        "c000004": {
+          "text": null,
+          "kind": "missing",
+          "truncated": false,
+          "length": null
+        },
+        "c000005": {
+          "text": null,
+          "kind": "missing",
+          "truncated": false,
+          "length": null
+        },
+        "c000003": {
+          "text": "line\nnext",
+          "kind": "string",
+          "truncated": false,
+          "length": 9
+        },
+        "c000006": {
+          "text": "legacy",
+          "kind": "string",
+          "truncated": false,
+          "length": 6
+        },
+        "c000001": {
+          "text": "9007199254740993",
+          "kind": "int",
+          "truncated": false,
+          "length": 16
+        },
+        "c000002": {
+          "text": "2026-11-28T01:02:03.000000002Z",
+          "kind": "string",
+          "truncated": false,
+          "length": 30,
+          "datetime_nanos": "1795827723000000002"
+        }
+      },
+      "flag": "",
+      "memo": null,
+      "tags": [],
+      "bookmarked": false,
+      "color": null
+    }
+  ]
+}

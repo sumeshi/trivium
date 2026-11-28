@@ -84,7 +84,7 @@ pub fn time_analysis_with_job(
         .map_err(|error| AppError::Other(error.into()))?;
     analyze_series_with_job(
         &payload.column,
-        series,
+        series.as_materialized_series(),
         &source.target.ids,
         payload.gap_seconds,
         payload.session_minutes,

@@ -30,7 +30,8 @@ fn predicate(column: &str, op: Op, value: &str) -> Node {
 fn unparseable_numeric_sources_do_not_match_but_invalid_bounds_remain_errors() {
     for invalid in ["", " ", "NaN", "Infinity", "not numeric", "1.2.3", "1e"] {
         for (source, value) in [(invalid, "0"), ("1.5", invalid)] {
-            let frame = DataFrame::new(vec![Series::new("n", [source])]).unwrap();
+            let frame = DataFrame::new_infer_height(vec![Series::new("n".into(), [source]).into()])
+                .unwrap();
             let spec = QuerySpec {
                 condition: Some(predicate("n", Op::Ge, value)),
                 ..Default::default()
@@ -53,8 +54,11 @@ fn unparseable_numeric_sources_do_not_match_but_invalid_bounds_remain_errors() {
 
 #[test]
 fn single_value_float_histograms_use_one_inclusive_bin_and_reject_infinite_spans() {
-    for series in [Series::new("n", ["1.5"; 3]), Series::new("n", [1.5_f64; 3])] {
-        let frame = DataFrame::new(vec![series.clone()]).unwrap();
+    for series in [
+        Series::new("n".into(), ["1.5"; 3]),
+        Series::new("n".into(), [1.5_f64; 3]),
+    ] {
+        let frame = DataFrame::new_infer_height(vec![series.clone().into()]).unwrap();
         for range in [None, Some(("1.5", "1.5"))] {
             for histogram in [
                 histogram_series_ranged("n", &series, &[0, 1, 2], 3, range).unwrap(),
@@ -98,12 +102,12 @@ fn single_value_float_histograms_use_one_inclusive_bin_and_reject_infinite_spans
             }
         }
     }
-    let series = Series::new("n", ["-1e308", "1e308"]);
+    let series = Series::new("n".into(), ["-1e308", "1e308"]);
     for range in [None, Some(("-1e308", "1e308"))] {
         let error = histogram_series_ranged("n", &series, &[0, 1], 3, range).unwrap_err();
         assert!(error.contains("span is too wide"), "{error}");
     }
-    let series = Series::new("n", ["1e307", "1e308"]);
+    let series = Series::new("n".into(), ["1e307", "1e308"]);
     let histogram = histogram_series_ranged("n", &series, &[0, 1], 50, None).unwrap();
     assert!(histogram.buckets.iter().all(|bucket| bucket
         .start
@@ -115,8 +119,8 @@ fn single_value_float_histograms_use_one_inclusive_bin_and_reject_infinite_spans
 
 #[test]
 fn decimal_ordering_keeps_digits_exponents_and_integer_boundaries_exact() {
-    let frame = DataFrame::new(vec![Series::new(
-        "n",
+    let frame = DataFrame::new_infer_height(vec![Series::new(
+        "n".into(),
         [
             Some("-2.5"),
             Some("-0"),
@@ -133,7 +137,8 @@ fn decimal_ordering_keeps_digits_exponents_and_integer_boundaries_exact() {
             Some("9007199254740993.000000000000000001"),
             Some("1.50"),
         ],
-    )])
+    )
+    .into()])
     .unwrap();
     for (op, value, expected) in [
         (Op::Ge, "1.5", vec![3, 4, 5, 6, 7, 8, 9, 11, 12, 13]),
@@ -173,7 +178,9 @@ fn decimal_ordering_keeps_digits_exponents_and_integer_boundaries_exact() {
     }
     // Native float columns from older projects use their existing source text
     // adapter too, without turning string-backed CSV values into f64.
-    let frame = DataFrame::new(vec![Series::new("n", [0.1_f64, 1.5, 2.5])]).unwrap();
+    let frame =
+        DataFrame::new_infer_height(vec![Series::new("n".into(), [0.1_f64, 1.5, 2.5]).into()])
+            .unwrap();
     let target = resolve_target(
         &frame,
         &QuerySpec {

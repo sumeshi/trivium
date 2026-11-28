@@ -68,7 +68,9 @@ pub fn anyvalue_to_json(value: &AnyValue) -> Value {
         AnyValue::Float64(v) => Value::from(*v),
         AnyValue::String(v) => Value::String(v.to_string()),
         AnyValue::Date(v) => Value::String(v.to_string()),
-        AnyValue::Datetime(v, _, _) => Value::String(v.to_string()),
+        AnyValue::Datetime(v, _, _) | AnyValue::DatetimeOwned(v, _, _) => {
+            Value::String(v.to_string())
+        }
         AnyValue::Time(v) => Value::String(v.to_string()),
         AnyValue::List(series) => {
             let values: Vec<Value> = series.iter().map(|v| anyvalue_to_json(&v)).collect();
@@ -115,12 +117,18 @@ struct CellColumn<'a> {
 
 impl<'a> CellColumns<'a> {
     pub fn new(df: &'a DataFrame, columns: &'a [ColumnMeta]) -> Self {
-        let original = df.column(INTERNAL_ORIGINAL).ok();
+        let original = df
+            .column(INTERNAL_ORIGINAL)
+            .ok()
+            .map(|column| column.as_materialized_series());
         let columns = columns
             .iter()
             .map(|column| CellColumn {
                 id: &column.id,
-                series: df.column(&column.id).ok(),
+                series: df
+                    .column(&column.id)
+                    .ok()
+                    .map(|column| column.as_materialized_series()),
                 path: original.and_then(|_| decode_json_path(&column.source)),
             })
             .collect();
@@ -182,7 +190,9 @@ fn build_value_cell(
             let length = text.chars().count();
             let kind = original_json_kind(original, path).unwrap_or_else(|| anyvalue_kind(value));
             let nanos = match value {
-                AnyValue::Date(_) | AnyValue::Datetime(_, _, _) => {
+                AnyValue::Date(_)
+                | AnyValue::Datetime(_, _, _)
+                | AnyValue::DatetimeOwned(_, _, _) => {
                     datetime_value_nanos(value).and_then(|nanos| i64::try_from(nanos).ok())
                 }
                 AnyValue::Time(_) => None,
@@ -320,7 +330,7 @@ pub fn anyvalue_to_search_string(value: &AnyValue) -> Option<String> {
         AnyValue::Float64(v) => Some(v.to_string()),
         AnyValue::String(v) => Some(v.to_string()),
         AnyValue::StringOwned(v) => Some(v.to_string()),
-        AnyValue::Datetime(_, _, _) => Some(value.to_string()),
+        AnyValue::Datetime(_, _, _) | AnyValue::DatetimeOwned(_, _, _) => Some(value.to_string()),
         AnyValue::Date(_) => Some(value.to_string()),
         AnyValue::Time(_) => Some(value.to_string()),
         AnyValue::List(series) => {

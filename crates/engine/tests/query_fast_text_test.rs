@@ -22,7 +22,7 @@ fn columns(frame: &DataFrame) -> Vec<String> {
     frame
         .get_column_names()
         .into_iter()
-        .map(str::to_string)
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -38,17 +38,17 @@ fn entry(flag: &str, bookmarked: bool) -> FlagEntry {
 #[test]
 fn simple_and_or_matches_general_evaluation_with_scopes_and_null_chunks() {
     let mut first = Series::new(
-        "first",
+        "first".into(),
         [Some("PowerShell"), None, Some("power"), Some("foo bar")],
     );
     first
         .append(&Series::new(
-            "first",
+            "first".into(),
             [Some("ΟΣ"), Some("İstanbul"), Some("aaaab"), None],
         ))
         .unwrap();
     let mut second = Series::new(
-        "second",
+        "second".into(),
         [
             Some("event"),
             Some("powershell EVENT"),
@@ -58,11 +58,11 @@ fn simple_and_or_matches_general_evaluation_with_scopes_and_null_chunks() {
     );
     second
         .append(&Series::new(
-            "second",
+            "second".into(),
             [Some("β"), Some("event"), Some(""), Some("POWERSHELL EVENT")],
         ))
         .unwrap();
-    let frame = DataFrame::new(vec![first, second]).unwrap();
+    let frame = DataFrame::new_infer_height(vec![first.into(), second.into()]).unwrap();
     let flags = HashMap::from([
         (0, entry("critical", true)),
         (4, entry("safe", false)),
@@ -101,7 +101,7 @@ fn simple_and_or_matches_general_evaluation_with_scopes_and_null_chunks() {
                         &QuerySpec {
                             condition: Some(condition),
                             search_columns: scope.clone(),
-                            flag_filter: flag_filter.map(str::to_string),
+                            flag_filter: flag_filter.map(ToString::to_string),
                             bookmarked_only,
                             ..Default::default()
                         },
@@ -118,7 +118,7 @@ fn simple_and_or_matches_general_evaluation_with_scopes_and_null_chunks() {
                         &QuerySpec {
                             search: Some(search.into()),
                             search_columns: scope.clone(),
-                            flag_filter: flag_filter.map(str::to_string),
+                            flag_filter: flag_filter.map(ToString::to_string),
                             bookmarked_only,
                             ..Default::default()
                         },
@@ -162,9 +162,9 @@ fn simple_and_or_matches_general_evaluation_with_scopes_and_null_chunks() {
 
 #[test]
 fn typed_columns_keep_the_general_text_adapter() {
-    let frame = DataFrame::new(vec![
-        Series::new("number", [7i64, 8, 9]),
-        Series::new("text", [Some("event"), Some("powershell"), None]),
+    let frame = DataFrame::new_infer_height(vec![
+        Series::new("number".into(), [7i64, 8, 9]).into(),
+        Series::new("text".into(), [Some("event"), Some("powershell"), None]).into(),
     ])
     .unwrap();
     for search in [
@@ -193,7 +193,9 @@ fn typed_columns_keep_the_general_text_adapter() {
 
 #[test]
 fn no_eligible_rows_still_validate_conditions_and_observe_cancellation() {
-    let frame = DataFrame::new(vec![Series::new("text", ["powershell event"])]).unwrap();
+    let frame =
+        DataFrame::new_infer_height(vec![Series::new("text".into(), ["powershell event"]).into()])
+            .unwrap();
     for node in [
         Node::Condition(Condition {
             column: "missing".into(),
@@ -298,8 +300,8 @@ fn annotation_prefilter_keeps_source_ids_and_tags_across_reader_batches() {
                 QueryRowsPayload {
                     project_id: id,
                     spec: QuerySpec {
-                        search: search.map(str::to_string),
-                        flag_filter: flag_filter.map(str::to_string),
+                        search: search.map(ToString::to_string),
+                        flag_filter: flag_filter.map(ToString::to_string),
                         bookmarked_only,
                         ..Default::default()
                     },

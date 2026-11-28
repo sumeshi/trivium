@@ -147,7 +147,10 @@ pub(crate) fn analyze_series_with_job(
             let present = series.get(*idx).ok().is_some_and(|value| match value {
                 // Presence does not require formatting an out-of-range
                 // native datetime. Time-of-day alone has no calendar date.
-                AnyValue::Date(_) | AnyValue::Datetime(_, _, _) | AnyValue::Time(_) => true,
+                AnyValue::Date(_)
+                | AnyValue::Datetime(_, _, _)
+                | AnyValue::DatetimeOwned(_, _, _)
+                | AnyValue::Time(_) => true,
                 _ => anyvalue_to_search_string(&value).is_some_and(|text| !text.trim().is_empty()),
             });
             if present {
@@ -185,8 +188,10 @@ fn event_at(series: &Series, idx: usize) -> Option<Event> {
         AnyValue::Date(_) => chrono::DateTime::from_timestamp_nanos(nanos)
             .format("%Y-%m-%d")
             .to_string(),
-        AnyValue::Datetime(_, _, _) => chrono::DateTime::from_timestamp_nanos(nanos)
-            .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+        AnyValue::Datetime(_, _, _) | AnyValue::DatetimeOwned(_, _, _) => {
+            chrono::DateTime::from_timestamp_nanos(nanos)
+                .to_rfc3339_opts(SecondsFormat::AutoSi, true)
+        }
         _ => anyvalue_to_search_string(&value)?,
     };
     Some(Event { nanos, text })

@@ -33,11 +33,12 @@ pub(super) fn resolve_source_order(
         // synthetic row-count anchor for empty projections too.
         for offset in (0..total_rows).step_by(PROJECT_BATCH_ROWS) {
             job.check_cancelled()?;
-            let frame = DataFrame::new(vec![Series::full_null(
-                INTERNAL_ROW_ID,
+            let frame = DataFrame::new_infer_height(vec![Series::full_null(
+                INTERNAL_ROW_ID.into(),
                 PROJECT_BATCH_ROWS.min(total_rows - offset),
                 &DataType::Null,
-            )])
+            )
+            .into()])
             .map_err(|error| AppError::from(anyhow::Error::from(error)))?;
             annotated_filtered +=
                 append_matching_rows(&frame, offset, spec, prepared, flags, &mut filtered, job)?;

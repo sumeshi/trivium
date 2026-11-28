@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use trivium_engine::condition::{Condition, Node, Op};
 use trivium_engine::ops::export::{export_project, ExportProjectPayload};
-use trivium_engine::ops::projects::{create_project, load_project, CreateProjectPayload, ProjectRequest};
+use trivium_engine::ops::projects::{
+    create_project, load_project, CreateProjectPayload, ProjectRequest,
+};
 use trivium_engine::ops::rows::{query_project_rows, QueryRowsPayload, QuerySpec};
 use trivium_engine::project_io::{
     read_original_records, read_project_dataframe, INTERNAL_SOURCE_RECORD,
@@ -45,7 +47,11 @@ fn create(
     .expect("failed to create project")
 }
 
-fn query(store: &ProjectsStore, id: Uuid, spec: QuerySpec) -> trivium_engine::ops::rows::QueryRowsResponse {
+fn query(
+    store: &ProjectsStore,
+    id: Uuid,
+    spec: QuerySpec,
+) -> trivium_engine::ops::rows::QueryRowsResponse {
     query_project_rows(
         store,
         QueryRowsPayload {
@@ -67,7 +73,12 @@ fn condition(column: &str, value: &str) -> Node {
     })
 }
 
-fn export(store: &ProjectsStore, id: Uuid, destination: &Path, columns: Option<Vec<String>>) -> Vec<Vec<String>> {
+fn export(
+    store: &ProjectsStore,
+    id: Uuid,
+    destination: &Path,
+    columns: Option<Vec<String>>,
+) -> Vec<Vec<String>> {
     export_project(
         store,
         ExportProjectPayload {
@@ -150,8 +161,8 @@ fn csv_duplicate_and_empty_headers_get_positional_ids() {
     assert_eq!(
         ids,
         vec![
-            "c000001", "c000002", "c000003", "c000004", "c000005", "c000006", "c000007",
-            "c000008", "c000009", "c000010", "c000011", "c000012"
+            "c000001", "c000002", "c000003", "c000004", "c000005", "c000006", "c000007", "c000008",
+            "c000009", "c000010", "c000011", "c000012"
         ],
         "every header position gets its own id, including duplicates and the empty header"
     );
@@ -342,9 +353,11 @@ fn restore_annotations_is_explicit_and_keeps_the_columns() {
 
     let without = create(&store, &path, None);
     assert_eq!(without.meta.flagged_records, 0);
-    let flags = load_flags(&store.database_path(&without.meta.id))
-        .expect("load flags");
-    assert!(flags.is_empty(), "trivium-* must not become annotations by default");
+    let flags = load_flags(&store.database_path(&without.meta.id)).expect("load flags");
+    assert!(
+        flags.is_empty(),
+        "trivium-* must not become annotations by default"
+    );
     let loaded_without = load_project(
         &store,
         ProjectRequest {
@@ -363,12 +376,14 @@ fn restore_annotations_is_explicit_and_keeps_the_columns() {
 
     let with = create(&store, &path, Some(true));
     assert_eq!(with.meta.flagged_records, 1);
-    let flags = load_flags(&store.database_path(&with.meta.id))
-        .expect("load flags");
+    let flags = load_flags(&store.database_path(&with.meta.id)).expect("load flags");
     let entry = flags.get(&0).expect("row 0 annotation");
     assert_eq!(entry.flag, "critical");
     assert_eq!(entry.memo.as_deref(), Some("memo one"));
-    assert!(!flags.contains_key(&1), "zero flag and blank memo is no entry");
+    assert!(
+        !flags.contains_key(&1),
+        "zero flag and blank memo is no entry"
+    );
 
     let loaded_with = load_project(
         &store,
@@ -438,14 +453,20 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
         .collect();
     assert_eq!(
         labels,
-        vec!["a.b", "a/b", "__rowid", "trivium-memo", "only_later", "arr", "empty"]
+        vec![
+            "a.b",
+            "a/b",
+            "__rowid",
+            "trivium-memo",
+            "only_later",
+            "arr",
+            "empty"
+        ]
     );
     let ids: Vec<&str> = loaded.columns.iter().map(String::as_str).collect();
     assert_eq!(
         ids,
-        vec![
-            "c000001", "c000002", "c000003", "c000004", "c000005", "c000006", "c000007"
-        ]
+        vec!["c000001", "c000002", "c000003", "c000004", "c000005", "c000006", "c000007"]
     );
     assert!(!loaded.columns.iter().any(|id| id == "__original"));
     assert!(!loaded_rows[0].cells.contains_key("__original"));
@@ -490,7 +511,10 @@ fn jsonl_pointer_paths_keep_collisions_apart() {
     assert_eq!(records[1], json!({}));
     let first = records[0].as_object().expect("first record object");
     assert_eq!(first.get("a.b"), Some(&json!(1)));
-    assert_eq!(first.get("a").and_then(|value| value.get("b")), Some(&json!(2)));
+    assert_eq!(
+        first.get("a").and_then(|value| value.get("b")),
+        Some(&json!(2))
+    );
     assert_eq!(first.get("__rowid"), Some(&json!("source-row")));
     assert_eq!(first.get("trivium-memo"), Some(&json!("source memo")));
     assert_eq!(first.get("only_later"), Some(&Value::Null));
@@ -521,7 +545,7 @@ fn source_records(store: &ProjectsStore, id: Uuid) -> Vec<i64> {
         .expect("source record column")
         .i64()
         .expect("integer source records")
-        .into_no_null_iter()
+        .no_null_iter()
         .collect()
 }
 

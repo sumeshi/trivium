@@ -257,16 +257,21 @@ fn two_million_row_lookup_reaches_source_start_middle_and_end_without_full_reads
     let id = Uuid::new_v4();
     let directory = store.project_dir(&id);
     fs::create_dir_all(&directory).unwrap();
-    let mut frame = DataFrame::new(vec![
-        Series::new("c000001", (0..2_000_000u64).collect::<Vec<_>>()),
+    let mut frame = DataFrame::new_infer_height(vec![
+        Series::new("c000001".into(), (0..2_000_000u64).collect::<Vec<_>>()).into(),
         Series::new(
-            "__original",
+            "__original".into(),
             (0..2_000_000u64)
                 .map(|row| serde_json::json!({"seq": row}).to_string())
                 .collect::<Vec<_>>(),
-        ),
-        Series::new("__rowid", (0..2_000_000i64).collect::<Vec<_>>()),
-        Series::new("__trivium_source_record", (1..=2_000_000i64).collect::<Vec<_>>()),
+        )
+        .into(),
+        Series::new("__rowid".into(), (0..2_000_000i64).collect::<Vec<_>>()).into(),
+        Series::new(
+            "__trivium_source_record".into(),
+            (1..=2_000_000i64).collect::<Vec<_>>(),
+        )
+        .into(),
     ])
     .unwrap();
     ParquetWriter::new(File::create(directory.join("data.parquet")).unwrap())

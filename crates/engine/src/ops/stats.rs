@@ -65,7 +65,7 @@ fn column_stats_with_limits(
             .column(&projection[0])
             .map_err(|error| AppError::Other(error.into()))?;
         stats.observe(
-            series,
+            series.as_materialized_series(),
             (0..batch.frame.height()).filter(|row| selected.contains(batch.offset + row)),
             job,
         )?;

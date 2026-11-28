@@ -65,7 +65,7 @@ fn canonical_flags_count_unknown_values_as_unflagged() {
     .enumerate()
     .map(|(index, value)| (index, flag(value)))
     .collect();
-    let series = Series::new("ts", &["2024-01-01T00:00:00.000000001"; 8]);
+    let series = Series::new("ts".into(), &["2024-01-01T00:00:00.000000001"; 8]);
     let result = histogram_series_annotated(
         "ts",
         &series,
@@ -96,7 +96,7 @@ fn rfc3339_offsets_share_exact_nanosecond_buckets_without_changing_source_text()
         "2024-01-01T09:00:00.000000002+09:00",
         "2023-12-31T19:00:00.000000003-05:00",
     ];
-    let series = Series::new("ts", &text);
+    let series = Series::new("ts".into(), &text);
     let result =
         histogram_series_annotated("ts", &series, &[0, 1, 2], 3, None, &HashMap::new(), false)
             .unwrap();
@@ -116,7 +116,7 @@ fn rfc3339_offsets_share_exact_nanosecond_buckets_without_changing_source_text()
 #[test]
 fn nanosecond_buckets_have_exact_nonoverlapping_bounds_and_manual_flag_counts() {
     let series = Series::new(
-        "ts",
+        "ts".into(),
         &[
             Some("2024-01-01T00:00:00.000000001"),
             Some("2024-01-01T00:00:00.000000002"),
@@ -162,7 +162,7 @@ fn nanosecond_buckets_have_exact_nonoverlapping_bounds_and_manual_flag_counts() 
 fn dense_initial_period_excludes_ancient_outlier_and_show_all_restores_every_event() {
     let mut values = vec!["2000-01-01T00:00:00.000000001".to_string()];
     values.extend((0..100).map(|index| format!("2024-01-01T00:00:00.{index:09}")));
-    let series = Series::new("ts", values);
+    let series = Series::new("ts".into(), values);
     let rows = (0..101).collect::<Vec<_>>();
     let flags = HashMap::new();
     let focused = histogram_series_annotated("ts", &series, &rows, 60, None, &flags, true).unwrap();
@@ -203,7 +203,7 @@ fn large_sorted_input_uses_repeatable_bounded_sample_without_losing_counts() {
             }
         })
         .collect::<Vec<_>>();
-    let series = Series::new("ts", values);
+    let series = Series::new("ts".into(), values);
     let rows = (0..20_000).collect::<Vec<_>>();
     let flags = HashMap::new();
     let first = histogram_series_annotated("ts", &series, &rows, 60, None, &flags, true).unwrap();
@@ -222,7 +222,7 @@ fn uniform_period_is_not_arbitrarily_zoomed_and_numeric_flags_are_accurate() {
     let rows = (0..100).collect::<Vec<_>>();
     let result = histogram_series_annotated(
         "ts",
-        &Series::new("ts", values),
+        &Series::new("ts".into(), values),
         &rows,
         10,
         None,
@@ -237,8 +237,8 @@ fn uniform_period_is_not_arbitrarily_zoomed_and_numeric_flags_are_accurate() {
         .into_iter()
         .collect();
     for series in [
-        Series::new("v", &[0i64, 1, 2, 3]),
-        Series::new("v", &[0.1f64, 0.2, 0.3, 0.4]),
+        Series::new("v".into(), &[0i64, 1, 2, 3]),
+        Series::new("v".into(), &[0.1f64, 0.2, 0.3, 0.4]),
     ] {
         let result =
             histogram_series_annotated("v", &series, &[0, 1, 2, 3], 2, None, &flags, false)

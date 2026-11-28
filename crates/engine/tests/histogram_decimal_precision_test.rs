@@ -67,7 +67,7 @@ impl Fixture {
                 )
             })
             .collect();
-        let series = Series::new(&column, values);
+        let series = Series::new(column.as_str().into(), values);
         let data = store.project_dir(&id).join("data.parquet");
         let source_bytes = fs::read(&source).unwrap();
         let data_bytes = fs::read(&data).unwrap();

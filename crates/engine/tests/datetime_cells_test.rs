@@ -42,19 +42,18 @@ fn source_datetime_fixtures_publish_exact_keys_without_rewriting_text() {
 
 #[test]
 fn typed_temporal_units_publish_exact_keys_without_guessing_numeric_epochs() {
-    let timezone = None;
     for (value, expected) in [
         (AnyValue::Date(-1), Some("-86400000000000")),
         (
-            AnyValue::Datetime(-1, TimeUnit::Nanoseconds, &timezone),
+            AnyValue::Datetime(-1, TimeUnit::Nanoseconds, None),
             Some("-1"),
         ),
         (
-            AnyValue::Datetime(1, TimeUnit::Microseconds, &timezone),
+            AnyValue::Datetime(1, TimeUnit::Microseconds, None),
             Some("1000"),
         ),
         (
-            AnyValue::Datetime(1, TimeUnit::Milliseconds, &timezone),
+            AnyValue::Datetime(1, TimeUnit::Milliseconds, None),
             Some("1000000"),
         ),
         (AnyValue::Int64(1_700_000_000), None),

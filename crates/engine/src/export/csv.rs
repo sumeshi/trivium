@@ -13,7 +13,7 @@ use crate::{
     store::ProjectsStore,
 };
 use anyhow::Context;
-use polars::prelude::*;
+use polars::prelude::{CsvWriter, DataFrame, IdxCa, IdxSize, SerWriter};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io::Write, path::PathBuf, sync::Arc};
 use uuid::Uuid;
@@ -201,7 +201,7 @@ pub fn export_project_with_job(
             }
             let selected = batch
                 .frame
-                .take(&IdxCa::from_vec("", local))
+                .take(&IdxCa::from_vec("".into(), local))
                 .context("failed to select export batch")?;
             let mut output = if include_annotations {
                 annotations::annotation_series(
@@ -218,7 +218,8 @@ pub fn export_project_with_job(
                     .expect("projected export column")
                     .clone()
             }));
-            let mut frame = DataFrame::new(output).context("failed to build export batch")?;
+            let mut frame =
+                DataFrame::new_infer_height(output).context("failed to build export batch")?;
             if let Some(sorter) = &mut sorter {
                 let mut sink = RecordSink::new(sorter, &batch_ranks, job);
                 CsvWriter::new(&mut sink)

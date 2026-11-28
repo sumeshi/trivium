@@ -94,7 +94,7 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
         .get_column_names()
         .into_iter()
         .filter(|name| !is_internal_column(name))
-        .map(str::to_string)
+        .map(ToString::to_string)
         .collect();
     let mut widths: HashMap<String, usize> = columns
         .iter()
@@ -102,7 +102,11 @@ pub fn compute_column_max_chars(df: &DataFrame) -> HashMap<String, usize> {
         .collect();
     for column in &columns {
         if let Ok(series) = df.column(column) {
-            for value in series.iter().take(COLUMN_WIDTH_SAMPLE_ROWS) {
+            for value in series
+                .as_materialized_series()
+                .iter()
+                .take(COLUMN_WIDTH_SAMPLE_ROWS)
+            {
                 let length = value_display_length(&anyvalue_to_json(&value));
                 if let Some(current) = widths.get_mut(column) {
                     *current = (*current).max(length);

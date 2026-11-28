@@ -57,7 +57,10 @@ fn existing_case_reads_preserve_storage_original_records_and_saved_annotations()
     // Reproduce the previous importer representation, retaining __original.
     let mut frame = read_project_dataframe(&path).unwrap();
     frame
-        .replace(parent, Series::new(parent, [None, Some("bar")]))
+        .replace(
+            parent,
+            Series::new(parent.as_str().into(), [None, Some("bar")]).into(),
+        )
         .unwrap();
     write_project_dataframe(&path, &mut frame).unwrap();
     let original_bytes = fs::read(&path).unwrap();
