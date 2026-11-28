@@ -93,7 +93,7 @@
         dispatch("refresh");
       }
     } catch (err) {
-      if (current()) {
+      if (operation === "undo" ? owned() : current()) {
         error = errorMessage(err);
       }
     } finally { if (alive) busy = false; }

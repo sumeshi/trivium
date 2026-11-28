@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { BulkAnnotateArgs } from "./backend";
 import type { BulkCount } from "./types";
 import { applyBulkAnnotation, buildBulkAnnotateArgs, buildBulkPatch } from "./bulkAnnotation.ts";
+import { runSvelteTest } from "../../tests/ui/headlessSvelte.ts";
 
 const filters = {
   search: "alpha", flag: "suspicious|critical" as const, bookmarkedOnly: true,
@@ -157,3 +158,33 @@ test("a race during Apply asks the user to apply again, with no visible preview 
     bulkUpdate: async () => { throw failure; },
   }, args(), { isCurrent: () => true }), error => error === failure);
 });
+
+test("bulk Undo reports same-case failures after query changes without reviving stale owners", () => runSvelteTest(String.raw`
+import { createWorkspaceController } from './src/lib/workspaceController.ts';
+const Panel=await compileHeadless('BulkControls');
+for(const operation of ['undo','apply']){
+ for(const mode of ['same','query-changed','query-loading','other-case','disposed']){
+  let reject;const pending=new Promise((resolve,no)=>{reject=no;});
+  const workspace=createWorkspaceController();globalThis.__workspace=workspace;
+  workspace.currentProjectId.set('case');workspace.projectDetail.set({project:{meta:{id:'case',total_records:1}},columns:[]});
+  workspace.queryCountKnown.set(true);workspace.totalFilteredRows.set(1);
+  workspace.backend.set({bulkUndo:()=>pending,bulkApply:()=>pending});
+  const panel=await mountHeadless(Panel);let refreshes=0;panel.$on('refresh',()=>refreshes++);
+  if(operation==='apply'){panel.$capture_state().chooseFlag('critical');await tick();}
+  const running=panel.$capture_state().run(operation);
+  assert.equal(panel.$capture_state().busy,true,'the accepted operation is pending');
+  if(mode==='query-changed')workspace.search.set('different query');
+  if(mode==='query-loading'){workspace.queryCountKnown.set(false);workspace.appliedResultLoading.set(true);}
+  if(mode==='other-case')workspace.currentProjectId.set('other');
+  if(mode==='disposed')workspace.dispose();
+  const message='Annotation changed since the bulk operation; undo would overwrite it.';
+  reject(Error(message));await running;await tick();
+  const state=panel.$capture_state();
+  const visible=mode==='same'||operation==='undo'&&['query-changed','query-loading'].includes(mode);
+  assert.equal(state.error,visible?message:'',operation+'/'+mode);
+  assert.equal(refreshes,0,'a failed mutation must never publish successful annotation changes');
+  if(mode!=='disposed')assert.equal(state.busy,false);
+  panel.$destroy();workspace.dispose();
+ }
+}
+`));
