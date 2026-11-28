@@ -518,7 +518,7 @@
     scrollFrame = null;
     const target = pendingScrollEl;
     pendingScrollEl = null;
-    if (!target?.isConnected) return;
+    if (!target?.isConnected || target !== get(bodyScrollEl)) return;
     const top = target.scrollTop;
     if ($scrollTop !== top) scrollTop.set(top);
     rememberOffset(logicalRowAt(top, $totalFilteredRows, $viewportHeight, $rowHeight));
@@ -526,7 +526,7 @@
   };
 
   const queueScroll = (target: HTMLDivElement) => {
-    if (!target.isConnected) return;
+    if (!target.isConnected || target !== get(bodyScrollEl)) return;
     rememberOffset(logicalRowAt(target.scrollTop, $totalFilteredRows, $viewportHeight, $rowHeight));
     mirrorHorizontal(target.scrollLeft);
     if (pendingScrollEl !== target) pendingScrollEl = target;
@@ -647,6 +647,31 @@
     }
   };
 
+  const observeBody = (body: HTMLDivElement | null, observer: ResizeObserver | null) => {
+    if (!observer || body === observedScrollEl) return;
+    if (observedScrollEl) observer.unobserve(observedScrollEl);
+    observedScrollEl = body;
+    if (pendingScrollEl && pendingScrollEl !== body) {
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+      pendingScrollEl = null;
+    }
+    if (!body) return;
+    tableWidth.set(body.clientWidth);
+    observer.observe(body);
+    const left = get(scrollLeft), initialLeft = body.scrollLeft, generation = get(viewGeneration);
+    void tick().then(() => {
+      if (observer !== resizeObserver || body !== get(bodyScrollEl) || !body.isConnected
+        || generation !== get(viewGeneration) || pendingScrollEl
+        || get(scrollLeft) !== left || body.scrollLeft !== initialLeft) return;
+      // The replacement grid must exist before the browser can clamp a saved
+      // horizontal position to its current columns and viewport width.
+      body.scrollLeft = left;
+      syncHeader(body.scrollLeft);
+    });
+  };
+  $: observeBody($bodyScrollEl, resizeObserver);
+
   onMount(() => {
     const unsubscribeScroll = scrollTop.subscribe((top) => {
       const target = $bodyScrollEl;
@@ -658,14 +683,11 @@
     });
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        tableWidth.set(entry.contentRect.width);
+        if (entry.target === observedScrollEl && entry.target === get(bodyScrollEl)) {
+          tableWidth.set(entry.contentRect.width);
+        }
       }
     });
-    if ($bodyScrollEl) {
-      tableWidth.set($bodyScrollEl.clientWidth);
-      resizeObserver.observe($bodyScrollEl);
-      observedScrollEl = $bodyScrollEl;
-    }
 
     return () => {
       endColumnDrag();
@@ -678,6 +700,8 @@
         resizeObserver.unobserve(observedScrollEl);
       }
       resizeObserver?.disconnect();
+      resizeObserver = null;
+      observedScrollEl = null;
     };
   });
 

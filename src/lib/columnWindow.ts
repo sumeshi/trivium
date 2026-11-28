@@ -31,8 +31,14 @@ export function visibleTableColumns(
   previous: readonly TableColumn[] = [], overscan = 2, focusedId: string | null = null,
 ): readonly TableColumn[] {
   const scrolling = layout.filter((column) => !column.frozen);
-  const left = Math.max(0, scrollLeft) + Math.min(Math.max(0, viewportWidth), Math.max(0, frozenEdge));
-  const right = Math.max(0, scrollLeft) + Math.max(0, viewportWidth);
+  const viewport = Math.max(0, viewportWidth);
+  const last = layout[layout.length - 1];
+  // Visibility can shrink while the body is unmounted. Match the browser's
+  // physical scroll range before using its still-saved offset for virtualization.
+  const maximum = Math.max(0, (last ? last.left + last.width : 0) - viewport);
+  const offset = Math.min(Math.max(0, scrollLeft), maximum);
+  const left = offset + Math.min(viewport, Math.max(0, frozenEdge));
+  const right = offset + viewport;
   let start = 0;
   while (start < scrolling.length && scrolling[start].left + scrolling[start].width <= left) start += 1;
   let end = start;

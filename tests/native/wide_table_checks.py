@@ -55,6 +55,43 @@ def _geometry(web) -> dict:
     """)
 
 
+def _empty_result_recovery(web, columns: list[str], total: int) -> dict:
+    """A remounted narrow table must discard impossible stored scroll offsets."""
+    _horizontal_wheel(web, 2000)
+    web.input('[aria-label="Search rows"]', 'no-such-wide-table-row', enter=True)
+    web.results(0)
+    web.named('Choose visible columns')
+    web.named('Deselect all', '#visible-column-menu')
+    kept = columns[:6]
+    for column in kept:
+        web.tap(web.node(f'#column-{column}'))
+    web.named('Done', '#visible-column-menu')
+    web.write('[aria-label="Search rows"]', '')
+    web.results(total)
+    _settle(web)
+    recovered = _geometry(web)
+    assert recovered['scrollLeft'] == 0, recovered
+    assert [header['id'] for header in recovered['headers']] == kept, recovered
+    assert all(row == kept for row in recovered['sourceColumns']), recovered
+
+    # The new body must also be observed after replacing the empty-state view.
+    try:
+        web.request('POST', web.route('window/rect'), {'width': 900, 'height': 827})
+        wait_for(lambda: web.script("""const body=document.querySelector('.virtual-viewport'),
+          footer=document.querySelector('.table-horizontal-scroll');
+          return !!footer && Math.abs(footer.clientWidth-body.clientWidth)<=1;"""),
+            bool, 'the remounted table tracks native window resizing')
+        resized = _geometry(web)
+        assert resized['viewport']['right'] - resized['viewport']['left'] < recovered['viewport']['right'] - recovered['viewport']['left'], resized
+    finally:
+        web.request('POST', web.route('window/rect'), {'width': 1280, 'height': 827})
+        web.named('Choose visible columns')
+        web.named('Select all', '#visible-column-menu')
+        web.named('Done', '#visible-column-menu')
+        _settle(web)
+    return {'recovered': recovered, 'resized': resized}
+
+
 def verify_wide_table(web, data, root: Path, evidence: Path, report: dict) -> None:
     total = 2500
     source = root / f"wide-table-{uuid.uuid4().hex[:8]}.csv"
@@ -192,6 +229,7 @@ def verify_wide_table(web, data, root: Path, evidence: Path, report: dict) -> No
         assert cross_axis["before"]["top"] > 0 and cross_axis["after"]["top"] == 0, cross_axis
         assert cross_axis["before"]["left"] == cross_axis["after"]["left"] == 700, cross_axis
         verify_recycled_inputs(web, project_id, report)
+        report["empty_result_column_recovery"] = _empty_result_recovery(web, [columns[name] for name in names], total)
         web.screenshot(evidence / "wide-table-bounded-dom.png")
         report["wide_table"] = {"configured_columns": 120, "rows": total, "initial": first, "last_column": last,
             "retained_rows": retained, "recycled_focus": recycled_focus, "cross_axis_navigation": cross_axis, "header_tabs": 119,

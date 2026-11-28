@@ -63,3 +63,24 @@ test("one focused offscreen column retains its identity without widening the vir
   assert.equal(visibleTableColumns(layout, 6010, 1000, annotations, focused, 2, "c2"), focused);
   assert.equal(visibleTableColumns(layout, 6000, 1000, annotations, normal, 2, "hidden-column"), normal);
 });
+
+test("a saved offset cannot hide leading columns after the visible layout shrinks", () => {
+  const columns = Array.from({ length: 6 }, (_, index) => `c${index}`);
+  const widths = columns.map(() => 80);
+  const frozen = frozenColumnLayout(columns, columns, widths, "c0", annotations);
+  const layout = tableColumnLayout(columns, widths, frozen.offsets, annotations);
+  const initial = visibleTableColumns(layout, 0, 1000, frozen.width);
+  assert.deepEqual(initial.map(({ id }) => id), columns);
+  assert.equal(visibleTableColumns(layout, 2000, 1000, frozen.width, initial), initial);
+});
+
+test("stale offsets beyond a still-scrollable layout use its actual rightmost window", () => {
+  const columns = Array.from({ length: 12 }, (_, index) => `c${index}`);
+  const layout = tableColumnLayout(columns, columns.map(() => 100), new Map(), annotations);
+  const maximum = annotations + 1200 - 1000;
+  const last = visibleTableColumns(layout, maximum, 1000, annotations);
+  assert.equal(visibleTableColumns(layout, 2000, 1000, annotations, last), last);
+  for (const column of layout.filter(column => column.left + column.width > maximum + annotations)) {
+    assert.ok(last.includes(column), `Column ${column.id} remains in the browser's clamped viewport`);
+  }
+});
