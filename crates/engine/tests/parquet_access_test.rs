@@ -279,6 +279,35 @@ fn partial_string_batches_do_not_retain_unselected_dictionary_text() {
 }
 
 #[test]
+fn small_pages_release_unselected_string_buffers_before_accumulating_groups() {
+    let _lock = guard();
+    let fixture = Fixture::new(25_000, 25_000);
+    for (frame, rows) in [
+        (
+            read_page_dataframe(&fixture.path, &columns(), 5000, 3).unwrap(),
+            vec![5000, 5001, 5002],
+        ),
+        (
+            read_page_rows_dataframe(&fixture.path, &columns(), &[0, 12_500, 24_999, 12_500])
+                .unwrap(),
+            vec![0, 12_500, 24_999, 12_500],
+        ),
+    ] {
+        assert_rows(&frame, &rows);
+        let strings = frame.column("text").unwrap().str().unwrap();
+        let visible_bytes: usize = strings.no_null_iter().map(str::len).sum();
+        let retained_bytes: usize = strings
+            .downcast_iter()
+            .map(|array| array.total_buffer_len())
+            .sum();
+        assert!(
+            retained_bytes <= visible_bytes + 8192,
+            "pages must release unselected text: {retained_bytes} retained for {visible_bytes} visible bytes"
+        );
+    }
+}
+
+#[test]
 fn cancellation_before_or_between_batches_stops_further_parquet_io() {
     let _lock = guard();
     let fixture = Fixture::new(25_000, 12_500);

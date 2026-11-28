@@ -1,13 +1,31 @@
 use std::{path::Path, sync::atomic::Ordering};
 
 use anyhow::{anyhow, Result};
-use polars::prelude::{DataFrame, NewChunkedArray, UInt32Chunked};
+use polars::prelude::{DataFrame, IntoSeries, NewChunkedArray, StringChunked, UInt32Chunked};
 
 use crate::jobs::JobContext;
 
 use super::{
     last_page_projection_store, record_projection, ProjectBatchReader, PROJECT_PAGE_READS,
 };
+
+/// Taking StringView rows shares the source buffers. Retain only selected text
+/// before accumulating page batches, so sparse pages release unrelated values.
+fn compact_page_strings(frame: DataFrame) -> Result<DataFrame> {
+    let columns = frame.apply_columns(|column| {
+        if let Ok(strings) = column.str() {
+            StringChunked::from_chunk_iter(
+                column.name().clone(),
+                strings.downcast_iter().map(|array| array.clone().gc()),
+            )
+            .into_series()
+            .into()
+        } else {
+            column.clone()
+        }
+    });
+    Ok(DataFrame::new(frame.height(), columns)?)
+}
 
 /// Read only intersecting row groups and projected columns, not the file prefix.
 pub fn read_page_dataframe(
@@ -44,7 +62,8 @@ pub fn read_page_dataframe_with_job(
         if start < stop {
             let indices =
                 UInt32Chunked::from_iter_values("take".into(), (start..stop).map(|row| row as u32));
-            output.vstack_mut(&batch.frame.take(&indices)?)?;
+            let selected = compact_page_strings(batch.frame.take(&indices)?)?;
+            output.vstack_mut(&selected)?;
         }
         if batch.offset.saturating_add(batch.frame.height()) >= end {
             break;
@@ -96,7 +115,8 @@ pub fn read_page_rows_dataframe_with_job(
                     .iter()
                     .map(|row| (row - batch.offset) as u32),
             );
-            output.vstack_mut(&batch.frame.take(&indices)?)?;
+            let selected = compact_page_strings(batch.frame.take(&indices)?)?;
+            output.vstack_mut(&selected)?;
             next = last;
         }
         if next == sorted.len() {
