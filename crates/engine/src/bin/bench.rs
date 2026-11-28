@@ -33,6 +33,8 @@ use trivium_engine::ops::rows::{
 use trivium_engine::project_io::{project_data_reads, reset_project_data_reads};
 use trivium_engine::store::ProjectsStore;
 
+#[path = "bench/refinement.rs"]
+mod refinement;
 #[path = "bench/support.rs"]
 mod support;
 
@@ -199,6 +201,8 @@ fn run_fixture(fixture: &str) -> Result<(), AppError> {
     once("search_scoped_cold", || {
         page(&store, id, Some(&format!("{}:alice", user_id)), None, 0).map(|_| ())
     })?;
+
+    refinement::measure(&store, &meta)?;
 
     reset_project_data_reads();
     let mut flag_save = Samples::new("flag_save");
