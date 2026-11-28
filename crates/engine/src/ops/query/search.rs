@@ -10,8 +10,7 @@ use crate::error::AppError;
 use crate::jobs::JobContext;
 use crate::models::FlagEntry;
 use crate::search::{
-    is_tag_scope, prepare_tag_tokens, tokenize_search_query, validate_search_input_size,
-    validate_search_tokens, SearchToken,
+    prepare_tag_tokens, tokenize_search_query, validate_search_input_size, validate_search_tokens,
 };
 use crate::value_utils::{anyvalue_to_search_string, record_stringified_column_count};
 
@@ -40,23 +39,12 @@ impl PreparedQuery {
         search: Option<&str>,
         condition: Option<&Node>,
     ) -> Result<Self, AppError> {
-        // An empty search scope is the same as "every data column".
-        let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
         validate_search_input_size(search.unwrap_or_default()).map_err(AppError::Message)?;
         let search_raw = search.map(str::trim).filter(|value| !value.is_empty());
         let tokens = search_raw.map(tokenize_search_query).unwrap_or_default();
         if search_raw.is_some() {
             validate_search_tokens(&tokens).map_err(AppError::Message)?;
         }
-        let reads_tags = tokens.iter().any(|token| match token {
-            SearchToken::Term {
-                col: Some(column), ..
-            }
-            | SearchToken::QuotedTerm {
-                col: Some(column), ..
-            } => is_tag_scope(column),
-            _ => false,
-        });
         let tokens = prepare_tag_tokens(&tokens).map_err(AppError::Message)?;
         let search_node = search_tokens_to_node(&tokens)
             .map_err(AppError::Message)?
@@ -74,10 +62,33 @@ impl PreparedQuery {
             (None, Some(condition)) => Some(condition),
             (None, None) => None,
         };
+        Self::from_compiled_node(column_names, requested_columns, node)
+    }
 
+    fn from_compiled_node(
+        column_names: &[String],
+        requested_columns: Option<&[String]>,
+        node: Option<PreparedNode>,
+    ) -> Result<Self, AppError> {
+        let mut query = Self::from_compiled_nodes(column_names, requested_columns, node.iter())?;
+        query.node = node;
+        Ok(query)
+    }
+
+    fn from_compiled_nodes<'a>(
+        column_names: &[String],
+        requested_columns: Option<&[String]>,
+        nodes: impl Iterator<Item = &'a PreparedNode>,
+    ) -> Result<Self, AppError> {
+        // An empty search scope is the same as "every data column".
+        let requested_scope = requested_columns.filter(|columns| !columns.is_empty());
         let mut required_columns = Vec::new();
         let mut needs_unscoped_cells = false;
-        if let Some(node) = &node {
+        let mut needs_joined_text = false;
+        let mut reads_tags = false;
+        for node in nodes {
+            needs_joined_text |= node.needs_joined_text();
+            reads_tags |= node.reads_tags();
             for column in node.columns() {
                 if column.is_empty() {
                     needs_unscoped_cells = true;
@@ -90,9 +101,8 @@ impl PreparedQuery {
             }
         }
 
-        let needs_joined_text = node.as_ref().is_some_and(PreparedNode::needs_joined_text);
         Ok(Self {
-            node,
+            node: None,
             required_columns,
             // Search-bar and structured predicates share the selected scope.
             join_columns: if needs_unscoped_cells {
@@ -103,6 +113,64 @@ impl PreparedQuery {
             needs_joined_text,
             reads_tags,
         })
+    }
+
+    /// Removes conjunction prefixes already satisfied by a cached result.
+    /// Preparation of the complete query must validate every predicate first.
+    pub(super) fn refine(
+        &mut self,
+        column_names: &[String],
+        requested_columns: Option<&[String]>,
+        search_prefix: usize,
+        condition_prefix: usize,
+        search_terms: usize,
+        condition_terms: usize,
+    ) -> Result<bool, AppError> {
+        let Some(total_terms) = search_terms.checked_add(condition_terms) else {
+            return Ok(false);
+        };
+        let actual_terms = self
+            .node
+            .as_ref()
+            .map_or(0, |node| node.conjunction().len());
+        if actual_terms != total_terms
+            || search_prefix > search_terms
+            || condition_prefix > condition_terms
+        {
+            return Ok(false);
+        }
+        let Some(node) = self.node.as_ref() else {
+            return Ok(true);
+        };
+        let retain = |index: usize| {
+            if index < search_terms {
+                index >= search_prefix
+            } else {
+                index - search_terms >= condition_prefix
+            }
+        };
+        // Resolve residual bindings before consuming the tree, leaving the
+        // complete query intact if caller-supplied column metadata is invalid.
+        let mut residual = Self::from_compiled_nodes(
+            column_names,
+            requested_columns,
+            node.conjunction()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, child)| retain(index).then_some(child)),
+        )?;
+        let children = self
+            .node
+            .take()
+            .expect("validated conjunction")
+            .into_conjunction()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, child)| retain(index).then_some(child))
+            .collect();
+        residual.node = Some(PreparedNode::from_conjunction(children));
+        *self = residual;
+        Ok(true)
     }
 
     /// Required source columns for both projection and evaluation. Unscoped
@@ -314,4 +382,107 @@ fn resolve_column<'a>(column_names: &'a [String], column: &str) -> Result<&'a st
         .find(|name| name.eq_ignore_ascii_case(column))
         .map(String::as_str)
         .ok_or_else(|| AppError::Message(format!("Unknown column: {}", column)))
+}
+
+#[cfg(test)]
+mod refinement_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn refinement_removes_separate_prefixes_and_keeps_remaining_order() {
+        let columns =
+            ["old_search", "new_search", "old_condition", "new_condition"].map(str::to_string);
+        let condition: Node = serde_json::from_value(json!({
+            "kind": "and",
+            "children": [
+                {"column": "old_condition", "op": "regex", "values": ["^old$"]},
+                {"column": "new_condition", "op": "regex", "values": ["^pass$"]}
+            ]
+        }))
+        .unwrap();
+        let mut query = PreparedQuery::prepare(
+            &columns,
+            None,
+            Some("old_search:old new_search:yes"),
+            Some(&condition),
+        )
+        .unwrap();
+        assert!(query.refine(&columns, None, 1, 1, 2, 2).unwrap());
+        assert_eq!(query.projection(), ["new_search", "new_condition"]);
+        let frame = DataFrame::new_infer_height(vec![
+            Series::new("new_search".into(), ["yes", "yes", "no"]).into(),
+            Series::new("new_condition".into(), ["pass", "fail", "pass"]).into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            query
+                .evaluate(&frame, &HashMap::new(), 0, None, &JobContext::none())
+                .unwrap(),
+            Some(vec![true, false, false])
+        );
+    }
+
+    #[test]
+    fn refinement_recomputes_unscoped_text_and_tag_requirements() {
+        let columns = ["value".to_string(), "other".to_string()];
+        let scope = ["value".to_string()];
+        let condition: Node = serde_json::from_value(json!({
+            "column": "", "op": "regex", "values": ["^exact value$"]
+        }))
+        .unwrap();
+        let mut query = PreparedQuery::prepare(
+            &columns,
+            Some(&scope),
+            Some("@tag:review"),
+            Some(&condition),
+        )
+        .unwrap();
+        assert!(query.reads_tags && query.needs_joined_text);
+        assert!(query.refine(&columns, Some(&scope), 1, 0, 1, 1).unwrap());
+        assert!(!query.reads_tags && query.needs_joined_text);
+        assert_eq!(query.projection(), ["value"]);
+        let frame = DataFrame::new_infer_height(vec![Series::new(
+            "value".into(),
+            ["exact value", "other"],
+        )
+        .into()])
+        .unwrap();
+        assert_eq!(
+            query
+                .evaluate(&frame, &HashMap::new(), 0, None, &JobContext::none())
+                .unwrap(),
+            Some(vec![true, false])
+        );
+        assert!(query.refine(&columns, Some(&scope), 0, 1, 0, 1).unwrap());
+        assert!(query.projection().is_empty());
+        assert!(!query.reads_tags && !query.needs_joined_text);
+    }
+
+    #[test]
+    fn invalid_refinement_leaves_the_prepared_query_unchanged() {
+        let columns = ["value".to_string()];
+        let mut query =
+            PreparedQuery::prepare(&columns, None, Some("value:keep value:yes"), None).unwrap();
+        let original = format!("{:?}", query.node);
+        for (search_prefix, condition_prefix, search_terms, condition_terms) in [
+            (1, 0, 1, 0),
+            (3, 0, 2, 0),
+            (0, 1, 2, 0),
+            (0, 0, usize::MAX, 1),
+        ] {
+            assert!(!query
+                .refine(
+                    &columns,
+                    None,
+                    search_prefix,
+                    condition_prefix,
+                    search_terms,
+                    condition_terms,
+                )
+                .unwrap());
+            assert_eq!(format!("{:?}", query.node), original);
+            assert_eq!(query.projection(), ["value"]);
+        }
+    }
 }

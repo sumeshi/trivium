@@ -97,7 +97,7 @@ pub fn resolve_target(
         spec.search.as_deref(),
         spec.condition.as_ref(),
     )?;
-    resolve_target_prepared(df, spec, flags, &prepared, job)
+    resolve_target_prepared(df, spec, flags, &prepared, None, job)
 }
 
 pub(super) fn resolve_target_prepared(
@@ -105,12 +105,13 @@ pub(super) fn resolve_target_prepared(
     spec: &QuerySpec,
     flags: &HashMap<usize, FlagEntry>,
     prepared: &PreparedQuery,
+    candidates: Option<&[bool]>,
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
     record_resolution();
     let mut filtered = Vec::new();
     let annotated_filtered =
-        append_matching_rows(df, 0, spec, prepared, flags, &mut filtered, job)?;
+        append_matching_rows(df, 0, spec, prepared, flags, candidates, &mut filtered, job)?;
     let filtered = sort_row_indices(
         df,
         filtered,
@@ -136,25 +137,31 @@ pub(super) fn record_resolution() {
 
 /// Shared membership evaluation for an in-memory frame or one decoded batch.
 /// Annotation IDs always refer to source rows, never positions within a batch.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn append_matching_rows(
     frame: &DataFrame,
     row_offset: usize,
     spec: &QuerySpec,
     prepared: &PreparedQuery,
     flags: &HashMap<usize, FlagEntry>,
+    candidates: Option<&[bool]>,
     output: &mut Vec<usize>,
     job: &JobContext,
 ) -> Result<usize, AppError> {
     let flag_filter = FlagFilterMask::parse(spec.flag_filter.as_deref())?;
     // Unflagged selections commonly include most rows. Keep their late filter
     // rather than adding an annotation lookup for every nonmatching text row.
-    let eligible = if prepared.has_predicate()
+    let annotation_eligible = if prepared.has_predicate()
         && (spec.bookmarked_only == Some(true) || !flag_filter.matches_population(8))
     {
         let mut eligible = Vec::with_capacity(frame.height());
         for index in 0..frame.height() {
             if index.is_multiple_of(1024) {
                 job.check_cancelled()?;
+            }
+            if candidates.is_some_and(|candidates| !candidates[index]) {
+                eligible.push(false);
+                continue;
             }
             let entry = flags.get(&(row_offset + index));
             eligible.push(
@@ -168,13 +175,14 @@ pub(super) fn append_matching_rows(
     } else {
         None
     };
-    let mask = prepared.evaluate(frame, flags, row_offset, eligible.as_deref(), job)?;
+    let eligible = annotation_eligible.as_deref().or(candidates);
+    let mask = prepared.evaluate(frame, flags, row_offset, eligible, job)?;
     let mut annotated = 0;
     for index in 0..frame.height() {
         if index.is_multiple_of(1024) {
             job.check_cancelled()?;
         }
-        if eligible.as_ref().is_some_and(|eligible| !eligible[index])
+        if eligible.is_some_and(|eligible| !eligible[index])
             || mask.as_ref().is_some_and(|mask| !mask[index])
         {
             continue;
@@ -182,10 +190,8 @@ pub(super) fn append_matching_rows(
         let row_id = row_offset + index;
         let entry = flags.get(&row_id);
         let population = entry.map_or(8, |entry| flag_population(&entry.flag));
-        if eligible.is_none()
-            && (!flag_filter.matches_population(population)
-                || (spec.bookmarked_only == Some(true)
-                    && !entry.is_some_and(|entry| entry.bookmarked)))
+        if !flag_filter.matches_population(population)
+            || (spec.bookmarked_only == Some(true) && !entry.is_some_and(|entry| entry.bookmarked))
         {
             continue;
         }

@@ -1,6 +1,6 @@
 use crate::search::{
-    prepare_tag_tokens, to_rpn, tokenize_search_query, validate_search_query,
-    validate_search_tokens, SearchToken,
+    prepare_tag_tokens, to_rpn, tokenize_search_query, validate_prepared_search_tokens,
+    validate_search_query, SearchToken,
 };
 
 use super::model::{Condition, Group, GroupKind, Node, Op};
@@ -25,7 +25,7 @@ pub fn search_tokens_to_node(tokens: &[SearchToken]) -> Result<Option<Node>, Str
     if tokens.is_empty() {
         return Ok(None);
     }
-    validate_search_tokens(tokens)?;
+    validate_prepared_search_tokens(tokens)?;
     // The public token helper also rejects malformed tag escapes. Query
     // preparation has already decoded these into internal metadata scopes.
     prepare_tag_tokens(tokens)?;

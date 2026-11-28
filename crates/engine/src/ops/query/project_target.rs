@@ -9,8 +9,8 @@ use super::{
     result_cache::{self, CachedResult},
     search::PreparedQuery,
     singleflight,
-    stream::resolve_source_order,
-    target::{resolve_target_prepared, QuerySpec},
+    stream::{candidate_mask, resolve_source_order},
+    target::{record_resolution, resolve_target_prepared, QuerySpec, ResolvedTarget},
 };
 use crate::{
     error::AppError,
@@ -96,21 +96,58 @@ pub(super) fn resolve_project_target_with_metadata(
     let token = result_cache::spec_depends_on_annotations(spec).then(|| revision.to_string());
     let key = result_cache::query_cache_key(project_id, spec, &path, token);
     let result = singleflight::resolve_once(key.clone(), job, || {
-        let prepared = PreparedQuery::prepare(
+        let mut prepared = PreparedQuery::prepare(
             &columns,
             spec.search_columns.as_deref(),
             spec.search.as_deref(),
             spec.condition.as_ref(),
         )?;
+        // Validate the complete new query before reusing a narrower cached
+        // population. Even an empty cached result must not hide invalid rules.
+        let refinement = key
+            .as_ref()
+            .and_then(|key| result_cache::cache_refinement(key, total_rows));
+        let candidates = match refinement {
+            Some(refinement)
+                if prepared.refine(
+                    &columns,
+                    spec.search_columns.as_deref(),
+                    refinement.search_prefix,
+                    refinement.condition_prefix,
+                    refinement.search_terms,
+                    refinement.condition_terms,
+                )? =>
+            {
+                Some(refinement.ids)
+            }
+            _ => None,
+        };
+        let candidates = candidates.as_deref().filter(|ids| ids.len() < total_rows);
         let mut projection = prepared.projection();
         job.report_progress(1, Some(3), Some("Evaluating query".into()));
-        let target = if spec
+        let target = if candidates.is_some_and(Vec::is_empty) {
+            record_resolution();
+            ResolvedTarget {
+                filtered: Vec::new(),
+                annotated_filtered: 0,
+                annotated_total,
+            }
+        } else if spec
             .sort_key
             .as_deref()
             .is_none_or(|key| key.trim().is_empty())
         {
             record_column_read_projection(&projection);
-            resolve_source_order(&path, total_rows, &projection, spec, &prepared, &flags, job)?
+            resolve_source_order(
+                &path,
+                total_rows,
+                &projection,
+                spec,
+                &prepared,
+                &flags,
+                candidates.map(Vec::as_slice),
+                job,
+            )?
         } else {
             // Sorting retains the current materialized path. Only source-order
             // queries switch to streaming until sorted keys can be bounded too.
@@ -134,7 +171,10 @@ pub(super) fn resolve_project_target_with_metadata(
             } else {
                 read_project_columns_with_job(&path, &projection, job).map_err(AppError::from)?
             };
-            resolve_target_prepared(&frame, spec, &flags, &prepared, job)?
+            // User-sorted cached IDs are not in source order. Mark source
+            // positions, then retain the existing exact/stable sort path.
+            let eligible = candidates.map(|rows| candidate_mask(rows, 0, total_rows));
+            resolve_target_prepared(&frame, spec, &flags, &prepared, eligible.as_deref(), job)?
         };
         job.check_cancelled()?;
         if store

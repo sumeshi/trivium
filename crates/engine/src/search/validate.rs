@@ -1,4 +1,6 @@
-use super::{prepare_tag_tokens, tokenize_search_query, SearchToken};
+use super::{
+    prepare_tag_tokens, tokenize_search_query, SearchToken, TAG_ANY_COLUMN, TAG_EXACT_COLUMN,
+};
 
 const MAX_QUERY_BYTES: usize = 64 * 1024;
 const MAX_TERMS: usize = 64;
@@ -25,6 +27,23 @@ pub fn validate_search_query(input: &str) -> Result<(), String> {
 }
 
 pub(crate) fn validate_search_tokens(tokens: &[SearchToken]) -> Result<(), String> {
+    for token in tokens {
+        if let SearchToken::Term { col: Some(col), .. }
+        | SearchToken::QuotedTerm { col: Some(col), .. } = token
+        {
+            if col.eq_ignore_ascii_case(TAG_EXACT_COLUMN)
+                || col.eq_ignore_ascii_case(TAG_ANY_COLUMN)
+            {
+                return Err("Invalid search query: internal column scopes are reserved.".into());
+            }
+        }
+    }
+    validate_prepared_search_tokens(tokens)
+}
+
+/// Grammar validation after raw scopes have been checked and ordinary @tag
+/// operands have been translated to their internal column identifiers.
+pub(crate) fn validate_prepared_search_tokens(tokens: &[SearchToken]) -> Result<(), String> {
     if tokens.len() > MAX_TOKENS {
         return Err(format!(
             "Invalid search query: exceeds the limit of {MAX_TOKENS} tokens."
@@ -65,4 +84,46 @@ pub(crate) fn validate_search_tokens(tokens: &[SearchToken]) -> Result<(), Strin
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_queries_cannot_supply_internal_tag_scopes() {
+        for scope in [TAG_EXACT_COLUMN, TAG_ANY_COLUMN, "\0TRIVIUM-TAG"] {
+            for query in [
+                format!("{scope}:triage"),
+                format!("-{scope}:*"),
+                format!("{scope}:\"triage\""),
+                format!("{scope}:triage|review"),
+            ] {
+                assert!(
+                    validate_search_query(&query)
+                        .unwrap_err()
+                        .contains("reserved"),
+                    "{query:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reserved_scopes_do_not_restrict_literal_values_or_prepared_tags() {
+        for query in [
+            "@tag:triage",
+            "@tag:*",
+            "@tag:nul\0tag",
+            "\"@tag:triage\"",
+            "\"\0trivium-tag:triage\"",
+            "message:\0trivium-tag:triage",
+            "ordinary\0value",
+        ] {
+            validate_search_query(query).unwrap();
+            let prepared = prepare_tag_tokens(&tokenize_search_query(query)).unwrap();
+            validate_prepared_search_tokens(&prepared).unwrap();
+            crate::condition::search_tokens_to_node(&prepared).unwrap();
+        }
+    }
 }

@@ -257,6 +257,72 @@ fn import_query_annotations_bulk_export_view_and_reopen_use_the_real_engine() {
 }
 
 #[test]
+fn internal_tag_scopes_are_rejected_at_the_json_boundary_without_stale_cached_membership() {
+    let root = std::env::temp_dir().join(format!("trivium-cli-tag-scopes-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.jsonl");
+    fs::write(
+        &source,
+        "{\"message\":\"alpha\"}\n{\"message\":\"literal @tag:triage\"}\n{\"message\":\"nul\\u0000value\"}\n",
+    )
+    .unwrap();
+    let mut cli = Session::start(&root.join("workspace"));
+    let id = cli.call("import", json!({"path":source}))["meta"]["id"].clone();
+    cli.call(
+        "update_flag",
+        json!({"projectId":id,"row_index":0,"tags":["triage"]}),
+    );
+    for expected_row in [0, 1] {
+        for search in ["\0trivium-tag:triage", "\0trivium-any-tag:*"] {
+            for method in ["query", "locate"] {
+                let mut request = serde_json::to_vec(&json!({
+                    "id":"reserved-scope", "method":method,
+                    "params":{"projectId":id,"search":search,"rowIndex":0}
+                }))
+                .unwrap();
+                assert!(request.windows(6).any(|bytes| bytes == b"\\u0000"));
+                request.push(b'\n');
+                let rejected = cli.raw(&request);
+                assert_eq!(rejected["id"], "reserved-scope");
+                assert_eq!(rejected["ok"], false, "{rejected}");
+                assert_eq!(rejected["error"]["code"], "operation_failed");
+                assert!(rejected["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("reserved"));
+            }
+        }
+        let valid = cli.call("query", json!({"projectId":id,"search":"@tag:triage"}));
+        assert_eq!(valid["total_filtered_rows"], 1);
+        assert_eq!(valid["rows"][0]["row_index"], expected_row);
+        if expected_row == 0 {
+            cli.call(
+                "update_flag",
+                json!({"projectId":id,"row_index":0,"tags":[]}),
+            );
+            cli.call(
+                "update_flag",
+                json!({"projectId":id,"row_index":1,"tags":["triage"]}),
+            );
+        }
+    }
+    for (search, row) in [("\"@tag:triage\"", 1), ("nul\0value", 2)] {
+        let valid = cli.call("query", json!({"projectId":id,"search":search}));
+        assert_eq!(valid["total_filtered_rows"], 1);
+        assert_eq!(valid["rows"][0]["row_index"], row);
+    }
+    cli.call(
+        "update_flag",
+        json!({"projectId":id,"row_index":2,"tags":["nul\0tag"]}),
+    );
+    let nul_tag = cli.call("query", json!({"projectId":id,"search":"@tag:nul\0tag"}));
+    assert_eq!(nul_tag["total_filtered_rows"], 1);
+    assert_eq!(nul_tag["rows"][0]["row_index"], 2);
+    cli.finish();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn protocol_errors_are_structured_and_do_not_desynchronize_following_requests() {
     let root = std::env::temp_dir().join(format!("trivium-cli-errors-{}", Uuid::new_v4()));
     let missing = Command::new(env!("CARGO_BIN_EXE_trivium-cli"))

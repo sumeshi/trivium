@@ -16,6 +16,7 @@ use super::{
     target::{append_matching_rows, record_resolution, QuerySpec, ResolvedTarget},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_source_order(
     path: &Path,
     total_rows: usize,
@@ -23,6 +24,7 @@ pub(super) fn resolve_source_order(
     spec: &QuerySpec,
     prepared: &PreparedQuery,
     flags: &HashMap<usize, FlagEntry>,
+    candidates: Option<&[usize]>,
     job: &JobContext,
 ) -> Result<ResolvedTarget, AppError> {
     record_resolution();
@@ -33,26 +35,51 @@ pub(super) fn resolve_source_order(
         // synthetic row-count anchor for empty projections too.
         for offset in (0..total_rows).step_by(PROJECT_BATCH_ROWS) {
             job.check_cancelled()?;
+            let height = PROJECT_BATCH_ROWS.min(total_rows - offset);
+            let selected = batch_candidates(candidates, offset, height);
+            if selected.is_some_and(<[usize]>::is_empty) {
+                continue;
+            }
+            let eligible = selected.map(|rows| candidate_mask(rows, offset, height));
             let frame = DataFrame::new_infer_height(vec![Series::full_null(
                 INTERNAL_ROW_ID.into(),
-                PROJECT_BATCH_ROWS.min(total_rows - offset),
+                height,
                 &DataType::Null,
             )
             .into()])
             .map_err(|error| AppError::from(anyhow::Error::from(error)))?;
-            annotated_filtered +=
-                append_matching_rows(&frame, offset, spec, prepared, flags, &mut filtered, job)?;
+            annotated_filtered += append_matching_rows(
+                &frame,
+                offset,
+                spec,
+                prepared,
+                flags,
+                eligible.as_deref(),
+                &mut filtered,
+                job,
+            )?;
         }
     } else {
-        let mut reader = ProjectBatchReader::open(path, columns).map_err(AppError::from)?;
+        let mut reader = match candidates {
+            Some(rows) => ProjectBatchReader::for_rows(path, columns, rows),
+            None => ProjectBatchReader::open(path, columns),
+        }
+        .map_err(AppError::from)?;
         while let Some(batch) = reader.next_with_job(job) {
             let batch = batch.map_err(AppError::from)?;
+            let selected = batch_candidates(candidates, batch.offset, batch.frame.height());
+            if selected.is_some_and(<[usize]>::is_empty) {
+                continue;
+            }
+            let eligible =
+                selected.map(|rows| candidate_mask(rows, batch.offset, batch.frame.height()));
             annotated_filtered += append_matching_rows(
                 &batch.frame,
                 batch.offset,
                 spec,
                 prepared,
                 flags,
+                eligible.as_deref(),
                 &mut filtered,
                 job,
             )?;
@@ -75,4 +102,26 @@ pub(super) fn resolve_source_order(
         annotated_filtered,
         annotated_total,
     })
+}
+
+/// Source-order cached IDs are sorted. Select a batch without scanning the
+/// cached population again, and skip batches with no eligible source rows.
+fn batch_candidates(
+    candidates: Option<&[usize]>,
+    offset: usize,
+    height: usize,
+) -> Option<&[usize]> {
+    candidates.map(|rows| {
+        let start = rows.partition_point(|row| *row < offset);
+        let end = start + rows[start..].partition_point(|row| *row < offset + height);
+        &rows[start..end]
+    })
+}
+
+pub(super) fn candidate_mask(rows: &[usize], offset: usize, height: usize) -> Vec<bool> {
+    let mut eligible = vec![false; height];
+    for &row in rows {
+        eligible[row - offset] = true;
+    }
+    eligible
 }

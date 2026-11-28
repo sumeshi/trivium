@@ -22,6 +22,36 @@ pub enum BoundNode<'a> {
 }
 
 impl PreparedNode {
+    pub(crate) fn conjunction(&self) -> &[Self] {
+        match self {
+            Self::Group(group) if group.kind == GroupKind::And => &group.children,
+            _ => std::slice::from_ref(self),
+        }
+    }
+
+    pub(crate) fn into_conjunction(self) -> Vec<Self> {
+        match self {
+            Self::Group(group) if group.kind == GroupKind::And => group.children,
+            node => vec![node],
+        }
+    }
+
+    pub(crate) fn from_conjunction(mut children: Vec<Self>) -> Self {
+        if children.len() == 1 {
+            children.pop().expect("one conjunction child")
+        } else {
+            Self::group(GroupKind::And, children)
+        }
+    }
+
+    pub(crate) fn reads_tags(&self) -> bool {
+        match self {
+            Self::Tag(_) => true,
+            Self::Group(group) => group.children.iter().any(Self::reads_tags),
+            Self::Condition(_) | Self::Format(_) => false,
+        }
+    }
+
     pub fn bind_columns(&self, resolve: &impl Fn(&str) -> usize) -> BoundNode<'_> {
         match self {
             Self::Condition(condition) => BoundNode::Condition {

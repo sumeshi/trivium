@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fs::File,
     io::{Cursor, Read, Seek, SeekFrom},
     path::Path,
@@ -96,9 +97,12 @@ impl ProjectBatchReader {
     /// are intentionally left to the caller gathering its result. Decoding in
     /// the final selected group stops after the highest requested ID.
     pub fn for_rows(path: &Path, columns: &[String], rows: &[usize]) -> Result<Self> {
-        let mut sorted = rows.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
+        let mut sorted = Cow::Borrowed(rows);
+        if !rows.is_sorted() {
+            let sorted = sorted.to_mut();
+            sorted.sort_unstable();
+            sorted.dedup();
+        }
         let end = sorted.last().map(|row| row.saturating_add(1));
         Self::select(path, columns, end, |range| {
             let index = sorted.partition_point(|row| *row < range.0);

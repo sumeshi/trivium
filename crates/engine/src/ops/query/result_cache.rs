@@ -11,6 +11,9 @@ use uuid::Uuid;
 
 use super::{page::is_unrestricted_flag_filter, target::QuerySpec};
 
+mod refinement;
+pub(crate) use refinement::CachedRefinement;
+
 pub(crate) const MAX_RESULTS: usize = 8;
 pub(crate) const MAX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 // Entry metadata plus the Arc counters and Vec header. Owned buffers are
@@ -293,6 +296,12 @@ fn global_cache() -> &'static Mutex<ResultCache> {
 
 pub(crate) fn cache_lookup(key: &QueryCacheKey) -> Option<CachedResult> {
     global_cache().lock().get(key)
+}
+
+/// Reuse an already validated conjunction prefix; the caller must validate
+/// the complete new query before allowing any predicates to be skipped.
+pub(crate) fn cache_refinement(key: &QueryCacheKey, total_rows: usize) -> Option<CachedRefinement> {
+    global_cache().lock().refinement(key, total_rows)
 }
 
 /// Page/locator preflight counts a ready hit; a miss is counted by the shared
