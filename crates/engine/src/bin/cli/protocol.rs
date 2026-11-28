@@ -77,7 +77,12 @@ pub(super) fn respond(store: &ProjectsStore, line: &[u8]) -> Value {
         );
     }
     match dispatch::dispatch(store, &request.method, request.params) {
-        Ok(result) => json!({"version":1, "id":request.id, "ok":true, "result":result}),
+        Ok(result) => {
+            let mut response = json!({"version":1, "id":request.id, "ok":true});
+            // json! would serialize and copy the entire result tree again.
+            response["result"] = result;
+            response
+        }
         Err(failure) => error(request.id, failure.code, &failure.message),
     }
 }
