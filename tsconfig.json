@@ -8,11 +8,12 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "strict": true,
     "target": "ESNext",
     "useDefineForClassFields": true,
+    "verbatimModuleSyntax": true,
     "types": ["svelte", "@tauri-apps/api"]
   },
   "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte"],

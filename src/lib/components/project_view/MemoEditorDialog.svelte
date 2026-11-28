@@ -214,7 +214,7 @@
               saveMemo();
             }
           }}
-        />
+        ></textarea>
       </label>
       <div class="memo-tags">
         <span class="memo-editor-caption">Tags</span>

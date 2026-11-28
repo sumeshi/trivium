@@ -102,10 +102,10 @@
     <div class="pattern-form" aria-label="Pattern editor">
       {#if editing === 'new'}
         <label>Name<input aria-label="Pattern name" bind:value={name} autocomplete="off" /></label>
-        <label>Regular expression<textarea aria-label="Pattern expression" bind:value={pattern} rows="3" spellcheck="false" placeholder="(?i)error|warning" /></label>
+        <label>Regular expression<textarea aria-label="Pattern expression" bind:value={pattern} rows="3" spellcheck="false" placeholder="(?i)error|warning"></textarea></label>
         <label>Capture group<input aria-label="Pattern capture group" bind:value={valueGroup} placeholder="Whole match" autocomplete="off" /></label>
       {:else}
-        <label>Definition JSON<textarea class="definition-json" aria-label="Pattern definition JSON" bind:value={json} rows="12" spellcheck="false" /></label>
+        <label>Definition JSON<textarea class="definition-json" aria-label="Pattern definition JSON" bind:value={json} rows="12" spellcheck="false"></textarea></label>
       {/if}
       <div class="pattern-actions">
         <button type="button" on:click={() => { editing = null; error = ''; }} disabled={busy}>Cancel</button>

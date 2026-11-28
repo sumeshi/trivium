@@ -13,12 +13,14 @@ const {readFile}=await import('node:fs/promises');
 const {dirname,extname,resolve}=await import('node:path');
 const {pathToFileURL}=await import('node:url');
 const {compile,preprocess}=await import('svelte/compiler');
+const {render}=await import('svelte/server');
 const {default:sveltePreprocess}=await import('svelte-preprocess');
 const filename=resolve('src/lib/components/project_view/ColumnContextMenu.svelte');
 const source=await preprocess(await readFile(filename,'utf8'),sveltePreprocess({typescript:true}),{filename});
-let code=compile(source.code,{filename,generate:'ssr',css:'external'}).js.code;
+let code=compile(source.code,{filename,generate:'server',css:'external'}).js.code;
 code=code.replace(/((?:^|\n)import(?:\s+[^;]+?\s+from)?\s*)(['"])([^'"]+)\2/g,(_all,prefix,_quote,specifier)=>{
- const url=specifier.startsWith('.')?pathToFileURL(resolve(dirname(filename),specifier+(extname(specifier)?'':'.ts'))).href:import.meta.resolve(specifier);
+ const url=specifier==='svelte'?new URL('./src/index-server.js',import.meta.resolve('svelte/package.json')).href
+  :specifier.startsWith('.')?pathToFileURL(resolve(dirname(filename),specifier+(extname(specifier)?'':'.ts'))).href:import.meta.resolve(specifier);
  return prefix+JSON.stringify(url);
 });
 const {default:RenderedMenu}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
@@ -26,7 +28,7 @@ const Menu=await compileHeadless('ColumnContextMenu');
 const props={columnId:'c1',label:'Evidence',x:0,y:0};
 for(const kind of ['string','int','float','null',undefined,'datetime']){
  for(const displayFormat of ['original','iso']){
-  const html=RenderedMenu.render({...props,columnKind:kind,displayFormat}).html;
+  const html=render(RenderedMenu,{props:{...props,columnKind:kind,displayFormat}}).body;
   const labels={string:'Text',int:'Int',float:'Float',datetime:'Datetime',null:'Null',unknown:'Unknown'};
   const kindLabel=labels[kind??'unknown'];
   assert.match(html,/class="column-menu-name[^\"]*">Evidence<\/span>/);
@@ -59,6 +61,7 @@ const {dirname,extname,resolve}=await import('node:path');
 const {pathToFileURL}=await import('node:url');
 const {get}=await import('svelte/store');
 const {compile,preprocess}=await import('svelte/compiler');
+const {render}=await import('svelte/server');
 const {default:sveltePreprocess}=await import('svelte-preprocess');
 const columnFormats=writable({c1:'iso'});
 globalThis.__workspace={columnFormats,search:writable(''),setFlag(){},editMemo(){},openCell(){},handleCellKeydown(){},toggleRowSelection(){}};
@@ -67,9 +70,10 @@ let source=await readFile(filename,'utf8');
 source=source.replace(/import \{ useWorkspace \} from [^;]+;/,'const useWorkspace=()=>globalThis.__workspace;')
  .replace(/import RowTagsMenu from [^;]+;/,'const RowTagsMenu=null;');
 const processed=await preprocess(source,sveltePreprocess({typescript:true}),{filename});
-let code=compile(processed.code,{filename,generate:'ssr',css:'external'}).js.code;
+let code=compile(processed.code,{filename,generate:'server',css:'external'}).js.code;
 code=code.replace(/((?:^|\n)import(?:\s+[^;]+?\s+from)?\s*)(['"])([^'"]+)\2/g,(_all,prefix,_quote,specifier)=>{
- const url=specifier.startsWith('.')?pathToFileURL(resolve(dirname(filename),specifier+(extname(specifier)?'':'.ts'))).href:import.meta.resolve(specifier);
+ const url=specifier==='svelte'?new URL('./src/index-server.js',import.meta.resolve('svelte/package.json')).href
+  :specifier.startsWith('.')?pathToFileURL(resolve(dirname(filename),specifier+(extname(specifier)?'':'.ts'))).href:import.meta.resolve(specifier);
  return prefix+JSON.stringify(url);
 });
 const {default:Row}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
@@ -79,13 +83,13 @@ const row=normalizeRow({row_index:0,cells:{c1:{kind:'string',text:raw,truncated:
  flag:'',memo:'',tags:[],bookmarked:false});
 const props={row,position:0,projectId:'case',columns:[{id:'c1',index:0,frozen:false}],columnCount:1,gridTemplate:'',
  frozenOffsets:new Map(),frozenPan:0,lastFrozen:null,focusColumn(){},openCellMenu(){},columnTab(){}};
-const text=html=>html.match(/class="cell-text">([^<]*)</)?.[1].trim();
+const text=html=>html.match(/class="cell-text">([\s\S]*?)<\/span>/)?.[1].replace(/<!--[\s\S]*?-->/g,'').trim();
 for(const kind of ['string','int','float','null',undefined,'datetime']){
- const html=Row.render({...props,columnKinds:kind?{c1:kind}:{}}).html;
+ const html=render(Row,{props:{...props,columnKinds:kind?{c1:kind}:{}}}).body;
  assert.equal(text(html),kind==='datetime'?'2026-11-19T00:00:00.123456789Z':raw,kind);
  assert.deepEqual(get(columnFormats),{c1:'iso'},'unsupported saved presentation stays untouched');
  assert.equal(row.cells.c1.text,raw,'source evidence is never reformatted');
 }
 columnFormats.set({});
-assert.equal(text(Row.render({...props,columnKinds:{c1:'datetime'}}).html),raw,'original display remains original');
+assert.equal(text(render(Row,{props:{...props,columnKinds:{c1:'datetime'}}}).body),raw,'original display remains original');
 `));

@@ -39,9 +39,9 @@
       {/if}
     </div>
     {#if pending.total !== null && pending.total > 0}
-      <progress value={pending.done} max={pending.total} aria-label="Extraction progress" />
+      <progress value={pending.done} max={pending.total} aria-label="Extraction progress"></progress>
     {:else}
-      <progress aria-label="Extraction progress" />
+      <progress aria-label="Extraction progress"></progress>
     {/if}
   </div>
 {/if}
